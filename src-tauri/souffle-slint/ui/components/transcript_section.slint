@@ -288,10 +288,11 @@ export component TranscriptSection inherits VerticalLayout {
 
                         Text {
                             width: parent.width;
-                            text: block.text;
+                            text: block.markdown-text;
                             color: Theme.text-primary;
                             font-size: 13px;
                             wrap: word-wrap;
+                            link-clicked(url) => { root.open-alias-popup(url); }
                         }
                     }
 

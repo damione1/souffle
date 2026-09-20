@@ -46,8 +46,13 @@ export component MeetingDetail inherits Rectangle {
     in property <[string]> summary-decisions;
     in property <[StructuredActionItem]> summary-action-items;
     in property <[string]> summary-open-questions;
+    in property <bool> summary-is-generating: false;
+    in property <string> summary-generation-progress: "";
+    in property <bool> can-resume: true;
 
     callback back-requested();
+    callback resume-requested();
+    callback summarize-requested();
     callback rename-requested(string);
     callback notes-changed(string);
     callback audio-play-pause-requested();
@@ -99,6 +104,8 @@ export component MeetingDetail inherits Rectangle {
             }
 
             HorizontalLayout {
+                y: (parent.height - self.height) / 2;
+                height: 18px;
                 spacing: 8px;
                 alignment: start;
                 LucideIcon {
@@ -116,104 +123,156 @@ export component MeetingDetail inherits Rectangle {
             }
         }
 
-        if !root.editing-title: title-btn := Rectangle {
-            width: parent.width;
-            height: 34px;
-            horizontal-stretch: 1;
-            vertical-stretch: 0;
-            border-radius: 4px;
-            border-width: title-focus.has-focus ? 2px : 0px;
-            border-color: Theme.accent;
-            background: title-area.has-hover ? Theme.surface-2 : transparent;
+        HorizontalLayout {
+            alignment: space-between;
+            spacing: 14px;
 
-            accessible-role: button;
-            accessible-label: @tr("Renommer la r\u{e9}union");
-            accessible-action-default => {
-                root.title-draft = root.title;
-                root.editing-title = true;
-            }
+            VerticalLayout {
+                horizontal-stretch: 1;
+                spacing: 14px;
 
-            forward-focus: title-focus;
-            title-focus := FocusScope {
-                key-pressed(event) => {
-                    if event.text == Key.Return || event.text == Key.Space {
+                if !root.editing-title: title-btn := Rectangle {
+                    width: parent.width;
+                    height: 34px;
+                    horizontal-stretch: 1;
+                    vertical-stretch: 0;
+                    border-radius: 4px;
+                    border-width: title-focus.has-focus ? 2px : 0px;
+                    border-color: Theme.accent;
+                    background: title-area.has-hover ? Theme.surface-2 : transparent;
+
+                    accessible-role: button;
+                    accessible-label: @tr("Renommer la r\u{e9}union");
+                    accessible-action-default => {
                         root.title-draft = root.title;
                         root.editing-title = true;
-                        return accept;
                     }
-                    return reject;
+
+                    forward-focus: title-focus;
+                    title-focus := FocusScope {
+                        key-pressed(event) => {
+                            if event.text == Key.Return || event.text == Key.Space {
+                                root.title-draft = root.title;
+                                root.editing-title = true;
+                                return accept;
+                            }
+                            return reject;
+                        }
+                    }
+
+                    title-area := TouchArea {
+                        clicked => {
+                            title-focus.focus();
+                            root.title-draft = root.title;
+                            root.editing-title = true;
+                        }
+                    }
+
+                    Text {
+                        width: parent.width;
+                        text: root.title;
+                        font-family: "Archivo SemiBold";
+                        font-size: 24px;
+                        font-weight: 700;
+                        horizontal-alignment: left;
+                        vertical-alignment: center;
+                    }
+                }
+
+                if root.editing-title: LineEdit {
+                    text <=> root.title-draft;
+                    accessible-label: @tr("Titre de la réunion");
+                    accepted => {
+                        root.editing-title = false;
+                        if (root.title-draft != "" && root.title-draft != root.title) {
+                            root.rename-requested(root.title-draft);
+                        }
+                    }
+                }
+
+                HorizontalLayout {
+                    height: 26px;
+                    vertical-stretch: 0;
+                    spacing: 9px;
+                    alignment: start;
+
+                    Text {
+                        text: root.meta-line;
+                        color: Theme.text-muted;
+                        font-size: 12px;
+                        vertical-alignment: center;
+                    }
+
+                    if root.model-label != "": Rectangle {
+                        width: model-chip.preferred-width + 16px;
+                        height: 24px;
+                        horizontal-stretch: 0;
+                        border-width: 1px;
+                        border-color: Theme.surface-4;
+
+                        model-chip := Text {
+                            text: root.model-label;
+                            color: Theme.accent;
+                            font-family: "JetBrains Mono";
+                            font-size: 11px;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+
+                if root.participant-labels.length > 0: HorizontalLayout {
+                    spacing: 8px;
+                    alignment: start;
+
+                    for label in root.participant-labels: Text {
+                        text: label;
+                        color: Theme.text-secondary;
+                        font-size: 11px;
+                    }
                 }
             }
 
-            title-area := TouchArea {
-                clicked => {
-                    title-focus.focus();
-                    root.title-draft = root.title;
-                    root.editing-title = true;
-                }
-            }
-
-            Text {
-                width: parent.width;
-                text: root.title;
-                font-family: "Archivo SemiBold";
-                font-size: 24px;
-                font-weight: 700;
-                horizontal-alignment: left;
-                vertical-alignment: center;
-            }
-        }
-
-        if root.editing-title: LineEdit {
-            text <=> root.title-draft;
-            accessible-label: @tr("Titre de la réunion");
-            accepted => {
-                root.editing-title = false;
-                if (root.title-draft != "" && root.title-draft != root.title) {
-                    root.rename-requested(root.title-draft);
-                }
-            }
-        }
-
-        HorizontalLayout {
-            height: 26px;
-            vertical-stretch: 0;
-            spacing: 9px;
-            alignment: start;
-
-            Text {
-                text: root.meta-line;
-                color: Theme.text-muted;
-                font-size: 12px;
-                vertical-alignment: center;
-            }
-
-            if root.model-label != "": Rectangle {
-                width: model-chip.preferred-width + 16px;
-                height: 24px;
+            if root.can-resume: resume-btn := Rectangle {
+                width: resume-txt.preferred-width + 24px;
+                height: 32px;
                 horizontal-stretch: 0;
-                border-width: 1px;
-                border-color: Theme.surface-4;
+                vertical-stretch: 0;
+                border-radius: 4px;
+                border-width: resume-focus.has-focus ? 2px : 0px;
+                border-color: Theme.text-primary;
+                background: resume-area.pressed ? Theme.accent.darker(0.2) : resume-area.has-hover ? Theme.accent.darker(0.1) : Theme.accent;
 
-                model-chip := Text {
-                    text: root.model-label;
-                    color: Theme.accent;
-                    font-family: "JetBrains Mono";
-                    font-size: 11px;
+                accessible-role: button;
+                accessible-label: @tr("Reprendre l'enregistrement");
+                accessible-action-default => { root.resume-requested(); }
+
+                forward-focus: resume-focus;
+                resume-focus := FocusScope {
+                    key-pressed(event) => {
+                        if event.text == Key.Return || event.text == Key.Space {
+                            root.resume-requested();
+                            return accept;
+                        }
+                        return reject;
+                    }
+                }
+
+                resume-area := TouchArea {
+                    clicked => {
+                        resume-focus.focus();
+                        root.resume-requested();
+                    }
+                }
+
+                resume-txt := Text {
+                    text: @tr("Reprendre");
+                    font-family: "Archivo SemiBold";
+                    font-size: 13px;
+                    color: Theme.text-primary;
                     horizontal-alignment: center;
                     vertical-alignment: center;
                 }
-            }
-        }
-
-        if root.participant-labels.length > 0: HorizontalLayout {
-            spacing: 8px;
-            alignment: start;
-
-            for label in root.participant-labels: Text {
-                text: label;
-                color: Theme.text-secondary;
-                font-size: 11px;
             }
         }
 
@@ -352,6 +411,9 @@ export component MeetingDetail inherits Rectangle {
                         decisions: root.summary-decisions;
                         action-items: root.summary-action-items;
                         open-questions: root.summary-open-questions;
+                        is-generating: root.summary-is-generating;
+                        generation-progress: root.summary-generation-progress;
+                        generate-requested => { root.summarize-requested(); }
                     }
                 }
             }
