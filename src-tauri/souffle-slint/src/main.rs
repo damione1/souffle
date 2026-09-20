@@ -1863,6 +1863,10 @@ async fn finalize_dictation(
     let entry_id =
         souffle_lib::commands::add_dictation_entry(Arc::clone(&handle), raw_text.clone())?;
     let settings = souffle_lib::commands::get_settings(Arc::clone(&handle))?;
+    let _ = souffle_lib::commands::pill_hold(
+        Arc::clone(&handle),
+        souffle_lib::app_events::PillHoldKind::Polishing,
+    );
     let polished = match tokio::time::timeout(
         Duration::from_secs(25),
         souffle_lib::commands::polish_dictation(Arc::clone(&handle), raw_text.clone(), focused_app),
@@ -1879,6 +1883,7 @@ async fn finalize_dictation(
             raw_text.clone()
         }
     };
+    let _ = souffle_lib::commands::pill_release(Arc::clone(&handle));
     let final_text = if polished.is_empty() {
         raw_text.clone()
     } else {
@@ -3220,7 +3225,9 @@ fn wire_callbacks(
             let state = handle_resume.clone();
             let channel = live_segment_channel(weak_resume.clone());
             souffle_lib::async_runtime::spawn(async move {
-                if let Err(e) = souffle_lib::commands::resume_meeting_recording(state, id, channel).await {
+                if let Err(e) =
+                    souffle_lib::commands::resume_meeting_recording(state, id, channel).await
+                {
                     eprintln!("Failed to resume meeting: {:?}", e);
                 }
             });
@@ -3230,29 +3237,39 @@ fn wire_callbacks(
     let weak_sum = window.as_weak();
     let handle_sum = tauri_handle.clone();
     window.on_meeting_detail_summarize(move || {
-        let Some(window) = weak_sum.upgrade() else { return; };
+        let Some(window) = weak_sum.upgrade() else {
+            return;
+        };
         window.set_meeting_detail_summary_is_generating(true);
         window.set_meeting_detail_summary_generation_progress("Démarrage...".into());
         let id = window.get_active_meeting_id().to_string();
         let state = handle_sum.clone();
-        
+
         let weak_for_progress = weak_sum.clone();
-        let channel = ProgressChannel::new(move |progress: souffle_lib::summary::SummarizeProgress| {
-            let weak = weak_for_progress.clone();
-            let text = progress.text.clone();
-            let _ = slint::invoke_from_event_loop(move || {
-                if let Some(w) = weak.upgrade() {
-                    w.set_meeting_detail_summary_generation_progress(text.into());
-                }
+        let channel =
+            ProgressChannel::new(move |progress: souffle_lib::summary::SummarizeProgress| {
+                let weak = weak_for_progress.clone();
+                let text = progress.text.clone();
+                let _ = slint::invoke_from_event_loop(move || {
+                    if let Some(w) = weak.upgrade() {
+                        w.set_meeting_detail_summary_generation_progress(text.into());
+                    }
+                });
             });
-        });
 
         let weak_for_done = weak_sum.clone();
         let state_for_done = state.clone();
         souffle_lib::async_runtime::spawn(async move {
-            let model = "auto".to_string(); 
-            let result = souffle_lib::commands::summarize_meeting(state.clone(), id.clone(), model, None, channel).await;
-            
+            let model = "auto".to_string();
+            let result = souffle_lib::commands::summarize_meeting(
+                state.clone(),
+                id.clone(),
+                model,
+                None,
+                channel,
+            )
+            .await;
+
             let _ = slint::invoke_from_event_loop(move || {
                 if let Some(w) = weak_for_done.upgrade() {
                     w.set_meeting_detail_summary_is_generating(false);
@@ -3263,7 +3280,9 @@ fn wire_callbacks(
                             }
                         }
                         Err(e) => {
-                            w.set_meeting_detail_summary_generation_progress(format!("Erreur: {}", e).into());
+                            w.set_meeting_detail_summary_generation_progress(
+                                format!("Erreur: {}", e).into(),
+                            );
                         }
                     }
                 }

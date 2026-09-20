@@ -1,4 +1,5 @@
 import { SettingsField } from "settings_field.slint";
+import { SettingsFieldVertical } from "settings_field_vertical.slint";
 import { SettingsGroup } from "settings_group.slint";
 import { Theme } from "../../theme.slint";
 import { ThemedButton } from "../themed_button.slint";
@@ -92,7 +93,7 @@ export component SummaryTemplatesSection inherits VerticalLayout {
         }
     }
 
-    SettingsField {
+    SettingsFieldVertical {
         label: "Instruction";
         description: root.editing-is-builtin
             ? "Modèle intégré : le prompt peut être personnalisé mais pas supprimé."

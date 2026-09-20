@@ -14,6 +14,7 @@ export component ThemedTextArea inherits Rectangle {
 
     height: root.area-height;
     min-width: 240px;
+    horizontal-stretch: 1;
     vertical-stretch: 0;
     clip: true;
     border-radius: 4px;
@@ -32,7 +33,7 @@ export component ThemedTextArea inherits Rectangle {
 
         input := TextInput {
             width: parent.width;
-            height: max(parent.height, self.preferred-height);
+            height: max(parent.height, self.preferred-height + 16px);
             text <=> root.text;
             font-size: 14px;
             font-family: "Archivo";
