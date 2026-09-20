@@ -367,6 +367,7 @@ fn populate_meeting_detail(window: &MainWindow, meeting: &MeetingTranscript) {
     window.set_meeting_detail_title(meeting.title.clone().into());
     window.set_meeting_detail_meta(meta_line(meeting).into());
     window.set_meeting_detail_model_label(meeting.transcription_profile.model_label.clone().into());
+    window.set_meeting_detail_can_resume(true);
     let participants: Vec<slint::SharedString> = meeting
         .participants
         .iter()
@@ -3209,6 +3210,64 @@ fn wire_callbacks(
         }
         stop_audio_player(&player_for_back, &progress_timer_for_back);
         stop_transcript_window(&transcript_state_for_back, &transcript_timer_for_back);
+    });
+
+    let weak_resume = window.as_weak();
+    let app_handle_resume = app_handle.clone();
+    window.on_meeting_detail_resume(move || {
+        if let Some(window) = weak_resume.upgrade() {
+            let id = window.get_active_meeting_id().to_string();
+            let state = app_handle_resume.state::<Arc<AppState>>().inner().clone();
+            tauri::async_runtime::spawn(async move {
+                if let Err(e) = souffle_lib::commands::transcription::resume_meeting_recording(state, id).await {
+                    tracing::error!("Failed to resume meeting: {:?}", e);
+                }
+            });
+        }
+    });
+
+    let weak_sum = window.as_weak();
+    let app_handle_sum = app_handle.clone();
+    window.on_meeting_detail_summarize(move || {
+        let Some(window) = weak_sum.upgrade() else { return; };
+        window.set_meeting_detail_summary_is_generating(true);
+        window.set_meeting_detail_summary_generation_progress("Démarrage...".into());
+        let id = window.get_active_meeting_id().to_string();
+        let state = app_handle_sum.state::<Arc<AppState>>().inner().clone();
+        
+        let weak_for_progress = weak_sum.clone();
+        let channel = ProgressChannel::new(move |progress: souffle_lib::summary::SummarizeProgress| {
+            let weak = weak_for_progress.clone();
+            let text = progress.text.clone();
+            let _ = slint::invoke_from_event_loop(move || {
+                if let Some(w) = weak.upgrade() {
+                    w.set_meeting_detail_summary_generation_progress(text.into());
+                }
+            });
+        });
+
+        let weak_for_done = weak_sum.clone();
+        let state_for_done = state.clone();
+        tauri::async_runtime::spawn(async move {
+            let model = "auto".to_string(); 
+            let result = souffle_lib::commands::meetings::summarize_meeting(state.clone(), id.clone(), model, None, channel).await;
+            
+            let _ = slint::invoke_from_event_loop(move || {
+                if let Some(w) = weak_for_done.upgrade() {
+                    w.set_meeting_detail_summary_is_generating(false);
+                    match result {
+                        Ok(_) => {
+                            if let Ok(m) = state_for_done.db.load_meeting(&id) {
+                                populate_meeting_detail(&w, &m);
+                            }
+                        }
+                        Err(e) => {
+                            w.set_meeting_detail_summary_generation_progress(format!("Erreur: {}", e).into());
+                        }
+                    }
+                }
+            });
+        });
     });
 
     let weak = window.as_weak();

@@ -113,6 +113,9 @@ export component MainWindow inherits Window {
     in property <[string]> meeting-detail-summary-decisions;
     in property <[StructuredActionItem]> meeting-detail-summary-action-items;
     in property <[string]> meeting-detail-summary-open-questions;
+    in property <bool> meeting-detail-summary-is-generating: false;
+    in property <string> meeting-detail-summary-generation-progress: "";
+    in property <bool> meeting-detail-can-resume: false;
 
     // SOU-188: Settings overlay. Toggled from IdleView's gear button;
     // `settings-requested` (not a plain property flip) because opening it
@@ -360,6 +363,8 @@ export component MainWindow inherits Window {
     callback stop-requested();
     callback cancel-dictation-requested();
     callback meeting-detail-back();
+    callback meeting-detail-resume();
+    callback meeting-detail-summarize();
     callback meeting-detail-rename(string);
     callback meeting-detail-notes-changed(string);
     callback meeting-detail-audio-play-pause-requested();
@@ -537,7 +542,12 @@ export component MainWindow inherits Window {
         summary-decisions: root.meeting-detail-summary-decisions;
         summary-action-items: root.meeting-detail-summary-action-items;
         summary-open-questions: root.meeting-detail-summary-open-questions;
+        summary-is-generating: root.meeting-detail-summary-is-generating;
+        summary-generation-progress: root.meeting-detail-summary-generation-progress;
+        can-resume: root.meeting-detail-can-resume;
         back-requested => { root.meeting-detail-back(); }
+        resume-requested => { root.meeting-detail-resume(); }
+        summarize-requested => { root.meeting-detail-summarize(); }
         rename-requested(title) => { root.meeting-detail-rename(title); }
         notes-changed(value) => { root.meeting-detail-notes-changed(value); }
         audio-play-pause-requested => { root.meeting-detail-audio-play-pause-requested(); }

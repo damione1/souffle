@@ -19,10 +19,68 @@ export component SummarySection inherits VerticalLayout {
     in property <[string]> decisions;
     in property <[StructuredActionItem]> action-items;
     in property <[string]> open-questions;
+    in property <bool> is-generating: false;
+    in property <string> generation-progress: "";
+
+    callback generate-requested();
 
     spacing: 8px;
 
-    if root.summary == "": VerticalLayout {
+    if root.summary == "" && !root.is-generating: VerticalLayout {
+        spacing: 4px;
+
+        Text {
+            text: @tr("R\u{e9}sum\u{e9}");
+            font-size: 11px;
+            font-weight: 600;
+            color: Theme.text-muted;
+        }
+
+        HorizontalLayout {
+            alignment: start;
+            gen-btn := Rectangle {
+                width: gen-txt.preferred-width + 24px;
+                height: 28px;
+                border-radius: 4px;
+                border-width: gen-focus.has-focus ? 2px : 0px;
+                border-color: Theme.text-primary;
+                background: gen-area.pressed ? Theme.accent.darker(0.2) : gen-area.has-hover ? Theme.accent.darker(0.1) : Theme.accent;
+
+                accessible-role: button;
+                accessible-label: @tr("Générer le résumé");
+                accessible-action-default => { root.generate-requested(); }
+
+                forward-focus: gen-focus;
+                gen-focus := FocusScope {
+                    key-pressed(event) => {
+                        if event.text == Key.Return || event.text == Key.Space {
+                            root.generate-requested();
+                            return accept;
+                        }
+                        return reject;
+                    }
+                }
+
+                gen-area := TouchArea {
+                    clicked => {
+                        gen-focus.focus();
+                        root.generate-requested();
+                    }
+                }
+
+                gen-txt := Text {
+                    text: @tr("Générer le résumé");
+                    font-family: "Archivo SemiBold";
+                    font-size: 13px;
+                    color: Theme.text-primary;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+        }
+    }
+
+    if root.is-generating: VerticalLayout {
         spacing: 4px;
 
         Text {
@@ -33,14 +91,13 @@ export component SummarySection inherits VerticalLayout {
         }
 
         Text {
-            text: @tr("Aucun r\u{e9}sum\u{e9} pour cette r\u{e9}union.");
+            text: root.generation-progress != "" ? root.generation-progress : @tr("Génération en cours...");
             color: Theme.text-muted;
             font-size: 12px;
-            wrap: word-wrap;
         }
     }
 
-    if root.summary != "": VerticalLayout {
+    if root.summary != "" && !root.is-generating: VerticalLayout {
         spacing: 10px;
 
         HorizontalLayout {
@@ -55,12 +112,55 @@ export component SummarySection inherits VerticalLayout {
                 vertical-alignment: center;
             }
 
-            if root.summary-model-label != "": Text {
-                text: root.summary-model-label;
-                font-family: "monospace";
-                font-size: 10.5px;
-                color: Theme.text-faint;
-                vertical-alignment: center;
+            HorizontalLayout {
+                spacing: 8px;
+                alignment: end;
+                if root.summary-model-label != "": Text {
+                    text: root.summary-model-label;
+                    font-family: "monospace";
+                    font-size: 10.5px;
+                    color: Theme.text-faint;
+                    vertical-alignment: center;
+                }
+                Rectangle {
+                    width: regen-txt.preferred-width + 16px;
+                    height: 24px;
+                    border-radius: 4px;
+                    border-width: regen-focus.has-focus ? 2px : 0px;
+                    border-color: Theme.accent;
+                    background: regen-area.pressed ? Theme.surface-4 : regen-area.has-hover ? Theme.surface-3 : Theme.surface-2;
+
+                    accessible-role: button;
+                    accessible-label: @tr("Régénérer");
+                    accessible-action-default => { root.generate-requested(); }
+
+                    forward-focus: regen-focus;
+                    regen-focus := FocusScope {
+                        key-pressed(event) => {
+                            if event.text == Key.Return || event.text == Key.Space {
+                                root.generate-requested();
+                                return accept;
+                            }
+                            return reject;
+                        }
+                    }
+
+                    regen-area := TouchArea {
+                        clicked => {
+                            regen-focus.focus();
+                            root.generate-requested();
+                        }
+                    }
+
+                    regen-txt := Text {
+                        text: @tr("Régénérer");
+                        font-family: "Archivo SemiBold";
+                        font-size: 11px;
+                        color: Theme.text-secondary;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
             }
         }
 
