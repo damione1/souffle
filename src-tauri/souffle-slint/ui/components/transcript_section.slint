@@ -286,12 +286,13 @@ export component TranscriptSection inherits VerticalLayout {
                             }
                         }
 
-                        Text {
+                        StyledText {
                             width: parent.width;
-                            text: block.text;
-                            color: Theme.text-primary;
-                            font-size: 13px;
-                            wrap: word-wrap;
+                            text: block.markdown-text;
+                            default-color: Theme.text-primary;
+                            default-font-size: 13px;
+                            link-color: Theme.text-primary;
+                            link-clicked(word) => { root.open-alias-popup(word); }
                         }
                     }
 
