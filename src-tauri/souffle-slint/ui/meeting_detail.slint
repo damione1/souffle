@@ -132,7 +132,6 @@ export component MeetingDetail inherits Rectangle {
                 spacing: 14px;
 
                 if !root.editing-title: title-btn := Rectangle {
-                    width: parent.width;
                     height: 34px;
                     horizontal-stretch: 1;
                     vertical-stretch: 0;
@@ -169,7 +168,6 @@ export component MeetingDetail inherits Rectangle {
                     }
 
                     Text {
-                        width: parent.width;
                         text: root.title;
                         font-family: "Archivo SemiBold";
                         font-size: 24px;
