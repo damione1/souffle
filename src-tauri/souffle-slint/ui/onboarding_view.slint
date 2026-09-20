@@ -141,7 +141,7 @@ export component OnboardingView inherits Rectangle {
                 VerticalLayout {
                     padding: 8px;
                     Text {
-                        text: root.status-message;
+                        text: root.status-message == "MODEL_ERROR" ? @tr("Le modèle est en erreur.") : root.status-message;
                         color: Theme.warning;
                         font-size: 11.5px;
                         wrap: word-wrap;
