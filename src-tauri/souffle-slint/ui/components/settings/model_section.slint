@@ -1,6 +1,7 @@
 import { SettingsField } from "settings_field.slint";
 import { SettingsGroup } from "settings_group.slint";
 import { Theme } from "../../theme.slint";
+import { TranscriptionPhase } from "../../types.slint";
 import { ThemedComboBox } from "../themed_combo.slint";
 import { StatusIndicator } from "status_indicator.slint";
 
@@ -10,7 +11,7 @@ import { StatusIndicator } from "status_indicator.slint";
 // `load_model` commands the Svelte controller calls), this component only
 // displays whatever state Rust pushes and forwards the chosen label back.
 export component ModelSection inherits VerticalLayout {
-    in property <string> status-text;
+    in property <TranscriptionPhase> model-phase;
     in property <bool> ready;
     in property <[string]> model-labels;
     in property <string> selected-model-label;
@@ -37,7 +38,14 @@ export component ModelSection inherits VerticalLayout {
         description: @tr("Choisissez un modèle : il se télécharge et se charge tout seul. Tout tourne sur ce Mac.");
 
         StatusIndicator {
-            text: root.status-text;
+            text: root.model-phase == TranscriptionPhase.download-required ? @tr("Téléchargement requis")
+                : root.model-phase == TranscriptionPhase.downloading ? @tr("Téléchargement…")
+                : root.model-phase == TranscriptionPhase.load-required ? @tr("Chargement requis")
+                : root.model-phase == TranscriptionPhase.loading ? @tr("Chargement…")
+                : root.model-phase == TranscriptionPhase.ready ? @tr("Prêt")
+                : root.model-phase == TranscriptionPhase.unloading ? @tr("Déchargement…")
+                : root.model-phase == TranscriptionPhase.failed ? @tr("Erreur du modèle")
+                : "";
             indicator-color: root.ready ? Theme.accent : Theme.warning;
         }
     }

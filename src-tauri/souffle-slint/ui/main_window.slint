@@ -230,7 +230,6 @@ export component MainWindow inherits Window {
     in-out property <string> settings-editing-summary-template-name;
     in-out property <string> settings-editing-summary-template-prompt;
     in-out property <string> settings-new-summary-template-draft: "";
-    in property <string> settings-model-status-text;
     in property <[string]> settings-model-labels;
     in property <string> settings-selected-model-label;
     // Bare model label ("STT 1B FR/EN") for AppHeader's status pill - kept
@@ -455,7 +454,7 @@ export component MainWindow inherits Window {
         AppHeader {
             settings-open: root.settings-open;
             model-phase: root.model-runtime-phase;
-            model-status-label: root.settings-model-status-text;
+            
             recording-mode: root.recording-mode;
             model-label: root.header-model-label;
             settings-toggled => {
@@ -687,7 +686,7 @@ export component MainWindow inherits Window {
         editing-summary-template-name <=> root.settings-editing-summary-template-name;
         editing-summary-template-prompt <=> root.settings-editing-summary-template-prompt;
         new-summary-template-draft <=> root.settings-new-summary-template-draft;
-        model-status-text: root.settings-model-status-text;
+        model-phase: root.model-runtime-phase;
         model-ready: root.model-ready;
         model-labels: root.settings-model-labels;
         selected-model-label: root.settings-selected-model-label;

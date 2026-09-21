@@ -110,7 +110,7 @@ msgstr "Draft kept: {}"
 #: src-tauri/souffle-slint/ui/recording_view.slint:28
 msgctxt "RecordingView"
 msgid " {}"
-msgstr " {} "
+msgstr " {}"
 
 #: src-tauri/souffle-slint/ui/recording_view.slint:77
 msgctxt "RecordingView"
@@ -150,6 +150,7 @@ msgstr ""
 "Only your microphone is recorded. Audio from other participants is "
 "unavailable."
 
+#: src-tauri/souffle-slint/ui/recording_view.slint:249
 #: src-tauri/souffle-slint/ui/recording_view.slint:249
 msgctxt "RecordingView"
 msgid "À l'écoute…"
@@ -221,6 +222,7 @@ msgid "AUDIO"
 msgstr "AUDIO"
 
 #: src-tauri/souffle-slint/ui/components/settings/audio_section.slint:55
+#: src-tauri/souffle-slint/ui/components/settings/audio_section.slint:55
 msgctxt "AudioSection"
 msgid "Microphone quand le capot est fermé"
 msgstr "Microphone when lid is closed"
@@ -235,6 +237,7 @@ msgstr ""
 "connected."
 
 #: src-tauri/souffle-slint/ui/components/settings/audio_section.slint:68
+#: src-tauri/souffle-slint/ui/components/settings/audio_section.slint:68
 msgctxt "AudioSection"
 msgid "Capturer l'audio système"
 msgstr "Capture system audio"
@@ -242,7 +245,8 @@ msgstr "Capture system audio"
 #: src-tauri/souffle-slint/ui/components/settings/audio_section.slint:69
 msgctxt "AudioSection"
 msgid ""
-"Inclure le son des haut-parleurs (l'autre côté d'un appel) dans les réunions."
+"Inclure le son des haut-parleurs (l'autre côté d'un appel) dans les "
+"réunions."
 msgstr "Include speaker sound (the other side of a call) in meetings."
 
 #: src-tauri/souffle-slint/ui/components/settings/audio_section.slint:80
@@ -260,6 +264,7 @@ msgctxt "AudioSection"
 msgid "Langue de transcription des réunions"
 msgstr "Meeting transcription language"
 
+#: src-tauri/souffle-slint/ui/components/settings/audio_section.slint:106
 #: src-tauri/souffle-slint/ui/components/settings/audio_section.slint:106
 msgctxt "AudioSection"
 msgid "Arrêt automatique des réunions"
@@ -281,6 +286,7 @@ msgid "Délai avant arrêt automatique"
 msgstr "Auto-stop delay"
 
 #: src-tauri/souffle-slint/ui/components/settings/audio_section.slint:128
+#: src-tauri/souffle-slint/ui/components/settings/audio_section.slint:128
 msgctxt "AudioSection"
 msgid "Durée maximale d'une réunion"
 msgstr "Maximum meeting duration"
@@ -301,6 +307,7 @@ msgid "Détection de voix"
 msgstr "Voice detection"
 
 #: src-tauri/souffle-slint/ui/components/settings/audio_section.slint:150
+#: src-tauri/souffle-slint/ui/components/settings/audio_section.slint:150
 msgctxt "AudioSection"
 msgid "Suppression des hésitations"
 msgstr "Hesitation removal"
@@ -311,6 +318,7 @@ msgid "Retirer les \"euh\", \"hum\" et autres marqueurs d'hésitation."
 msgstr "Remove \"um\", \"uh\" and other hesitation markers."
 
 #: src-tauri/souffle-slint/ui/components/settings/audio_section.slint:161
+#: src-tauri/souffle-slint/ui/components/settings/audio_section.slint:161
 msgctxt "AudioSection"
 msgid "Réduction des bégaiements"
 msgstr "Stutter reduction"
@@ -320,6 +328,7 @@ msgctxt "AudioSection"
 msgid "Fusionner les répétitions et faux départs."
 msgstr "Merge repetitions and false starts."
 
+#: src-tauri/souffle-slint/ui/components/settings/audio_section.slint:172
 #: src-tauri/souffle-slint/ui/components/settings/audio_section.slint:172
 msgctxt "AudioSection"
 msgid "Correction par dictionnaire"
@@ -338,8 +347,8 @@ msgstr "SUMMARY TEMPLATES"
 #: src-tauri/souffle-slint/ui/components/settings/summary_templates_section.slint:44
 msgctxt "SummaryTemplatesSection"
 msgid ""
-"Le modèle par défaut est utilisé pour résumer automatiquement une réunion "
-"terminée."
+"Le modèle par défaut est utilisé pour résumer automatiquement une "
+"réunion terminée."
 msgstr ""
 "The default template is used to automatically summarize a finished meeting."
 
@@ -419,6 +428,7 @@ msgid "Ajouter"
 msgstr "Add"
 
 #: src-tauri/souffle-slint/ui/components/settings/settings_permissions_dialog.slint:20
+#: src-tauri/souffle-slint/ui/components/settings/settings_permissions_dialog.slint:20
 msgctxt "SettingsPermissionsDialog"
 msgid "Permissions macOS"
 msgstr "macOS permissions"
@@ -426,8 +436,8 @@ msgstr "macOS permissions"
 #: src-tauri/souffle-slint/ui/components/settings/settings_permissions_dialog.slint:60
 msgctxt "SettingsPermissionsDialog"
 msgid ""
-"Vérifiez chaque autorisation. La réparation réinitialise uniquement l’entrée "
-"Accessibilité avant de redemander l’accès."
+"Vérifiez chaque autorisation. La réparation réinitialise uniquement "
+"l’entrée Accessibilité avant de redemander l’accès."
 msgstr ""
 "Check each authorization. Repair only resets the Accessibility entry before "
 "requesting access again."
@@ -548,6 +558,7 @@ msgid "Système"
 msgstr "System"
 
 #: src-tauri/souffle-slint/ui/components/settings/interface_section.slint:177
+#: src-tauri/souffle-slint/ui/components/settings/interface_section.slint:177
 msgctxt "InterfaceSection"
 msgid "Collage automatique après dictée"
 msgstr "Auto-paste after dictation"
@@ -558,6 +569,7 @@ msgid "Colle automatiquement la transcription à l'arrêt de l'enregistrement."
 msgstr "Automatically pastes transcription when recording stops."
 
 #: src-tauri/souffle-slint/ui/components/settings/interface_section.slint:188
+#: src-tauri/souffle-slint/ui/components/settings/interface_section.slint:188
 msgctxt "InterfaceSection"
 msgid "Méthode de collage"
 msgstr "Paste method"
@@ -566,8 +578,8 @@ msgstr "Paste method"
 msgctxt "InterfaceSection"
 msgid ""
 "Le champ ciblé utilise l'accessibilité pour insérer dans la sélection. "
-"Utilisez la frappe simulée si une app refuse le ⌘V synthétique (terminaux, "
-"champs sécurisés)."
+"Utilisez la frappe simulée si une app refuse le ⌘V synthétique "
+"(terminaux, champs sécurisés)."
 msgstr ""
 "The targeted field uses accessibility to insert into the selection. Use "
 "simulated typing if an app refuses synthetic ⌘V (terminals, secure fields)."
@@ -602,6 +614,7 @@ msgid "Appuyez une fois pour démarrer ou arrêter la dictée."
 msgstr "Press once to start or stop dictation."
 
 #: src-tauri/souffle-slint/ui/components/settings/interface_section.slint:246
+#: src-tauri/souffle-slint/ui/components/settings/interface_section.slint:246
 msgctxt "InterfaceSection"
 msgid "Effacer"
 msgstr "Clear"
@@ -617,6 +630,7 @@ msgid "Maintenez pour enregistrer, relâchez pour arrêter."
 msgstr "Hold to record, release to stop."
 
 #: src-tauri/souffle-slint/ui/components/settings/interface_section.slint:280
+#: src-tauri/souffle-slint/ui/components/settings/interface_section.slint:280
 msgctxt "InterfaceSection"
 msgid "Masquer l'overlay d'enregistrement"
 msgstr "Hide recording overlay"
@@ -625,8 +639,8 @@ msgstr "Hide recording overlay"
 msgctxt "InterfaceSection"
 msgid ""
 "Ne pas afficher le HUD flottant pendant une dictée ou une réunion. Déplacez-"
-"le par glisser-déposer ; la position est mémorisée et reste à l'écran si la "
-"résolution change."
+"le par glisser-déposer ; la position est mémorisée et reste à l'écran "
+"si la résolution change."
 msgstr ""
 "Do not show the floating HUD during a dictation or meeting. Move it by drag "
 "and drop; the position is memorized and stays on screen if resolution "
@@ -649,6 +663,7 @@ msgctxt "DictationPolishSection"
 msgid "POLISH DE LA DICTÉE"
 msgstr "DICTATION POLISH"
 
+#: src-tauri/souffle-slint/ui/components/settings/dictation_polish_section.slint:35
 #: src-tauri/souffle-slint/ui/components/settings/dictation_polish_section.slint:35
 msgctxt "DictationPolishSection"
 msgid "Nettoyer la dictée avec l'IA"
@@ -676,6 +691,7 @@ msgid "Choisir un fournisseur"
 msgstr "Choose a provider"
 
 #: src-tauri/souffle-slint/ui/components/settings/dictation_polish_section.slint:71
+#: src-tauri/souffle-slint/ui/components/settings/dictation_polish_section.slint:71
 msgctxt "DictationPolishSection"
 msgid "Modèle de retouche"
 msgstr "Polishing model"
@@ -691,6 +707,7 @@ msgid "Prompt envoyé à l'IA pour retoucher le texte transcrit."
 msgstr "Prompt sent to AI to polish transcribed text."
 
 #: src-tauri/souffle-slint/ui/components/settings/dictation_polish_section.slint:89
+#: src-tauri/souffle-slint/ui/components/settings/dictation_polish_section.slint:89
 msgctxt "DictationPolishSection"
 msgid "Instruction de retouche"
 msgstr "Polishing prompt"
@@ -700,6 +717,7 @@ msgctxt "FeedbackSoundsSection"
 msgid "SONS DE DICTÉE"
 msgstr "DICTATION SOUNDS"
 
+#: src-tauri/souffle-slint/ui/components/settings/feedback_sounds_section.slint:25
 #: src-tauri/souffle-slint/ui/components/settings/feedback_sounds_section.slint:25
 msgctxt "FeedbackSoundsSection"
 msgid "Activer les sons"
@@ -733,8 +751,8 @@ msgstr "VOICE SNIPPETS"
 #: src-tauri/souffle-slint/ui/components/settings/snippets_section.slint:51
 msgctxt "SnippetsSection"
 msgid ""
-"Dites une phrase déclencheur au début d'une dictée pour insérer un bloc de "
-"texte. La comparaison ignore la casse et les accents ; aucune retouche IA "
+"Dites une phrase déclencheur au début d'une dictée pour insérer un bloc "
+"de texte. La comparaison ignore la casse et les accents ; aucune retouche IA "
 "n'est appliquée quand un extrait correspond."
 msgstr ""
 "Say a trigger phrase at the start of a dictation to insert a block of text. "
@@ -742,15 +760,19 @@ msgstr ""
 "matches."
 
 #: src-tauri/souffle-slint/ui/components/settings/snippets_section.slint:57
+#: src-tauri/souffle-slint/ui/components/settings/snippets_section.slint:57
 msgctxt "SnippetsSection"
 msgid "DÉCLENCHEUR"
 msgstr "TRIGGER"
 
 #: src-tauri/souffle-slint/ui/components/settings/snippets_section.slint:60
+#: src-tauri/souffle-slint/ui/components/settings/snippets_section.slint:60
+#: src-tauri/souffle-slint/ui/components/settings/snippets_section.slint:60
 msgctxt "SnippetsSection"
 msgid "Phrase déclencheur"
 msgstr "Trigger phrase"
 
+#: src-tauri/souffle-slint/ui/components/settings/snippets_section.slint:63
 #: src-tauri/souffle-slint/ui/components/settings/snippets_section.slint:63
 msgctxt "SnippetsSection"
 msgid "EXPANSION"
@@ -761,6 +783,7 @@ msgctxt "SnippetsSection"
 msgid "Texte à insérer"
 msgstr "Text to insert"
 
+#: src-tauri/souffle-slint/ui/components/settings/snippets_section.slint:68
 #: src-tauri/souffle-slint/ui/components/settings/snippets_section.slint:68
 msgctxt "SnippetsSection"
 msgid "Texte de l'extrait vocal"
@@ -890,8 +913,8 @@ msgstr "Native frequency of the selected device."
 #: src-tauri/souffle-slint/ui/components/settings/microphone_section.slint:183
 msgctxt "MicrophoneSection"
 msgid ""
-"Cette fréquence élevée peut perturber les appels en visioconférence pendant "
-"l'enregistrement."
+"Cette fréquence élevée peut perturber les appels en visioconférence "
+"pendant l'enregistrement."
 msgstr "This high frequency may disrupt video calls during recording."
 
 #: src-tauri/souffle-slint/ui/components/settings/microphone_section.slint:193
@@ -915,35 +938,43 @@ msgid "Utilisé quand plusieurs micros sont branchés en même temps."
 msgstr "Used when multiple mics are plugged in at once."
 
 #: src-tauri/souffle-slint/ui/components/settings/microphone_section.slint:278
+#: src-tauri/souffle-slint/ui/components/settings/microphone_section.slint:278
 msgctxt "MicrophoneSection"
 msgid "Monter {}"
 msgstr "Move up {}"
 
+#: src-tauri/souffle-slint/ui/components/settings/microphone_section.slint:284
 #: src-tauri/souffle-slint/ui/components/settings/microphone_section.slint:284
 msgctxt "MicrophoneSection"
 msgid "Descendre {}"
 msgstr "Move down {}"
 
 #: src-tauri/souffle-slint/ui/components/settings/microphone_section.slint:292
+#: src-tauri/souffle-slint/ui/components/settings/microphone_section.slint:292
 msgctxt "MicrophoneSection"
 msgid "Masquer {}"
 msgstr "Hide {}"
 
+#: src-tauri/souffle-slint/ui/components/settings/microphone_section.slint:297
 #: src-tauri/souffle-slint/ui/components/settings/microphone_section.slint:297
 msgctxt "MicrophoneSection"
 msgid "Masquer"
 msgstr "Hide"
 
 #: src-tauri/souffle-slint/ui/components/settings/microphone_section.slint:311
+#: src-tauri/souffle-slint/ui/components/settings/microphone_section.slint:311
 msgctxt "MicrophoneSection"
 msgid "Supprimer {}"
 msgstr "Delete {}"
 
 #: src-tauri/souffle-slint/ui/components/settings/microphone_section.slint:330
+#: src-tauri/souffle-slint/ui/components/settings/microphone_section.slint:330
+#: src-tauri/souffle-slint/ui/components/settings/microphone_section.slint:330
 msgctxt "MicrophoneSection"
 msgid "Autoriser les micros Bluetooth"
 msgstr "Allow Bluetooth microphones"
 
+#: src-tauri/souffle-slint/ui/components/settings/microphone_section.slint:331
 #: src-tauri/souffle-slint/ui/components/settings/microphone_section.slint:331
 msgctxt "MicrophoneSection"
 msgid ""
@@ -958,6 +989,7 @@ msgctxt "CalendarSection"
 msgid "CALENDRIER"
 msgstr "CALENDAR"
 
+#: src-tauri/souffle-slint/ui/components/settings/calendar_section.slint:42
 #: src-tauri/souffle-slint/ui/components/settings/calendar_section.slint:42
 msgctxt "CalendarSection"
 msgid "Intégration du calendrier"
@@ -980,6 +1012,7 @@ msgctxt "CalendarSection"
 msgid "Ouvrir les Réglages Système"
 msgstr "Open System Settings"
 
+#: src-tauri/souffle-slint/ui/components/settings/calendar_section.slint:78
 #: src-tauri/souffle-slint/ui/components/settings/calendar_section.slint:78
 msgctxt "CalendarSection"
 msgid "Proposer au début de la réunion"
@@ -1023,6 +1056,7 @@ msgctxt "DictionarySection"
 msgid "DICTIONNAIRE PERSONNALISÉ"
 msgstr "CUSTOM DICTIONARY"
 
+#: src-tauri/souffle-slint/ui/components/settings/dictionary_section.slint:44
 #: src-tauri/souffle-slint/ui/components/settings/dictionary_section.slint:44
 msgctxt "DictionarySection"
 msgid "Apprendre depuis les corrections après collage"
@@ -1198,6 +1232,7 @@ msgid "DIAGNOSTICS"
 msgstr "DIAGNOSTICS"
 
 #: src-tauri/souffle-slint/ui/components/settings/diagnostics_section.slint:38
+#: src-tauri/souffle-slint/ui/components/settings/diagnostics_section.slint:38
 msgctxt "DiagnosticsSection"
 msgid "Niveau de journal"
 msgstr "Log level"
@@ -1208,6 +1243,7 @@ msgid "Quantité de détails que Soufflé écrit dans le fichier journal."
 msgstr "Amount of detail Soufflé writes to the log file."
 
 #: src-tauri/souffle-slint/ui/components/settings/diagnostics_section.slint:62
+#: src-tauri/souffle-slint/ui/components/settings/diagnostics_section.slint:62
 msgctxt "DiagnosticsSection"
 msgid "Journaux détaillés de transcription"
 msgstr "Detailed transcription logs"
@@ -1215,11 +1251,12 @@ msgstr "Detailed transcription logs"
 #: src-tauri/souffle-slint/ui/components/settings/diagnostics_section.slint:63
 msgctxt "DiagnosticsSection"
 msgid ""
-"Enregistre des détails supplémentaires sur la reconnaissance vocale pour le "
-"dépannage."
+"Enregistre des détails supplémentaires sur la reconnaissance vocale pour "
+"le dépannage."
 msgstr ""
 "Records additional details about speech recognition for troubleshooting."
 
+#: src-tauri/souffle-slint/ui/components/settings/diagnostics_section.slint:81
 #: src-tauri/souffle-slint/ui/components/settings/diagnostics_section.slint:81
 msgctxt "DiagnosticsSection"
 msgid "Journal en direct"
@@ -1245,6 +1282,7 @@ msgctxt "DiagnosticsSection"
 msgid "Copier les diagnostics"
 msgstr "Copy diagnostics"
 
+#: src-tauri/souffle-slint/ui/components/settings/intelligence_section.slint:45
 #: src-tauri/souffle-slint/ui/components/settings/intelligence_section.slint:45
 msgctxt "IntelligenceSection"
 msgid "Apple Intelligence"
@@ -1322,6 +1360,7 @@ msgid "Disponible"
 msgstr "Available"
 
 #: src-tauri/souffle-slint/ui/components/settings/intelligence_section.slint:133
+#: src-tauri/souffle-slint/ui/components/settings/intelligence_section.slint:133
 msgctxt "IntelligenceSection"
 msgid "Non disponible"
 msgstr "Not available"
@@ -1331,6 +1370,7 @@ msgctxt "IntelligenceSection"
 msgid "Réglages Système"
 msgstr "System Settings"
 
+#: src-tauri/souffle-slint/ui/components/settings/intelligence_section.slint:163
 #: src-tauri/souffle-slint/ui/components/settings/intelligence_section.slint:163
 msgctxt "IntelligenceSection"
 msgid "URL Ollama"
@@ -1376,6 +1416,7 @@ msgctxt "IntelligenceSection"
 msgid "Réessayer"
 msgstr "Retry"
 
+#: src-tauri/souffle-slint/ui/components/settings/intelligence_section.slint:205
 #: src-tauri/souffle-slint/ui/components/settings/intelligence_section.slint:205
 msgctxt "IntelligenceSection"
 msgid "Modèle de résumé"
@@ -1431,6 +1472,7 @@ msgctxt "DataSection"
 msgid "DONNÉES"
 msgstr "DATA"
 
+#: src-tauri/souffle-slint/ui/components/settings/data_section.slint:112
 #: src-tauri/souffle-slint/ui/components/settings/data_section.slint:112
 msgctxt "DataSection"
 msgid "Conservation audio des réunions"
@@ -1511,6 +1553,7 @@ msgid "À coller dans claude_desktop_config.json sous mcpServers."
 msgstr "Paste into claude_desktop_config.json under mcpServers."
 
 #: src-tauri/souffle-slint/ui/components/settings/data_section.slint:236
+#: src-tauri/souffle-slint/ui/components/settings/data_section.slint:236
 msgctxt "DataSection"
 msgid "Copier"
 msgstr "Copy"
@@ -1525,6 +1568,7 @@ msgctxt "DataSection"
 msgid "À exécuter une fois dans un terminal pour enregistrer le serveur."
 msgstr "Run once in a terminal to register the server."
 
+#: src-tauri/souffle-slint/ui/components/settings/data_section.slint:286
 #: src-tauri/souffle-slint/ui/components/settings/data_section.slint:286
 msgctxt "DataSection"
 msgid "Tester la connexion"
@@ -1541,6 +1585,7 @@ msgid "MODÈLE DE TRANSCRIPTION"
 msgstr "TRANSCRIPTION MODEL"
 
 #: src-tauri/souffle-slint/ui/components/settings/model_section.slint:36
+#: src-tauri/souffle-slint/ui/components/settings/model_section.slint:36
 msgctxt "ModelSection"
 msgid "Modèle de transcription"
 msgstr "Transcription model"
@@ -1548,17 +1593,20 @@ msgstr "Transcription model"
 #: src-tauri/souffle-slint/ui/components/settings/model_section.slint:37
 msgctxt "ModelSection"
 msgid ""
-"Choisissez un modèle : il se télécharge et se charge tout seul. Tout tourne "
-"sur ce Mac."
+"Choisissez un modèle : il se télécharge et se charge tout seul. Tout "
+"tourne sur ce Mac."
 msgstr ""
 "Choose a model: it downloads and loads on its own. Everything runs on this "
 "Mac."
 
 #: src-tauri/souffle-slint/ui/components/settings/model_section.slint:93
+#: src-tauri/souffle-slint/ui/components/settings/model_section.slint:93
+#: src-tauri/souffle-slint/ui/components/settings/model_section.slint:93
 msgctxt "ModelSection"
 msgid "Délai avant déchargement"
 msgstr "Unload delay"
 
+#: src-tauri/souffle-slint/ui/components/settings/model_section.slint:94
 #: src-tauri/souffle-slint/ui/components/settings/model_section.slint:94
 msgctxt "ModelSection"
 msgid "Décharger le modèle de la mémoire après une période d'inactivité."
@@ -1602,10 +1650,12 @@ msgid "Sélection"
 msgstr "Selection"
 
 #: src-tauri/souffle-slint/ui/components/timeline_item.slint:112
+#: src-tauri/souffle-slint/ui/components/timeline_item.slint:112
 msgctxt "TimelineItemRow"
 msgid "Copié !"
 msgstr "Copied!"
 
+#: src-tauri/souffle-slint/ui/components/timeline_item.slint:112
 #: src-tauri/souffle-slint/ui/components/timeline_item.slint:112
 msgctxt "TimelineItemRow"
 msgid "Copier"
@@ -1649,17 +1699,17 @@ msgstr "Play"
 #: src-tauri/souffle-slint/ui/components/audio_player_section.slint:60
 msgctxt "AudioPlayerSection"
 msgid "⏸"
-msgstr "⏸ "
+msgstr "⏸"
 
 #: src-tauri/souffle-slint/ui/components/audio_player_section.slint:60
 msgctxt "AudioPlayerSection"
 msgid "▶"
-msgstr "▶ "
+msgstr "▶"
 
 #: src-tauri/souffle-slint/ui/components/audio_player_section.slint:67
 msgctxt "AudioPlayerSection"
 msgid " / {}"
-msgstr " / {} "
+msgstr " / {}"
 
 #: src-tauri/souffle-slint/ui/components/audio_player_section.slint:81
 msgctxt "AudioPlayerSection"
@@ -1714,8 +1764,7 @@ msgstr "Nothing here yet"
 
 #: src-tauri/souffle-slint/ui/components/timeline_section.slint:268
 msgctxt "TimelineSection"
-msgid ""
-"Vos dictées et meetings apparaîtront ici, du plus récent au plus ancien."
+msgid "Vos dictées et meetings apparaîtront ici, du plus récent au plus ancien."
 msgstr "Your dictations and meetings will appear here, from newest to oldest."
 
 #: src-tauri/souffle-slint/ui/components/timeline_section.slint:271
@@ -1726,7 +1775,8 @@ msgstr "No results"
 #: src-tauri/souffle-slint/ui/components/timeline_section.slint:272
 msgctxt "TimelineSection"
 msgid ""
-"Essayez d'autres mots-clés — la recherche couvre toutes les transcriptions."
+"Essayez d'autres mots-clés — la recherche couvre toutes les "
+"transcriptions."
 msgstr "Try other keywords - search covers all transcriptions."
 
 #: src-tauri/souffle-slint/ui/components/themed_switch.slint:9
@@ -1735,30 +1785,37 @@ msgid "Interrupteur"
 msgstr "Switch"
 
 #: src-tauri/souffle-slint/ui/components/app_header.slint:35
+#: src-tauri/souffle-slint/ui/components/app_header.slint:35
 msgctxt "AppHeader"
 msgid "Enregistrement"
 msgstr "Recording"
 
+#: src-tauri/souffle-slint/ui/components/app_header.slint:83
 #: src-tauri/souffle-slint/ui/components/app_header.slint:83
 msgctxt "AppHeader"
 msgid "Soufflé"
 msgstr "Soufflé"
 
 #: src-tauri/souffle-slint/ui/components/app_header.slint:148
+#: src-tauri/souffle-slint/ui/components/app_header.slint:148
 msgctxt "AppHeader"
 msgid "Basculer clair / sombre"
 msgstr "Toggle light / dark mode"
 
+#: src-tauri/souffle-slint/ui/components/app_header.slint:172
 #: src-tauri/souffle-slint/ui/components/app_header.slint:172
 msgctxt "AppHeader"
 msgid "Réglages"
 msgstr "Settings"
 
 #: src-tauri/souffle-slint/ui/components/summary_section.slint:33
+#: src-tauri/souffle-slint/ui/components/summary_section.slint:33
+#: src-tauri/souffle-slint/ui/components/summary_section.slint:33
 msgctxt "SummarySection"
 msgid "Résumé"
 msgstr "Summary"
 
+#: src-tauri/souffle-slint/ui/components/summary_section.slint:50
 #: src-tauri/souffle-slint/ui/components/summary_section.slint:50
 msgctxt "SummarySection"
 msgid "Générer le résumé"
@@ -1769,6 +1826,7 @@ msgctxt "SummarySection"
 msgid "Génération en cours..."
 msgstr "Generating..."
 
+#: src-tauri/souffle-slint/ui/components/summary_section.slint:134
 #: src-tauri/souffle-slint/ui/components/summary_section.slint:134
 msgctxt "SummarySection"
 msgid "Régénérer"
@@ -1785,9 +1843,10 @@ msgid "Décisions"
 msgstr "Decisions"
 
 #: src-tauri/souffle-slint/ui/components/summary_section.slint:220
+#: src-tauri/souffle-slint/ui/components/summary_section.slint:220
 msgctxt "SummarySection"
 msgid "• {}"
-msgstr "• {} "
+msgstr "• {}"
 
 #: src-tauri/souffle-slint/ui/components/summary_section.slint:231
 msgctxt "SummarySection"
@@ -1797,7 +1856,7 @@ msgstr "Action items"
 #: src-tauri/souffle-slint/ui/components/summary_section.slint:243
 msgctxt "SummarySection"
 msgid "→ {}"
-msgstr "→ {} "
+msgstr "→ {}"
 
 #: src-tauri/souffle-slint/ui/components/summary_section.slint:255
 msgctxt "SummarySection"
@@ -1850,6 +1909,7 @@ msgid "Appuyez sur"
 msgstr "Press"
 
 #: src-tauri/souffle-slint/ui/components/action_hero.slint:125
+#: src-tauri/souffle-slint/ui/components/action_hero.slint:125
 msgctxt "ActionHero"
 msgid "Démarrer une réunion"
 msgstr "Start meeting"
@@ -1862,7 +1922,7 @@ msgstr "Transcribe live with system audio"
 #: src-tauri/souffle-slint/ui/components/themed_checkbox.slint:27
 msgctxt "ThemedCheckbox"
 msgid "✓"
-msgstr "✓ "
+msgstr "✓"
 
 #: src-tauri/souffle-slint/ui/components/transcript_section.slint:118
 msgctxt "TranscriptSection"
@@ -2007,6 +2067,7 @@ msgid "Aucun microphone détecté."
 msgstr "No microphone detected."
 
 #: src-tauri/souffle-slint/ui/components/onboarding/permissions_step.slint:41
+#: src-tauri/souffle-slint/ui/components/onboarding/permissions_step.slint:41
 msgctxt "PermissionsStep"
 msgid "Réglages Système"
 msgstr "System Settings"
@@ -2021,6 +2082,7 @@ msgctxt "PermissionsStep"
 msgid "Non pris en charge"
 msgstr "Unsupported"
 
+#: src-tauri/souffle-slint/ui/components/onboarding/permissions_step.slint:124
 #: src-tauri/souffle-slint/ui/components/onboarding/permissions_step.slint:124
 msgctxt "PermissionsStep"
 msgid "Vérification…"
@@ -2044,7 +2106,7 @@ msgstr "Repair"
 #: src-tauri/souffle-slint/ui/components/onboarding/markdown_view.slint:22
 msgctxt "MarkdownView"
 msgid "•"
-msgstr "• "
+msgstr "•"
 
 #: src-tauri/souffle-slint/ui/components/onboarding/update_available_dialog.slint:46
 msgctxt "UpdateAvailableDialog"
@@ -2054,7 +2116,7 @@ msgstr "Update available"
 #: src-tauri/souffle-slint/ui/components/onboarding/update_available_dialog.slint:52
 msgctxt "UpdateAvailableDialog"
 msgid "Version {}"
-msgstr "Version {} "
+msgstr "Version {}"
 
 #: src-tauri/souffle-slint/ui/components/onboarding/update_available_dialog.slint:73
 msgctxt "UpdateAvailableDialog"
@@ -2088,11 +2150,13 @@ msgstr "Download"
 
 #. "permissions" | "microphone" | "model" | "shortcut"
 #: src-tauri/souffle-slint/ui/onboarding_view.slint:20
+#: src-tauri/souffle-slint/ui/onboarding_view.slint:20
 msgctxt "OnboardingView"
 msgid "Permissions"
 msgstr "App Permissions"
 
 #. "permissions" | "microphone" | "model" | "shortcut"
+#: src-tauri/souffle-slint/ui/onboarding_view.slint:20
 #: src-tauri/souffle-slint/ui/onboarding_view.slint:20
 msgctxt "OnboardingView"
 msgid "Choisissez votre microphone"
@@ -2100,31 +2164,37 @@ msgstr "Choose your microphone"
 
 #. "permissions" | "microphone" | "model" | "shortcut"
 #: src-tauri/souffle-slint/ui/onboarding_view.slint:20
+#: src-tauri/souffle-slint/ui/onboarding_view.slint:20
 msgctxt "OnboardingView"
 msgid "Modèle de transcription"
 msgstr "Transcription model"
 
 #. "permissions" | "microphone" | "model" | "shortcut"
 #: src-tauri/souffle-slint/ui/onboarding_view.slint:20
+#: src-tauri/souffle-slint/ui/onboarding_view.slint:20
 msgctxt "OnboardingView"
 msgid "Raccourci clavier"
 msgstr "Keyboard shortcut"
 
+#: src-tauri/souffle-slint/ui/onboarding_view.slint:21
 #: src-tauri/souffle-slint/ui/onboarding_view.slint:21
 msgctxt "OnboardingView"
 msgid "Soufflé a besoin de ces autorisations macOS pour fonctionner."
 msgstr "Soufflé needs these macOS permissions to work."
 
 #: src-tauri/souffle-slint/ui/onboarding_view.slint:21
+#: src-tauri/souffle-slint/ui/onboarding_view.slint:21
 msgctxt "OnboardingView"
 msgid "Vous pourrez changer ce choix plus tard dans les Réglages."
 msgstr "You can change this choice later in Settings."
 
 #: src-tauri/souffle-slint/ui/onboarding_view.slint:21
+#: src-tauri/souffle-slint/ui/onboarding_view.slint:21
 msgctxt "OnboardingView"
 msgid "Téléchargé une seule fois, tout tourne ensuite hors ligne."
 msgstr "Downloaded once, everything runs offline afterwards."
 
+#: src-tauri/souffle-slint/ui/onboarding_view.slint:21
 #: src-tauri/souffle-slint/ui/onboarding_view.slint:21
 msgctxt "OnboardingView"
 msgid ""
@@ -2133,90 +2203,109 @@ msgid ""
 msgstr "Used to start and stop dictation from any application."
 
 #: src-tauri/souffle-slint/ui/onboarding_view.slint:47
+#: src-tauri/souffle-slint/ui/onboarding_view.slint:47
 msgctxt "OnboardingView"
 msgid "Terminer"
 msgstr "Finish"
 
+#: src-tauri/souffle-slint/ui/onboarding_view.slint:47
 #: src-tauri/souffle-slint/ui/onboarding_view.slint:47
 msgctxt "OnboardingView"
 msgid "Télécharger et continuer"
 msgstr "Download and continue"
 
 #: src-tauri/souffle-slint/ui/onboarding_view.slint:47
+#: src-tauri/souffle-slint/ui/onboarding_view.slint:47
 msgctxt "OnboardingView"
 msgid "Continuer"
 msgstr "Continue"
 
+#: src-tauri/souffle-slint/ui/onboarding_view.slint:81
 #: src-tauri/souffle-slint/ui/onboarding_view.slint:81
 msgctxt "OnboardingView"
 msgid "Soufflé"
 msgstr "Soufflé"
 
 #: src-tauri/souffle-slint/ui/onboarding_view.slint:88
+#: src-tauri/souffle-slint/ui/onboarding_view.slint:88
 msgctxt "OnboardingView"
 msgid "Dictée et transcription de réunion, 100% locale."
 msgstr "Meeting dictation and transcription, 100% local."
 
+#: src-tauri/souffle-slint/ui/onboarding_view.slint:98
 #: src-tauri/souffle-slint/ui/onboarding_view.slint:98
 msgctxt "OnboardingView"
 msgid "English"
 msgstr "English"
 
 #: src-tauri/souffle-slint/ui/onboarding_view.slint:103
+#: src-tauri/souffle-slint/ui/onboarding_view.slint:103
 msgctxt "OnboardingView"
 msgid "Français"
 msgstr "French"
 
+#: src-tauri/souffle-slint/ui/onboarding_view.slint:144
 #: src-tauri/souffle-slint/ui/onboarding_view.slint:144
 msgctxt "OnboardingView"
 msgid "Le modèle est en erreur."
 msgstr "The model is in an error state."
 
 #: src-tauri/souffle-slint/ui/onboarding_view.slint:173
+#: src-tauri/souffle-slint/ui/onboarding_view.slint:173
 msgctxt "OnboardingView"
 msgid "Actualiser"
 msgstr "Refresh"
 
+#: src-tauri/souffle-slint/ui/onboarding_view.slint:178
 #: src-tauri/souffle-slint/ui/onboarding_view.slint:178
 msgctxt "OnboardingView"
 msgid "Le microphone peut être changé plus tard dans les Réglages."
 msgstr "The microphone can be changed later in Settings."
 
 #: src-tauri/souffle-slint/ui/onboarding_view.slint:190
+#: src-tauri/souffle-slint/ui/onboarding_view.slint:190
 msgctxt "OnboardingView"
 msgid "Téléchargement du modèle…"
 msgstr "Downloading model…"
 
+#: src-tauri/souffle-slint/ui/onboarding_view.slint:206
 #: src-tauri/souffle-slint/ui/onboarding_view.slint:206
 msgctxt "OnboardingView"
 msgid "Chargement du modèle…"
 msgstr "Loading model…"
 
 #: src-tauri/souffle-slint/ui/onboarding_view.slint:211
+#: src-tauri/souffle-slint/ui/onboarding_view.slint:211
 msgctxt "OnboardingView"
 msgid "Modèle prêt."
 msgstr "Model ready."
 
+#: src-tauri/souffle-slint/ui/onboarding_view.slint:244
+#: src-tauri/souffle-slint/ui/onboarding_view.slint:244
 #: src-tauri/souffle-slint/ui/onboarding_view.slint:244
 msgctxt "OnboardingView"
 msgid "Coller automatiquement le texte transcrit"
 msgstr "Automatically paste transcribed text"
 
 #: src-tauri/souffle-slint/ui/onboarding_view.slint:260
+#: src-tauri/souffle-slint/ui/onboarding_view.slint:260
 msgctxt "OnboardingView"
 msgid "Le collage automatique nécessite la permission Accessibilité."
 msgstr "Auto-paste requires Accessibility permission."
 
+#: src-tauri/souffle-slint/ui/onboarding_view.slint:267
 #: src-tauri/souffle-slint/ui/onboarding_view.slint:267
 msgctxt "OnboardingView"
 msgid "Vérifier"
 msgstr "Check"
 
 #: src-tauri/souffle-slint/ui/onboarding_view.slint:277
+#: src-tauri/souffle-slint/ui/onboarding_view.slint:277
 msgctxt "OnboardingView"
 msgid "Retour"
 msgstr "Back"
 
+#: src-tauri/souffle-slint/ui/onboarding_view.slint:283
 #: src-tauri/souffle-slint/ui/onboarding_view.slint:283
 msgctxt "OnboardingView"
 msgid "Les permissions peuvent être accordées plus tard."
@@ -2271,6 +2360,207 @@ msgstr "Meetings"
 msgctxt "IdleView"
 msgid "Dictées"
 msgstr "Dictations"
+
+#: src-tauri/souffle-slint/ui/components/settings/microphone_section.slint:257
+msgctxt "MicrophoneSection"
+msgid "Intégré"
+msgstr "Built-in"
+
+#: src-tauri/souffle-slint/ui/components/settings/microphone_section.slint:258
+msgctxt "MicrophoneSection"
+msgid "USB"
+msgstr "USB"
+
+#: src-tauri/souffle-slint/ui/components/settings/microphone_section.slint:259
+msgctxt "MicrophoneSection"
+msgid "Bluetooth"
+msgstr "Bluetooth"
+
+#: src-tauri/souffle-slint/ui/components/settings/microphone_section.slint:260
+msgctxt "MicrophoneSection"
+msgid "Virtuel"
+msgstr "Virtual"
+
+#: src-tauri/souffle-slint/ui/components/settings/microphone_section.slint:261
+msgctxt "MicrophoneSection"
+msgid "Agrégé"
+msgstr "Aggregate"
+
+#: src-tauri/souffle-slint/ui/components/settings/microphone_section.slint:262
+msgctxt "MicrophoneSection"
+msgid "Inconnu"
+msgstr "Unknown"
+
+#: src-tauri/souffle-slint/ui/components/settings/microphone_section.slint:263
+msgctxt "MicrophoneSection"
+msgid " · par défaut"
+msgstr " · default"
+
+#: src-tauri/souffle-slint/ui/components/settings/model_section.slint:40
+msgctxt "ModelSection"
+msgid "Téléchargement requis"
+msgstr "Download required"
+
+#: src-tauri/souffle-slint/ui/components/settings/model_section.slint:41
+msgctxt "ModelSection"
+msgid "Téléchargement…"
+msgstr "Downloading..."
+
+#: src-tauri/souffle-slint/ui/components/settings/model_section.slint:42
+msgctxt "ModelSection"
+msgid "Chargement requis"
+msgstr "Load required"
+
+#: src-tauri/souffle-slint/ui/components/settings/model_section.slint:43
+msgctxt "ModelSection"
+msgid "Chargement…"
+msgstr "Loading..."
+
+#: src-tauri/souffle-slint/ui/components/settings/model_section.slint:44
+msgctxt "ModelSection"
+msgid "Prêt"
+msgstr "Ready"
+
+#: src-tauri/souffle-slint/ui/components/settings/model_section.slint:45
+msgctxt "ModelSection"
+msgid "Déchargement…"
+msgstr "Unloading..."
+
+#: src-tauri/souffle-slint/ui/components/settings/model_section.slint:46
+msgctxt "ModelSection"
+msgid "Erreur du modèle"
+msgstr "Model error"
+
+#: src-tauri/souffle-slint/ui/components/themed_combo.slint:72
+#: src-tauri/souffle-slint/ui/components/themed_combo.slint:72
+msgctxt "ThemedComboBox"
+msgid "Automatique"
+msgstr "Automatic"
+
+#: src-tauri/souffle-slint/ui/components/themed_combo.slint:73
+#: src-tauri/souffle-slint/ui/components/themed_combo.slint:73
+msgctxt "ThemedComboBox"
+msgid "Suivre l'appareil par défaut"
+msgstr "Follow default device"
+
+#: src-tauri/souffle-slint/ui/components/themed_combo.slint:74
+#: src-tauri/souffle-slint/ui/components/themed_combo.slint:74
+msgctxt "ThemedComboBox"
+msgid "Jamais"
+msgstr "Never"
+
+#: src-tauri/souffle-slint/ui/components/themed_combo.slint:75
+#: src-tauri/souffle-slint/ui/components/themed_combo.slint:75
+msgctxt "ThemedComboBox"
+msgid "Par défaut"
+msgstr "Default"
+
+#: src-tauri/souffle-slint/ui/components/themed_combo.slint:76
+#: src-tauri/souffle-slint/ui/components/themed_combo.slint:76
+msgctxt "ThemedComboBox"
+msgid "Compte rendu détaillé"
+msgstr "Detailed minutes"
+
+#: src-tauri/souffle-slint/ui/components/themed_combo.slint:77
+#: src-tauri/souffle-slint/ui/components/themed_combo.slint:77
+msgctxt "ThemedComboBox"
+msgid "Aperçu bref"
+msgstr "Brief overview"
+
+#: src-tauri/souffle-slint/ui/components/themed_combo.slint:78
+#: src-tauri/souffle-slint/ui/components/themed_combo.slint:78
+msgctxt "ThemedComboBox"
+msgid "Intégré"
+msgstr "Built-in"
+
+#: src-tauri/souffle-slint/ui/components/themed_combo.slint:79
+#: src-tauri/souffle-slint/ui/components/themed_combo.slint:79
+msgctxt "ThemedComboBox"
+msgid "USB"
+msgstr "USB"
+
+#: src-tauri/souffle-slint/ui/components/themed_combo.slint:80
+#: src-tauri/souffle-slint/ui/components/themed_combo.slint:80
+msgctxt "ThemedComboBox"
+msgid "Bluetooth"
+msgstr "Bluetooth"
+
+#: src-tauri/souffle-slint/ui/components/themed_combo.slint:81
+#: src-tauri/souffle-slint/ui/components/themed_combo.slint:81
+msgctxt "ThemedComboBox"
+msgid "Virtuel"
+msgstr "Virtual"
+
+#: src-tauri/souffle-slint/ui/components/themed_combo.slint:82
+#: src-tauri/souffle-slint/ui/components/themed_combo.slint:82
+msgctxt "ThemedComboBox"
+msgid "Agrégé"
+msgstr "Aggregate"
+
+#: src-tauri/souffle-slint/ui/components/themed_combo.slint:83
+#: src-tauri/souffle-slint/ui/components/themed_combo.slint:83
+msgctxt "ThemedComboBox"
+msgid "Inconnu"
+msgstr "Unknown"
+
+#: src-tauri/souffle-slint/ui/components/themed_combo.slint:84
+#: src-tauri/souffle-slint/ui/components/themed_combo.slint:84
+msgctxt "ThemedComboBox"
+msgid "Nettoyage"
+msgstr "Cleanup"
+
+#: src-tauri/souffle-slint/ui/components/themed_combo.slint:85
+#: src-tauri/souffle-slint/ui/components/themed_combo.slint:85
+msgctxt "ThemedComboBox"
+msgid "E-mail professionnel"
+msgstr "Professional email"
+
+#: src-tauri/souffle-slint/ui/components/themed_combo.slint:86
+#: src-tauri/souffle-slint/ui/components/themed_combo.slint:86
+msgctxt "ThemedComboBox"
+msgid "Puces"
+msgstr "Bullets"
+
+#: src-tauri/souffle-slint/ui/components/themed_combo.slint:87
+#: src-tauri/souffle-slint/ui/components/themed_combo.slint:87
+msgctxt "ThemedComboBox"
+msgid "Sans fillers"
+msgstr "No fillers"
+
+#: src-tauri/souffle-slint/ui/components/app_header.slint:35
+msgctxt "AppHeader"
+msgid "Téléchargement requis"
+msgstr "Download required"
+
+#: src-tauri/souffle-slint/ui/components/app_header.slint:36
+msgctxt "AppHeader"
+msgid "Téléchargement…"
+msgstr "Downloading..."
+
+#: src-tauri/souffle-slint/ui/components/app_header.slint:37
+msgctxt "AppHeader"
+msgid "Chargement requis"
+msgstr "Load required"
+
+#: src-tauri/souffle-slint/ui/components/app_header.slint:38
+msgctxt "AppHeader"
+msgid "Chargement…"
+msgstr "Loading..."
+
+#: src-tauri/souffle-slint/ui/components/app_header.slint:39
+msgctxt "AppHeader"
+msgid "Prêt"
+msgstr "Ready"
+
+#: src-tauri/souffle-slint/ui/components/app_header.slint:40
+msgctxt "AppHeader"
+msgid "Déchargement…"
+msgstr "Unloading..."
+
+#: src-tauri/souffle-slint/ui/components/app_header.slint:41
+msgctxt "AppHeader"
+msgid "Erreur du modèle"
+msgstr "Model error"
 
 #~ msgctxt "SnippetsSection"
 #~ msgid "TRIGGER"
