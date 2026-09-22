@@ -1947,10 +1947,15 @@ async fn finalize_dictation(
     let entry_id =
         souffle_lib::commands::add_dictation_entry(Arc::clone(&handle), raw_text.clone())?;
     let settings = souffle_lib::commands::get_settings(Arc::clone(&handle))?;
-    let _ = souffle_lib::commands::pill_hold(
-        Arc::clone(&handle),
-        souffle_lib::app_events::PillHoldKind::Polishing,
-    );
+    // The Polishing pill only makes sense when a polish actually runs:
+    // polish_dictation returns immediately (skipped) when the setting is
+    // off, which would otherwise flash the pill for nothing.
+    if settings.dictation_polish_enabled {
+        let _ = souffle_lib::commands::pill_hold(
+            Arc::clone(&handle),
+            souffle_lib::app_events::PillHoldKind::Polishing,
+        );
+    }
     let polished = match tokio::time::timeout(
         Duration::from_secs(25),
         souffle_lib::commands::polish_dictation(Arc::clone(&handle), raw_text.clone(), focused_app),
@@ -1967,7 +1972,9 @@ async fn finalize_dictation(
             raw_text.clone()
         }
     };
-    let _ = souffle_lib::commands::pill_release(Arc::clone(&handle));
+    if settings.dictation_polish_enabled {
+        let _ = souffle_lib::commands::pill_release(Arc::clone(&handle));
+    }
     let final_text = if polished.is_empty() {
         raw_text.clone()
     } else {
