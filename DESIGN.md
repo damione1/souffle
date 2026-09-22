@@ -683,7 +683,7 @@ a `#5b6b8c` accent, avatars harmonised to one cool family in `_data/*.json`)
 rather than the crimson it once carried: it has to stay visibly foreign to
 Soufflé's warm cream (that is the point of the scene) without shouting across
 the sheet at the amber. And the pill mock is verified against the real Swift
-panel at `src-tauri/swift/pill_panel.swift`: no width transition, because the
+panel at `app/swift/pill_panel.swift`: no width transition, because the
 panel calls `setFrame` with `animate: false` and snaps between its 280pt and
 440pt widths; a 10pt systemRed dot pulsing 1 → 0.3 over 0.9s, autoreversing; a
 27pt stop button; a 1px white border at 12% opacity.

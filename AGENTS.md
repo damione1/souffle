@@ -2,7 +2,7 @@
 
 Conventions for agents working in this repo live in [`CLAUDE.md`](./CLAUDE.md).
 
-**Slint UI:** the shipped frontend is native Slint (`src-tauri/souffle-slint/`), not Svelte. The senior checklist (closed-set enums, house widgets, Metal/Skia, tab keep-alive, memory, threads) is [`docs/engineering/slint.md`](./docs/engineering/slint.md). Follow it for any `.slint` or `souffle-slint` change.
+**Slint UI:** the shipped frontend is native Slint (`app/souffle-slint/`), not Svelte. The senior checklist (closed-set enums, house widgets, Metal/Skia, tab keep-alive, memory, threads) is [`docs/engineering/slint.md`](./docs/engineering/slint.md). Follow it for any `.slint` or `souffle-slint` change.
 
 **CodeQL:** not a PR check. Run `./scripts/codeql-local.sh` before opening or updating a PR (requires `brew install --cask codeql`). GitHub only runs CodeQL on push to `develop` (see `.github/workflows/codeql.yml`).
 
@@ -14,7 +14,7 @@ One language, one app. Rust owns the truth. The shipped UI is Slint. In both cas
 
 Every value belonging to a **closed set** is declared exactly once.
 
-**Shipped UI (Slint):** `export enum` in `src-tauri/souffle-slint/ui/types.slint`, matching `souffle_lib` enum, converted with an exhaustive `match` both ways (`settings_ui.rs`, `ia_ui.rs`, …). Never a string property or a string callback argument. Type-design rules (enum vs catalogue, no sentinels, no speculative traits) are in [`docs/engineering/slint.md`](./docs/engineering/slint.md), adapted from Microsoft's Framework Design Guidelines.
+**Shipped UI (Slint):** `export enum` in `app/souffle-slint/ui/types.slint`, matching `souffle_lib` enum, converted with an exhaustive `match` both ways (`settings_ui.rs`, `ia_ui.rs`, …). Never a string property or a string callback argument. Type-design rules (enum vs catalogue, no sentinels, no speculative traits) are in [`docs/engineering/slint.md`](./docs/engineering/slint.md), adapted from Microsoft's Framework Design Guidelines.
 
 
 Closed set means: the set of valid values is decided by the code, not by the user or by data.
@@ -65,7 +65,7 @@ Read these before inventing a shape:
 | Theme as a reactive global | `ui/theme.slint` |
 | Tab keep-alive (no remount) | `ui/components/settings/settings_tabs.slint` |
 | Metal renderer pin | `souffle-slint/Cargo.toml` (`renderer-skia`), `main.rs` (`renderer_name("skia")`) |
-| Catalogue for an open set | `TranscriptionCatalog`, `src-tauri/src/engine/mod.rs` |
+| Catalogue for an open set | `TranscriptionCatalog`, `app/src/engine/mod.rs` |
 
 Full Slint checklist: [`docs/engineering/slint.md`](./docs/engineering/slint.md).
 

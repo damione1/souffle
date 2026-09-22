@@ -419,7 +419,7 @@ fn finish_cue_block(out: String) -> String {
 /// Rust port of `groupIntoParagraphs` from `src/lib/utils/paragraphs.ts`.
 /// Used for the Markdown export's `## Transcript` section and for the
 /// labeled turns sent to the summary LLM. See
-/// `src-tauri/tests/fixtures/paragraph_grouping.json` for the cross-language
+/// `app/tests/fixtures/paragraph_grouping.json` for the cross-language
 /// fixture that pins this port against the TS original.
 pub(crate) mod paragraphs {
     use crate::engine::{Speaker, TranscriptionSegment};

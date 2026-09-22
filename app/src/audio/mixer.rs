@@ -872,7 +872,7 @@ mod tests {
 /// ordering) rather than the `Aec` wrapper in isolation. Ignored by default:
 /// several seconds of synthetic audio at 48kHz is too slow for the normal
 /// test loop. Run explicitly with:
-///   cargo test --release --manifest-path src-tauri/Cargo.toml audio::mixer::aec_bench -- --ignored --nocapture
+///   cargo test --release --manifest-path app/Cargo.toml audio::mixer::aec_bench -- --ignored --nocapture
 #[cfg(test)]
 mod aec_bench {
     use ringbuf::HeapRb;
