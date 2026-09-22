@@ -1,3 +1,5 @@
+import { MarkdownBlockKind } from "../../types.slint";
+
 // A single block of pre-parsed Markdown content (`markdown.rs` on the Rust
 // side). Slint's `@markdown()` builtin only accepts a string literal, not a
 // runtime expression, so dynamic content (release notes, changelogs) is
@@ -5,7 +7,7 @@
 // here instead - see `markdown.rs`'s module doc for what is and isn't
 // supported.
 export struct MarkdownBlock {
-    kind: string, // "heading" | "bullet" | "paragraph" | "link"
+    kind: MarkdownBlockKind,
     text: string,
     url: string,
 }

@@ -1,5 +1,5 @@
-import { LineEdit } from "std-widgets.slint";
 import { Theme } from "../theme.slint";
+import { ThemedLineEdit } from "themed_line_edit.slint";
 
 // Port of MeetingTranscriptSection.svelte - paragraph grouping with speaker
 // labels and session-break dividers, click-to-seek on a paragraph's
@@ -142,14 +142,14 @@ export component TranscriptSection inherits VerticalLayout {
                         }
                     }
 
-                    LineEdit {
-                        placeholder-text: @tr("Terme correct");
+                    ThemedLineEdit {
+                        placeholder: @tr("Terme correct");
                         text <=> root.alias-term-draft;
                         accepted => { root.save-and-close-alias-popup(); }
                     }
 
-                    LineEdit {
-                        placeholder-text: @tr("Prononciation entendue");
+                    ThemedLineEdit {
+                        placeholder: @tr("Prononciation entendue");
                         text <=> root.alias-pronunciation-draft;
                         accepted => { root.save-and-close-alias-popup(); }
                     }

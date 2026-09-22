@@ -19,6 +19,10 @@ export component ThemedLineEdit inherits Rectangle {
     background: Theme.input;
     opacity: root.enabled ? 1.0 : 0.5;
 
+    // Lets a parent call `field.focus()` (or `init => { self.focus(); }`
+    // on a conditionally-created field) and land in the actual input.
+    forward-focus: input;
+
     input := TextInput {
         x: 12px;
         width: parent.width - 24px;

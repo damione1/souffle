@@ -5,10 +5,9 @@
 //! read/write). Not part of `AppSettings`: this is local wizard-visibility
 //! state, not a synced setting, matching the original's own scoping choice.
 
+use crate::OnboardingStep;
 use souffle_lib::engine::TranscriptionRuntimePhase;
 use std::path::PathBuf;
-
-pub type SetupStep = &'static str; // "permissions" | "microphone" | "model" | "shortcut"
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct SetupFlags {
@@ -73,17 +72,20 @@ pub fn decide_autostart_on_finish(recovery_only: bool, current: bool) -> bool {
     if recovery_only { current } else { true }
 }
 
-pub fn wizard_steps(flags: SetupFlags) -> Vec<SetupStep> {
+/// Which wizard pages this install still needs, in order. Never empty: a
+/// fully set-up install re-entering the wizard (model recovery) gets the
+/// model step alone.
+pub fn wizard_steps(flags: SetupFlags) -> Vec<OnboardingStep> {
     if flags.setup_done {
-        return vec!["model"];
+        return vec![OnboardingStep::Model];
     }
     let mut steps = Vec::new();
     if !flags.permissions_done {
-        steps.push("permissions");
+        steps.push(OnboardingStep::Permissions);
     }
-    steps.push("microphone");
-    steps.push("model");
-    steps.push("shortcut");
+    steps.push(OnboardingStep::Microphone);
+    steps.push(OnboardingStep::Model);
+    steps.push(OnboardingStep::Shortcut);
     steps
 }
 
@@ -97,7 +99,14 @@ mod tests {
             permissions_done: true,
             setup_done: false,
         };
-        assert_eq!(wizard_steps(flags), vec!["microphone", "model", "shortcut"]);
+        assert_eq!(
+            wizard_steps(flags),
+            vec![
+                OnboardingStep::Microphone,
+                OnboardingStep::Model,
+                OnboardingStep::Shortcut
+            ]
+        );
     }
 
     #[test]
@@ -106,7 +115,7 @@ mod tests {
             permissions_done: true,
             setup_done: true,
         };
-        assert_eq!(wizard_steps(flags), vec!["model"]);
+        assert_eq!(wizard_steps(flags), vec![OnboardingStep::Model]);
     }
 
     #[test]
@@ -114,7 +123,12 @@ mod tests {
         let flags = SetupFlags::default();
         assert_eq!(
             wizard_steps(flags),
-            vec!["permissions", "microphone", "model", "shortcut"]
+            vec![
+                OnboardingStep::Permissions,
+                OnboardingStep::Microphone,
+                OnboardingStep::Model,
+                OnboardingStep::Shortcut
+            ]
         );
     }
 

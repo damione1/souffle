@@ -20,6 +20,24 @@ export enum NotesSaveState { idle, pending, saved }
 // was added later.
 export enum ModelPhase { pick, downloading, loading, ready }
 
+// Which wizard page is showing. The *order* of steps (and which ones a
+// given install still needs) is decided in Rust (`onboarding_flags::
+// wizard_steps`); Slint only branches on the current one.
+export enum OnboardingStep { permissions, microphone, model, shortcut }
+
+// Mirrors souffle_lib::app_events::UpdatePhase (the updater's download
+// state machine) at the UI boundary - `update_ui.rs` converts exhaustively.
+export enum UpdatePhase { idle, downloading, ready, failed }
+
+// Mirrors souffle_lib::commands::updater::InstallBlockReason. Absence
+// ("install is allowed") is a separate `bool` on the Window, never a
+// variant here.
+export enum InstallBlockReason { recording-dictation, recording-meeting, stopping, downloading, loading, unloading }
+
+// A pre-parsed Markdown block's kind (`markdown.rs`). Rendering branches on
+// it in `markdown_view.slint`; adding a variant must update that file.
+export enum MarkdownBlockKind { heading, bullet, paragraph, link }
+
 // Projection of souffle_lib::engine::TranscriptionRuntimePhase. The Rust
 // AppStateMachine owns every transition; Slint only derives presentation.
 export enum TranscriptionPhase { download-required, downloading, load-required, loading, ready, unloading, failed }

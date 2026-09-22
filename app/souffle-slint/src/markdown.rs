@@ -18,7 +18,7 @@
 //! and drop the URL. A whole line that is only a link (the common case in
 //! release notes) still renders as a real clickable link.
 
-use crate::MarkdownBlock;
+use crate::{MarkdownBlock, MarkdownBlockKind};
 
 fn strip_inline_emphasis(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
@@ -75,7 +75,7 @@ pub fn render_blocks(markdown: &str) -> Vec<MarkdownBlock> {
         }
         if is_bare_link(line) {
             blocks.push(MarkdownBlock {
-                kind: "link".into(),
+                kind: MarkdownBlockKind::Link,
                 text: line.into(),
                 url: line.into(),
             });
@@ -87,7 +87,7 @@ pub fn render_blocks(markdown: &str) -> Vec<MarkdownBlock> {
             .or_else(|| line.strip_prefix("# "))
         {
             blocks.push(MarkdownBlock {
-                kind: "heading".into(),
+                kind: MarkdownBlockKind::Heading,
                 text: strip_inline_emphasis(&strip_inline_links(heading)).into(),
                 url: "".into(),
             });
@@ -95,14 +95,14 @@ pub fn render_blocks(markdown: &str) -> Vec<MarkdownBlock> {
         }
         if let Some(bullet) = line.strip_prefix("- ").or_else(|| line.strip_prefix("* ")) {
             blocks.push(MarkdownBlock {
-                kind: "bullet".into(),
+                kind: MarkdownBlockKind::Bullet,
                 text: strip_inline_emphasis(&strip_inline_links(bullet)).into(),
                 url: "".into(),
             });
             continue;
         }
         blocks.push(MarkdownBlock {
-            kind: "paragraph".into(),
+            kind: MarkdownBlockKind::Paragraph,
             text: strip_inline_emphasis(&strip_inline_links(line)).into(),
             url: "".into(),
         });
@@ -114,8 +114,8 @@ pub fn render_blocks(markdown: &str) -> Vec<MarkdownBlock> {
 mod tests {
     use super::*;
 
-    fn kinds(blocks: &[MarkdownBlock]) -> Vec<String> {
-        blocks.iter().map(|b| b.kind.to_string()).collect()
+    fn kinds(blocks: &[MarkdownBlock]) -> Vec<MarkdownBlockKind> {
+        blocks.iter().map(|b| b.kind).collect()
     }
 
     #[test]
@@ -123,7 +123,12 @@ mod tests {
         let blocks = render_blocks("## Fixed\n\n- One thing\n- Another thing\n\nA closing note.");
         assert_eq!(
             kinds(&blocks),
-            vec!["heading", "bullet", "bullet", "paragraph"]
+            vec![
+                MarkdownBlockKind::Heading,
+                MarkdownBlockKind::Bullet,
+                MarkdownBlockKind::Bullet,
+                MarkdownBlockKind::Paragraph
+            ]
         );
         assert_eq!(blocks[0].text, "Fixed");
         assert_eq!(blocks[1].text, "One thing");
@@ -133,7 +138,7 @@ mod tests {
     fn recognizes_a_whole_line_link() {
         let blocks = render_blocks("https://github.com/example/repo/releases/tag/v1.0.0");
         assert_eq!(blocks.len(), 1);
-        assert_eq!(blocks[0].kind, "link");
+        assert_eq!(blocks[0].kind, MarkdownBlockKind::Link);
         assert_eq!(
             blocks[0].url,
             "https://github.com/example/repo/releases/tag/v1.0.0"

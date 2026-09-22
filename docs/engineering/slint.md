@@ -141,6 +141,8 @@ Same rule, different artefact: `#[derive(specta::Type)]` on the Rust enum, gener
 | Theme as a reactive global | `ui/theme.slint` |
 | Tab keep-alive (no remount) | `ui/components/settings/settings_tabs.slint` (`SettingsTabPage`) |
 | House widget, not Fluent | `ui/components/themed_button.slint` |
+| Modal dialog chrome (scrim, panel, Escape, click-outside) | `ui/components/modal_dialog.slint`, inherited by `whats_new_dialog.slint` / `update_available_dialog.slint` / `settings_permissions_dialog.slint` |
+| `Option<Enum>` across the boundary | `update_ui::project_install_block` (a `bool` + enum pair, written by one Rust site) |
 | Metal renderer pin | `souffle-slint/Cargo.toml` (`renderer-skia`) + `main.rs` (`renderer_name("skia")`) |
 
 ## 2. Layout of the UI crate
