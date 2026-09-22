@@ -115,7 +115,11 @@ export component MainWindow inherits Window {
     in property <[string]> meeting-detail-summary-open-questions;
     in property <bool> meeting-detail-summary-is-generating: false;
     in property <string> meeting-detail-summary-generation-progress: "";
+    in property <[string]> meeting-detail-summary-available-models;
+    in property <[string]> meeting-detail-summary-available-model-ids;
+    in-out property <string> meeting-detail-summary-selected-model-id;
     in property <bool> meeting-detail-can-resume: false;
+    in property <string> meeting-detail-resume-error: "";
 
     // SOU-188: Settings overlay. Toggled from IdleView's gear button;
     // `settings-requested` (not a plain property flip) because opening it
@@ -539,7 +543,11 @@ export component MainWindow inherits Window {
         summary-open-questions: root.meeting-detail-summary-open-questions;
         summary-is-generating: root.meeting-detail-summary-is-generating;
         summary-generation-progress: root.meeting-detail-summary-generation-progress;
+        summary-available-models: root.meeting-detail-summary-available-models;
+        summary-available-model-ids: root.meeting-detail-summary-available-model-ids;
+        summary-selected-model-id <=> root.meeting-detail-summary-selected-model-id;
         can-resume: root.meeting-detail-can-resume;
+        resume-error: root.meeting-detail-resume-error;
         back-requested => { root.meeting-detail-back(); }
         resume-requested => { root.meeting-detail-resume(); }
         summarize-requested => { root.meeting-detail-summarize(); }

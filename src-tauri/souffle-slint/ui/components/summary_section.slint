@@ -1,4 +1,6 @@
 import { Theme } from "../theme.slint";
+import { ThemedComboBox } from "themed_combo.slint";
+
 // Port of MeetingSummarySection.svelte + MeetingStructuredSummarySection.svelte
 // - read-only display only (SOU-187 milestone 9, remaining part of AC13).
 // Generation itself (model/template pickers, the "Générer"/"Régénérer"
@@ -15,6 +17,10 @@ export component SummarySection inherits VerticalLayout {
     in property <string> summary; // empty means "no summary yet"
     in property <bool> summary-is-stale: false;
     in property <string> summary-model-label;
+    in property <[string]> available-models;
+    in property <[string]> available-model-ids;
+    in-out property <string> selected-model-id;
+    
     in property <[string]> key-points;
     in property <[string]> decisions;
     in property <[StructuredActionItem]> action-items;
@@ -38,6 +44,16 @@ export component SummarySection inherits VerticalLayout {
 
         HorizontalLayout {
             alignment: start;
+            spacing: 8px;
+            
+            if root.available-models.length > 0 : ThemedComboBox {
+                model: root.available-models;
+                option-values: root.available-model-ids;
+                current-value: root.selected-model-id;
+                combo-width: 250px;
+                selected(id) => { root.selected-model-id = id; }
+            }
+
             gen-btn := Rectangle {
                 width: gen-txt.preferred-width + 24px;
                 height: 28px;
@@ -122,6 +138,15 @@ export component SummarySection inherits VerticalLayout {
                     color: Theme.text-faint;
                     vertical-alignment: center;
                 }
+                
+                if root.available-models.length > 0 : ThemedComboBox {
+                    model: root.available-models;
+                    option-values: root.available-model-ids;
+                    current-value: root.selected-model-id;
+                    combo-width: 250px;
+                    selected(id) => { root.selected-model-id = id; }
+                }
+
                 Rectangle {
                     width: regen-txt.preferred-width + 16px;
                     height: 24px;

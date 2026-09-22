@@ -48,7 +48,11 @@ export component MeetingDetail inherits Rectangle {
     in property <[string]> summary-open-questions;
     in property <bool> summary-is-generating: false;
     in property <string> summary-generation-progress: "";
+    in property <[string]> summary-available-models;
+    in property <[string]> summary-available-model-ids;
+    in-out property <string> summary-selected-model-id;
     in property <bool> can-resume: true;
+    in property <string> resume-error;
 
     callback back-requested();
     callback resume-requested();
@@ -231,45 +235,57 @@ export component MeetingDetail inherits Rectangle {
                 }
             }
 
-            if root.can-resume: resume-btn := Rectangle {
-                width: resume-txt.preferred-width + 24px;
-                height: 32px;
+            if root.can-resume || root.resume-error != "": VerticalLayout {
+                spacing: 8px;
+                alignment: start;
                 horizontal-stretch: 0;
-                vertical-stretch: 0;
-                border-radius: 4px;
-                border-width: resume-focus.has-focus ? 2px : 0px;
-                border-color: Theme.text-primary;
-                background: resume-area.pressed ? Theme.accent.darker(0.2) : resume-area.has-hover ? Theme.accent.darker(0.1) : Theme.accent;
 
-                accessible-role: button;
-                accessible-label: @tr("Reprendre l'enregistrement");
-                accessible-action-default => { root.resume-requested(); }
+                if root.can-resume: resume-btn := Rectangle {
+                    width: resume-txt.preferred-width + 24px;
+                    height: 32px;
+                    horizontal-stretch: 0;
+                    vertical-stretch: 0;
+                    border-radius: 4px;
+                    border-width: resume-focus.has-focus ? 2px : 0px;
+                    border-color: Theme.text-primary;
+                    background: resume-area.pressed ? Theme.accent.darker(0.2) : resume-area.has-hover ? Theme.accent.darker(0.1) : Theme.accent;
 
-                forward-focus: resume-focus;
-                resume-focus := FocusScope {
-                    key-pressed(event) => {
-                        if event.text == Key.Return || event.text == Key.Space {
-                            root.resume-requested();
-                            return accept;
+                    accessible-role: button;
+                    accessible-label: @tr("Reprendre l'enregistrement");
+                    accessible-action-default => { root.resume-requested(); }
+
+                    forward-focus: resume-focus;
+                    resume-focus := FocusScope {
+                        key-pressed(event) => {
+                            if event.text == Key.Return || event.text == Key.Space {
+                                root.resume-requested();
+                                return accept;
+                            }
+                            return reject;
                         }
-                        return reject;
+                    }
+
+                    resume-area := TouchArea {
+                        clicked => {
+                            resume-focus.focus();
+                            root.resume-requested();
+                        }
+                    }
+
+                    resume-txt := Text {
+                        text: @tr("Reprendre");
+                        font-family: "Archivo SemiBold";
+                        font-size: 13px;
+                        color: Theme.text-primary;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
                     }
                 }
 
-                resume-area := TouchArea {
-                    clicked => {
-                        resume-focus.focus();
-                        root.resume-requested();
-                    }
-                }
-
-                resume-txt := Text {
-                    text: @tr("Reprendre");
-                    font-family: "Archivo SemiBold";
-                    font-size: 13px;
-                    color: Theme.text-primary;
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
+                if root.resume-error != "": Text {
+                    text: root.resume-error;
+                    color: Theme.danger;
+                    font-size: 11px;
                 }
             }
         }
@@ -414,6 +430,9 @@ export component MeetingDetail inherits Rectangle {
                             summary: root.summary;
                             summary-is-stale: root.summary-is-stale;
                             summary-model-label: root.summary-model-label;
+                            available-models: root.summary-available-models;
+                            available-model-ids: root.summary-available-model-ids;
+                            selected-model-id <=> root.summary-selected-model-id;
                             key-points: root.summary-key-points;
                             decisions: root.summary-decisions;
                             action-items: root.summary-action-items;

@@ -379,7 +379,8 @@ fn populate_meeting_detail(window: &MainWindow, meeting: &MeetingTranscript) {
     window.set_meeting_detail_title(meeting.title.clone().into());
     window.set_meeting_detail_meta(meta_line(meeting).into());
     window.set_meeting_detail_model_label(meeting.transcription_profile.model_label.clone().into());
-    window.set_meeting_detail_can_resume(true);
+    window.set_meeting_detail_can_resume(meeting.ended_at.is_none());
+    window.set_meeting_detail_resume_error("".into());
     let participants: Vec<slint::SharedString> = meeting
         .participants
         .iter()
@@ -430,6 +431,44 @@ fn populate_meeting_detail(window: &MainWindow, meeting: &MeetingTranscript) {
     window.set_meeting_detail_summary_open_questions(
         std::rc::Rc::new(slint::VecModel::from(open_questions)).into(),
     );
+}
+
+fn load_meeting_summary_models(window_weak: slint::Weak<MainWindow>, state: Arc<AppState>) {
+    souffle_lib::async_runtime::spawn(async move {
+        if let Ok(settings) = souffle_lib::settings::AppSettings::load(&state.db) {
+            let providers = souffle_lib::summary::check_providers(&settings.ollama_url).await;
+            let mut labels = vec![];
+            let mut ids = vec![];
+            for m in &providers.models {
+                labels.push(m.label.clone().into());
+                ids.push(m.id.clone().into());
+            }
+
+            let default_id =
+                match souffle_lib::summary::choose_summary_model(&settings, &providers.models) {
+                    Ok(id) => id,
+                    Err(_) => "".to_string(),
+                };
+
+            let _ = slint::invoke_from_event_loop(move || {
+                if let Some(w) = window_weak.upgrade() {
+                    w.set_meeting_detail_summary_available_models(
+                        std::rc::Rc::new(slint::VecModel::from(labels)).into(),
+                    );
+                    w.set_meeting_detail_summary_available_model_ids(
+                        std::rc::Rc::new(slint::VecModel::from(ids)).into(),
+                    );
+
+                    // Don't overwrite if the user already selected something else while this loaded,
+                    // or if it's already set to a valid choice.
+                    let current = w.get_meeting_detail_summary_selected_model_id();
+                    if current.is_empty() {
+                        w.set_meeting_detail_summary_selected_model_id(default_id.into());
+                    }
+                }
+            });
+        }
+    });
 }
 
 /// Sets `transcript_state` to `meeting`'s full block list + offsets, mounts
@@ -1384,8 +1423,9 @@ fn open_meeting_detail(
                 &meeting,
                 transcript_state,
                 transcript_timer,
-                weak,
+                weak.clone(),
             );
+            load_meeting_summary_models(weak.clone(), handle.clone());
         }
         Err(e) => eprintln!("Failed to load meeting {meeting_id}: {e}"),
     }
@@ -3223,14 +3263,21 @@ fn wire_callbacks(
     let handle_resume = tauri_handle.clone();
     window.on_meeting_detail_resume(move || {
         if let Some(window) = weak_resume.upgrade() {
+            window.set_meeting_detail_resume_error("".into());
             let id = window.get_active_meeting_id().to_string();
             let state = handle_resume.clone();
             let channel = live_segment_channel(weak_resume.clone());
+            let weak_for_done = weak_resume.clone();
             souffle_lib::async_runtime::spawn(async move {
                 if let Err(e) =
                     souffle_lib::commands::resume_meeting_recording(state, id, channel).await
                 {
                     eprintln!("Failed to resume meeting: {:?}", e);
+                    let _ = slint::invoke_from_event_loop(move || {
+                        if let Some(w) = weak_for_done.upgrade() {
+                            w.set_meeting_detail_resume_error(format!("Erreur: {}", e).into());
+                        }
+                    });
                 }
             });
         }
@@ -3247,6 +3294,10 @@ fn wire_callbacks(
         let id = window.get_active_meeting_id().to_string();
         let state = handle_sum.clone();
 
+        let selected_model = window
+            .get_meeting_detail_summary_selected_model_id()
+            .to_string();
+
         let weak_for_progress = weak_sum.clone();
         let channel =
             ProgressChannel::new(move |progress: souffle_lib::summary::SummarizeProgress| {
@@ -3262,7 +3313,7 @@ fn wire_callbacks(
         let weak_for_done = weak_sum.clone();
         let state_for_done = state.clone();
         souffle_lib::async_runtime::spawn(async move {
-            let model = "auto".to_string();
+            let model = selected_model;
             let result = souffle_lib::commands::summarize_meeting(
                 state.clone(),
                 id.clone(),
