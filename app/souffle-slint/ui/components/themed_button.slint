@@ -11,10 +11,13 @@ export component ThemedButton inherits Rectangle {
     in property <string> text;
     in property <ThemedButtonKind> kind: ThemedButtonKind.default;
     in property <bool> enabled: true;
+    // app.css `.btn-sm` (`padding: 0.25rem 0.5rem; font-size: 0.75rem`):
+    // the locale toggles on the wizard, inline "Vérifier"/banner actions.
+    in property <bool> compact: false;
 
     callback clicked();
 
-    height: Theme.settings-control-height;
+    height: root.compact ? 26px : Theme.settings-control-height;
     horizontal-stretch: 0;
     vertical-stretch: 0;
     border-radius: 4px;
@@ -58,14 +61,14 @@ export component ThemedButton inherits Rectangle {
     }
 
     HorizontalLayout {
-        padding-left: 16px;
-        padding-right: 16px;
+        padding-left: root.compact ? 10px : 16px;
+        padding-right: root.compact ? 10px : 16px;
         padding-top: 1px; // +1px for optical baseline center
         alignment: center;
 
         Text {
             text: root.text;
-            font-size: 13px;
+            font-size: root.compact ? 11.5px : 13px;
             font-weight: root.kind == ThemedButtonKind.default ? 500 : 600;
             color: root.kind == ThemedButtonKind.primary ? Theme.accent
                 : root.kind == ThemedButtonKind.active ? Theme.canvas

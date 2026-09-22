@@ -1,62 +1,37 @@
-import { Button, ScrollView, Palette } from "std-widgets.slint";
 import { MarkdownBlock } from "markdown_block.slint";
-import { MarkdownView } from "markdown_view.slint";
-import { Theme } from "../../theme.slint";
+import { ReleaseNotesBox } from "markdown_view.slint";
+import { ModalDialog } from "../modal_dialog.slint";
+import { ThemedButton, ThemedButtonKind } from "../themed_button.slint";
 
 // Port of WhatsNewDialog.svelte. Content is pre-parsed into `MarkdownBlock`s
 // on the Rust side (`markdown.rs`) - see that module's doc comment for why
 // Slint's `@markdown()` builtin (literal-only) can't take this dynamic
-// content directly.
-export component WhatsNewDialog inherits Rectangle {
+// content directly. Chrome comes from `ModalDialog`; the only action is
+// the reference's `btn btn-active` "Compris".
+export component WhatsNewDialog inherits ModalDialog {
     in property <string> version;
     in property <[MarkdownBlock]> content-blocks;
 
     callback dismissed();
     callback link-clicked(string);
 
-    background: #000000aa;
+    title: @tr("Nouveautés");
+    subtitle: @tr("Mis à jour vers v{}", root.version);
+    close-requested => { root.dismissed(); }
 
-    Rectangle {
-        width: 440px;
-        height: 360px;
-        background: Theme.canvas;
-        border-width: 1px;
-        border-color: Theme.surface-4;
-        border-radius: 8px;
+    ReleaseNotesBox {
+        blocks: root.content-blocks;
+        link-clicked(url) => { root.link-clicked(url); }
+    }
 
-        VerticalLayout {
-            padding: 20px;
-            spacing: 14px;
+    HorizontalLayout {
+        alignment: end;
+        vertical-stretch: 0;
 
-            VerticalLayout {
-                spacing: 2px;
-                Text {
-                    text: @tr("Nouveautés");
-                    font-size: 16px;
-                    font-weight: 700;
-                    color: Theme.text-primary;
-                }
-                Text {
-                    text: @tr("Mis à jour vers v{}", root.version);
-                    font-size: 11.5px;
-                    color: Theme.text-muted;
-                }
-            }
-
-            ScrollView {
-                MarkdownView {
-                    blocks: root.content-blocks;
-                    link-clicked(url) => { root.link-clicked(url); }
-                }
-            }
-
-            HorizontalLayout {
-                alignment: end;
-                Button {
-                    text: @tr("Compris");
-                    clicked => { root.dismissed(); }
-                }
-            }
+        ThemedButton {
+            text: @tr("Compris");
+            kind: ThemedButtonKind.active;
+            clicked => { root.dismissed(); }
         }
     }
 }

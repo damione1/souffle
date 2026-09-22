@@ -3,7 +3,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: \n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-09-20 18:53+0000\n"
+"POT-Creation-Date: 2026-09-22 21:45+0000\n"
 "PO-Revision-Date: \n"
 "Last-Translator: \n"
 "Language-Team: \n"
@@ -12,137 +12,137 @@ msgstr ""
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
 
-#: app/souffle-slint/ui/meeting_detail.slint:85
+#: app/souffle-slint/ui/meeting_detail.slint:90
 msgctxt "MeetingDetail"
 msgid "Retour à l'historique"
 msgstr "Back to history"
 
-#: app/souffle-slint/ui/meeting_detail.slint:118
+#: app/souffle-slint/ui/meeting_detail.slint:123
 msgctxt "MeetingDetail"
 msgid "Historique"
 msgstr "History"
 
-#: app/souffle-slint/ui/meeting_detail.slint:144
+#: app/souffle-slint/ui/meeting_detail.slint:149
 msgctxt "MeetingDetail"
 msgid "Renommer la réunion"
 msgstr "Rename meeting"
 
-#: app/souffle-slint/ui/meeting_detail.slint:182
+#: app/souffle-slint/ui/meeting_detail.slint:190
 msgctxt "MeetingDetail"
 msgid "Titre de la réunion"
 msgstr "Meeting title"
 
-#: app/souffle-slint/ui/meeting_detail.slint:245
+#: app/souffle-slint/ui/meeting_detail.slint:259
 msgctxt "MeetingDetail"
 msgid "Reprendre l'enregistrement"
 msgstr "Resume recording"
 
-#: app/souffle-slint/ui/meeting_detail.slint:267
+#: app/souffle-slint/ui/meeting_detail.slint:281
 msgctxt "MeetingDetail"
 msgid "Reprendre"
 msgstr "Resume"
 
-#: app/souffle-slint/ui/meeting_detail.slint:307
+#: app/souffle-slint/ui/meeting_detail.slint:332
 msgctxt "MeetingDetail"
 msgid "Notes"
 msgstr "Notes"
 
-#: app/souffle-slint/ui/meeting_detail.slint:317
+#: app/souffle-slint/ui/meeting_detail.slint:342
 msgctxt "MeetingDetail"
 msgid "Enregistré"
 msgstr "Saved"
 
-#: app/souffle-slint/ui/meeting_detail.slint:323
+#: app/souffle-slint/ui/meeting_detail.slint:348
 msgctxt "MeetingDetail"
 msgid "Enregistrement…"
 msgstr "Recording…"
 
-#: app/souffle-slint/ui/meeting_detail.slint:333
+#: app/souffle-slint/ui/meeting_detail.slint:358
 msgctxt "MeetingDetail"
 msgid "Ajoutez les décisions, actions et noms importants…"
 msgstr "Add important decisions, actions and names..."
 
-#: app/souffle-slint/ui/meeting_detail.slint:334
+#: app/souffle-slint/ui/meeting_detail.slint:359
 msgctxt "MeetingDetail"
 msgid "Notes de la réunion"
 msgstr "Meeting notes"
 
-#: app/souffle-slint/ui/meeting_detail.slint:339
+#: app/souffle-slint/ui/meeting_detail.slint:364
 msgctxt "MeetingDetail"
 msgid "Les notes sont enregistrées avec la réunion et améliorent le résumé."
 msgstr "Notes are saved with the meeting and improve the summary."
 
-#: app/souffle-slint/ui/meeting_detail.slint:364
+#: app/souffle-slint/ui/meeting_detail.slint:390
 msgctxt "MeetingDetail"
 msgid "Cette réunion ne contient aucun enregistrement."
 msgstr "This meeting has no recordings."
 
-#: app/souffle-slint/ui/meeting_detail.slint:371
+#: app/souffle-slint/ui/meeting_detail.slint:397
 msgctxt "MeetingDetail"
 msgid "Aucun audio, aucune transcription et aucun résumé."
 msgstr "No audio, no transcript, and no summary."
 
-#: app/souffle-slint/ui/settings_view.slint:270
+#: app/souffle-slint/ui/settings_view.slint:295
 msgctxt "SettingsView"
 msgid "Fermer les paramètres"
 msgstr "Close settings"
 
-#: app/souffle-slint/ui/settings_view.slint:295
+#: app/souffle-slint/ui/settings_view.slint:320
 msgctxt "SettingsView"
 msgid "Terminé"
 msgstr "Done"
 
-#: app/souffle-slint/ui/settings_view.slint:308
+#: app/souffle-slint/ui/settings_view.slint:333
 msgctxt "SettingsView"
 msgid "Paramètres"
 msgstr "Settings"
 
-#: app/souffle-slint/ui/settings_view.slint:325
+#: app/souffle-slint/ui/settings_view.slint:342
 msgctxt "SettingsView"
 msgid "État des réglages enregistrés inconnu : {}"
 msgstr "Unknown state of the saved settings: {}"
 
-#: app/souffle-slint/ui/settings_view.slint:326
+#: app/souffle-slint/ui/settings_view.slint:343
 msgctxt "SettingsView"
 msgid "Enregistrement des réglages : {}"
 msgstr "Saving settings: {}"
 
-#: app/souffle-slint/ui/settings_view.slint:334
+#: app/souffle-slint/ui/settings_view.slint:351
 msgctxt "SettingsView"
 msgid "Brouillon conservé, état des réglages inconnu : {}"
 msgstr "Draft kept, unknown settings state: {}"
 
-#: app/souffle-slint/ui/settings_view.slint:335
+#: app/souffle-slint/ui/settings_view.slint:352
 msgctxt "SettingsView"
 msgid "Brouillon conservé : {}"
 msgstr "Draft kept: {}"
 
-#: app/souffle-slint/ui/recording_view.slint:28
+#: app/souffle-slint/ui/recording_view.slint:43
 msgctxt "RecordingView"
 msgid " {}"
 msgstr " {}"
 
-#: app/souffle-slint/ui/recording_view.slint:77
+#: app/souffle-slint/ui/recording_view.slint:93
 msgctxt "RecordingView"
 msgid "Réunion en direct"
 msgstr "Live meeting"
 
-#: app/souffle-slint/ui/recording_view.slint:77
+#: app/souffle-slint/ui/recording_view.slint:93
 msgctxt "RecordingView"
 msgid "Dictée"
 msgstr "Dictation"
 
-#: app/souffle-slint/ui/recording_view.slint:135
+#: app/souffle-slint/ui/recording_view.slint:151
 msgctxt "RecordingView"
 msgid "Arrêter l'enregistrement"
 msgstr "Stop recording"
 
-#: app/souffle-slint/ui/recording_view.slint:181
+#: app/souffle-slint/ui/recording_view.slint:197
 msgctxt "RecordingView"
 msgid "Arrêter"
 msgstr "Stop"
 
-#: app/souffle-slint/ui/recording_view.slint:201
+#: app/souffle-slint/ui/recording_view.slint:217
 msgctxt "RecordingView"
 msgid ""
 "Attention. Seul votre microphone est enregistré. L'audio des autres "
@@ -151,7 +151,7 @@ msgstr ""
 "Warning. Only your microphone is recorded. Audio from other participants is "
 "unavailable."
 
-#: app/souffle-slint/ui/recording_view.slint:217
+#: app/souffle-slint/ui/recording_view.slint:233
 msgctxt "RecordingView"
 msgid ""
 "Seul votre microphone est enregistré. L’audio des autres participants est "
@@ -160,56 +160,709 @@ msgstr ""
 "Only your microphone is recorded. Audio from other participants is "
 "unavailable."
 
-#: app/souffle-slint/ui/recording_view.slint:249
-#: app/souffle-slint/ui/recording_view.slint:249
+#: app/souffle-slint/ui/recording_view.slint:265
 msgctxt "RecordingView"
 msgid "À l'écoute…"
 msgstr "Listening…"
 
-#: app/souffle-slint/ui/recording_view.slint:269
+#: app/souffle-slint/ui/recording_view.slint:285
 msgctxt "RecordingView"
 msgid "Collé automatiquement dans votre dernière app à l’arrêt"
 msgstr "Automatically pasted to your last app upon stopping"
 
-#: app/souffle-slint/ui/recording_view.slint:299
+#: app/souffle-slint/ui/recording_view.slint:317
 msgctxt "RecordingView"
 msgid "TRANSCRIPTION EN DIRECT"
 msgstr "LIVE TRANSCRIPTION"
 
-#: app/souffle-slint/ui/recording_view.slint:319
+#: app/souffle-slint/ui/recording_view.slint:337
 msgctxt "RecordingView"
 msgid "Audio système demandé"
 msgstr "System audio requested"
 
-#: app/souffle-slint/ui/recording_view.slint:319
+#: app/souffle-slint/ui/recording_view.slint:337
 msgctxt "RecordingView"
 msgid "Audio système indisponible"
 msgstr "System audio unavailable"
 
-#: app/souffle-slint/ui/recording_view.slint:340
-msgctxt "RecordingView"
-msgid "Moi"
-msgstr "Me"
-
-#: app/souffle-slint/ui/recording_view.slint:363
-msgctxt "RecordingView"
-msgid "Eux"
-msgstr "Them"
-
-#: app/souffle-slint/ui/recording_view.slint:424
+#: app/souffle-slint/ui/recording_view.slint:426
 msgctxt "RecordingView"
 msgid "NOTES"
 msgstr "NOTES"
 
-#: app/souffle-slint/ui/recording_view.slint:441
+#: app/souffle-slint/ui/recording_view.slint:443
 msgctxt "RecordingView"
 msgid "Notez décisions, actions, noms…"
 msgstr "Note decisions, actions, names..."
 
-#: app/souffle-slint/ui/recording_view.slint:442
+#: app/souffle-slint/ui/recording_view.slint:444
 msgctxt "RecordingView"
 msgid "Notes de la réunion"
 msgstr "Meeting notes"
+
+#: app/souffle-slint/ui/onboarding_view.slint:73
+msgctxt "OnboardingView"
+msgid "Permissions"
+msgstr "App Permissions"
+
+#: app/souffle-slint/ui/onboarding_view.slint:74
+msgctxt "OnboardingView"
+msgid "Choisissez votre microphone"
+msgstr "Choose your microphone"
+
+#: app/souffle-slint/ui/onboarding_view.slint:75
+msgctxt "OnboardingView"
+msgid "Modèle de transcription"
+msgstr "Transcription model"
+
+#: app/souffle-slint/ui/onboarding_view.slint:76
+msgctxt "OnboardingView"
+msgid "Raccourci clavier"
+msgstr "Keyboard shortcut"
+
+#: app/souffle-slint/ui/onboarding_view.slint:80
+msgctxt "OnboardingView"
+msgid "Soufflé a besoin de ces autorisations macOS pour fonctionner."
+msgstr "Soufflé needs these macOS permissions to work."
+
+#: app/souffle-slint/ui/onboarding_view.slint:81
+msgctxt "OnboardingView"
+msgid "Vous pourrez changer ce choix plus tard dans les Réglages."
+msgstr "You can change this choice later in Settings."
+
+#: app/souffle-slint/ui/onboarding_view.slint:82
+msgctxt "OnboardingView"
+msgid "Téléchargé une seule fois, tout tourne ensuite hors ligne."
+msgstr "Downloaded once, everything runs offline afterwards."
+
+#: app/souffle-slint/ui/onboarding_view.slint:83
+msgctxt "OnboardingView"
+msgid ""
+"Utilisé pour démarrer et arrêter la dictée depuis n'importe quelle "
+"application."
+msgstr "Used to start and stop dictation from any application."
+
+#: app/souffle-slint/ui/onboarding_view.slint:88
+msgctxt "OnboardingView"
+msgid "Télécharger et continuer"
+msgstr "Download and continue"
+
+#: app/souffle-slint/ui/onboarding_view.slint:89
+msgctxt "OnboardingView"
+msgid "Terminer"
+msgstr "Finish"
+
+#: app/souffle-slint/ui/onboarding_view.slint:90
+msgctxt "OnboardingView"
+msgid "Continuer"
+msgstr "Continue"
+
+#: app/souffle-slint/ui/onboarding_view.slint:119
+msgctxt "OnboardingView"
+msgid "Soufflé"
+msgstr "Soufflé"
+
+#: app/souffle-slint/ui/onboarding_view.slint:127
+msgctxt "OnboardingView"
+msgid "Transcription vocale locale pour la dictée et les meetings."
+msgstr "Local speech-to-text for dictation and meetings."
+
+#: app/souffle-slint/ui/onboarding_view.slint:143
+msgctxt "OnboardingView"
+msgid "100 % local — rien ne quitte votre Mac. Pas de compte, pas de cloud."
+msgstr "100% local — nothing ever leaves your Mac. No account, no cloud."
+
+#: app/souffle-slint/ui/onboarding_view.slint:155
+msgctxt "OnboardingView"
+msgid "English"
+msgstr "English"
+
+#: app/souffle-slint/ui/onboarding_view.slint:161
+msgctxt "OnboardingView"
+msgid "Français"
+msgstr "French"
+
+#: app/souffle-slint/ui/onboarding_view.slint:238
+msgctxt "OnboardingView"
+msgid "Actualiser"
+msgstr "Refresh"
+
+#: app/souffle-slint/ui/onboarding_view.slint:243
+msgctxt "OnboardingView"
+msgid "Le microphone peut être changé plus tard dans les Réglages."
+msgstr "The microphone can be changed later in Settings."
+
+#: app/souffle-slint/ui/onboarding_view.slint:255
+msgctxt "OnboardingView"
+msgid "Téléchargement du modèle…"
+msgstr "Downloading model…"
+
+#: app/souffle-slint/ui/onboarding_view.slint:271
+msgctxt "OnboardingView"
+msgid "Chargement du modèle…"
+msgstr "Loading model…"
+
+#: app/souffle-slint/ui/onboarding_view.slint:277
+msgctxt "OnboardingView"
+msgid "Modèle prêt."
+msgstr "Model ready."
+
+#: app/souffle-slint/ui/onboarding_view.slint:322
+msgctxt "OnboardingView"
+msgid ""
+"Cliquez sur le raccourci, puis appuyez sur les touches voulues. Échap annule."
+msgstr "Click the shortcut, then press the keys you want. Escape cancels."
+
+#: app/souffle-slint/ui/onboarding_view.slint:342
+msgctxt "OnboardingView"
+msgid "Coller automatiquement le texte transcrit"
+msgstr "Automatically paste transcribed text"
+
+#: app/souffle-slint/ui/onboarding_view.slint:347
+msgctxt "OnboardingView"
+msgid ""
+"À l'arrêt, colle la transcription dans l'app que vous utilisiez. Nécessite "
+"Accessibilité."
+msgstr ""
+"When you stop, paste the transcript into the app you were using. Needs "
+"Accessibility."
+
+#: app/souffle-slint/ui/onboarding_view.slint:374
+msgctxt "OnboardingView"
+msgid ""
+"Le collage automatique a besoin de l'Accessibilité, qui n'est pas encore "
+"accordée. Le texte ira dans votre historique à la place."
+msgstr ""
+"Automatic paste needs Accessibility, which isn't granted yet. Your dictation "
+"will go to your history instead."
+
+#: app/souffle-slint/ui/onboarding_view.slint:384
+msgctxt "OnboardingView"
+msgid "Vérifier les permissions"
+msgstr "Review permissions"
+
+#: app/souffle-slint/ui/onboarding_view.slint:395
+msgctxt "OnboardingView"
+msgid "Retour"
+msgstr "Back"
+
+#: app/souffle-slint/ui/onboarding_view.slint:401
+msgctxt "OnboardingView"
+msgid "Vous pourrez les accorder plus tard."
+msgstr "You can grant these later when prompted."
+
+#: app/souffle-slint/ui/main_window.slint:42
+msgctxt "MainWindow"
+msgid "Soufflé"
+msgstr "Soufflé"
+
+#: app/souffle-slint/ui/idle_view.slint:44
+msgctxt "IdleView"
+msgid "Modèle non téléchargé - ouvrez Réglages pour le télécharger."
+msgstr "Model not downloaded - open Settings to download."
+
+#: app/souffle-slint/ui/idle_view.slint:47
+msgctxt "IdleView"
+msgid "Le modèle est en cours de préparation. Réessayez lorsqu’il est prêt."
+msgstr "Model is preparing. Please try again when ready."
+
+#: app/souffle-slint/ui/idle_view.slint:50
+msgctxt "IdleView"
+msgid "Le modèle est en erreur. Réessayez depuis Réglages."
+msgstr "Model error. Please retry from Settings."
+
+#: app/souffle-slint/ui/idle_view.slint:53
+msgctxt "IdleView"
+msgid "La réunion a quitté son état de finalisation de façon inattendue."
+msgstr "The meeting left its finalization state unexpectedly."
+
+#: app/souffle-slint/ui/idle_view.slint:56
+msgctxt "IdleView"
+msgid "La finalisation de la réunion a dépassé 30 secondes."
+msgstr "Meeting finalization timed out after 30 seconds."
+
+#: app/souffle-slint/ui/idle_view.slint:98
+msgctxt "IdleView"
+msgid "Rechercher transcriptions et réunions"
+msgstr "Search transcriptions and meetings"
+
+#: app/souffle-slint/ui/idle_view.slint:110
+msgctxt "IdleView"
+msgid "Tout"
+msgstr "All"
+
+#: app/souffle-slint/ui/idle_view.slint:115
+msgctxt "IdleView"
+msgid "Réunions"
+msgstr "Meetings"
+
+#: app/souffle-slint/ui/idle_view.slint:120
+msgctxt "IdleView"
+msgid "Dictées"
+msgstr "Dictations"
+
+#: app/souffle-slint/ui/components/themed_spin.slint:12
+msgctxt "ThemedSpinBox"
+msgid "Valeur"
+msgstr "Value"
+
+#: app/souffle-slint/ui/components/themed_slider.slint:11
+msgctxt "ThemedSlider"
+msgid "Valeur"
+msgstr "Value"
+
+#: app/souffle-slint/ui/components/themed_combo.slint:16
+msgctxt "ThemedComboBox"
+msgid "Sélection"
+msgstr "Selection"
+
+#: app/souffle-slint/ui/components/themed_combo.slint:76
+msgctxt "ThemedComboBox"
+msgid "Automatique"
+msgstr "Automatic"
+
+#: app/souffle-slint/ui/components/themed_combo.slint:77
+msgctxt "ThemedComboBox"
+msgid "Suivre l'appareil par défaut"
+msgstr "Follow default device"
+
+#: app/souffle-slint/ui/components/themed_combo.slint:78
+msgctxt "ThemedComboBox"
+msgid "Appareil personnalisé (indisponible)"
+msgstr "Custom device (unavailable)"
+
+#: app/souffle-slint/ui/components/themed_combo.slint:79
+msgctxt "ThemedComboBox"
+msgid "Jamais"
+msgstr "Never"
+
+#: app/souffle-slint/ui/components/themed_combo.slint:80
+msgctxt "ThemedComboBox"
+msgid "Par défaut"
+msgstr "Default"
+
+#: app/souffle-slint/ui/components/themed_combo.slint:81
+msgctxt "ThemedComboBox"
+msgid "Compte rendu détaillé"
+msgstr "Detailed minutes"
+
+#: app/souffle-slint/ui/components/themed_combo.slint:82
+msgctxt "ThemedComboBox"
+msgid "Aperçu bref"
+msgstr "Brief overview"
+
+#: app/souffle-slint/ui/components/themed_combo.slint:83
+msgctxt "ThemedComboBox"
+msgid "Intégré"
+msgstr "Built-in"
+
+#: app/souffle-slint/ui/components/themed_combo.slint:84
+msgctxt "ThemedComboBox"
+msgid "USB"
+msgstr "USB"
+
+#: app/souffle-slint/ui/components/themed_combo.slint:85
+msgctxt "ThemedComboBox"
+msgid "Bluetooth"
+msgstr "Bluetooth"
+
+#: app/souffle-slint/ui/components/themed_combo.slint:86
+msgctxt "ThemedComboBox"
+msgid "Virtuel"
+msgstr "Virtual"
+
+#: app/souffle-slint/ui/components/themed_combo.slint:87
+msgctxt "ThemedComboBox"
+msgid "Agrégé"
+msgstr "Aggregate"
+
+#: app/souffle-slint/ui/components/themed_combo.slint:88
+msgctxt "ThemedComboBox"
+msgid "Inconnu"
+msgstr "Unknown"
+
+#: app/souffle-slint/ui/components/themed_combo.slint:89
+msgctxt "ThemedComboBox"
+msgid "Nettoyage"
+msgstr "Cleanup"
+
+#: app/souffle-slint/ui/components/themed_combo.slint:90
+msgctxt "ThemedComboBox"
+msgid "E-mail professionnel"
+msgstr "Professional email"
+
+#: app/souffle-slint/ui/components/themed_combo.slint:91
+msgctxt "ThemedComboBox"
+msgid "Puces"
+msgstr "Bullets"
+
+#: app/souffle-slint/ui/components/themed_combo.slint:92
+msgctxt "ThemedComboBox"
+msgid "Sans fillers"
+msgstr "No fillers"
+
+#: app/souffle-slint/ui/components/timeline_item.slint:115
+msgctxt "TimelineItemRow"
+msgid "Copié !"
+msgstr "Copied!"
+
+#: app/souffle-slint/ui/components/timeline_item.slint:115
+msgctxt "TimelineItemRow"
+msgid "Copier"
+msgstr "Copy"
+
+#: app/souffle-slint/ui/components/timeline_item.slint:153
+msgctxt "TimelineItemRow"
+msgid "Confirmer la suppression"
+msgstr "Confirm deletion"
+
+#: app/souffle-slint/ui/components/timeline_item.slint:153
+msgctxt "TimelineItemRow"
+msgid "Supprimer"
+msgstr "Delete"
+
+#: app/souffle-slint/ui/components/timeline_item.slint:185
+msgctxt "TimelineItemRow"
+msgid "Confirmer"
+msgstr "Confirm"
+
+#: app/souffle-slint/ui/components/search_field.slint:39
+msgctxt "SearchField"
+msgid "Rechercher les transcriptions et réunions"
+msgstr "Search transcripts and meetings"
+
+#: app/souffle-slint/ui/components/audio_player_section.slint:21
+msgctxt "AudioPlayerSection"
+msgid "Aucun enregistrement audio pour cette réunion."
+msgstr "No audio recording for this meeting."
+
+#: app/souffle-slint/ui/components/audio_player_section.slint:38
+msgctxt "AudioPlayerSection"
+msgid "Pause"
+msgstr "Pause audio"
+
+#: app/souffle-slint/ui/components/audio_player_section.slint:38
+msgctxt "AudioPlayerSection"
+msgid "Lecture"
+msgstr "Play"
+
+#: app/souffle-slint/ui/components/audio_player_section.slint:60
+msgctxt "AudioPlayerSection"
+msgid "⏸"
+msgstr "⏸"
+
+#: app/souffle-slint/ui/components/audio_player_section.slint:60
+msgctxt "AudioPlayerSection"
+msgid "▶"
+msgstr "▶"
+
+#: app/souffle-slint/ui/components/audio_player_section.slint:67
+msgctxt "AudioPlayerSection"
+msgid " / {}"
+msgstr " / {}"
+
+#: app/souffle-slint/ui/components/audio_player_section.slint:81
+msgctxt "AudioPlayerSection"
+msgid "Position de lecture"
+msgstr "Playback position"
+
+#: app/souffle-slint/ui/components/timeline_section.slint:63
+msgctxt "TimelineSection"
+msgid "À VENIR AUJOURD'HUI"
+msgstr "UPCOMING TODAY"
+
+#: app/souffle-slint/ui/components/timeline_section.slint:114
+msgctxt "TimelineSection"
+msgid "EN COURS"
+msgstr "IN PROGRESS"
+
+#: app/souffle-slint/ui/components/timeline_section.slint:132
+msgctxt "TimelineSection"
+msgid "SUIVANT"
+msgstr "UP NEXT"
+
+#: app/souffle-slint/ui/components/timeline_section.slint:184
+msgctxt "TimelineSection"
+msgid "Démarrer la transcription"
+msgstr "Start transcription"
+
+#: app/souffle-slint/ui/components/timeline_section.slint:211
+msgctxt "TimelineSection"
+msgid "Configurer le calendrier"
+msgstr "Configure calendar"
+
+#: app/souffle-slint/ui/components/timeline_section.slint:241
+msgctxt "TimelineSection"
+msgid "Affichez vos réunions du jour ici"
+msgstr "View today's meetings here"
+
+#: app/souffle-slint/ui/components/timeline_section.slint:247
+msgctxt "TimelineSection"
+msgid ""
+"Connectez le calendrier macOS pour des rappels et un démarrage en un clic."
+msgstr "Connect macOS calendar for reminders and one-click start."
+
+#: app/souffle-slint/ui/components/timeline_section.slint:255
+msgctxt "TimelineSection"
+msgid "Configurer"
+msgstr "Configure"
+
+#: app/souffle-slint/ui/components/timeline_section.slint:267
+msgctxt "TimelineSection"
+msgid "Rien ici pour l'instant"
+msgstr "Nothing here yet"
+
+#: app/souffle-slint/ui/components/timeline_section.slint:268
+msgctxt "TimelineSection"
+msgid ""
+"Vos dictées et meetings apparaîtront ici, du plus récent au plus ancien."
+msgstr "Your dictations and meetings will appear here, from newest to oldest."
+
+#: app/souffle-slint/ui/components/timeline_section.slint:271
+msgctxt "TimelineSection"
+msgid "Aucun résultat"
+msgstr "No results"
+
+#: app/souffle-slint/ui/components/timeline_section.slint:272
+msgctxt "TimelineSection"
+msgid ""
+"Essayez d'autres mots-clés — la recherche couvre toutes les transcriptions."
+msgstr "Try other keywords - search covers all transcriptions."
+
+#: app/souffle-slint/ui/components/themed_switch.slint:9
+msgctxt "ThemedSwitch"
+msgid "Interrupteur"
+msgstr "Switch"
+
+#: app/souffle-slint/ui/components/app_header.slint:34
+msgctxt "AppHeader"
+msgid "Enregistrement"
+msgstr "Recording"
+
+#: app/souffle-slint/ui/components/app_header.slint:35
+msgctxt "AppHeader"
+msgid "Téléchargement requis"
+msgstr "Download required"
+
+#: app/souffle-slint/ui/components/app_header.slint:36
+msgctxt "AppHeader"
+msgid "Téléchargement…"
+msgstr "Downloading..."
+
+#: app/souffle-slint/ui/components/app_header.slint:37
+msgctxt "AppHeader"
+msgid "Chargement requis"
+msgstr "Load required"
+
+#: app/souffle-slint/ui/components/app_header.slint:38
+msgctxt "AppHeader"
+msgid "Chargement…"
+msgstr "Loading..."
+
+#: app/souffle-slint/ui/components/app_header.slint:39
+msgctxt "AppHeader"
+msgid "Prêt"
+msgstr "Ready"
+
+#: app/souffle-slint/ui/components/app_header.slint:40
+msgctxt "AppHeader"
+msgid "Déchargement…"
+msgstr "Unloading..."
+
+#: app/souffle-slint/ui/components/app_header.slint:41
+msgctxt "AppHeader"
+msgid "Erreur du modèle"
+msgstr "Model error"
+
+#: app/souffle-slint/ui/components/app_header.slint:89
+msgctxt "AppHeader"
+msgid "Soufflé"
+msgstr "Soufflé"
+
+#: app/souffle-slint/ui/components/app_header.slint:154
+msgctxt "AppHeader"
+msgid "Basculer clair / sombre"
+msgstr "Toggle light / dark mode"
+
+#: app/souffle-slint/ui/components/app_header.slint:178
+msgctxt "AppHeader"
+msgid "Réglages"
+msgstr "Settings"
+
+#: app/souffle-slint/ui/components/summary_section.slint:44
+msgctxt "SummarySection"
+msgid "Résumé"
+msgstr "Summary"
+
+#: app/souffle-slint/ui/components/summary_section.slint:76
+msgctxt "SummarySection"
+msgid "Générer le résumé"
+msgstr "Generate summary"
+
+#: app/souffle-slint/ui/components/summary_section.slint:120
+msgctxt "SummarySection"
+msgid "Génération en cours..."
+msgstr "Generating..."
+
+#: app/souffle-slint/ui/components/summary_section.slint:174
+msgctxt "SummarySection"
+msgid "Régénérer"
+msgstr "Regenerate"
+
+#: app/souffle-slint/ui/components/summary_section.slint:208
+msgctxt "SummarySection"
+msgid "Résumé obsolète (audio ajouté depuis)"
+msgstr "Outdated summary (audio added since)"
+
+#: app/souffle-slint/ui/components/summary_section.slint:254
+msgctxt "SummarySection"
+msgid "Décisions"
+msgstr "Decisions"
+
+#: app/souffle-slint/ui/components/summary_section.slint:260
+msgctxt "SummarySection"
+msgid "• {}"
+msgstr "• {}"
+
+#: app/souffle-slint/ui/components/summary_section.slint:271
+msgctxt "SummarySection"
+msgid "Actions"
+msgstr "Action items"
+
+#: app/souffle-slint/ui/components/summary_section.slint:283
+msgctxt "SummarySection"
+msgid "→ {}"
+msgstr "→ {}"
+
+#: app/souffle-slint/ui/components/summary_section.slint:295
+msgctxt "SummarySection"
+msgid "Questions ouvertes"
+msgstr "Open questions"
+
+#: app/souffle-slint/ui/components/dictation_recovery.slint:28
+msgctxt "DictationRecovery"
+msgid "Dictée à récupérer"
+msgstr "Dictation to recover"
+
+#: app/souffle-slint/ui/components/dictation_recovery.slint:34
+msgctxt "DictationRecovery"
+msgid "Le texte reste ici tant que vous ne l’avez pas copié ou supprimé."
+msgstr "The text stays here until you copy or delete it."
+
+#: app/souffle-slint/ui/components/dictation_recovery.slint:42
+msgctxt "DictationRecovery"
+msgid "Texte de dictée à récupérer"
+msgstr "Dictation text to recover"
+
+#: app/souffle-slint/ui/components/dictation_recovery.slint:48
+msgctxt "DictationRecovery"
+msgid "Supprimer"
+msgstr "Delete"
+
+#: app/souffle-slint/ui/components/dictation_recovery.slint:53
+msgctxt "DictationRecovery"
+msgid "Copier le texte"
+msgstr "Copy text"
+
+#: app/souffle-slint/ui/components/action_hero.slint:29
+msgctxt "ActionHero"
+msgid "Démarrer une dictée"
+msgstr "Start dictation"
+
+#: app/souffle-slint/ui/components/action_hero.slint:70
+msgctxt "ActionHero"
+msgid "Dicter"
+msgstr "Dictate"
+
+#: app/souffle-slint/ui/components/action_hero.slint:77
+msgctxt "ActionHero"
+msgid "Définissez un raccourci"
+msgstr "Set a shortcut"
+
+#: app/souffle-slint/ui/components/action_hero.slint:86
+msgctxt "ActionHero"
+msgid "Appuyez sur"
+msgstr "Press"
+
+#: app/souffle-slint/ui/components/action_hero.slint:125
+msgctxt "ActionHero"
+msgid "Démarrer une réunion"
+msgstr "Start meeting"
+
+#: app/souffle-slint/ui/components/action_hero.slint:172
+msgctxt "ActionHero"
+msgid "Transcrire en direct avec l’audio système"
+msgstr "Transcribe live with system audio"
+
+#: app/souffle-slint/ui/components/themed_checkbox.slint:27
+msgctxt "ThemedCheckbox"
+msgid "✓"
+msgstr "✓"
+
+#: app/souffle-slint/ui/components/transcript_section.slint:118
+msgctxt "TranscriptSection"
+msgid "Alias de dictionnaire"
+msgstr "Dictionary alias"
+
+#: app/souffle-slint/ui/components/transcript_section.slint:130
+msgctxt "TranscriptSection"
+msgid "Fermer"
+msgstr "Close"
+
+#: app/souffle-slint/ui/components/transcript_section.slint:138
+msgctxt "TranscriptSection"
+msgid "✕"
+msgstr "✕"
+
+#: app/souffle-slint/ui/components/transcript_section.slint:146
+msgctxt "TranscriptSection"
+msgid "Terme correct"
+msgstr "Correct term"
+
+#: app/souffle-slint/ui/components/transcript_section.slint:152
+msgctxt "TranscriptSection"
+msgid "Prononciation entendue"
+msgstr "Heard pronunciation"
+
+#: app/souffle-slint/ui/components/transcript_section.slint:162
+msgctxt "TranscriptSection"
+msgid "Enregistrer l'alias"
+msgstr "Save alias"
+
+#: app/souffle-slint/ui/components/transcript_section.slint:171
+msgctxt "TranscriptSection"
+msgid "Enregistrer"
+msgstr "Save"
+
+#: app/souffle-slint/ui/components/transcript_section.slint:196
+msgctxt "TranscriptSection"
+msgid "Transcription"
+msgstr "Transcription"
+
+#: app/souffle-slint/ui/components/transcript_section.slint:203
+msgctxt "TranscriptSection"
+msgid "Aucun texte transcrit pour cette réunion."
+msgstr "No transcribed text for this meeting."
+
+#: app/souffle-slint/ui/components/transcript_section.slint:253
+msgctxt "TranscriptSection"
+msgid "Aller à {}"
+msgstr "Go to {}"
+
+#: app/souffle-slint/ui/components/transcript_section.slint:310
+msgctxt "TranscriptSection"
+msgid "Fin de l'enregistrement précédent"
+msgstr "End of previous recording"
+
+#: app/souffle-slint/ui/components/transcript_section.slint:310
+msgctxt "TranscriptSection"
+msgid "Nouvelle session d'enregistrement"
+msgstr "New recording session"
+
+#: app/souffle-slint/ui/components/status_banner.slint:64
+msgctxt "StatusBanner"
+msgid "Fermer"
+msgstr "Dismiss"
 
 #: app/souffle-slint/ui/components/settings/audio_section.slint:41
 msgctxt "AudioSection"
@@ -232,7 +885,6 @@ msgid "AUDIO"
 msgstr "AUDIO"
 
 #: app/souffle-slint/ui/components/settings/audio_section.slint:55
-#: app/souffle-slint/ui/components/settings/audio_section.slint:55
 msgctxt "AudioSection"
 msgid "Microphone quand le capot est fermé"
 msgstr "Microphone when lid is closed"
@@ -247,7 +899,6 @@ msgstr ""
 "connected."
 
 #: app/souffle-slint/ui/components/settings/audio_section.slint:68
-#: app/souffle-slint/ui/components/settings/audio_section.slint:68
 msgctxt "AudioSection"
 msgid "Capturer l'audio système"
 msgstr "Capture system audio"
@@ -255,8 +906,7 @@ msgstr "Capture system audio"
 #: app/souffle-slint/ui/components/settings/audio_section.slint:69
 msgctxt "AudioSection"
 msgid ""
-"Inclure le son des haut-parleurs (l'autre côté d'un appel) dans les "
-"réunions."
+"Inclure le son des haut-parleurs (l'autre côté d'un appel) dans les réunions."
 msgstr "Include speaker sound (the other side of a call) in meetings."
 
 #: app/souffle-slint/ui/components/settings/audio_section.slint:80
@@ -274,7 +924,6 @@ msgctxt "AudioSection"
 msgid "Langue de transcription des réunions"
 msgstr "Meeting transcription language"
 
-#: app/souffle-slint/ui/components/settings/audio_section.slint:106
 #: app/souffle-slint/ui/components/settings/audio_section.slint:106
 msgctxt "AudioSection"
 msgid "Arrêt automatique des réunions"
@@ -296,7 +945,6 @@ msgid "Délai avant arrêt automatique"
 msgstr "Auto-stop delay"
 
 #: app/souffle-slint/ui/components/settings/audio_section.slint:128
-#: app/souffle-slint/ui/components/settings/audio_section.slint:128
 msgctxt "AudioSection"
 msgid "Durée maximale d'une réunion"
 msgstr "Maximum meeting duration"
@@ -317,7 +965,6 @@ msgid "Détection de voix"
 msgstr "Voice detection"
 
 #: app/souffle-slint/ui/components/settings/audio_section.slint:150
-#: app/souffle-slint/ui/components/settings/audio_section.slint:150
 msgctxt "AudioSection"
 msgid "Suppression des hésitations"
 msgstr "Hesitation removal"
@@ -328,7 +975,6 @@ msgid "Retirer les \"euh\", \"hum\" et autres marqueurs d'hésitation."
 msgstr "Remove \"um\", \"uh\" and other hesitation markers."
 
 #: app/souffle-slint/ui/components/settings/audio_section.slint:161
-#: app/souffle-slint/ui/components/settings/audio_section.slint:161
 msgctxt "AudioSection"
 msgid "Réduction des bégaiements"
 msgstr "Stutter reduction"
@@ -338,7 +984,6 @@ msgctxt "AudioSection"
 msgid "Fusionner les répétitions et faux départs."
 msgstr "Merge repetitions and false starts."
 
-#: app/souffle-slint/ui/components/settings/audio_section.slint:172
 #: app/souffle-slint/ui/components/settings/audio_section.slint:172
 msgctxt "AudioSection"
 msgid "Correction par dictionnaire"
@@ -357,8 +1002,8 @@ msgstr "SUMMARY TEMPLATES"
 #: app/souffle-slint/ui/components/settings/summary_templates_section.slint:44
 msgctxt "SummaryTemplatesSection"
 msgid ""
-"Le modèle par défaut est utilisé pour résumer automatiquement une "
-"réunion terminée."
+"Le modèle par défaut est utilisé pour résumer automatiquement une réunion "
+"terminée."
 msgstr ""
 "The default template is used to automatically summarize a finished meeting."
 
@@ -437,22 +1082,26 @@ msgctxt "SummaryTemplatesSection"
 msgid "Ajouter"
 msgstr "Add"
 
-#: app/souffle-slint/ui/components/settings/settings_permissions_dialog.slint:20
-#: app/souffle-slint/ui/components/settings/settings_permissions_dialog.slint:20
+#: app/souffle-slint/ui/components/settings/settings_permissions_dialog.slint:21
 msgctxt "SettingsPermissionsDialog"
 msgid "Permissions macOS"
 msgstr "macOS permissions"
 
-#: app/souffle-slint/ui/components/settings/settings_permissions_dialog.slint:60
+#: app/souffle-slint/ui/components/settings/settings_permissions_dialog.slint:22
 msgctxt "SettingsPermissionsDialog"
 msgid ""
-"Vérifiez chaque autorisation. La réparation réinitialise uniquement "
-"l’entrée Accessibilité avant de redemander l’accès."
+"Vérifiez chaque autorisation. La réparation réinitialise uniquement l’entrée "
+"Accessibilité avant de redemander l’accès."
 msgstr ""
 "Check each authorization. Repair only resets the Accessibility entry before "
 "requesting access again."
 
-#: app/souffle-slint/ui/components/settings/settings_permissions_dialog.slint:89
+#: app/souffle-slint/ui/components/settings/settings_permissions_dialog.slint:54
+msgctxt "SettingsPermissionsDialog"
+msgid "Vous pourrez les accorder plus tard."
+msgstr "You can grant these later when prompted."
+
+#: app/souffle-slint/ui/components/settings/settings_permissions_dialog.slint:62
 msgctxt "SettingsPermissionsDialog"
 msgid "Terminé"
 msgstr "Done"
@@ -568,7 +1217,6 @@ msgid "Système"
 msgstr "System"
 
 #: app/souffle-slint/ui/components/settings/interface_section.slint:177
-#: app/souffle-slint/ui/components/settings/interface_section.slint:177
 msgctxt "InterfaceSection"
 msgid "Collage automatique après dictée"
 msgstr "Auto-paste after dictation"
@@ -579,7 +1227,6 @@ msgid "Colle automatiquement la transcription à l'arrêt de l'enregistrement."
 msgstr "Automatically pastes transcription when recording stops."
 
 #: app/souffle-slint/ui/components/settings/interface_section.slint:188
-#: app/souffle-slint/ui/components/settings/interface_section.slint:188
 msgctxt "InterfaceSection"
 msgid "Méthode de collage"
 msgstr "Paste method"
@@ -588,8 +1235,8 @@ msgstr "Paste method"
 msgctxt "InterfaceSection"
 msgid ""
 "Le champ ciblé utilise l'accessibilité pour insérer dans la sélection. "
-"Utilisez la frappe simulée si une app refuse le ⌘V synthétique "
-"(terminaux, champs sécurisés)."
+"Utilisez la frappe simulée si une app refuse le ⌘V synthétique (terminaux, "
+"champs sécurisés)."
 msgstr ""
 "The targeted field uses accessibility to insert into the selection. Use "
 "simulated typing if an app refuses synthetic ⌘V (terminals, secure fields)."
@@ -624,7 +1271,6 @@ msgid "Appuyez une fois pour démarrer ou arrêter la dictée."
 msgstr "Press once to start or stop dictation."
 
 #: app/souffle-slint/ui/components/settings/interface_section.slint:246
-#: app/souffle-slint/ui/components/settings/interface_section.slint:246
 msgctxt "InterfaceSection"
 msgid "Effacer"
 msgstr "Clear"
@@ -640,7 +1286,6 @@ msgid "Maintenez pour enregistrer, relâchez pour arrêter."
 msgstr "Hold to record, release to stop."
 
 #: app/souffle-slint/ui/components/settings/interface_section.slint:280
-#: app/souffle-slint/ui/components/settings/interface_section.slint:280
 msgctxt "InterfaceSection"
 msgid "Masquer l'overlay d'enregistrement"
 msgstr "Hide recording overlay"
@@ -649,8 +1294,8 @@ msgstr "Hide recording overlay"
 msgctxt "InterfaceSection"
 msgid ""
 "Ne pas afficher le HUD flottant pendant une dictée ou une réunion. Déplacez-"
-"le par glisser-déposer ; la position est mémorisée et reste à l'écran "
-"si la résolution change."
+"le par glisser-déposer ; la position est mémorisée et reste à l'écran si la "
+"résolution change."
 msgstr ""
 "Do not show the floating HUD during a dictation or meeting. Move it by drag "
 "and drop; the position is memorized and stays on screen if resolution "
@@ -673,7 +1318,6 @@ msgctxt "DictationPolishSection"
 msgid "POLISH DE LA DICTÉE"
 msgstr "DICTATION POLISH"
 
-#: app/souffle-slint/ui/components/settings/dictation_polish_section.slint:35
 #: app/souffle-slint/ui/components/settings/dictation_polish_section.slint:35
 msgctxt "DictationPolishSection"
 msgid "Nettoyer la dictée avec l'IA"
@@ -701,7 +1345,6 @@ msgid "Choisir un fournisseur"
 msgstr "Choose a provider"
 
 #: app/souffle-slint/ui/components/settings/dictation_polish_section.slint:71
-#: app/souffle-slint/ui/components/settings/dictation_polish_section.slint:71
 msgctxt "DictationPolishSection"
 msgid "Modèle de retouche"
 msgstr "Polishing model"
@@ -717,7 +1360,6 @@ msgid "Prompt envoyé à l'IA pour retoucher le texte transcrit."
 msgstr "Prompt sent to AI to polish transcribed text."
 
 #: app/souffle-slint/ui/components/settings/dictation_polish_section.slint:89
-#: app/souffle-slint/ui/components/settings/dictation_polish_section.slint:89
 msgctxt "DictationPolishSection"
 msgid "Instruction de retouche"
 msgstr "Polishing prompt"
@@ -727,7 +1369,6 @@ msgctxt "FeedbackSoundsSection"
 msgid "SONS DE DICTÉE"
 msgstr "DICTATION SOUNDS"
 
-#: app/souffle-slint/ui/components/settings/feedback_sounds_section.slint:25
 #: app/souffle-slint/ui/components/settings/feedback_sounds_section.slint:25
 msgctxt "FeedbackSoundsSection"
 msgid "Activer les sons"
@@ -753,78 +1394,73 @@ msgctxt "FeedbackSoundsSection"
 msgid "{}%"
 msgstr "{} %"
 
-#: app/souffle-slint/ui/components/settings/snippets_section.slint:41
+#: app/souffle-slint/ui/components/settings/snippets_section.slint:49
 msgctxt "SnippetsSection"
 msgid "EXTRAITS VOCAUX"
 msgstr "VOICE SNIPPETS"
 
-#: app/souffle-slint/ui/components/settings/snippets_section.slint:51
+#: app/souffle-slint/ui/components/settings/snippets_section.slint:59
 msgctxt "SnippetsSection"
 msgid ""
-"Dites une phrase déclencheur au début d'une dictée pour insérer un bloc "
-"de texte. La comparaison ignore la casse et les accents ; aucune retouche IA "
+"Dites une phrase déclencheur au début d'une dictée pour insérer un bloc de "
+"texte. La comparaison ignore la casse et les accents ; aucune retouche IA "
 "n'est appliquée quand un extrait correspond."
 msgstr ""
 "Say a trigger phrase at the start of a dictation to insert a block of text. "
 "Comparison ignores case and accents; no AI polish is applied when a snippet "
 "matches."
 
-#: app/souffle-slint/ui/components/settings/snippets_section.slint:57
-#: app/souffle-slint/ui/components/settings/snippets_section.slint:57
+#: app/souffle-slint/ui/components/settings/snippets_section.slint:65
 msgctxt "SnippetsSection"
 msgid "DÉCLENCHEUR"
 msgstr "TRIGGER"
 
-#: app/souffle-slint/ui/components/settings/snippets_section.slint:60
-#: app/souffle-slint/ui/components/settings/snippets_section.slint:60
-#: app/souffle-slint/ui/components/settings/snippets_section.slint:60
+#: app/souffle-slint/ui/components/settings/snippets_section.slint:68
 msgctxt "SnippetsSection"
 msgid "Phrase déclencheur"
 msgstr "Trigger phrase"
 
-#: app/souffle-slint/ui/components/settings/snippets_section.slint:63
-#: app/souffle-slint/ui/components/settings/snippets_section.slint:63
+#: app/souffle-slint/ui/components/settings/snippets_section.slint:71
 msgctxt "SnippetsSection"
 msgid "EXPANSION"
 msgstr "EXPANSION"
 
-#: app/souffle-slint/ui/components/settings/snippets_section.slint:67
+#: app/souffle-slint/ui/components/settings/snippets_section.slint:75
 msgctxt "SnippetsSection"
 msgid "Texte à insérer"
 msgstr "Text to insert"
 
-#: app/souffle-slint/ui/components/settings/snippets_section.slint:68
-#: app/souffle-slint/ui/components/settings/snippets_section.slint:68
+#: app/souffle-slint/ui/components/settings/snippets_section.slint:76
 msgctxt "SnippetsSection"
 msgid "Texte de l'extrait vocal"
 msgstr "Voice snippet text"
 
-#: app/souffle-slint/ui/components/settings/snippets_section.slint:74
+#: app/souffle-slint/ui/components/settings/snippets_section.slint:82
 msgctxt "SnippetsSection"
 msgid "Ajouter un extrait"
 msgstr "Add snippet"
 
-#: app/souffle-slint/ui/components/settings/snippets_section.slint:89
+#: app/souffle-slint/ui/components/settings/snippets_section.slint:97
 msgctxt "SnippetsSection"
 msgid "Aucune formule."
 msgstr "No triggers."
 
-#: app/souffle-slint/ui/components/settings/snippets_section.slint:129
+#: app/souffle-slint/ui/components/settings/snippets_section.slint:146
 msgctxt "SnippetsSection"
 msgid "Modifier"
 msgstr "Edit"
 
-#: app/souffle-slint/ui/components/settings/snippets_section.slint:133
+#: app/souffle-slint/ui/components/settings/snippets_section.slint:150
 msgctxt "SnippetsSection"
 msgid "Supprimer"
 msgstr "Delete"
 
-#: app/souffle-slint/ui/components/settings/snippets_section.slint:172
+#: app/souffle-slint/ui/components/settings/snippets_section.slint:189
 msgctxt "SnippetsSection"
 msgid "Annuler"
 msgstr "Cancel"
 
-#: app/souffle-slint/ui/components/settings/snippets_section.slint:176
+#: app/souffle-slint/ui/components/settings/snippets_section.slint:193
 msgctxt "SnippetsSection"
 msgid "Enregistrer"
 msgstr "Save"
@@ -923,8 +1559,8 @@ msgstr "Native frequency of the selected device."
 #: app/souffle-slint/ui/components/settings/microphone_section.slint:183
 msgctxt "MicrophoneSection"
 msgid ""
-"Cette fréquence élevée peut perturber les appels en visioconférence "
-"pendant l'enregistrement."
+"Cette fréquence élevée peut perturber les appels en visioconférence pendant "
+"l'enregistrement."
 msgstr "This high frequency may disrupt video calls during recording."
 
 #: app/souffle-slint/ui/components/settings/microphone_section.slint:193
@@ -947,45 +1583,72 @@ msgctxt "MicrophoneSection"
 msgid "Utilisé quand plusieurs micros sont branchés en même temps."
 msgstr "Used when multiple mics are plugged in at once."
 
-#: app/souffle-slint/ui/components/settings/microphone_section.slint:278
-#: app/souffle-slint/ui/components/settings/microphone_section.slint:278
+#: app/souffle-slint/ui/components/settings/microphone_section.slint:257
+msgctxt "MicrophoneSection"
+msgid "Intégré"
+msgstr "Built-in"
+
+#: app/souffle-slint/ui/components/settings/microphone_section.slint:258
+msgctxt "MicrophoneSection"
+msgid "USB"
+msgstr "USB"
+
+#: app/souffle-slint/ui/components/settings/microphone_section.slint:259
+msgctxt "MicrophoneSection"
+msgid "Bluetooth"
+msgstr "Bluetooth"
+
+#: app/souffle-slint/ui/components/settings/microphone_section.slint:260
+msgctxt "MicrophoneSection"
+msgid "Virtuel"
+msgstr "Virtual"
+
+#: app/souffle-slint/ui/components/settings/microphone_section.slint:261
+msgctxt "MicrophoneSection"
+msgid "Agrégé"
+msgstr "Aggregate"
+
+#: app/souffle-slint/ui/components/settings/microphone_section.slint:262
+msgctxt "MicrophoneSection"
+msgid "Inconnu"
+msgstr "Unknown"
+
+#: app/souffle-slint/ui/components/settings/microphone_section.slint:263
+msgctxt "MicrophoneSection"
+msgid " · par défaut"
+msgstr " · default"
+
+#: app/souffle-slint/ui/components/settings/microphone_section.slint:284
 msgctxt "MicrophoneSection"
 msgid "Monter {}"
 msgstr "Move up {}"
 
-#: app/souffle-slint/ui/components/settings/microphone_section.slint:284
-#: app/souffle-slint/ui/components/settings/microphone_section.slint:284
+#: app/souffle-slint/ui/components/settings/microphone_section.slint:290
 msgctxt "MicrophoneSection"
 msgid "Descendre {}"
 msgstr "Move down {}"
 
-#: app/souffle-slint/ui/components/settings/microphone_section.slint:292
-#: app/souffle-slint/ui/components/settings/microphone_section.slint:292
+#: app/souffle-slint/ui/components/settings/microphone_section.slint:298
 msgctxt "MicrophoneSection"
 msgid "Masquer {}"
 msgstr "Hide {}"
 
-#: app/souffle-slint/ui/components/settings/microphone_section.slint:297
-#: app/souffle-slint/ui/components/settings/microphone_section.slint:297
+#: app/souffle-slint/ui/components/settings/microphone_section.slint:303
 msgctxt "MicrophoneSection"
 msgid "Masquer"
 msgstr "Hide"
 
-#: app/souffle-slint/ui/components/settings/microphone_section.slint:311
-#: app/souffle-slint/ui/components/settings/microphone_section.slint:311
+#: app/souffle-slint/ui/components/settings/microphone_section.slint:317
 msgctxt "MicrophoneSection"
 msgid "Supprimer {}"
 msgstr "Delete {}"
 
-#: app/souffle-slint/ui/components/settings/microphone_section.slint:330
-#: app/souffle-slint/ui/components/settings/microphone_section.slint:330
-#: app/souffle-slint/ui/components/settings/microphone_section.slint:330
+#: app/souffle-slint/ui/components/settings/microphone_section.slint:336
 msgctxt "MicrophoneSection"
 msgid "Autoriser les micros Bluetooth"
 msgstr "Allow Bluetooth microphones"
 
-#: app/souffle-slint/ui/components/settings/microphone_section.slint:331
-#: app/souffle-slint/ui/components/settings/microphone_section.slint:331
+#: app/souffle-slint/ui/components/settings/microphone_section.slint:337
 msgctxt "MicrophoneSection"
 msgid ""
 "Sinon, un casque Bluetooth n'est jamais sélectionné automatiquement (évite "
@@ -999,7 +1662,6 @@ msgctxt "CalendarSection"
 msgid "CALENDRIER"
 msgstr "CALENDAR"
 
-#: app/souffle-slint/ui/components/settings/calendar_section.slint:42
 #: app/souffle-slint/ui/components/settings/calendar_section.slint:42
 msgctxt "CalendarSection"
 msgid "Intégration du calendrier"
@@ -1022,7 +1684,6 @@ msgctxt "CalendarSection"
 msgid "Ouvrir les Réglages Système"
 msgstr "Open System Settings"
 
-#: app/souffle-slint/ui/components/settings/calendar_section.slint:78
 #: app/souffle-slint/ui/components/settings/calendar_section.slint:78
 msgctxt "CalendarSection"
 msgid "Proposer au début de la réunion"
@@ -1061,18 +1722,17 @@ msgctxt "CalendarSection"
 msgid "Tous les calendriers sont inclus ; décochez ceux à masquer."
 msgstr "All calendars are included; uncheck those to hide."
 
-#: app/souffle-slint/ui/components/settings/dictionary_section.slint:40
+#: app/souffle-slint/ui/components/settings/dictionary_section.slint:55
 msgctxt "DictionarySection"
 msgid "DICTIONNAIRE PERSONNALISÉ"
 msgstr "CUSTOM DICTIONARY"
 
-#: app/souffle-slint/ui/components/settings/dictionary_section.slint:44
-#: app/souffle-slint/ui/components/settings/dictionary_section.slint:44
+#: app/souffle-slint/ui/components/settings/dictionary_section.slint:59
 msgctxt "DictionarySection"
 msgid "Apprendre depuis les corrections après collage"
 msgstr "Learn from post-paste corrections"
 
-#: app/souffle-slint/ui/components/settings/dictionary_section.slint:45
+#: app/souffle-slint/ui/components/settings/dictionary_section.slint:60
 msgctxt "DictionarySection"
 msgid ""
 "Quand le collage auto est actif, retenir les corrections mot à mot faites "
@@ -1081,67 +1741,67 @@ msgstr ""
 "When auto-paste is active, remember word-for-word corrections made in the "
 "target app for future dictations."
 
-#: app/souffle-slint/ui/components/settings/dictionary_section.slint:62
+#: app/souffle-slint/ui/components/settings/dictionary_section.slint:77
 msgctxt "DictionarySection"
 msgid "Termes techniques, noms propres ou acronymes mal reconnus."
 msgstr "Technical terms, proper nouns or poorly recognized acronyms."
 
-#: app/souffle-slint/ui/components/settings/dictionary_section.slint:74
+#: app/souffle-slint/ui/components/settings/dictionary_section.slint:89
 msgctxt "DictionarySection"
 msgid "TERME"
 msgstr "TERM"
 
-#: app/souffle-slint/ui/components/settings/dictionary_section.slint:82
+#: app/souffle-slint/ui/components/settings/dictionary_section.slint:97
 msgctxt "DictionarySection"
 msgid "PRONONCIATION"
 msgstr "PRONUNCIATION"
 
-#: app/souffle-slint/ui/components/settings/dictionary_section.slint:90
+#: app/souffle-slint/ui/components/settings/dictionary_section.slint:105
 msgctxt "DictionarySection"
 msgid "CATÉGORIE"
 msgstr "CATEGORY"
 
-#: app/souffle-slint/ui/components/settings/dictionary_section.slint:108
+#: app/souffle-slint/ui/components/settings/dictionary_section.slint:123
 msgctxt "DictionarySection"
 msgid "ex. Kubernetes"
 msgstr "e.g. Kubernetes"
 
-#: app/souffle-slint/ui/components/settings/dictionary_section.slint:109
+#: app/souffle-slint/ui/components/settings/dictionary_section.slint:124
 msgctxt "DictionarySection"
 msgid "Terme"
 msgstr "Term"
 
-#: app/souffle-slint/ui/components/settings/dictionary_section.slint:114
+#: app/souffle-slint/ui/components/settings/dictionary_section.slint:129
 msgctxt "DictionarySection"
 msgid "ex. vaysix"
 msgstr "e.g. vaysix"
 
-#: app/souffle-slint/ui/components/settings/dictionary_section.slint:115
+#: app/souffle-slint/ui/components/settings/dictionary_section.slint:130
 msgctxt "DictionarySection"
 msgid "Prononciation facultative"
 msgstr "Optional pronunciation"
 
-#: app/souffle-slint/ui/components/settings/dictionary_section.slint:120
+#: app/souffle-slint/ui/components/settings/dictionary_section.slint:135
 msgctxt "DictionarySection"
 msgid "ex. tech"
 msgstr "e.g. tech"
 
-#: app/souffle-slint/ui/components/settings/dictionary_section.slint:121
+#: app/souffle-slint/ui/components/settings/dictionary_section.slint:136
 msgctxt "DictionarySection"
 msgid "Catégorie facultative"
 msgstr "Optional category"
 
-#: app/souffle-slint/ui/components/settings/dictionary_section.slint:125
+#: app/souffle-slint/ui/components/settings/dictionary_section.slint:140
 msgctxt "DictionarySection"
 msgid "Ajouter"
 msgstr "Add"
 
-#: app/souffle-slint/ui/components/settings/dictionary_section.slint:141
+#: app/souffle-slint/ui/components/settings/dictionary_section.slint:156
 msgctxt "DictionarySection"
 msgid "Aucune entrée."
 msgstr "No entries."
 
-#: app/souffle-slint/ui/components/settings/dictionary_section.slint:187
+#: app/souffle-slint/ui/components/settings/dictionary_section.slint:211
 msgctxt "DictionarySection"
 msgid "Supprimer"
 msgstr "Delete"
@@ -1158,13 +1818,13 @@ msgstr "App Version"
 
 #: app/souffle-slint/ui/components/settings/about_section.slint:35
 msgctxt "AboutSection"
-msgid "v{}"
-msgstr "v {}"
+msgid "Build local"
+msgstr "Local build"
 
 #: app/souffle-slint/ui/components/settings/about_section.slint:35
 msgctxt "AboutSection"
-msgid "Build local"
-msgstr "Local build"
+msgid "v{}"
+msgstr "v {}"
 
 #: app/souffle-slint/ui/components/settings/about_section.slint:46
 msgctxt "AboutSection"
@@ -1216,88 +1876,84 @@ msgctxt "AboutSection"
 msgid "Vérification automatique des mises à jour"
 msgstr "Automatic update checks"
 
-#: app/souffle-slint/ui/components/settings/diagnostics_section.slint:22
+#: app/souffle-slint/ui/components/settings/diagnostics_section.slint:37
 msgctxt "DiagnosticsSection"
 msgid "Erreur"
 msgstr "Error"
 
-#: app/souffle-slint/ui/components/settings/diagnostics_section.slint:23
+#: app/souffle-slint/ui/components/settings/diagnostics_section.slint:38
 msgctxt "DiagnosticsSection"
 msgid "Avertissement"
 msgstr "Warning"
 
-#: app/souffle-slint/ui/components/settings/diagnostics_section.slint:24
+#: app/souffle-slint/ui/components/settings/diagnostics_section.slint:39
 msgctxt "DiagnosticsSection"
 msgid "Information"
 msgstr "Info"
 
-#: app/souffle-slint/ui/components/settings/diagnostics_section.slint:25
+#: app/souffle-slint/ui/components/settings/diagnostics_section.slint:40
 msgctxt "DiagnosticsSection"
 msgid "Débogage"
 msgstr "Debug"
 
-#: app/souffle-slint/ui/components/settings/diagnostics_section.slint:26
+#: app/souffle-slint/ui/components/settings/diagnostics_section.slint:41
 msgctxt "DiagnosticsSection"
 msgid "Trace"
 msgstr "Trace log"
 
-#: app/souffle-slint/ui/components/settings/diagnostics_section.slint:34
+#: app/souffle-slint/ui/components/settings/diagnostics_section.slint:49
 msgctxt "DiagnosticsSection"
 msgid "DIAGNOSTICS"
 msgstr "DIAGNOSTICS"
 
-#: app/souffle-slint/ui/components/settings/diagnostics_section.slint:38
-#: app/souffle-slint/ui/components/settings/diagnostics_section.slint:38
+#: app/souffle-slint/ui/components/settings/diagnostics_section.slint:53
 msgctxt "DiagnosticsSection"
 msgid "Niveau de journal"
 msgstr "Log level"
 
-#: app/souffle-slint/ui/components/settings/diagnostics_section.slint:39
+#: app/souffle-slint/ui/components/settings/diagnostics_section.slint:54
 msgctxt "DiagnosticsSection"
 msgid "Quantité de détails que Soufflé écrit dans le fichier journal."
 msgstr "Amount of detail Soufflé writes to the log file."
 
-#: app/souffle-slint/ui/components/settings/diagnostics_section.slint:62
-#: app/souffle-slint/ui/components/settings/diagnostics_section.slint:62
+#: app/souffle-slint/ui/components/settings/diagnostics_section.slint:77
 msgctxt "DiagnosticsSection"
 msgid "Journaux détaillés de transcription"
 msgstr "Detailed transcription logs"
 
-#: app/souffle-slint/ui/components/settings/diagnostics_section.slint:63
+#: app/souffle-slint/ui/components/settings/diagnostics_section.slint:78
 msgctxt "DiagnosticsSection"
 msgid ""
-"Enregistre des détails supplémentaires sur la reconnaissance vocale pour "
-"le dépannage."
+"Enregistre des détails supplémentaires sur la reconnaissance vocale pour le "
+"dépannage."
 msgstr ""
 "Records additional details about speech recognition for troubleshooting."
 
-#: app/souffle-slint/ui/components/settings/diagnostics_section.slint:81
-#: app/souffle-slint/ui/components/settings/diagnostics_section.slint:81
+#: app/souffle-slint/ui/components/settings/diagnostics_section.slint:96
 msgctxt "DiagnosticsSection"
 msgid "Journal en direct"
 msgstr "Live log"
 
-#: app/souffle-slint/ui/components/settings/diagnostics_section.slint:86
+#: app/souffle-slint/ui/components/settings/diagnostics_section.slint:101
 msgctxt "DiagnosticsSection"
 msgid "Fin du fichier journal actuel, actualisé toutes les quelques secondes."
 msgstr "End of current log file, refreshed every few seconds."
 
-#: app/souffle-slint/ui/components/settings/diagnostics_section.slint:109
+#: app/souffle-slint/ui/components/settings/diagnostics_section.slint:132
 msgctxt "DiagnosticsSection"
 msgid "Aucune entrée de journal pour l'instant."
 msgstr "No log entries yet."
 
-#: app/souffle-slint/ui/components/settings/diagnostics_section.slint:125
+#: app/souffle-slint/ui/components/settings/diagnostics_section.slint:164
 msgctxt "DiagnosticsSection"
 msgid "Copie…"
 msgstr "Copying..."
 
-#: app/souffle-slint/ui/components/settings/diagnostics_section.slint:125
+#: app/souffle-slint/ui/components/settings/diagnostics_section.slint:164
 msgctxt "DiagnosticsSection"
 msgid "Copier les diagnostics"
 msgstr "Copy diagnostics"
 
-#: app/souffle-slint/ui/components/settings/intelligence_section.slint:45
 #: app/souffle-slint/ui/components/settings/intelligence_section.slint:45
 msgctxt "IntelligenceSection"
 msgid "Apple Intelligence"
@@ -1375,7 +2031,6 @@ msgid "Disponible"
 msgstr "Available"
 
 #: app/souffle-slint/ui/components/settings/intelligence_section.slint:133
-#: app/souffle-slint/ui/components/settings/intelligence_section.slint:133
 msgctxt "IntelligenceSection"
 msgid "Non disponible"
 msgstr "Not available"
@@ -1385,7 +2040,6 @@ msgctxt "IntelligenceSection"
 msgid "Réglages Système"
 msgstr "System Settings"
 
-#: app/souffle-slint/ui/components/settings/intelligence_section.slint:163
 #: app/souffle-slint/ui/components/settings/intelligence_section.slint:163
 msgctxt "IntelligenceSection"
 msgid "URL Ollama"
@@ -1431,7 +2085,6 @@ msgctxt "IntelligenceSection"
 msgid "Réessayer"
 msgstr "Retry"
 
-#: app/souffle-slint/ui/components/settings/intelligence_section.slint:205
 #: app/souffle-slint/ui/components/settings/intelligence_section.slint:205
 msgctxt "IntelligenceSection"
 msgid "Modèle de résumé"
@@ -1487,7 +2140,6 @@ msgctxt "DataSection"
 msgid "DONNÉES"
 msgstr "DATA"
 
-#: app/souffle-slint/ui/components/settings/data_section.slint:112
 #: app/souffle-slint/ui/components/settings/data_section.slint:112
 msgctxt "DataSection"
 msgid "Conservation audio des réunions"
@@ -1568,7 +2220,6 @@ msgid "À coller dans claude_desktop_config.json sous mcpServers."
 msgstr "Paste into claude_desktop_config.json under mcpServers."
 
 #: app/souffle-slint/ui/components/settings/data_section.slint:236
-#: app/souffle-slint/ui/components/settings/data_section.slint:236
 msgctxt "DataSection"
 msgid "Copier"
 msgstr "Copy"
@@ -1584,7 +2235,6 @@ msgid "À exécuter une fois dans un terminal pour enregistrer le serveur."
 msgstr "Run once in a terminal to register the server."
 
 #: app/souffle-slint/ui/components/settings/data_section.slint:286
-#: app/souffle-slint/ui/components/settings/data_section.slint:286
 msgctxt "DataSection"
 msgid "Tester la connexion"
 msgstr "Test connection"
@@ -1594,35 +2244,66 @@ msgctxt "DataSection"
 msgid "Test en cours…"
 msgstr "Testing..."
 
-#: app/souffle-slint/ui/components/settings/model_section.slint:32
+#: app/souffle-slint/ui/components/settings/model_section.slint:33
 msgctxt "ModelSection"
 msgid "MODÈLE DE TRANSCRIPTION"
 msgstr "TRANSCRIPTION MODEL"
 
-#: app/souffle-slint/ui/components/settings/model_section.slint:36
-#: app/souffle-slint/ui/components/settings/model_section.slint:36
+#: app/souffle-slint/ui/components/settings/model_section.slint:37
 msgctxt "ModelSection"
 msgid "Modèle de transcription"
 msgstr "Transcription model"
 
-#: app/souffle-slint/ui/components/settings/model_section.slint:37
+#: app/souffle-slint/ui/components/settings/model_section.slint:38
 msgctxt "ModelSection"
 msgid ""
-"Choisissez un modèle : il se télécharge et se charge tout seul. Tout "
-"tourne sur ce Mac."
+"Choisissez un modèle : il se télécharge et se charge tout seul. Tout tourne "
+"sur ce Mac."
 msgstr ""
 "Choose a model: it downloads and loads on its own. Everything runs on this "
 "Mac."
 
-#: app/souffle-slint/ui/components/settings/model_section.slint:93
-#: app/souffle-slint/ui/components/settings/model_section.slint:93
-#: app/souffle-slint/ui/components/settings/model_section.slint:93
+#: app/souffle-slint/ui/components/settings/model_section.slint:41
+msgctxt "ModelSection"
+msgid "Téléchargement requis"
+msgstr "Download required"
+
+#: app/souffle-slint/ui/components/settings/model_section.slint:42
+msgctxt "ModelSection"
+msgid "Téléchargement…"
+msgstr "Downloading..."
+
+#: app/souffle-slint/ui/components/settings/model_section.slint:43
+msgctxt "ModelSection"
+msgid "Chargement requis"
+msgstr "Load required"
+
+#: app/souffle-slint/ui/components/settings/model_section.slint:44
+msgctxt "ModelSection"
+msgid "Chargement…"
+msgstr "Loading..."
+
+#: app/souffle-slint/ui/components/settings/model_section.slint:45
+msgctxt "ModelSection"
+msgid "Prêt"
+msgstr "Ready"
+
+#: app/souffle-slint/ui/components/settings/model_section.slint:46
+msgctxt "ModelSection"
+msgid "Déchargement…"
+msgstr "Unloading..."
+
+#: app/souffle-slint/ui/components/settings/model_section.slint:47
+msgctxt "ModelSection"
+msgid "Erreur du modèle"
+msgstr "Model error"
+
+#: app/souffle-slint/ui/components/settings/model_section.slint:101
 msgctxt "ModelSection"
 msgid "Délai avant déchargement"
 msgstr "Unload delay"
 
-#: app/souffle-slint/ui/components/settings/model_section.slint:94
-#: app/souffle-slint/ui/components/settings/model_section.slint:94
+#: app/souffle-slint/ui/components/settings/model_section.slint:102
 msgctxt "ModelSection"
 msgid "Décharger le modèle de la mémoire après une période d'inactivité."
 msgstr "Unload model from memory after a period of inactivity."
@@ -1649,372 +2330,17 @@ msgctxt "PermissionsSection"
 msgid "Vérifier les permissions"
 msgstr "Check permissions"
 
-#: app/souffle-slint/ui/components/themed_spin.slint:12
-msgctxt "ThemedSpinBox"
-msgid "Valeur"
-msgstr "Value"
-
-#: app/souffle-slint/ui/components/themed_slider.slint:11
-msgctxt "ThemedSlider"
-msgid "Valeur"
-msgstr "Value"
-
-#: app/souffle-slint/ui/components/themed_combo.slint:16
-msgctxt "ThemedComboBox"
-msgid "Sélection"
-msgstr "Selection"
-
-#: app/souffle-slint/ui/components/timeline_item.slint:112
-#: app/souffle-slint/ui/components/timeline_item.slint:112
-msgctxt "TimelineItemRow"
-msgid "Copié !"
-msgstr "Copied!"
-
-#: app/souffle-slint/ui/components/timeline_item.slint:112
-#: app/souffle-slint/ui/components/timeline_item.slint:112
-msgctxt "TimelineItemRow"
-msgid "Copier"
-msgstr "Copy"
-
-#: app/souffle-slint/ui/components/timeline_item.slint:150
-msgctxt "TimelineItemRow"
-msgid "Confirmer la suppression"
-msgstr "Confirm deletion"
-
-#: app/souffle-slint/ui/components/timeline_item.slint:150
-msgctxt "TimelineItemRow"
-msgid "Supprimer"
-msgstr "Delete"
-
-#: app/souffle-slint/ui/components/timeline_item.slint:182
-msgctxt "TimelineItemRow"
-msgid "Confirmer"
-msgstr "Confirm"
-
-#: app/souffle-slint/ui/components/search_field.slint:39
-msgctxt "SearchField"
-msgid "Rechercher les transcriptions et réunions"
-msgstr "Search transcripts and meetings"
-
-#: app/souffle-slint/ui/components/audio_player_section.slint:21
-msgctxt "AudioPlayerSection"
-msgid "Aucun enregistrement audio pour cette réunion."
-msgstr "No audio recording for this meeting."
-
-#: app/souffle-slint/ui/components/audio_player_section.slint:38
-msgctxt "AudioPlayerSection"
-msgid "Pause"
-msgstr "Pause audio"
-
-#: app/souffle-slint/ui/components/audio_player_section.slint:38
-msgctxt "AudioPlayerSection"
-msgid "Lecture"
-msgstr "Play"
-
-#: app/souffle-slint/ui/components/audio_player_section.slint:60
-msgctxt "AudioPlayerSection"
-msgid "⏸"
-msgstr "⏸"
-
-#: app/souffle-slint/ui/components/audio_player_section.slint:60
-msgctxt "AudioPlayerSection"
-msgid "▶"
-msgstr "▶"
-
-#: app/souffle-slint/ui/components/audio_player_section.slint:67
-msgctxt "AudioPlayerSection"
-msgid " / {}"
-msgstr " / {}"
-
-#: app/souffle-slint/ui/components/audio_player_section.slint:81
-msgctxt "AudioPlayerSection"
-msgid "Position de lecture"
-msgstr "Playback position"
-
-#: app/souffle-slint/ui/components/timeline_section.slint:63
-msgctxt "TimelineSection"
-msgid "À VENIR AUJOURD'HUI"
-msgstr "UPCOMING TODAY"
-
-#: app/souffle-slint/ui/components/timeline_section.slint:114
-msgctxt "TimelineSection"
-msgid "EN COURS"
-msgstr "IN PROGRESS"
-
-#: app/souffle-slint/ui/components/timeline_section.slint:132
-msgctxt "TimelineSection"
-msgid "SUIVANT"
-msgstr "UP NEXT"
-
-#: app/souffle-slint/ui/components/timeline_section.slint:184
-msgctxt "TimelineSection"
-msgid "Démarrer la transcription"
-msgstr "Start transcription"
-
-#: app/souffle-slint/ui/components/timeline_section.slint:211
-msgctxt "TimelineSection"
-msgid "Configurer le calendrier"
-msgstr "Configure calendar"
-
-#: app/souffle-slint/ui/components/timeline_section.slint:241
-msgctxt "TimelineSection"
-msgid "Affichez vos réunions du jour ici"
-msgstr "View today's meetings here"
-
-#: app/souffle-slint/ui/components/timeline_section.slint:247
-msgctxt "TimelineSection"
-msgid ""
-"Connectez le calendrier macOS pour des rappels et un démarrage en un clic."
-msgstr "Connect macOS calendar for reminders and one-click start."
-
-#: app/souffle-slint/ui/components/timeline_section.slint:255
-msgctxt "TimelineSection"
-msgid "Configurer"
-msgstr "Configure"
-
-#: app/souffle-slint/ui/components/timeline_section.slint:267
-msgctxt "TimelineSection"
-msgid "Rien ici pour l'instant"
-msgstr "Nothing here yet"
-
-#: app/souffle-slint/ui/components/timeline_section.slint:268
-msgctxt "TimelineSection"
-msgid "Vos dictées et meetings apparaîtront ici, du plus récent au plus ancien."
-msgstr "Your dictations and meetings will appear here, from newest to oldest."
-
-#: app/souffle-slint/ui/components/timeline_section.slint:271
-msgctxt "TimelineSection"
-msgid "Aucun résultat"
-msgstr "No results"
-
-#: app/souffle-slint/ui/components/timeline_section.slint:272
-msgctxt "TimelineSection"
-msgid ""
-"Essayez d'autres mots-clés — la recherche couvre toutes les "
-"transcriptions."
-msgstr "Try other keywords - search covers all transcriptions."
-
-#: app/souffle-slint/ui/components/themed_switch.slint:9
-msgctxt "ThemedSwitch"
-msgid "Interrupteur"
-msgstr "Switch"
-
-#: app/souffle-slint/ui/components/app_header.slint:35
-#: app/souffle-slint/ui/components/app_header.slint:35
-msgctxt "AppHeader"
-msgid "Enregistrement"
-msgstr "Recording"
-
-#: app/souffle-slint/ui/components/app_header.slint:83
-#: app/souffle-slint/ui/components/app_header.slint:83
-msgctxt "AppHeader"
-msgid "Soufflé"
-msgstr "Soufflé"
-
-#: app/souffle-slint/ui/components/app_header.slint:148
-#: app/souffle-slint/ui/components/app_header.slint:148
-msgctxt "AppHeader"
-msgid "Basculer clair / sombre"
-msgstr "Toggle light / dark mode"
-
-#: app/souffle-slint/ui/components/app_header.slint:172
-#: app/souffle-slint/ui/components/app_header.slint:172
-msgctxt "AppHeader"
-msgid "Réglages"
-msgstr "Settings"
-
-#: app/souffle-slint/ui/components/summary_section.slint:33
-#: app/souffle-slint/ui/components/summary_section.slint:33
-#: app/souffle-slint/ui/components/summary_section.slint:33
-msgctxt "SummarySection"
-msgid "Résumé"
-msgstr "Summary"
-
-#: app/souffle-slint/ui/components/summary_section.slint:50
-#: app/souffle-slint/ui/components/summary_section.slint:50
-msgctxt "SummarySection"
-msgid "Générer le résumé"
-msgstr "Generate summary"
-
-#: app/souffle-slint/ui/components/summary_section.slint:94
-msgctxt "SummarySection"
-msgid "Génération en cours..."
-msgstr "Generating..."
-
-#: app/souffle-slint/ui/components/summary_section.slint:134
-#: app/souffle-slint/ui/components/summary_section.slint:134
-msgctxt "SummarySection"
-msgid "Régénérer"
-msgstr "Regenerate"
-
-#: app/souffle-slint/ui/components/summary_section.slint:168
-msgctxt "SummarySection"
-msgid "Résumé obsolète (audio ajouté depuis)"
-msgstr "Outdated summary (audio added since)"
-
-#: app/souffle-slint/ui/components/summary_section.slint:214
-msgctxt "SummarySection"
-msgid "Décisions"
-msgstr "Decisions"
-
-#: app/souffle-slint/ui/components/summary_section.slint:220
-#: app/souffle-slint/ui/components/summary_section.slint:220
-msgctxt "SummarySection"
-msgid "• {}"
-msgstr "• {}"
-
-#: app/souffle-slint/ui/components/summary_section.slint:231
-msgctxt "SummarySection"
-msgid "Actions"
-msgstr "Action items"
-
-#: app/souffle-slint/ui/components/summary_section.slint:243
-msgctxt "SummarySection"
-msgid "→ {}"
-msgstr "→ {}"
-
-#: app/souffle-slint/ui/components/summary_section.slint:255
-msgctxt "SummarySection"
-msgid "Questions ouvertes"
-msgstr "Open questions"
-
-#: app/souffle-slint/ui/components/dictation_recovery.slint:28
-msgctxt "DictationRecovery"
-msgid "Dictée à récupérer"
-msgstr "Dictation to recover"
-
-#: app/souffle-slint/ui/components/dictation_recovery.slint:34
-msgctxt "DictationRecovery"
-msgid "Le texte reste ici tant que vous ne l’avez pas copié ou supprimé."
-msgstr "The text stays here until you copy or delete it."
-
-#: app/souffle-slint/ui/components/dictation_recovery.slint:42
-msgctxt "DictationRecovery"
-msgid "Texte de dictée à récupérer"
-msgstr "Dictation text to recover"
-
-#: app/souffle-slint/ui/components/dictation_recovery.slint:48
-msgctxt "DictationRecovery"
-msgid "Supprimer"
-msgstr "Delete"
-
-#: app/souffle-slint/ui/components/dictation_recovery.slint:53
-msgctxt "DictationRecovery"
-msgid "Copier le texte"
-msgstr "Copy text"
-
-#: app/souffle-slint/ui/components/action_hero.slint:29
-msgctxt "ActionHero"
-msgid "Démarrer une dictée"
-msgstr "Start dictation"
-
-#: app/souffle-slint/ui/components/action_hero.slint:70
-msgctxt "ActionHero"
-msgid "Dicter"
-msgstr "Dictate"
-
-#: app/souffle-slint/ui/components/action_hero.slint:77
-msgctxt "ActionHero"
-msgid "Définissez un raccourci"
-msgstr "Set a shortcut"
-
-#: app/souffle-slint/ui/components/action_hero.slint:86
-msgctxt "ActionHero"
-msgid "Appuyez sur"
-msgstr "Press"
-
-#: app/souffle-slint/ui/components/action_hero.slint:125
-#: app/souffle-slint/ui/components/action_hero.slint:125
-msgctxt "ActionHero"
-msgid "Démarrer une réunion"
-msgstr "Start meeting"
-
-#: app/souffle-slint/ui/components/action_hero.slint:172
-msgctxt "ActionHero"
-msgid "Transcrire en direct avec l’audio système"
-msgstr "Transcribe live with system audio"
-
-#: app/souffle-slint/ui/components/themed_checkbox.slint:27
-msgctxt "ThemedCheckbox"
-msgid "✓"
-msgstr "✓"
-
-#: app/souffle-slint/ui/components/transcript_section.slint:118
-msgctxt "TranscriptSection"
-msgid "Alias de dictionnaire"
-msgstr "Dictionary alias"
-
-#: app/souffle-slint/ui/components/transcript_section.slint:130
-msgctxt "TranscriptSection"
-msgid "Fermer"
-msgstr "Close"
-
-#: app/souffle-slint/ui/components/transcript_section.slint:138
-msgctxt "TranscriptSection"
-msgid "✕"
-msgstr "✕"
-
-#: app/souffle-slint/ui/components/transcript_section.slint:146
-msgctxt "TranscriptSection"
-msgid "Terme correct"
-msgstr "Correct term"
-
-#: app/souffle-slint/ui/components/transcript_section.slint:152
-msgctxt "TranscriptSection"
-msgid "Prononciation entendue"
-msgstr "Heard pronunciation"
-
-#: app/souffle-slint/ui/components/transcript_section.slint:162
-msgctxt "TranscriptSection"
-msgid "Enregistrer l'alias"
-msgstr "Save alias"
-
-#: app/souffle-slint/ui/components/transcript_section.slint:171
-msgctxt "TranscriptSection"
-msgid "Enregistrer"
-msgstr "Save"
-
-#: app/souffle-slint/ui/components/transcript_section.slint:196
-msgctxt "TranscriptSection"
-msgid "Transcription"
-msgstr "Transcription"
-
-#: app/souffle-slint/ui/components/transcript_section.slint:203
-msgctxt "TranscriptSection"
-msgid "Aucun texte transcrit pour cette réunion."
-msgstr "No transcribed text for this meeting."
-
-#: app/souffle-slint/ui/components/transcript_section.slint:253
-msgctxt "TranscriptSection"
-msgid "Aller à {}"
-msgstr "Go to {}"
-
-#: app/souffle-slint/ui/components/transcript_section.slint:310
-msgctxt "TranscriptSection"
-msgid "Fin de l'enregistrement précédent"
-msgstr "End of previous recording"
-
-#: app/souffle-slint/ui/components/transcript_section.slint:310
-msgctxt "TranscriptSection"
-msgid "Nouvelle session d'enregistrement"
-msgstr "New recording session"
-
-#: app/souffle-slint/ui/components/status_banner.slint:37
-msgctxt "StatusBanner"
-msgid "×"
-msgstr "×"
-
-#: app/souffle-slint/ui/components/onboarding/whats_new_dialog.slint:34
+#: app/souffle-slint/ui/components/onboarding/whats_new_dialog.slint:18
 msgctxt "WhatsNewDialog"
 msgid "Nouveautés"
 msgstr "What's new"
 
-#: app/souffle-slint/ui/components/onboarding/whats_new_dialog.slint:40
+#: app/souffle-slint/ui/components/onboarding/whats_new_dialog.slint:19
 msgctxt "WhatsNewDialog"
 msgid "Mis à jour vers v{}"
 msgstr "Updated to v{}"
 
-#: app/souffle-slint/ui/components/onboarding/whats_new_dialog.slint:56
+#: app/souffle-slint/ui/components/onboarding/whats_new_dialog.slint:32
 msgctxt "WhatsNewDialog"
 msgid "Compris"
 msgstr "Got it"
@@ -2082,7 +2408,6 @@ msgid "Aucun microphone détecté."
 msgstr "No microphone detected."
 
 #: app/souffle-slint/ui/components/onboarding/permissions_step.slint:41
-#: app/souffle-slint/ui/components/onboarding/permissions_step.slint:41
 msgctxt "PermissionsStep"
 msgid "Réglages Système"
 msgstr "System Settings"
@@ -2097,7 +2422,6 @@ msgctxt "PermissionsStep"
 msgid "Non pris en charge"
 msgstr "Unsupported"
 
-#: app/souffle-slint/ui/components/onboarding/permissions_step.slint:124
 #: app/souffle-slint/ui/components/onboarding/permissions_step.slint:124
 msgctxt "PermissionsStep"
 msgid "Vérification…"
@@ -2118,469 +2442,124 @@ msgctxt "PermissionsStep"
 msgid "Réparer"
 msgstr "Repair"
 
-#: app/souffle-slint/ui/components/onboarding/markdown_view.slint:22
+#: app/souffle-slint/ui/components/onboarding/markdown_view.slint:24
 msgctxt "MarkdownView"
 msgid "•"
 msgstr "•"
 
-#: app/souffle-slint/ui/components/onboarding/update_available_dialog.slint:46
+#: app/souffle-slint/ui/components/onboarding/update_available_dialog.slint:39
+msgctxt "UpdateAvailableDialog"
+msgid "Terminez la dictée avant d'installer."
+msgstr "Finish dictation before installing."
+
+#: app/souffle-slint/ui/components/onboarding/update_available_dialog.slint:40
+msgctxt "UpdateAvailableDialog"
+msgid "Arrêtez la réunion avant d'installer."
+msgstr "Stop the meeting before installing."
+
+#: app/souffle-slint/ui/components/onboarding/update_available_dialog.slint:41
+msgctxt "UpdateAvailableDialog"
+msgid "Attendez la fin de l'arrêt de l'enregistrement."
+msgstr "Wait for recording to finish stopping."
+
+#: app/souffle-slint/ui/components/onboarding/update_available_dialog.slint:42
+msgctxt "UpdateAvailableDialog"
+msgid "Attendez la fin du téléchargement du modèle."
+msgstr "Wait for the model download to finish."
+
+#: app/souffle-slint/ui/components/onboarding/update_available_dialog.slint:43
+msgctxt "UpdateAvailableDialog"
+msgid "Attendez la fin du chargement du modèle."
+msgstr "Wait for the model to finish loading."
+
+#: app/souffle-slint/ui/components/onboarding/update_available_dialog.slint:44
+msgctxt "UpdateAvailableDialog"
+msgid "Attendez la fin du déchargement du modèle."
+msgstr "Wait for the model to finish unloading."
+
+#: app/souffle-slint/ui/components/onboarding/update_available_dialog.slint:48
 msgctxt "UpdateAvailableDialog"
 msgid "Mise à jour disponible"
 msgstr "Update available"
 
-#: app/souffle-slint/ui/components/onboarding/update_available_dialog.slint:52
+#: app/souffle-slint/ui/components/onboarding/update_available_dialog.slint:49
 msgctxt "UpdateAvailableDialog"
 msgid "Version {}"
 msgstr "Version {}"
 
-#: app/souffle-slint/ui/components/onboarding/update_available_dialog.slint:73
-msgctxt "UpdateAvailableDialog"
-msgid "Installation impossible pour l'instant : {}"
-msgstr "Installation currently impossible: {}"
-
-#: app/souffle-slint/ui/components/onboarding/update_available_dialog.slint:84
-msgctxt "UpdateAvailableDialog"
-msgid "Voir sur GitHub"
-msgstr "View on GitHub"
-
-#: app/souffle-slint/ui/components/onboarding/update_available_dialog.slint:91
+#: app/souffle-slint/ui/components/onboarding/update_available_dialog.slint:80
 msgctxt "UpdateAvailableDialog"
 msgid "Plus tard"
 msgstr "Later"
+
+#: app/souffle-slint/ui/components/onboarding/update_available_dialog.slint:85
+msgctxt "UpdateAvailableDialog"
+msgid "Télécharger la mise à jour"
+msgstr "Download update"
+
+#: app/souffle-slint/ui/components/onboarding/update_available_dialog.slint:90
+msgctxt "UpdateAvailableDialog"
+msgid "Téléchargement…"
+msgstr "Downloading..."
 
 #: app/souffle-slint/ui/components/onboarding/update_available_dialog.slint:95
 msgctxt "UpdateAvailableDialog"
 msgid "Installer et redémarrer"
 msgstr "Install and restart"
 
-#: app/souffle-slint/ui/components/onboarding/update_available_dialog.slint:100
+#: app/souffle-slint/ui/components/onboarding/update_available_dialog.slint:101
 msgctxt "UpdateAvailableDialog"
-msgid "Téléchargement…"
-msgstr "Downloading..."
+msgid "Réessayer"
+msgstr "Try again"
 
-#: app/souffle-slint/ui/components/onboarding/update_available_dialog.slint:100
+#: app/souffle-slint/ui/components/onboarding/update_available_dialog.slint:106
 msgctxt "UpdateAvailableDialog"
-msgid "Télécharger"
-msgstr "Download"
-
-#. "permissions" | "microphone" | "model" | "shortcut"
-#: app/souffle-slint/ui/onboarding_view.slint:20
-#: app/souffle-slint/ui/onboarding_view.slint:20
-msgctxt "OnboardingView"
-msgid "Permissions"
-msgstr "App Permissions"
-
-#. "permissions" | "microphone" | "model" | "shortcut"
-#: app/souffle-slint/ui/onboarding_view.slint:20
-#: app/souffle-slint/ui/onboarding_view.slint:20
-msgctxt "OnboardingView"
-msgid "Choisissez votre microphone"
-msgstr "Choose your microphone"
-
-#. "permissions" | "microphone" | "model" | "shortcut"
-#: app/souffle-slint/ui/onboarding_view.slint:20
-#: app/souffle-slint/ui/onboarding_view.slint:20
-msgctxt "OnboardingView"
-msgid "Modèle de transcription"
-msgstr "Transcription model"
-
-#. "permissions" | "microphone" | "model" | "shortcut"
-#: app/souffle-slint/ui/onboarding_view.slint:20
-#: app/souffle-slint/ui/onboarding_view.slint:20
-msgctxt "OnboardingView"
-msgid "Raccourci clavier"
-msgstr "Keyboard shortcut"
-
-#: app/souffle-slint/ui/onboarding_view.slint:21
-#: app/souffle-slint/ui/onboarding_view.slint:21
-msgctxt "OnboardingView"
-msgid "Soufflé a besoin de ces autorisations macOS pour fonctionner."
-msgstr "Soufflé needs these macOS permissions to work."
-
-#: app/souffle-slint/ui/onboarding_view.slint:21
-#: app/souffle-slint/ui/onboarding_view.slint:21
-msgctxt "OnboardingView"
-msgid "Vous pourrez changer ce choix plus tard dans les Réglages."
-msgstr "You can change this choice later in Settings."
-
-#: app/souffle-slint/ui/onboarding_view.slint:21
-#: app/souffle-slint/ui/onboarding_view.slint:21
-msgctxt "OnboardingView"
-msgid "Téléchargé une seule fois, tout tourne ensuite hors ligne."
-msgstr "Downloaded once, everything runs offline afterwards."
-
-#: app/souffle-slint/ui/onboarding_view.slint:21
-#: app/souffle-slint/ui/onboarding_view.slint:21
-msgctxt "OnboardingView"
-msgid ""
-"Utilisé pour démarrer et arrêter la dictée depuis n'importe quelle "
-"application."
-msgstr "Used to start and stop dictation from any application."
-
-#: app/souffle-slint/ui/onboarding_view.slint:47
-#: app/souffle-slint/ui/onboarding_view.slint:47
-msgctxt "OnboardingView"
-msgid "Terminer"
-msgstr "Finish"
-
-#: app/souffle-slint/ui/onboarding_view.slint:47
-#: app/souffle-slint/ui/onboarding_view.slint:47
-msgctxt "OnboardingView"
-msgid "Télécharger et continuer"
-msgstr "Download and continue"
-
-#: app/souffle-slint/ui/onboarding_view.slint:47
-#: app/souffle-slint/ui/onboarding_view.slint:47
-msgctxt "OnboardingView"
-msgid "Continuer"
-msgstr "Continue"
-
-#: app/souffle-slint/ui/onboarding_view.slint:81
-#: app/souffle-slint/ui/onboarding_view.slint:81
-msgctxt "OnboardingView"
-msgid "Soufflé"
-msgstr "Soufflé"
-
-#: app/souffle-slint/ui/onboarding_view.slint:88
-#: app/souffle-slint/ui/onboarding_view.slint:88
-msgctxt "OnboardingView"
-msgid "Dictée et transcription de réunion, 100% locale."
-msgstr "Meeting dictation and transcription, 100% local."
-
-#: app/souffle-slint/ui/onboarding_view.slint:98
-#: app/souffle-slint/ui/onboarding_view.slint:98
-msgctxt "OnboardingView"
-msgid "English"
-msgstr "English"
-
-#: app/souffle-slint/ui/onboarding_view.slint:103
-#: app/souffle-slint/ui/onboarding_view.slint:103
-msgctxt "OnboardingView"
-msgid "Français"
-msgstr "French"
-
-#: app/souffle-slint/ui/onboarding_view.slint:144
-#: app/souffle-slint/ui/onboarding_view.slint:144
-msgctxt "OnboardingView"
-msgid "Le modèle est en erreur."
-msgstr "The model is in an error state."
-
-#: app/souffle-slint/ui/onboarding_view.slint:173
-#: app/souffle-slint/ui/onboarding_view.slint:173
-msgctxt "OnboardingView"
-msgid "Actualiser"
-msgstr "Refresh"
-
-#: app/souffle-slint/ui/onboarding_view.slint:178
-#: app/souffle-slint/ui/onboarding_view.slint:178
-msgctxt "OnboardingView"
-msgid "Le microphone peut être changé plus tard dans les Réglages."
-msgstr "The microphone can be changed later in Settings."
-
-#: app/souffle-slint/ui/onboarding_view.slint:190
-#: app/souffle-slint/ui/onboarding_view.slint:190
-msgctxt "OnboardingView"
-msgid "Téléchargement du modèle…"
-msgstr "Downloading model…"
-
-#: app/souffle-slint/ui/onboarding_view.slint:206
-#: app/souffle-slint/ui/onboarding_view.slint:206
-msgctxt "OnboardingView"
-msgid "Chargement du modèle…"
-msgstr "Loading model…"
-
-#: app/souffle-slint/ui/onboarding_view.slint:211
-#: app/souffle-slint/ui/onboarding_view.slint:211
-msgctxt "OnboardingView"
-msgid "Modèle prêt."
-msgstr "Model ready."
-
-#: app/souffle-slint/ui/onboarding_view.slint:244
-#: app/souffle-slint/ui/onboarding_view.slint:244
-#: app/souffle-slint/ui/onboarding_view.slint:244
-msgctxt "OnboardingView"
-msgid "Coller automatiquement le texte transcrit"
-msgstr "Automatically paste transcribed text"
-
-#: app/souffle-slint/ui/onboarding_view.slint:260
-#: app/souffle-slint/ui/onboarding_view.slint:260
-msgctxt "OnboardingView"
-msgid "Le collage automatique nécessite la permission Accessibilité."
-msgstr "Auto-paste requires Accessibility permission."
-
-#: app/souffle-slint/ui/onboarding_view.slint:267
-#: app/souffle-slint/ui/onboarding_view.slint:267
-msgctxt "OnboardingView"
-msgid "Vérifier"
-msgstr "Check"
-
-#: app/souffle-slint/ui/onboarding_view.slint:277
-#: app/souffle-slint/ui/onboarding_view.slint:277
-msgctxt "OnboardingView"
-msgid "Retour"
-msgstr "Back"
-
-#: app/souffle-slint/ui/onboarding_view.slint:283
-#: app/souffle-slint/ui/onboarding_view.slint:283
-msgctxt "OnboardingView"
-msgid "Les permissions peuvent être accordées plus tard."
-msgstr "Permissions can be granted later."
-
-#: app/souffle-slint/ui/main_window.slint:42
-msgctxt "MainWindow"
-msgid "Soufflé"
-msgstr "Soufflé"
-
-#: app/souffle-slint/ui/idle_view.slint:44
-msgctxt "IdleView"
-msgid "Modèle non téléchargé - ouvrez Réglages pour le télécharger."
-msgstr "Model not downloaded - open Settings to download."
-
-#: app/souffle-slint/ui/idle_view.slint:47
-msgctxt "IdleView"
-msgid "Le modèle est en cours de préparation. Réessayez lorsqu’il est prêt."
-msgstr "Model is preparing. Please try again when ready."
-
-#: app/souffle-slint/ui/idle_view.slint:50
-msgctxt "IdleView"
-msgid "Le modèle est en erreur. Réessayez depuis Réglages."
-msgstr "Model error. Please retry from Settings."
-
-#: app/souffle-slint/ui/idle_view.slint:53
-msgctxt "IdleView"
-msgid "La réunion a quitté son état de finalisation de façon inattendue."
-msgstr "The meeting left its finalization state unexpectedly."
-
-#: app/souffle-slint/ui/idle_view.slint:56
-msgctxt "IdleView"
-msgid "La finalisation de la réunion a dépassé 30 secondes."
-msgstr "Meeting finalization timed out after 30 seconds."
-
-#: app/souffle-slint/ui/idle_view.slint:98
-msgctxt "IdleView"
-msgid "Rechercher transcriptions et réunions"
-msgstr "Search transcriptions and meetings"
-
-#: app/souffle-slint/ui/idle_view.slint:110
-msgctxt "IdleView"
-msgid "Tout"
-msgstr "All"
-
-#: app/souffle-slint/ui/idle_view.slint:115
-msgctxt "IdleView"
-msgid "Réunions"
-msgstr "Meetings"
-
-#: app/souffle-slint/ui/idle_view.slint:120
-msgctxt "IdleView"
-msgid "Dictées"
-msgstr "Dictations"
-
-#: app/souffle-slint/ui/components/settings/microphone_section.slint:257
-msgctxt "MicrophoneSection"
-msgid "Intégré"
-msgstr "Built-in"
-
-#: app/souffle-slint/ui/components/settings/microphone_section.slint:258
-msgctxt "MicrophoneSection"
-msgid "USB"
-msgstr "USB"
-
-#: app/souffle-slint/ui/components/settings/microphone_section.slint:259
-msgctxt "MicrophoneSection"
-msgid "Bluetooth"
-msgstr "Bluetooth"
-
-#: app/souffle-slint/ui/components/settings/microphone_section.slint:260
-msgctxt "MicrophoneSection"
-msgid "Virtuel"
-msgstr "Virtual"
-
-#: app/souffle-slint/ui/components/settings/microphone_section.slint:261
-msgctxt "MicrophoneSection"
-msgid "Agrégé"
-msgstr "Aggregate"
-
-#: app/souffle-slint/ui/components/settings/microphone_section.slint:262
-msgctxt "MicrophoneSection"
-msgid "Inconnu"
-msgstr "Unknown"
-
-#: app/souffle-slint/ui/components/settings/microphone_section.slint:263
-msgctxt "MicrophoneSection"
-msgid " · par défaut"
-msgstr " · default"
-
-#: app/souffle-slint/ui/components/settings/model_section.slint:40
-msgctxt "ModelSection"
-msgid "Téléchargement requis"
-msgstr "Download required"
-
-#: app/souffle-slint/ui/components/settings/model_section.slint:41
-msgctxt "ModelSection"
-msgid "Téléchargement…"
-msgstr "Downloading..."
-
-#: app/souffle-slint/ui/components/settings/model_section.slint:42
-msgctxt "ModelSection"
-msgid "Chargement requis"
-msgstr "Load required"
-
-#: app/souffle-slint/ui/components/settings/model_section.slint:43
-msgctxt "ModelSection"
-msgid "Chargement…"
-msgstr "Loading..."
-
-#: app/souffle-slint/ui/components/settings/model_section.slint:44
-msgctxt "ModelSection"
-msgid "Prêt"
-msgstr "Ready"
-
-#: app/souffle-slint/ui/components/settings/model_section.slint:45
-msgctxt "ModelSection"
-msgid "Déchargement…"
-msgstr "Unloading..."
-
-#: app/souffle-slint/ui/components/settings/model_section.slint:46
-msgctxt "ModelSection"
-msgid "Erreur du modèle"
-msgstr "Model error"
-
-#: app/souffle-slint/ui/components/themed_combo.slint:72
-#: app/souffle-slint/ui/components/themed_combo.slint:72
-msgctxt "ThemedComboBox"
-msgid "Automatique"
-msgstr "Automatic"
-
-#: app/souffle-slint/ui/components/themed_combo.slint:73
-#: app/souffle-slint/ui/components/themed_combo.slint:73
-msgctxt "ThemedComboBox"
-msgid "Suivre l'appareil par défaut"
-msgstr "Follow default device"
-
-#: app/souffle-slint/ui/components/themed_combo.slint:78
-msgctxt "ThemedComboBox"
-msgid "Appareil personnalisé (indisponible)"
-msgstr "Custom device (unavailable)"
-
-#: app/souffle-slint/ui/components/themed_combo.slint:74
-#: app/souffle-slint/ui/components/themed_combo.slint:74
-msgctxt "ThemedComboBox"
-msgid "Jamais"
-msgstr "Never"
-
-#: app/souffle-slint/ui/components/themed_combo.slint:75
-#: app/souffle-slint/ui/components/themed_combo.slint:75
-msgctxt "ThemedComboBox"
-msgid "Par défaut"
-msgstr "Default"
-
-#: app/souffle-slint/ui/components/themed_combo.slint:76
-#: app/souffle-slint/ui/components/themed_combo.slint:76
-msgctxt "ThemedComboBox"
-msgid "Compte rendu détaillé"
-msgstr "Detailed minutes"
-
-#: app/souffle-slint/ui/components/themed_combo.slint:77
-#: app/souffle-slint/ui/components/themed_combo.slint:77
-msgctxt "ThemedComboBox"
-msgid "Aperçu bref"
-msgstr "Brief overview"
-
-#: app/souffle-slint/ui/components/themed_combo.slint:78
-#: app/souffle-slint/ui/components/themed_combo.slint:78
-msgctxt "ThemedComboBox"
-msgid "Intégré"
-msgstr "Built-in"
-
-#: app/souffle-slint/ui/components/themed_combo.slint:79
-#: app/souffle-slint/ui/components/themed_combo.slint:79
-msgctxt "ThemedComboBox"
-msgid "USB"
-msgstr "USB"
-
-#: app/souffle-slint/ui/components/themed_combo.slint:80
-#: app/souffle-slint/ui/components/themed_combo.slint:80
-msgctxt "ThemedComboBox"
-msgid "Bluetooth"
-msgstr "Bluetooth"
-
-#: app/souffle-slint/ui/components/themed_combo.slint:81
-#: app/souffle-slint/ui/components/themed_combo.slint:81
-msgctxt "ThemedComboBox"
-msgid "Virtuel"
-msgstr "Virtual"
-
-#: app/souffle-slint/ui/components/themed_combo.slint:82
-#: app/souffle-slint/ui/components/themed_combo.slint:82
-msgctxt "ThemedComboBox"
-msgid "Agrégé"
-msgstr "Aggregate"
-
-#: app/souffle-slint/ui/components/themed_combo.slint:83
-#: app/souffle-slint/ui/components/themed_combo.slint:83
-msgctxt "ThemedComboBox"
-msgid "Inconnu"
-msgstr "Unknown"
-
-#: app/souffle-slint/ui/components/themed_combo.slint:84
-#: app/souffle-slint/ui/components/themed_combo.slint:84
-msgctxt "ThemedComboBox"
-msgid "Nettoyage"
-msgstr "Cleanup"
-
-#: app/souffle-slint/ui/components/themed_combo.slint:85
-#: app/souffle-slint/ui/components/themed_combo.slint:85
-msgctxt "ThemedComboBox"
-msgid "E-mail professionnel"
-msgstr "Professional email"
-
-#: app/souffle-slint/ui/components/themed_combo.slint:86
-#: app/souffle-slint/ui/components/themed_combo.slint:86
-msgctxt "ThemedComboBox"
-msgid "Puces"
-msgstr "Bullets"
-
-#: app/souffle-slint/ui/components/themed_combo.slint:87
-#: app/souffle-slint/ui/components/themed_combo.slint:87
-msgctxt "ThemedComboBox"
-msgid "Sans fillers"
-msgstr "No fillers"
-
-#: app/souffle-slint/ui/components/app_header.slint:35
-msgctxt "AppHeader"
-msgid "Téléchargement requis"
-msgstr "Download required"
-
-#: app/souffle-slint/ui/components/app_header.slint:36
-msgctxt "AppHeader"
-msgid "Téléchargement…"
-msgstr "Downloading..."
-
-#: app/souffle-slint/ui/components/app_header.slint:37
-msgctxt "AppHeader"
-msgid "Chargement requis"
-msgstr "Load required"
-
-#: app/souffle-slint/ui/components/app_header.slint:38
-msgctxt "AppHeader"
-msgid "Chargement…"
-msgstr "Loading..."
-
-#: app/souffle-slint/ui/components/app_header.slint:39
-msgctxt "AppHeader"
-msgid "Prêt"
-msgstr "Ready"
-
-#: app/souffle-slint/ui/components/app_header.slint:40
-msgctxt "AppHeader"
-msgid "Déchargement…"
-msgstr "Unloading..."
-
-#: app/souffle-slint/ui/components/app_header.slint:41
-msgctxt "AppHeader"
-msgid "Erreur du modèle"
-msgstr "Model error"
+msgid "Ouvrir la page de release"
+msgstr "Open release page"
+
+#~ msgctxt "RecordingView"
+#~ msgid "Moi"
+#~ msgstr "Me"
+
+#~ msgctxt "RecordingView"
+#~ msgid "Eux"
+#~ msgstr "Them"
+
+#~ msgctxt "StatusBanner"
+#~ msgid "×"
+#~ msgstr "×"
+
+#~ msgctxt "UpdateAvailableDialog"
+#~ msgid "Installation impossible pour l'instant : {}"
+#~ msgstr "Installation currently impossible: {}"
+
+#~ msgctxt "UpdateAvailableDialog"
+#~ msgid "Voir sur GitHub"
+#~ msgstr "View on GitHub"
+
+#~ msgctxt "UpdateAvailableDialog"
+#~ msgid "Télécharger"
+#~ msgstr "Download"
+
+#~ msgctxt "OnboardingView"
+#~ msgid "Dictée et transcription de réunion, 100% locale."
+#~ msgstr "Meeting dictation and transcription, 100% local."
+
+#~ msgctxt "OnboardingView"
+#~ msgid "Le modèle est en erreur."
+#~ msgstr "The model is in an error state."
+
+#~ msgctxt "OnboardingView"
+#~ msgid "Le collage automatique nécessite la permission Accessibilité."
+#~ msgstr "Auto-paste requires Accessibility permission."
+
+#~ msgctxt "OnboardingView"
+#~ msgid "Vérifier"
+#~ msgstr "Check"
+
+#~ msgctxt "OnboardingView"
+#~ msgid "Les permissions peuvent être accordées plus tard."
+#~ msgstr "Permissions can be granted later."
 
 #~ msgctxt "SnippetsSection"
 #~ msgid "TRIGGER"
