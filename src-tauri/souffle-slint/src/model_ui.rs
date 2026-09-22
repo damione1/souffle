@@ -117,18 +117,6 @@ pub fn download_is_globally_complete(progress: &DownloadProgress) -> bool {
         && progress.completed_files >= progress.total_files
 }
 
-pub fn phase_label(phase: TranscriptionRuntimePhase) -> &'static str {
-    match phase {
-        TranscriptionRuntimePhase::DownloadRequired => "Téléchargement requis",
-        TranscriptionRuntimePhase::Downloading => "Téléchargement…",
-        TranscriptionRuntimePhase::LoadRequired => "Chargement requis",
-        TranscriptionRuntimePhase::Loading => "Chargement…",
-        TranscriptionRuntimePhase::Ready => "Prêt",
-        TranscriptionRuntimePhase::Unloading => "Déchargement…",
-        TranscriptionRuntimePhase::Failed => "Erreur du modèle",
-    }
-}
-
 impl From<TranscriptionRuntimePhase> for crate::TranscriptionPhase {
     fn from(phase: TranscriptionRuntimePhase) -> Self {
         match phase {
@@ -159,7 +147,6 @@ impl From<crate::TranscriptionPhase> for TranscriptionRuntimePhase {
 
 pub fn populate_runtime(window: &MainWindow, phase: TranscriptionRuntimePhase) {
     window.set_model_runtime_phase(phase.into());
-    // window.set_settings_model_status_text(phase_label(phase).into());
 }
 
 /// The FSM already arbitrates StartLoad atomically. A losing concurrent caller
@@ -253,19 +240,6 @@ mod tests {
     }
 
     #[test]
-    fn phase_label_covers_every_phase() {
-        assert_eq!(phase_label(TranscriptionRuntimePhase::Ready), "Prêt");
-        assert_eq!(
-            phase_label(TranscriptionRuntimePhase::DownloadRequired),
-            "Téléchargement requis"
-        );
-        assert_eq!(
-            phase_label(TranscriptionRuntimePhase::LoadRequired),
-            "Chargement requis"
-        );
-    }
-
-    #[test]
     fn runtime_phase_round_trips_without_losing_in_flight_states() {
         for phase in [
             TranscriptionRuntimePhase::DownloadRequired,
@@ -280,7 +254,6 @@ mod tests {
                 TranscriptionRuntimePhase::from(crate::TranscriptionPhase::from(phase)),
                 phase
             );
-            assert!(!phase_label(phase).is_empty());
         }
     }
 

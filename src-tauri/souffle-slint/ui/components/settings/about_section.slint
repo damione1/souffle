@@ -32,7 +32,7 @@ export component AboutSection inherits VerticalLayout {
             label: @tr("Version");
 
             Text {
-                text: root.app-version == "local build" ? "Build local" : @tr("v{}", root.app-version);
+                text: root.app-version == "local build" ? @tr("Build local") : @tr("v{}", root.app-version);
                 font-size: 13px;
                 color: Theme.text-secondary;
                 horizontal-alignment: right;

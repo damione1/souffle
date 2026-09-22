@@ -25,8 +25,8 @@ fn dictation_polish_label(template: &DictationPolishTemplate) -> String {
 fn summary_template_label(template: &SummaryTemplate) -> String {
     match template.id.as_str() {
         "default" => "__DEFAULT__".to_string(),
-        "detailed_minutes" => "__DETAILED_MINUTES__".to_string(),
-        "brief_overview" => "__BRIEF_OVERVIEW__".to_string(),
+        "detailed_minutes" => "__DETAILED__".to_string(),
+        "brief_overview" => "__BRIEF__".to_string(),
         _ => template.name.clone(),
     }
 }

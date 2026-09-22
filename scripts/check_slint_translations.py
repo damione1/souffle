@@ -13,6 +13,10 @@ UNCHANGED_ENGLISH = {
     "100% local", "AUDIO", "Audio", "Claude Code", "DIAGNOSTICS",
     "English", "EXPANSION", "INTERFACE", "Interface", "MICROPHONE",
     "NOTES", "Notes", "PERMISSIONS", "Soufflé", "Transcription", "×", "✕",
+    # Symbols, acronyms and placeholder-only templates: identical spelling
+    # in both languages is correct, not a missed translation.
+    "USB", "Bluetooth", "⏸", "▶", "✓", "•",
+    " {}", " / {}", "• {}", "→ {}", "Version {}",
 }
 
 

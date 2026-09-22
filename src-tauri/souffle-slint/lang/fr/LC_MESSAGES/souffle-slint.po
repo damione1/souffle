@@ -1165,6 +1165,11 @@ msgctxt "AboutSection"
 msgid "v{}"
 msgstr "v{}"
 
+#: src-tauri/souffle-slint/ui/components/settings/about_section.slint:35
+msgctxt "AboutSection"
+msgid "Build local"
+msgstr "Build local"
+
 #: src-tauri/souffle-slint/ui/components/settings/about_section.slint:46
 msgctxt "AboutSection"
 msgid "Transcription"

@@ -204,9 +204,9 @@ fn settings_save_failure_message(outcome: &SettingsSaveOutcome) -> String {
 pub(crate) fn select_app_locale(locale: AppLocale) {
     let locale_str = settings_ui::locale_from_slint(locale);
     if let Err(e) = slint::select_bundled_translation(locale_str) {
-        println!("Translation error: {:?}", e);
+        eprintln!("Translation error: {:?}", e);
     } else {
-        println!("Translation selected: {}", locale_str);
+        eprintln!("Translation selected: {}", locale_str);
     }
 }
 
