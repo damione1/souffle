@@ -3,18 +3,24 @@ import { RecordingMode, SpeakerRole } from "types.slint";
 import { Theme } from "theme.slint";
 import { LucideIcon, IconSet } from "components/lucide_icon.slint";
 import { ThemedTextArea } from "components/themed_text_area.slint";
+import { TranscriptBlock } from "components/transcript_section.slint";
 
 // LiveSessionCard.svelte parity surface. The two modes deliberately share
 // the session toolbar, while their bodies stay distinct: dictation is a
 // single writing surface; meetings add transcript context and live notes.
 export component RecordingView inherits Rectangle {
     in property <RecordingMode> mode; // never idle - see main_window.slint
+    // Dictation path - mono-lane flat buffer, unchanged (AC7).
     in property <string> live-text;
     in property <string> live-tentative;
-    in property <string> live-me-text;
-    in property <string> live-them-text;
-    in property <SpeakerRole> live-tentative-speaker: SpeakerRole.me;
-    in property <bool> live-tentative-has-speaker: false;
+    // Meeting path - paragraph model from LiveTranscript (SOU-237).
+    in property <[TranscriptBlock]> live-transcript-blocks;
+    // True when live-transcript-blocks is empty and live-tentative is empty
+    // (placeholder "À l'écoute…" logic).
+    in property <bool> live-transcript-empty: true;
+    // Elapsed offset in seconds, set by Rust to the real elapsed since
+    // recording started - anchors the free-running timer (AC6).
+    in property <int> live-elapsed-offset-seconds: 0;
     in property <float> audio-level: 0.0;
     in-out property <string> notes;
     in property <bool> system-audio-active: true;
@@ -22,11 +28,21 @@ export component RecordingView inherits Rectangle {
 
     callback stop-requested();
     callback notes-changed(string);
+    // Autoscroll: expose viewport-y for Rust to update.
+    in-out property <length> live-transcript-scroll-top: 0px;
+    // Notify Rust that content height changed so it can pin-to-bottom if needed.
+    callback live-content-height-changed(float);
+    
+    // Exposed for Rust autoscroll (AC5): the real pixel height of the
+    // live-content VerticalLayout and the ScrollView viewport.
+    in-out property <float> live-transcript-content-height: live-scroll.viewport-height / 1px;
+    in-out property <float> live-transcript-viewport-height: live-scroll.height / 1px;
 
     property <string> combined-text: root.live-tentative == "" ? root.live-text
         : root.live-text == "" ? root.live-tentative
         : root.live-text + @tr(" {}", root.live-tentative);
-    property <int> elapsed-seconds: 0;
+
+    property <int> elapsed-seconds: root.live-elapsed-offset-seconds;
     property <int> elapsed-minutes: root.elapsed-seconds / 60;
     property <int> elapsed-remainder: Math.mod(root.elapsed-seconds, 60);
     property <string> elapsed-label: root.elapsed-minutes + ":" +
@@ -34,7 +50,7 @@ export component RecordingView inherits Rectangle {
 
     Timer {
         interval: 1s;
-        running: true;
+        running: root.mode != RecordingMode.idle;
         triggered => { root.elapsed-seconds += 1; }
     }
 
@@ -275,9 +291,11 @@ export component RecordingView inherits Rectangle {
             }
         }
 
-        if root.mode == RecordingMode.meeting: Rectangle {
-            min-height: 170px;
-            vertical-stretch: 1;
+        Rectangle {
+            visible: root.mode == RecordingMode.meeting;
+            min-height: root.mode == RecordingMode.meeting ? 170px : 0px;
+            vertical-stretch: root.mode == RecordingMode.meeting ? 1 : 0;
+
             border-radius: 4px;
             border-width: 1px;
             border-color: Theme.border-soft;
@@ -324,65 +342,49 @@ export component RecordingView inherits Rectangle {
                     }
                 }
 
-                ScrollView {
+                live-scroll := ScrollView {
                     vertical-stretch: 1;
+                    viewport-y <=> root.live-transcript-scroll-top;
 
-                    VerticalLayout {
+                    live-content := VerticalLayout {
                         width: parent.width;
                         alignment: start;
-                        spacing: 3px;
+                        spacing: 10px;
 
-                        if root.live-me-text != "" || (root.live-tentative != "" && root.live-tentative-has-speaker && root.live-tentative-speaker == SpeakerRole.me): HorizontalLayout {
-                            alignment: start;
-                            spacing: 8px;
-
-                            Text {
-                                text: @tr("Moi");
-                                font-family: "Archivo SemiBold";
-                                font-size: 11.5px;
-                                color: Theme.accent;
-                            }
-                            Text {
-                                text: root.elapsed-label;
-                                font-family: "JetBrains Mono";
-                                font-size: 10.5px;
-                                color: Theme.text-faint;
-                            }
-                        }
-                        if root.live-me-text != "" || (root.live-tentative != "" && root.live-tentative-has-speaker && root.live-tentative-speaker == SpeakerRole.me): Text {
-                            width: parent.width;
-                            text: root.live-tentative-has-speaker && root.live-tentative-speaker == SpeakerRole.me ? (root.live-me-text != "" ? root.live-me-text + " " + root.live-tentative : root.live-tentative) : root.live-me-text;
-                            font-size: 15px;
-                            color: Theme.text-secondary;
-                            wrap: word-wrap;
-                        }
-                        if root.live-them-text != "" || (root.live-tentative != "" && root.live-tentative-has-speaker && root.live-tentative-speaker == SpeakerRole.them): HorizontalLayout {
-                            alignment: start;
-                            spacing: 8px;
-                            Text {
-                                text: @tr("Eux");
-                                font-family: "Archivo SemiBold";
-                                font-size: 11.5px;
-                                color: Theme.accent;
-                            }
-                            Text {
-                                text: root.elapsed-label;
-                                font-family: "JetBrains Mono";
-                                font-size: 10.5px;
-                                color: Theme.text-faint;
-                            }
-                        }
-                        if root.live-them-text != "" || (root.live-tentative != "" && root.live-tentative-has-speaker && root.live-tentative-speaker == SpeakerRole.them): Text {
-                            width: parent.width;
-                            text: root.live-tentative-has-speaker && root.live-tentative-speaker == SpeakerRole.them ? (root.live-them-text != "" ? root.live-them-text + " " + root.live-tentative : root.live-tentative) : root.live-them-text;
-                            font-size: 15px;
-                            color: Theme.text-secondary;
-                            wrap: word-wrap;
-                        }
-                        if root.live-me-text == "" && root.live-them-text == "" && root.live-tentative == "": Text {
+                        if root.live-transcript-empty: Text {
                             text: @tr("À l'écoute…");
                             font-size: 14px;
                             color: Theme.text-muted;
+                        }
+
+                        for block[i] in root.live-transcript-blocks: VerticalLayout {
+                            alignment: start;
+                            spacing: 2px;
+
+                            HorizontalLayout {
+                                alignment: start;
+                                spacing: 8px;
+
+                                Text {
+                                    text: block.speaker-label;
+                                    font-family: "Archivo SemiBold";
+                                    font-size: 11.5px;
+                                    color: Theme.accent;
+                                }
+                                Text {
+                                    text: block.timestamp;
+                                    font-family: "JetBrains Mono";
+                                    font-size: 10.5px;
+                                    color: Theme.text-faint;
+                                }
+                            }
+                            Text {
+                                width: parent.width;
+                                text: block.text;
+                                font-size: 15px;
+                                color: Theme.text-secondary;
+                                wrap: word-wrap;
+                            }
                         }
                     }
                 }

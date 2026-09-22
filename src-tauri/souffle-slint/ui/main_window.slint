@@ -69,11 +69,14 @@ export component MainWindow inherits Window {
     in-out property <RecordingMode> recording-mode: RecordingMode.idle;
     in-out property <string> live-text;
     in-out property <string> live-tentative;
-    in-out property <string> live-me-text;
-    in-out property <string> live-them-text;
     in-out property <string> dictation-recovery-text;
-    in-out property <SpeakerRole> live-tentative-speaker: SpeakerRole.me;
-    in-out property <bool> live-tentative-has-speaker: false;
+    in property <[TranscriptBlock]> live-transcript-blocks;
+    in property <bool> live-transcript-empty: true;
+    in property <int> live-elapsed-offset-seconds: 0;
+    in-out property <length> live-transcript-scroll-top: 0px;
+    out property <float> live-transcript-scroll-top-px: root.live-transcript-scroll-top / 1px;
+    in-out property <float> live-transcript-content-height;
+    in-out property <float> live-transcript-viewport-height;
     in property <float> audio-level: 0.0;
     in-out property <string> live-notes;
 
@@ -589,21 +592,25 @@ export component MainWindow inherits Window {
         transcript-alias-save-requested(term, pronunciation) => { root.meeting-detail-transcript-alias-save-requested(term, pronunciation); }
     }
 
-    if root.recording-mode != RecordingMode.idle: RecordingView {
+    if root.recording-mode != RecordingMode.idle: rv := RecordingView {
         width: 100%;
         height: 100%;
         mode: root.recording-mode;
         live-text: root.live-text;
         live-tentative: root.live-tentative;
-        live-me-text: root.live-me-text;
-        live-them-text: root.live-them-text;
-        live-tentative-speaker: root.live-tentative-speaker;
-        live-tentative-has-speaker: root.live-tentative-has-speaker;
+        live-transcript-blocks: root.live-transcript-blocks;
+        live-transcript-empty: root.live-transcript-empty;
+        live-elapsed-offset-seconds: root.live-elapsed-offset-seconds;
+        live-transcript-scroll-top <=> root.live-transcript-scroll-top;
+        live-transcript-content-height <=> root.live-transcript-content-height;
+        live-transcript-viewport-height <=> root.live-transcript-viewport-height;
         audio-level: root.audio-level;
         notes <=> root.live-notes;
         system-audio-active: root.settings-system-audio-supported && root.settings-capture-system-audio;
         auto-paste: root.settings-auto-paste;
         stop-requested => { root.stop-requested(); }
+        
+        
     }
 
     // Drawn last so it overlays whatever is behind it, mirroring App.svelte

@@ -33,13 +33,16 @@ use souffle_lib::audio::AudioInputDevice;
 use souffle_lib::calendar::CalendarEvent;
 use souffle_lib::commands::SettingsSaveOutcome;
 use souffle_lib::engine::{
-    Speaker, TranscriptionProfileSelection, TranscriptionRuntimePhase, TranscriptionSegment,
+    TranscriptionProfileSelection, TranscriptionRuntimePhase, TranscriptionSegment,
 };
+use souffle_lib::lock_ext::MutexExt;
 use souffle_lib::native::bridge::{AppView, NativeAction};
 use souffle_lib::permissions::{PermState, PermissionKind as DomainPermissionKind};
 use souffle_lib::progress::ProgressChannel;
 use souffle_lib::settings::{AppSettings, ShortcutSettings};
 use souffle_lib::state::AppState;
+mod live_transcript;
+use live_transcript::LiveTranscript;
 use souffle_lib::transcript::{MeetingCalendarContext, MeetingParticipant, MeetingTranscript};
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -55,6 +58,8 @@ use std::time::Duration;
 /// parameter below unchanged, while removing the Tauri dependency itself.
 type AppHandle = Arc<AppState>;
 
+type LiveTranscriptState = Arc<Mutex<LiveTranscript>>;
+
 /// Notes autosave debounce, matching `NOTES_DEBOUNCE_MS` in
 /// features/meeting/controller.svelte.ts.
 const NOTES_DEBOUNCE: Duration = Duration::from_millis(800);
@@ -69,6 +74,8 @@ const TRANSCRIPT_SCROLL_MARGIN: f32 = 3.0 * TRANSCRIPT_VIEWPORT_HEIGHT;
 /// `start_audio_progress_timer`'s 150ms poll below, just faster since
 /// scrolling is more time-sensitive than a playback position label.
 const TRANSCRIPT_SCROLL_POLL: Duration = Duration::from_millis(80);
+const LIVE_TRANSCRIPT_SCROLL_POLL: Duration = Duration::from_millis(80);
+const LIVE_NEAR_BOTTOM_PX: f32 = 40.0;
 
 /// Matches `DiagnosticsSettingsSection.svelte`'s `TAIL_LINES`/`POLL_MS`.
 const SETTINGS_LOG_TAIL_LINES: u32 = 80;
@@ -618,6 +625,43 @@ fn start_transcript_scroll_timer(
 /// Called before loading a different meeting's transcript and when leaving
 /// MeetingDetail, so a stale huge block list never lingers in memory and
 /// the poll timer never fires against a slice that no longer applies.
+
+fn start_live_transcript_timer(
+    weak: slint::Weak<MainWindow>,
+    live_state: LiveTranscriptState,
+) -> slint::Timer {
+    let timer = slint::Timer::default();
+    timer.start(
+        slint::TimerMode::Repeated,
+        LIVE_TRANSCRIPT_SCROLL_POLL,
+        move || {
+            let Some(window) = weak.upgrade() else {
+                return;
+            };
+            if window.get_recording_mode() == RecordingMode::Idle {
+                return;
+            }
+            {
+                let mut live = live_state.lock().unwrap();
+                live.expire_tentatives();
+            }
+            push_live_blocks(&window, &live_state);
+            let scroll_y = window.get_live_transcript_scroll_top_px();
+            let content_h = window.get_live_transcript_content_height();
+            let viewport_h = window.get_live_transcript_viewport_height();
+            if content_h <= viewport_h {
+                return;
+            }
+            let bottom = -(content_h - viewport_h);
+            let at_bottom_threshold = bottom + LIVE_NEAR_BOTTOM_PX;
+            if scroll_y == 0.0 || scroll_y <= at_bottom_threshold {
+                window.set_live_transcript_scroll_top((bottom as f32) * 1.0);
+            }
+        },
+    );
+    timer
+}
+
 fn stop_transcript_window(
     transcript_state: &Rc<RefCell<Option<TranscriptState>>>,
     transcript_timer: &Rc<RefCell<Option<slint::Timer>>>,
@@ -953,6 +997,7 @@ async fn start_meeting_from_event(
     handle: AppHandle,
     weak: slint::Weak<MainWindow>,
     event: CalendarEvent,
+    live_state: LiveTranscriptState,
 ) -> Result<(), String> {
     ensure_model_ready(&handle).await?;
     let title = event.title.clone();
@@ -968,7 +1013,7 @@ async fn start_meeting_from_event(
                 state,
                 title,
                 Some(context),
-                live_segment_channel(weak),
+                live_segment_channel(weak, live_state),
             )
             .await
         })
@@ -1631,19 +1676,31 @@ async fn ensure_model_ready(handle: &AppHandle) -> Result<(), String> {
 /// paragraph-grouped/speaker-lane rendering LiveSessionCard.svelte does -
 /// that's real, separate work (windowing, speaker lanes, inline edit),
 /// deliberately deferred and noted here rather than half-built.
-fn live_segment_channel(weak: slint::Weak<MainWindow>) -> ProgressChannel<TranscriptionSegment> {
+fn live_segment_channel(
+    weak: slint::Weak<MainWindow>,
+    live_state: LiveTranscriptState,
+) -> ProgressChannel<TranscriptionSegment> {
     ProgressChannel::new(move |segment: TranscriptionSegment| {
         let weak = weak.clone();
+        let live_state = live_state.clone();
         let _ = slint::invoke_from_event_loop(move || {
             let Some(window) = weak.upgrade() else {
                 return;
             };
+            if segment.speaker.is_some() {
+                {
+                    let mut live = live_state.lock().unwrap();
+                    if segment.is_final {
+                        live.push_final(&segment);
+                    } else {
+                        live.push_tentative(&segment);
+                    }
+                }
+                push_live_blocks(&window, &live_state);
+                return;
+            }
             if segment.is_final {
-                let mut text = match segment.speaker {
-                    Some(Speaker::Me) => window.get_live_me_text().to_string(),
-                    Some(Speaker::Them) => window.get_live_them_text().to_string(),
-                    None => window.get_live_text().to_string(),
-                };
+                let mut text = window.get_live_text().to_string();
                 let trimmed = segment.text.trim();
                 if !trimmed.is_empty() {
                     if !text.is_empty() {
@@ -1651,59 +1708,39 @@ fn live_segment_channel(weak: slint::Weak<MainWindow>) -> ProgressChannel<Transc
                     }
                     text.push_str(trimmed);
                 }
-                match segment.speaker {
-                    Some(Speaker::Me) => window.set_live_me_text(text.into()),
-                    Some(Speaker::Them) => window.set_live_them_text(text.into()),
-                    None => window.set_live_text(text.into()),
-                }
-                // `live-tentative` is a single shared buffer across both speaker
-                // lanes. Only clear it here if it still belongs to the speaker
-                // who just finalized - otherwise the other lane's in-flight word
-                // (e.g. Them started talking while Me's word was still pending)
-                // gets wiped mid-word instead of being left to finalize on its own.
-                let tentative_belongs_to_finalizing_speaker = match segment.speaker {
-                    Some(Speaker::Me) => window.get_live_tentative_speaker() == SpeakerRole::Me,
-                    Some(Speaker::Them) => window.get_live_tentative_speaker() == SpeakerRole::Them,
-                    None => true,
-                };
-                if !window.get_live_tentative_has_speaker()
-                    || tentative_belongs_to_finalizing_speaker
+                window.set_live_text(text.into());
                 {
-                    window.set_live_tentative("".into());
-                    window.set_live_tentative_has_speaker(false);
+                    let mut live = live_state.lock().unwrap();
+                    live.push_final(&segment);
                 }
+                window.set_live_tentative("".into());
             } else {
-                window.set_live_tentative(segment.text.into());
-                match segment.speaker {
-                    Some(Speaker::Me) => {
-                        window.set_live_tentative_speaker(SpeakerRole::Me);
-                        window.set_live_tentative_has_speaker(true);
-                    }
-                    Some(Speaker::Them) => {
-                        window.set_live_tentative_speaker(SpeakerRole::Them);
-                        window.set_live_tentative_has_speaker(true);
-                    }
-                    None => window.set_live_tentative_has_speaker(false),
-                }
+                window.set_live_tentative(segment.text.trim().into());
             }
         });
     })
+}
+
+fn push_live_blocks(window: &MainWindow, live_state: &LiveTranscriptState) {
+    let live = live_state.lock().unwrap();
+    let is_empty = live.is_empty();
+    let blocks = live.build_blocks();
+    drop(live);
+    let model = std::rc::Rc::new(slint::VecModel::from(blocks));
+    window.set_live_transcript_blocks(model.into());
+    window.set_live_transcript_empty(is_empty);
 }
 
 #[derive(Debug, PartialEq, Eq)]
 struct DictationTextBuffers {
     live: String,
     tentative: String,
-    me: String,
-    them: String,
     recovery: String,
 }
 
 fn reset_live_buffers(mut buffers: DictationTextBuffers) -> DictationTextBuffers {
     buffers.live.clear();
     buffers.tentative.clear();
-    buffers.me.clear();
-    buffers.them.clear();
     buffers
 }
 
@@ -1715,20 +1752,21 @@ fn merge_recovery_text(existing: &str, incoming: &str) -> String {
     }
 }
 
-fn clear_live_transcript(window: &MainWindow) {
+fn clear_live_transcript(window: &MainWindow, live_state: &LiveTranscriptState) {
     let buffers = reset_live_buffers(DictationTextBuffers {
         live: window.get_live_text().to_string(),
         tentative: window.get_live_tentative().to_string(),
-        me: window.get_live_me_text().to_string(),
-        them: window.get_live_them_text().to_string(),
         recovery: window.get_dictation_recovery_text().to_string(),
     });
     window.set_live_text(buffers.live.into());
     window.set_live_tentative(buffers.tentative.into());
-    window.set_live_me_text(buffers.me.into());
-    window.set_live_them_text(buffers.them.into());
     window.set_dictation_recovery_text(buffers.recovery.into());
-    window.set_live_tentative_has_speaker(false);
+
+    {
+        let mut live = live_state.lock().unwrap();
+        live.clear();
+    }
+    push_live_blocks(window, live_state);
 }
 
 /// Pushes each `OllamaPullProgress` update into the settings window's
@@ -1932,21 +1970,32 @@ where
     rx.await.expect("main-thread task dropped its result")
 }
 
-async fn start_dictation(handle: AppHandle, weak: slint::Weak<MainWindow>) -> Result<(), String> {
+async fn start_dictation(
+    handle: AppHandle,
+    weak: slint::Weak<MainWindow>,
+    live_state: LiveTranscriptState,
+) -> Result<(), String> {
     ensure_model_ready(&handle).await?;
     run_on_main_thread(move || {
         souffle_lib::async_runtime::block_on(async move {
             let state = Arc::clone(&handle);
-            souffle_lib::commands::start_transcription(state, live_segment_channel(weak), true)
-                .await
+            souffle_lib::commands::start_transcription(
+                state,
+                live_segment_channel(weak, live_state),
+                true,
+            )
+            .await
         })
     })
     .await
 }
 
-async fn start_meeting(handle: AppHandle, weak: slint::Weak<MainWindow>) -> Result<(), String> {
+async fn start_meeting(
+    handle: AppHandle,
+    weak: slint::Weak<MainWindow>,
+    live_state: LiveTranscriptState,
+) -> Result<(), String> {
     ensure_model_ready(&handle).await?;
-    // Mirrors defaultMeetingTitle() in meeting/controller.svelte.ts.
     let title = format!("Meeting {}", default_meeting_date());
     run_on_main_thread(move || {
         souffle_lib::async_runtime::block_on(async move {
@@ -1955,7 +2004,7 @@ async fn start_meeting(handle: AppHandle, weak: slint::Weak<MainWindow>) -> Resu
                 state,
                 title,
                 None,
-                live_segment_channel(weak),
+                live_segment_channel(weak, live_state),
             )
             .await
         })
@@ -3136,8 +3185,16 @@ fn wire_callbacks(
     settings_state: SettingsCache,
     settings_io: Rc<settings_io::SettingsIoCoordinator>,
     settings_drafts: Rc<settings_drafts::SettingsDraftController>,
+    live_state: LiveTranscriptState,
+    live_transcript_timer: Rc<RefCell<Option<slint::Timer>>>,
 ) {
     let lists_models = lists_ui::SettingsListModels::install(window);
+    *live_transcript_timer.borrow_mut() = Some(start_live_transcript_timer(
+        window.as_weak(),
+        live_state.clone(),
+    ));
+    let live_transcript_timer_keepalive = live_transcript_timer.clone();
+
     // Shared with load_meeting_audio/stop_audio_player/open_meeting_detail
     // and the play-pause/seek callbacks below - one loaded player at a
     // time, for whichever meeting is currently open in MeetingDetail.
@@ -3198,15 +3255,18 @@ fn wire_callbacks(
 
     let weak = window.as_weak();
     let handle = tauri_handle.clone();
+    let live_state_dict = live_state.clone();
     window.on_dictate_requested(move || {
         let weak = weak.clone();
         let handle = handle.clone();
+        let live_state = live_state_dict.clone();
         souffle_lib::async_runtime::spawn(async move {
-            let result = start_dictation(handle, weak.clone()).await;
+            let result = start_dictation(handle, weak.clone(), live_state.clone()).await;
             if let Err(e) = weak.upgrade_in_event_loop(move |window| match result {
                 Ok(()) => {
-                    clear_live_transcript(&window);
+                    clear_live_transcript(&window, &live_state);
                     window.set_recording_mode(RecordingMode::Dictation);
+                    window.set_live_elapsed_offset_seconds(0);
                 }
                 Err(e) => window.set_transcription_status_message(e.into()),
             }) {
@@ -3217,16 +3277,28 @@ fn wire_callbacks(
 
     let weak = window.as_weak();
     let handle = tauri_handle.clone();
+    let live_state_req = live_state.clone();
     window.on_meeting_requested(move || {
         let weak = weak.clone();
         let handle = handle.clone();
+        let live_state = live_state_req.clone();
         souffle_lib::async_runtime::spawn(async move {
-            let result = start_meeting(handle, weak.clone()).await;
+            let handle_for_accumulator = handle.clone();
+            let result = start_meeting(handle, weak.clone(), live_state.clone()).await;
             if let Err(e) = weak.upgrade_in_event_loop(move |window| match result {
                 Ok(()) => {
-                    clear_live_transcript(&window);
+                    clear_live_transcript(&window, &live_state);
                     window.set_live_notes("".into());
                     window.set_recording_mode(RecordingMode::Meeting);
+                    if let Ok(guard) = handle_for_accumulator.meeting_accumulator.acquire() {
+                        if let Some(a) = guard.as_ref() {
+                            let secs = chrono::Utc::now()
+                                .signed_duration_since(a.session_started_at)
+                                .num_seconds()
+                                .max(0);
+                            window.set_live_elapsed_offset_seconds(secs as i32);
+                        }
+                    }
                 }
                 Err(e) => window.set_meeting_status_message(e.into()),
             }) {
@@ -3240,8 +3312,10 @@ fn wire_callbacks(
     let handle = tauri_handle.clone();
     let stop_in_flight_for_request = Arc::clone(&stop_in_flight);
     let live_notes_timer_keepalive = live_notes_timer.clone();
+    let value_stop = live_state.clone();
     window.on_stop_requested(move || {
         let _ = &live_notes_timer_keepalive;
+        let _ = &live_transcript_timer_keepalive;
         if stop_in_flight_for_request.swap(true, Ordering::AcqRel) {
             return;
         }
@@ -3255,6 +3329,7 @@ fn wire_callbacks(
         let weak = weak.clone();
         let handle = handle.clone();
         let stop_in_flight = Arc::clone(&stop_in_flight_for_request);
+        let live_state_for_closure = value_stop.clone();
         souffle_lib::async_runtime::spawn(async move {
             let handle_for_refresh = handle.clone();
             if mode == RecordingMode::Meeting {
@@ -3279,7 +3354,8 @@ fn wire_callbacks(
                 // does capture it, as a plain same-thread closure) reuses
                 // the real open-meeting path instead of duplicating it.
                 if let Err(e) = weak.upgrade_in_event_loop(move |window| {
-                    clear_live_transcript(&window);
+                    let value = live_state_for_closure.clone();
+                    clear_live_transcript(&window, &value);
                     match result {
                         // A stopped meeting recording lands the user back on
                         // that meeting's detail, not the Timeline - they
@@ -3327,14 +3403,20 @@ fn wire_callbacks(
                         }
                     }
                     match disposition {
-                        DictationTranscriptDisposition::Clear => clear_live_transcript(&window),
+                        DictationTranscriptDisposition::Clear => {
+                            let val = live_state_for_closure.clone();
+                            clear_live_transcript(&window, &val);
+                        }
                         DictationTranscriptDisposition::RetainForRecovery => {
                             let recovery = merge_recovery_text(
                                 &window.get_dictation_recovery_text(),
                                 &window.get_live_text(),
                             );
                             window.set_dictation_recovery_text(recovery.into());
-                            clear_live_transcript(&window);
+                            {
+                                let val = live_state_for_closure.clone();
+                                clear_live_transcript(&window, &val);
+                            }
                         }
                     }
                     window.set_recording_mode(RecordingMode::Idle);
@@ -3350,6 +3432,7 @@ fn wire_callbacks(
     let weak = window.as_weak();
     let handle = tauri_handle.clone();
     let stop_in_flight_for_cancel = Arc::clone(&stop_in_flight);
+    let value_cancel = live_state.clone();
     window.on_cancel_dictation_requested(move || {
         if stop_in_flight_for_cancel.swap(true, Ordering::AcqRel) {
             return;
@@ -3365,12 +3448,16 @@ fn wire_callbacks(
         let weak = weak.clone();
         let handle = handle.clone();
         let stop_in_flight = Arc::clone(&stop_in_flight_for_cancel);
+        let live_state_for_closure = value_cancel.clone();
         souffle_lib::async_runtime::spawn(async move {
             let result =
                 end_dictation(handle, weak.clone(), None, DictationEndIntent::Cancel).await;
             if let Err(error) = weak.upgrade_in_event_loop(move |window| {
                 match dictation_transcript_disposition(DictationEndIntent::Cancel, result.is_ok()) {
-                    DictationTranscriptDisposition::Clear => clear_live_transcript(&window),
+                    DictationTranscriptDisposition::Clear => {
+                        let value = live_state_for_closure.clone();
+                        clear_live_transcript(&window, &value);
+                    }
                     DictationTranscriptDisposition::RetainForRecovery => {}
                 }
                 window.set_recording_mode(RecordingMode::Idle);
@@ -3454,23 +3541,43 @@ fn wire_callbacks(
 
     let weak_resume = window.as_weak();
     let handle_resume = tauri_handle.clone();
+    let live_state_res = live_state.clone();
     window.on_meeting_detail_resume(move || {
         if let Some(window) = weak_resume.upgrade() {
             window.set_meeting_detail_resume_error("".into());
             let id = window.get_active_meeting_id().to_string();
             let state = handle_resume.clone();
-            let channel = live_segment_channel(weak_resume.clone());
+            let live_state = live_state_res.clone();
+            let channel = live_segment_channel(weak_resume.clone(), live_state.clone());
             let weak_for_done = weak_resume.clone();
             souffle_lib::async_runtime::spawn(async move {
-                if let Err(e) =
-                    souffle_lib::commands::resume_meeting_recording(state, id, channel).await
+                match souffle_lib::commands::resume_meeting_recording(state.clone(), id, channel)
+                    .await
                 {
-                    eprintln!("Failed to resume meeting: {:?}", e);
-                    let _ = slint::invoke_from_event_loop(move || {
-                        if let Some(w) = weak_for_done.upgrade() {
-                            w.set_meeting_detail_resume_error(e.into());
-                        }
-                    });
+                    Ok(()) => {
+                        let state_for_accum = state.clone();
+                        let _ = slint::invoke_from_event_loop(move || {
+                            if let Some(w) = weak_for_done.upgrade() {
+                                if let Ok(guard) = state_for_accum.meeting_accumulator.acquire() {
+                                    if let Some(a) = guard.as_ref() {
+                                        let secs = chrono::Utc::now()
+                                            .signed_duration_since(a.session_started_at)
+                                            .num_seconds()
+                                            .max(0);
+                                        w.set_live_elapsed_offset_seconds(secs as i32);
+                                    }
+                                }
+                            }
+                        });
+                    }
+                    Err(e) => {
+                        eprintln!("Failed to resume meeting: {:?}", e);
+                        let _ = slint::invoke_from_event_loop(move || {
+                            if let Some(w) = weak_for_done.upgrade() {
+                                w.set_meeting_detail_resume_error(e.into());
+                            }
+                        });
+                    }
                 }
             });
         }
@@ -3666,6 +3773,7 @@ fn wire_callbacks(
     let weak = window.as_weak();
     let handle = tauri_handle.clone();
     let upcoming_for_start = upcoming_cache.clone();
+    let live_state_cal = live_state.clone();
     window.on_calendar_event_start_requested(move |occurrence_id| {
         let event = upcoming_for_start
             .borrow()
@@ -3678,13 +3786,25 @@ fn wire_callbacks(
         };
         let weak = weak.clone();
         let handle = handle.clone();
+        let live_state = live_state_cal.clone();
         souffle_lib::async_runtime::spawn(async move {
-            let result = start_meeting_from_event(handle, weak.clone(), event).await;
+            let handle_for_accumulator = handle.clone();
+            let result =
+                start_meeting_from_event(handle, weak.clone(), event, live_state.clone()).await;
             if let Err(e) = weak.upgrade_in_event_loop(move |window| match result {
                 Ok(()) => {
-                    clear_live_transcript(&window);
+                    clear_live_transcript(&window, &live_state);
                     window.set_live_notes("".into());
                     window.set_recording_mode(RecordingMode::Meeting);
+                    if let Ok(guard) = handle_for_accumulator.meeting_accumulator.acquire() {
+                        if let Some(a) = guard.as_ref() {
+                            let secs = chrono::Utc::now()
+                                .signed_duration_since(a.session_started_at)
+                                .num_seconds()
+                                .max(0);
+                            window.set_live_elapsed_offset_seconds(secs as i32);
+                        }
+                    }
                 }
                 Err(e) => window.set_meeting_status_message(e.into()),
             }) {
@@ -6157,6 +6277,9 @@ fn main() {
     let settings_io =
         settings_io::SettingsIoCoordinator::new(handle.clone(), settings_state.clone());
 
+    let live_state: LiveTranscriptState = Arc::new(Mutex::new(LiveTranscript::new()));
+    let live_transcript_timer: Rc<RefCell<Option<slint::Timer>>> = Rc::new(RefCell::new(None));
+
     let weak_close = window.as_weak();
     let io_close = settings_io.clone();
     window.window().on_close_requested(move || {
@@ -6194,6 +6317,8 @@ fn main() {
         settings_state,
         settings_io.clone(),
         settings_drafts,
+        live_state,
+        live_transcript_timer,
     );
     let startup_app_handle = handle.clone();
 
@@ -6451,17 +6576,15 @@ mod tests {
 
     #[test]
     fn every_live_reset_preserves_the_independent_recovery_buffer() {
+        // me/them speaker buffers were moved to LiveTranscript (SOU-237);
+        // DictationTextBuffers now only holds the dictation-path flat buffers.
         let reset = reset_live_buffers(DictationTextBuffers {
             live: "new live dictation".into(),
             tentative: "partial".into(),
-            me: "speaker me".into(),
-            them: "speaker them".into(),
             recovery: "older recoverable draft".into(),
         });
         assert!(reset.live.is_empty());
         assert!(reset.tentative.is_empty());
-        assert!(reset.me.is_empty());
-        assert!(reset.them.is_empty());
         assert_eq!(reset.recovery, "older recoverable draft");
         assert_eq!(
             merge_recovery_text(&reset.recovery, "second failed dictation"),
