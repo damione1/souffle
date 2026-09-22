@@ -113,11 +113,17 @@ export component ThemedComboBox inherits Rectangle {
         }
     }
 
-    function open(index: int) {
+    function open(fallback-index: int) {
         if !root.enabled || root.model.length == 0 {
             return;
         }
-        root.highlighted-index = max(0, min(root.model.length - 1, index));
+        // SOU-228: seed the keyboard cursor with the caller's fallback (0, or
+        // the last index for the Up arrow). Slint has no imperative loop in
+        // functions, so the reverse-lookup of `current-value` rides on the
+        // popup repeater instead: rows instantiate on `show()` and the row
+        // carrying the current selection pulls the cursor onto itself (see
+        // the row `init` below). When no row matches, the fallback stands.
+        root.highlighted-index = max(0, min(root.model.length - 1, fallback-index));
         popup.show();
     }
 
@@ -201,6 +207,20 @@ export component ThemedComboBox inherits Rectangle {
                         accessible-item-selectable: true;
                         accessible-item-selected: item == root.current-value;
                         accessible-item-index: index;
+                        // SOU-228: popup contents are (re)instantiated on
+                        // every `show()`, so each row checks whether it holds
+                        // the current selection — by stable id when
+                        // `option-values` mirrors `model`, else by label —
+                        // and moves the keyboard cursor onto itself. With no
+                        // match (value absent from the model), the cursor
+                        // keeps the fallback index seeded by `open()`.
+                        init => {
+                            if (root.option-values.length == root.model.length
+                                ? root.option-values[index]
+                                : item) == root.current-value {
+                                root.highlighted-index = index;
+                            }
+                        }
                         accessible-action-default => {
                             root.choose(index);
                             popup.close();
