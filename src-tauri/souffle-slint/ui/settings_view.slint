@@ -154,7 +154,19 @@ export component SettingsView inherits Rectangle {
     in property <string> unload-timeout-label;
     in property <string> model-error-message;
     in property <bool> dictation-learn-from-edit;
+    // `dictionary-entries` / `snippets` are windowed slices, not the full
+    // lists - see the SOU-229 comment in `dictionary_section.slint`.
     in property <[DictionaryRow]> dictionary-entries;
+    in property <int> dictionary-entry-count;
+    in property <float> dictionary-list-content-height;
+    in property <float> dictionary-list-spacer-before;
+    in property <float> dictionary-list-spacer-after;
+    in-out property <length> dictionary-list-scroll-top;
+    in property <int> snippets-entry-count;
+    in property <float> snippets-list-content-height;
+    in property <float> snippets-list-spacer-before;
+    in property <float> snippets-list-spacer-after;
+    in-out property <length> snippets-list-scroll-top;
     in property <string> dictionary-add-error;
     in property <int> dictionary-delete-error-id;
     in property <string> dictionary-delete-error;
@@ -374,6 +386,11 @@ export component SettingsView inherits Rectangle {
                         DictionarySection {
                             learn-from-edit: root.dictation-learn-from-edit;
                             entries: root.dictionary-entries;
+                            entry-count: root.dictionary-entry-count;
+                            list-content-height: root.dictionary-list-content-height;
+                            list-spacer-before: root.dictionary-list-spacer-before;
+                            list-spacer-after: root.dictionary-list-spacer-after;
+                            list-scroll-top <=> root.dictionary-list-scroll-top;
                             new-term-draft <=> root.new-dictionary-term-draft;
                             new-pronunciation-draft <=> root.new-dictionary-pronunciation-draft;
                             new-category-draft <=> root.new-dictionary-category-draft;
@@ -387,6 +404,11 @@ export component SettingsView inherits Rectangle {
 
                         SnippetsSection {
                             entries: root.snippets;
+                            entry-count: root.snippets-entry-count;
+                            list-content-height: root.snippets-list-content-height;
+                            list-spacer-before: root.snippets-list-spacer-before;
+                            list-spacer-after: root.snippets-list-spacer-after;
+                            list-scroll-top <=> root.snippets-list-scroll-top;
                             new-trigger-draft <=> root.new-snippet-trigger-draft;
                             new-expansion-draft <=> root.new-snippet-expansion-draft;
                             add-error: root.snippet-add-error;

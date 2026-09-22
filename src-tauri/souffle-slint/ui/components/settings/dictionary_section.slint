@@ -4,7 +4,6 @@ import { Theme } from "../../theme.slint";
 import { ThemedSwitch } from "../themed_switch.slint";
 import { ThemedButton } from "../themed_button.slint";
 import { ThemedLineEdit } from "../themed_line_edit.slint";
-import { ListView } from "std-widgets.slint";
 
 
 // Port of DictionarySettingsSection.svelte. Simplified: aliases (comma-
@@ -21,7 +20,23 @@ export struct DictionaryRow {
 
 export component DictionarySection inherits VerticalLayout {
     in property <bool> learn-from-edit;
+    // Only the currently visible slice of the dictionary, not the whole
+    // thing (SOU-229) - `lists_ui.rs` owns the full row list and pushes a
+    // new slice in whenever `list-scroll-top` moves far enough, same
+    // spacer-before/spacer-after windowing as `transcript_section.slint`
+    // (Slint's `ListView` is a `ScrollView { @children }` that mounts every
+    // model row, so it can't bound instantiation itself).
     in property <[DictionaryRow]> entries;
+    // Full entry count (for the empty state) and estimated px height of the
+    // whole list - plain `float`s because Rust's stable `set_*` API has no
+    // `length` type, see `transcript_section.slint`.
+    in property <int> entry-count: 0;
+    in property <float> list-content-height: 0.0;
+    in property <float> list-spacer-before: 0.0;
+    in property <float> list-spacer-after: 0.0;
+    // Two-way bound up to `MainWindow` so `lists_ui.rs` can poll the real
+    // scroll position and decide the next slice.
+    in-out property <length> list-scroll-top: 0px;
     in-out property <string> new-term-draft: "";
     in-out property <string> new-pronunciation-draft: "";
     in-out property <string> new-category-draft: "";
@@ -137,16 +152,25 @@ export component DictionarySection inherits VerticalLayout {
             font-size: 11px;
         }
 
-        if root.entries.length == 0: Text {
+        if root.entry-count == 0: Text {
             text: @tr("Aucune entrée.");
             font-size: 12px;
             color: Theme.text-muted;
         }
     }
 
-    dictionary-list := ListView {
-        height: min(root.entries.length * 64px, 360px);
-        visible: root.entries.length > 0;
+    dictionary-list := Flickable {
+        height: min(root.list-content-height * 1px, 360px);
+        visible: root.entry-count > 0;
+        viewport-width: self.width;
+        viewport-height: root.list-content-height * 1px;
+        viewport-y <=> root.list-scroll-top;
+
+        VerticalLayout {
+        width: dictionary-list.width;
+        alignment: start;
+
+        Rectangle { height: root.list-spacer-before * 1px; }
 
         for row in root.entries: Rectangle {
             height: root.delete-error != "" && root.delete-error-id == row.id ? 88px : 64px;
@@ -197,6 +221,9 @@ export component DictionarySection inherits VerticalLayout {
                     }
                 }
             }
+        }
+
+        Rectangle { height: root.list-spacer-after * 1px; }
         }
     }
     }

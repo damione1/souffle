@@ -256,14 +256,30 @@ export component MainWindow inherits Window {
     in property <string> settings-unload-timeout-label;
     in property <string> settings-model-error-message;
     in property <bool> settings-dictation-learn-from-edit;
+    // Windowed slice of the dictionary, not the full list (SOU-229) - same
+    // spacer/scroll-mirror plumbing as `meeting-detail-transcript-*` above:
+    // `lists_ui.rs` polls the `-px` mirror and pushes the next slice.
     in property <[DictionaryRow]> settings-dictionary-entries;
+    in property <int> settings-dictionary-count: 0;
+    in property <float> settings-dictionary-content-height: 0.0;
+    in property <float> settings-dictionary-spacer-before: 0.0;
+    in property <float> settings-dictionary-spacer-after: 0.0;
+    in-out property <length> settings-dictionary-scroll-top: 0px;
+    out property <float> settings-dictionary-scroll-top-px: root.settings-dictionary-scroll-top / 1px;
     in property <string> settings-dictionary-add-error;
     in property <int> settings-dictionary-delete-error-id;
     in property <string> settings-dictionary-delete-error;
     in-out property <string> settings-new-dictionary-term-draft: "";
     in-out property <string> settings-new-dictionary-pronunciation-draft: "";
     in-out property <string> settings-new-dictionary-category-draft: "";
+    // Same SOU-229 windowing plumbing as `settings-dictionary-*`.
     in property <[SnippetRow]> settings-snippets;
+    in property <int> settings-snippets-count: 0;
+    in property <float> settings-snippets-content-height: 0.0;
+    in property <float> settings-snippets-spacer-before: 0.0;
+    in property <float> settings-snippets-spacer-after: 0.0;
+    in-out property <length> settings-snippets-scroll-top: 0px;
+    out property <float> settings-snippets-scroll-top-px: root.settings-snippets-scroll-top / 1px;
     in property <string> settings-snippet-add-error;
     in property <int> settings-snippet-delete-error-id;
     in property <string> settings-snippet-delete-error;
@@ -713,6 +729,11 @@ export component MainWindow inherits Window {
         model-error-message: root.settings-model-error-message;
         dictation-learn-from-edit: root.settings-dictation-learn-from-edit;
         dictionary-entries: root.settings-dictionary-entries;
+        dictionary-entry-count: root.settings-dictionary-count;
+        dictionary-list-content-height: root.settings-dictionary-content-height;
+        dictionary-list-spacer-before: root.settings-dictionary-spacer-before;
+        dictionary-list-spacer-after: root.settings-dictionary-spacer-after;
+        dictionary-list-scroll-top <=> root.settings-dictionary-scroll-top;
         dictionary-add-error: root.settings-dictionary-add-error;
         dictionary-delete-error-id: root.settings-dictionary-delete-error-id;
         dictionary-delete-error: root.settings-dictionary-delete-error;
@@ -720,6 +741,11 @@ export component MainWindow inherits Window {
         new-dictionary-pronunciation-draft <=> root.settings-new-dictionary-pronunciation-draft;
         new-dictionary-category-draft <=> root.settings-new-dictionary-category-draft;
         snippets: root.settings-snippets;
+        snippets-entry-count: root.settings-snippets-count;
+        snippets-list-content-height: root.settings-snippets-content-height;
+        snippets-list-spacer-before: root.settings-snippets-spacer-before;
+        snippets-list-spacer-after: root.settings-snippets-spacer-after;
+        snippets-list-scroll-top <=> root.settings-snippets-scroll-top;
         snippet-add-error: root.settings-snippet-add-error;
         snippet-delete-error-id: root.settings-snippet-delete-error-id;
         snippet-delete-error: root.settings-snippet-delete-error;
