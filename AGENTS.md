@@ -102,3 +102,14 @@ Full Slint checklist: [`docs/engineering/slint.md`](./docs/engineering/slint.md)
 - A frequent view switch (`if tab ==`) that destroys and recreates the item tree.
 - FemtoVG left as the renderer (missing `renderer-skia` or `renderer_name("skia")`).
 - Palette hex or Fluent `std-widgets` chrome where a house widget + `Theme.*` exists.
+- A user-facing Slint string outside `@tr()`. For a label computed in Rust (which `@tr()` can't
+  wrap, since it only accepts a compile-time literal), route it through a sentinel-token switch
+  like `ThemedComboBox`'s — and the token emitted by Rust must match the literal the Slint switch
+  checks for exactly, both call sites (header label and dropdown-list item) updated together. A
+  mismatch that silently falls through to the raw token is the same class of bug as skipping
+  `@tr()` entirely, not a smaller one.
+- A new Python or Node script added to `scripts/` (or anywhere else) for something a Rust
+  binary/test or a POSIX shell script calling existing Rust tooling could do instead. This repo is
+  one language, on purpose (SOU-185: no Node/npm in the shipped build) — a scripting-language
+  dependency introduced as a shortcut is a regression against that goal, not a neutral convenience,
+  and ships with a ticket to replace it if it can't be avoided outright.
