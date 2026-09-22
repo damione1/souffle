@@ -1,5 +1,5 @@
 {
-  "_note": "Twin fixture at src/lib/test-helpers/paragraph-grouping.fixture.json. Keep both in sync: this proves export.rs's Rust port of groupIntoParagraphs (src/lib/utils/paragraphs.ts) matches the TS reference implementation.",
+  "_note": "Single pinned reference for souffle_schema::paragraphs::group_into_paragraphs. Every consumer (Markdown export, summary turns, Slint post-meeting view, MCP sidecar) is proven against these cases; a change here is a change to what every transcript renderer shows.",
   "pause_threshold": 1.5,
   "cases": [
     {

@@ -1,16 +1,27 @@
+//! Live transcript state for a meeting in progress.
+//!
+//! The live view uses a deliberately simpler, incremental paragraph rule
+//! than the canonical grouper in `souffle_schema::paragraphs`: a final
+//! segment appends to the most recent tail paragraph of the same speaker
+//! when the gap since that paragraph's last end is within the shared pause
+//! threshold, and otherwise opens a new paragraph. The canonical grouper
+//! splits a turn based on a *later* interrupter, so it cannot run
+//! incrementally without re-cutting paragraphs already on screen. The
+//! post-meeting view (`transcript.rs`) re-groups the finished meeting with
+//! the canonical algorithm; only the pause threshold is shared.
+
 use souffle_lib::engine::{Speaker, TranscriptionSegment};
+use souffle_schema::paragraphs::PAUSE_THRESHOLD_SECONDS;
 use std::time::{Duration, Instant};
 
 use crate::transcript::speaker_label;
 use crate::{TranscriptBlock, timeline};
 
-/// Matches `TAIL_WINDOW_S` in live-transcript.svelte.ts (8s tail before commit).
+/// Tail window before a paragraph is committed (immutable).
 const TAIL_WINDOW_S: f64 = 8.0;
-/// Matches `LIVE_PARAGRAPH_WINDOW` in live-paragraph-window.ts.
+/// Committed paragraphs kept in memory for the live view.
 const LIVE_PARAGRAPH_WINDOW: usize = 30;
-/// Pause threshold matching the post-meeting grouper (paragraphs.ts pauseThreshold = 1.5s).
-const PAUSE_THRESHOLD_S: f64 = 1.5;
-/// Tentative expiry (live-transcript.svelte.ts: 5s without a matching final).
+/// Tentative expiry: 5s without a matching final drops the pending word.
 const TENTATIVE_EXPIRY: Duration = Duration::from_secs(5);
 
 /// One in-progress or committed paragraph in the live view.
@@ -178,7 +189,7 @@ impl LiveTranscript {
 
         // Find the most recent tail paragraph of the same speaker to append to.
         let idx = self.tail.iter().rposition(|p| {
-            p.speaker == seg.speaker && (seg.start_time - p.last_end) <= PAUSE_THRESHOLD_S
+            p.speaker == seg.speaker && (seg.start_time - p.last_end) <= PAUSE_THRESHOLD_SECONDS
         });
 
         match idx {
