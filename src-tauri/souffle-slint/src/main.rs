@@ -5951,23 +5951,34 @@ fn main() {
     // bar on top of it. Must run before `MainWindow::new()` - it configures
     // the window attributes winit uses to create the NSWindow.
     #[cfg(target_os = "macos")]
-    slint::BackendSelector::new()
-        .renderer_name("skia".into())
-        .require_metal()
-        .with_winit_window_attributes_hook(move |attrs| {
-            use slint::winit_030::winit::platform::macos::WindowAttributesExtMacOS;
-            attrs
-                .with_inner_size(slint::winit_030::winit::dpi::LogicalSize::new(
-                    initial_width,
-                    initial_height,
-                ))
-                .with_titlebar_transparent(true)
-                .with_title_hidden(true)
-                .with_fullsize_content_view(true)
-                .with_movable_by_window_background(true)
-        })
-        .select()
-        .expect("failed to select winit backend");
+    {
+        let selector = slint::BackendSelector::new()
+            .renderer_name("skia".into())
+            .with_winit_window_attributes_hook(move |attrs| {
+                use slint::winit_030::winit::platform::macos::WindowAttributesExtMacOS;
+                attrs
+                    .with_inner_size(slint::winit_030::winit::dpi::LogicalSize::new(
+                        initial_width,
+                        initial_height,
+                    ))
+                    .with_titlebar_transparent(true)
+                    .with_title_hidden(true)
+                    .with_fullsize_content_view(true)
+                    .with_movable_by_window_background(true)
+            });
+        // `require_metal()` exists only as evidence for the opt-in Settings
+        // instrumentation (SOU-210): it proves the measured surface really is
+        // Metal. Outside the gate the backend selection must stay exactly what
+        // it was before, so an environment without a Metal context (VM, CI,
+        // remote session) keeps whatever fallback Skia can offer instead of
+        // panicking at startup (SOU-230).
+        let selector = if settings_instrumentation::enabled() {
+            selector.require_metal()
+        } else {
+            selector
+        };
+        selector.select().expect("failed to select winit backend");
+    }
 
     let window = MainWindow::new().expect("failed to create Slint window");
     settings_instrumentation::install(&window);
