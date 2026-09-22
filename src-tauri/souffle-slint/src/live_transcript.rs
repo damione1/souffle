@@ -1,6 +1,7 @@
 use souffle_lib::engine::{Speaker, TranscriptionSegment};
 use std::time::{Duration, Instant};
 
+use crate::transcript::speaker_label;
 use crate::{TranscriptBlock, timeline};
 
 /// Matches `TAIL_WINDOW_S` in live-transcript.svelte.ts (8s tail before commit).
@@ -11,14 +12,6 @@ const LIVE_PARAGRAPH_WINDOW: usize = 30;
 const PAUSE_THRESHOLD_S: f64 = 1.5;
 /// Tentative expiry (live-transcript.svelte.ts: 5s without a matching final).
 const TENTATIVE_EXPIRY: Duration = Duration::from_secs(5);
-
-fn speaker_label(speaker: Option<Speaker>) -> String {
-    match speaker {
-        Some(Speaker::Me) => "Moi".into(),
-        Some(Speaker::Them) => "Eux".into(),
-        None => String::new(),
-    }
-}
 
 /// One in-progress or committed paragraph in the live view.
 #[derive(Clone)]
@@ -264,7 +257,7 @@ impl LiveTranscript {
             let text = tentative_me.unwrap_or("");
             blocks.push(TranscriptBlock {
                 is_session_break: false,
-                speaker_label: "Moi".into(),
+                speaker_label: speaker_label(Some(Speaker::Me)).into(),
                 timestamp: "".into(),
                 text: text.into(),
                 markdown_text: slint::StyledText::from_plain_text(text),
@@ -278,7 +271,7 @@ impl LiveTranscript {
             let text = tentative_them.unwrap_or("");
             blocks.push(TranscriptBlock {
                 is_session_break: false,
-                speaker_label: "Eux".into(),
+                speaker_label: speaker_label(Some(Speaker::Them)).into(),
                 timestamp: "".into(),
                 text: text.into(),
                 markdown_text: slint::StyledText::from_plain_text(text),
