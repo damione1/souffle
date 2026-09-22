@@ -51,6 +51,7 @@ export component MeetingDetail inherits Rectangle {
     in property <[string]> summary-available-models;
     in property <[string]> summary-available-model-ids;
     in-out property <string> summary-selected-model-id;
+    in-out property <string> summary-selected-model-label;
     in property <bool> can-resume: true;
     in property <string> resume-error;
 
@@ -433,6 +434,7 @@ export component MeetingDetail inherits Rectangle {
                             available-models: root.summary-available-models;
                             available-model-ids: root.summary-available-model-ids;
                             selected-model-id <=> root.summary-selected-model-id;
+                            selected-model-label <=> root.summary-selected-model-label;
                             key-points: root.summary-key-points;
                             decisions: root.summary-decisions;
                             action-items: root.summary-action-items;

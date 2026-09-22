@@ -449,6 +449,12 @@ fn load_meeting_summary_models(window_weak: slint::Weak<MainWindow>, state: Arc<
                     Ok(id) => id,
                     Err(_) => "".to_string(),
                 };
+            let default_label = providers
+                .models
+                .iter()
+                .find(|m| m.id == default_id)
+                .map(|m| m.label.clone())
+                .unwrap_or_else(|| default_id.clone());
 
             let _ = slint::invoke_from_event_loop(move || {
                 if let Some(w) = window_weak.upgrade() {
@@ -464,6 +470,7 @@ fn load_meeting_summary_models(window_weak: slint::Weak<MainWindow>, state: Arc<
                     let current = w.get_meeting_detail_summary_selected_model_id();
                     if current.is_empty() {
                         w.set_meeting_detail_summary_selected_model_id(default_id.into());
+                        w.set_meeting_detail_summary_selected_model_label(default_label.into());
                     }
                 }
             });
@@ -1498,8 +1505,22 @@ fn live_segment_channel(weak: slint::Weak<MainWindow>) -> ProgressChannel<Transc
                     Some(Speaker::Them) => window.set_live_them_text(text.into()),
                     None => window.set_live_text(text.into()),
                 }
-                window.set_live_tentative("".into());
-                window.set_live_tentative_has_speaker(false);
+                // `live-tentative` is a single shared buffer across both speaker
+                // lanes. Only clear it here if it still belongs to the speaker
+                // who just finalized - otherwise the other lane's in-flight word
+                // (e.g. Them started talking while Me's word was still pending)
+                // gets wiped mid-word instead of being left to finalize on its own.
+                let tentative_belongs_to_finalizing_speaker = match segment.speaker {
+                    Some(Speaker::Me) => window.get_live_tentative_speaker() == SpeakerRole::Me,
+                    Some(Speaker::Them) => window.get_live_tentative_speaker() == SpeakerRole::Them,
+                    None => true,
+                };
+                if !window.get_live_tentative_has_speaker()
+                    || tentative_belongs_to_finalizing_speaker
+                {
+                    window.set_live_tentative("".into());
+                    window.set_live_tentative_has_speaker(false);
+                }
             } else {
                 window.set_live_tentative(segment.text.into());
                 match segment.speaker {
@@ -3275,7 +3296,7 @@ fn wire_callbacks(
                     eprintln!("Failed to resume meeting: {:?}", e);
                     let _ = slint::invoke_from_event_loop(move || {
                         if let Some(w) = weak_for_done.upgrade() {
-                            w.set_meeting_detail_resume_error(format!("Erreur: {}", e).into());
+                            w.set_meeting_detail_resume_error(e.into());
                         }
                     });
                 }

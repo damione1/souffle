@@ -20,7 +20,12 @@ export component SummarySection inherits VerticalLayout {
     in property <[string]> available-models;
     in property <[string]> available-model-ids;
     in-out property <string> selected-model-id;
-    
+    // Display label for `selected-model-id`. Rust seeds this alongside the
+    // id when it picks the default model; the picker below keeps it in sync
+    // on user selection via `selected-index` (id and label can differ, e.g.
+    // "apple-intelligence" vs "Apple Intelligence").
+    in-out property <string> selected-model-label;
+
     in property <[string]> key-points;
     in property <[string]> decisions;
     in property <[StructuredActionItem]> action-items;
@@ -49,9 +54,14 @@ export component SummarySection inherits VerticalLayout {
             if root.available-models.length > 0 : ThemedComboBox {
                 model: root.available-models;
                 option-values: root.available-model-ids;
-                current-value: root.selected-model-id;
+                current-value: root.selected-model-label;
                 combo-width: 250px;
                 selected(id) => { root.selected-model-id = id; }
+                selected-index(idx) => {
+                    root.selected-model-label = (idx >= 0 && idx < root.available-models.length)
+                        ? root.available-models[idx]
+                        : root.selected-model-id;
+                }
             }
 
             gen-btn := Rectangle {
@@ -142,9 +152,14 @@ export component SummarySection inherits VerticalLayout {
                 if root.available-models.length > 0 : ThemedComboBox {
                     model: root.available-models;
                     option-values: root.available-model-ids;
-                    current-value: root.selected-model-id;
+                    current-value: root.selected-model-label;
                     combo-width: 250px;
                     selected(id) => { root.selected-model-id = id; }
+                selected-index(idx) => {
+                    root.selected-model-label = (idx >= 0 && idx < root.available-models.length)
+                        ? root.available-models[idx]
+                        : root.selected-model-id;
+                }
                 }
 
                 Rectangle {
