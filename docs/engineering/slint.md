@@ -346,6 +346,12 @@ to the test/dev launch harness: it must not write a preference, production
 database, TCC state or user data, and a production launch must not accept an
 environment variable that can silently enable a non-Metal surface.
 
+A startup Metal check already exists (`BackendSelector::require_metal()` in
+`main.rs`), predating this policy. It currently fails via a raw `.expect()`
+panic — no native alert, no diagnostic-copy action, no controlled exit. Closing
+that gap to the contract above is the follow-up implementation work, not net-new
+enforcement.
+
 ## 5. Memory and threads
 
 Slint is retained-mode. The item tree, font cache, image cache, and GPU textures **are** the working set. Dropping a Window does not reliably unload font and image caches (upstream limitation). Do not open extra Windows to "save memory".

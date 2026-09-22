@@ -10,9 +10,9 @@ on:
   pull_request:
     types: [synchronize, reopened]
   workflow_run:
-    workflows: [Contracts, E2E]
+    workflows: [Contracts]
     types: [completed]
-    # Contracts and E2E also run on pushes to the trunks, where there is no PR
+    # Contracts also runs on pushes to the trunks, where there is no PR
     # to gate. Filtering here keeps those from spawning a run that only skips.
     branches-ignore: [develop, master]
 

@@ -16,6 +16,10 @@ export component ThemedComboBox inherits Rectangle {
     in property <string> control-label: @tr("Sélection");
 
     callback selected(string);
+    // Additive: fires alongside `selected` with the raw model index, for
+    // callers that need to resolve display data `option-values` can't carry
+    // (e.g. a label list parallel to `model`). Existing callers can ignore it.
+    callback selected-index(int);
 
     // Transient keyboard cursor only. The selected value remains fully
     // controlled by `current-value` and the parent callback contract.
@@ -123,6 +127,7 @@ export component ThemedComboBox inherits Rectangle {
         root.selected(root.option-values.length == root.model.length
             ? root.option-values[index]
             : root.model[index]);
+        root.selected-index(index);
     }
 
     function restore-focus() {

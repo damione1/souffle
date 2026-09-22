@@ -51,6 +51,8 @@ jobs:
       # wins the `Once` in `ensure_ort_initialized` can stall inside
       # `ort::init_from`, and every other thread then blocks on that `Once`
       # with no timeout. Fail the step instead of holding the runner.
+      - run: cargo test --manifest-path src-tauri/Cargo.toml --workspace
+        timeout-minutes: 15
       # The catalogue gate extracts the @tr() calls before validating both PO
       # files. Keep the extractor aligned with the Slint compiler in Cargo.lock.
       - run: cargo install slint-tr-extractor --version 1.17.1 --locked
