@@ -621,11 +621,11 @@ fn start_transcript_scroll_timer(
     timer
 }
 
-/// Drops the transcript window state/timer - mirrors `stop_audio_player`.
-/// Called before loading a different meeting's transcript and when leaving
-/// MeetingDetail, so a stale huge block list never lingers in memory and
-/// the poll timer never fires against a slice that no longer applies.
-
+/// Repeated poll driving the live meeting transcript's time-based behavior:
+/// expires stale per-speaker tentatives (AC3) and keeps the view pinned to
+/// the bottom while the user is within `LIVE_NEAR_BOTTOM_PX` of it (AC5) -
+/// the Slint port of `LiveSessionCard.svelte`'s tentative expiry and
+/// `scheduleAutoscroll`. A user who scrolled up is left alone.
 fn start_live_transcript_timer(
     weak: slint::Weak<MainWindow>,
     live_state: LiveTranscriptState,
@@ -655,13 +655,17 @@ fn start_live_transcript_timer(
             let bottom = -(content_h - viewport_h);
             let at_bottom_threshold = bottom + LIVE_NEAR_BOTTOM_PX;
             if scroll_y == 0.0 || scroll_y <= at_bottom_threshold {
-                window.set_live_transcript_scroll_top((bottom as f32) * 1.0);
+                window.set_live_transcript_scroll_top(bottom);
             }
         },
     );
     timer
 }
 
+/// Drops the transcript window state/timer - mirrors `stop_audio_player`.
+/// Called before loading a different meeting's transcript and when leaving
+/// MeetingDetail, so a stale huge block list never lingers in memory and
+/// the poll timer never fires against a slice that no longer applies.
 fn stop_transcript_window(
     transcript_state: &Rc<RefCell<Option<TranscriptState>>>,
     transcript_timer: &Rc<RefCell<Option<slint::Timer>>>,
@@ -1767,6 +1771,26 @@ fn clear_live_transcript(window: &MainWindow, live_state: &LiveTranscriptState) 
         live.clear();
     }
     push_live_blocks(window, live_state);
+}
+
+/// Anchors the live elapsed clock to the real recording start time (AC6,
+/// SOU-022): seeds the view's offset from the accumulator's
+/// `session_started_at` wall clock, so the toolbar chrono neither drifts
+/// with a free-running tick counter nor restarts at 0:00 when a resumed
+/// meeting recreates the view. No accumulator (dictation, or a start that
+/// lost the race) leaves the offset untouched.
+fn anchor_live_elapsed_offset(window: &MainWindow, handle: &AppHandle) {
+    let Ok(guard) = handle.meeting_accumulator.acquire() else {
+        return;
+    };
+    let Some(accumulator) = guard.as_ref() else {
+        return;
+    };
+    let secs = chrono::Utc::now()
+        .signed_duration_since(accumulator.session_started_at)
+        .num_seconds()
+        .max(0);
+    window.set_live_elapsed_offset_seconds(secs as i32);
 }
 
 /// Pushes each `OllamaPullProgress` update into the settings window's
@@ -3186,13 +3210,14 @@ fn wire_callbacks(
     settings_io: Rc<settings_io::SettingsIoCoordinator>,
     settings_drafts: Rc<settings_drafts::SettingsDraftController>,
     live_state: LiveTranscriptState,
-    live_transcript_timer: Rc<RefCell<Option<slint::Timer>>>,
 ) {
     let lists_models = lists_ui::SettingsListModels::install(window);
-    *live_transcript_timer.borrow_mut() = Some(start_live_transcript_timer(
-        window.as_weak(),
-        live_state.clone(),
-    ));
+    // Owned here (not by the caller): the keepalive clone below is captured
+    // by the long-lived stop callback, which is what actually keeps the
+    // repeating live-transcript timer alive for the window's lifetime.
+    let live_transcript_timer: Rc<RefCell<Option<slint::Timer>>> = Rc::new(RefCell::new(Some(
+        start_live_transcript_timer(window.as_weak(), live_state.clone()),
+    )));
     let live_transcript_timer_keepalive = live_transcript_timer.clone();
 
     // Shared with load_meeting_audio/stop_audio_player/open_meeting_detail
@@ -3290,15 +3315,7 @@ fn wire_callbacks(
                     clear_live_transcript(&window, &live_state);
                     window.set_live_notes("".into());
                     window.set_recording_mode(RecordingMode::Meeting);
-                    if let Ok(guard) = handle_for_accumulator.meeting_accumulator.acquire() {
-                        if let Some(a) = guard.as_ref() {
-                            let secs = chrono::Utc::now()
-                                .signed_duration_since(a.session_started_at)
-                                .num_seconds()
-                                .max(0);
-                            window.set_live_elapsed_offset_seconds(secs as i32);
-                        }
-                    }
+                    anchor_live_elapsed_offset(&window, &handle_for_accumulator);
                 }
                 Err(e) => window.set_meeting_status_message(e.into()),
             }) {
@@ -3558,15 +3575,7 @@ fn wire_callbacks(
                         let state_for_accum = state.clone();
                         let _ = slint::invoke_from_event_loop(move || {
                             if let Some(w) = weak_for_done.upgrade() {
-                                if let Ok(guard) = state_for_accum.meeting_accumulator.acquire() {
-                                    if let Some(a) = guard.as_ref() {
-                                        let secs = chrono::Utc::now()
-                                            .signed_duration_since(a.session_started_at)
-                                            .num_seconds()
-                                            .max(0);
-                                        w.set_live_elapsed_offset_seconds(secs as i32);
-                                    }
-                                }
+                                anchor_live_elapsed_offset(&w, &state_for_accum);
                             }
                         });
                     }
@@ -3796,15 +3805,7 @@ fn wire_callbacks(
                     clear_live_transcript(&window, &live_state);
                     window.set_live_notes("".into());
                     window.set_recording_mode(RecordingMode::Meeting);
-                    if let Ok(guard) = handle_for_accumulator.meeting_accumulator.acquire() {
-                        if let Some(a) = guard.as_ref() {
-                            let secs = chrono::Utc::now()
-                                .signed_duration_since(a.session_started_at)
-                                .num_seconds()
-                                .max(0);
-                            window.set_live_elapsed_offset_seconds(secs as i32);
-                        }
-                    }
+                    anchor_live_elapsed_offset(&window, &handle_for_accumulator);
                 }
                 Err(e) => window.set_meeting_status_message(e.into()),
             }) {
@@ -6278,7 +6279,6 @@ fn main() {
         settings_io::SettingsIoCoordinator::new(handle.clone(), settings_state.clone());
 
     let live_state: LiveTranscriptState = Arc::new(Mutex::new(LiveTranscript::new()));
-    let live_transcript_timer: Rc<RefCell<Option<slint::Timer>>> = Rc::new(RefCell::new(None));
 
     let weak_close = window.as_weak();
     let io_close = settings_io.clone();
@@ -6318,7 +6318,6 @@ fn main() {
         settings_io.clone(),
         settings_drafts,
         live_state,
-        live_transcript_timer,
     );
     let startup_app_handle = handle.clone();
 

@@ -237,7 +237,7 @@ impl LiveTranscript {
         let last_them_idx = window
             .iter()
             .rposition(|p| p.speaker == Some(Speaker::Them));
-        let last_none_idx = window.iter().rposition(|p| p.speaker == None);
+        let last_none_idx = window.iter().rposition(|p| p.speaker.is_none());
 
         let tentative_me = self.tentative_me.active_text();
         let tentative_them = self.tentative_them.active_text();
@@ -416,7 +416,7 @@ pub mod tests {
         // Second paragraph well beyond tail window (>8s later) → first is committed.
         lt.push_final(&seg("Beta", 20.0, 21.0, true, Some(Speaker::Me)));
         // The committed block's text must still be just "Alpha".
-        assert!(lt.committed.len() >= 1);
+        assert!(!lt.committed.is_empty());
         assert_eq!(lt.committed[0].text, "Alpha");
     }
 
