@@ -1,6 +1,6 @@
 # Soufflé
 
-Private, on-device speech-to-text for macOS (Apple Silicon only). Rust backend + native Slint UI in `src-tauri/` (binary crate `souffle-slint`). No Tauri, no webview, no npm frontend in the shipped app.
+Private, on-device speech-to-text for macOS (Apple Silicon only). Rust backend + native Slint UI in `app/` (binary crate `souffle-slint`). No Tauri, no webview, no npm frontend in the shipped app.
 
 Slint conventions (closed-set enums, house widgets, Metal/Skia, keep-alive tabs, memory, threads, PR checklist): [`docs/engineering/slint.md`](./docs/engineering/slint.md). Agent notes: [`AGENTS.md`](./AGENTS.md).
 
@@ -9,7 +9,7 @@ Slint conventions (closed-set enums, house widgets, Metal/Skia, keep-alive tabs,
 
 - `./scripts/bundle-macos.sh [--debug] [--nightly] [--dmg] [--notarize] [--sign-updater]` builds, code-signs, and (optionally) notarizes/packages the app — see the script's own header comment for every flag.
 - `make nightly` builds the debug app as **Soufflé Nightly** (`com.souffle.desktop.nightly`) and opens it; `make nightly-fresh` wipes Nightly data and TCC first; `make nightly-dmg` wraps it in a `.dmg`. Does not touch the installed Soufflé.
-- `cargo test --manifest-path src-tauri/Cargo.toml --workspace` runs backend tests
+- `cargo test --manifest-path app/Cargo.toml --workspace` runs backend tests
 - `./scripts/codeql-local.sh` runs CodeQL (rust, javascript-typescript, actions) locally; required before opening or updating a PR. Needs `brew install --cask codeql`. CI CodeQL runs only on push to `develop`, not on PRs.
 
 ## Local gate (before every PR open / push)
@@ -18,9 +18,9 @@ Mirror `.github/workflows/contracts.yml`, then CodeQL (not on PR CI):
 
 ```bash
 ./scripts/build-mcp-sidecar.test.sh && ./scripts/build-mcp-sidecar.sh
-cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
-cargo clippy --manifest-path src-tauri/Cargo.toml --workspace --all-targets -- -D warnings
-cargo test --manifest-path src-tauri/Cargo.toml --workspace
+cargo fmt --manifest-path app/Cargo.toml --all -- --check
+cargo clippy --manifest-path app/Cargo.toml --workspace --all-targets -- -D warnings
+cargo test --manifest-path app/Cargo.toml --workspace
 ./scripts/check_slint_translations.sh
 ./scripts/codeql-local.sh
 ```

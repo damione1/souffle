@@ -73,7 +73,7 @@ enum Backend {
 struct Spec {
     #[serde(default = "default_sample_rate")]
     sample_rate_hz: u32,
-    /// Where the WAVs land, relative to the repo's `src-tauri` directory.
+    /// Where the WAVs land, relative to the repo's `app` directory.
     out_dir: String,
     backend: Backend,
     #[serde(default)]
@@ -323,8 +323,8 @@ fn main() -> Res<()> {
         }),
     };
 
-    // Paths in the spec are relative to src-tauri, so the tool works the same
-    // whether it is run from the repo root or from src-tauri.
+    // Paths in the spec are relative to app, so the tool works the same
+    // whether it is run from the repo root or from app.
     let base = spec_base_dir()?;
     let out_dir = base.join(&spec.out_dir);
 
@@ -355,14 +355,14 @@ fn main() -> Res<()> {
     Ok(())
 }
 
-/// The `src-tauri` directory, so `out_dir` in a spec means the same thing
+/// The `app` directory, so `out_dir` in a spec means the same thing
 /// regardless of the working directory the tool was launched from.
 fn spec_base_dir() -> Res<PathBuf> {
     let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     manifest
         .parent()
         .map(Path::to_path_buf)
-        .ok_or_else(|| "cannot locate src-tauri from the crate manifest".into())
+        .ok_or_else(|| "cannot locate app from the crate manifest".into())
 }
 
 /// Exact name, or a prefix so `--only hesitation-a` renders the whole ladder.

@@ -875,7 +875,7 @@ mod tests {
     #[test]
     fn info_plist_declares_input_monitoring_usage() {
         let plist = std::fs::read_to_string(format!("{}/Info.plist", env!("CARGO_MANIFEST_DIR")))
-            .expect("src-tauri/Info.plist");
+            .expect("app/Info.plist");
         assert!(
             plist.contains("<key>NSInputMonitoringUsageDescription</key>"),
             "the native shortcut tap makes macOS ask for ListenEvent on our behalf"

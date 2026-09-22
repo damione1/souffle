@@ -111,5 +111,5 @@ does not have.** When the app lands, this section goes and the palette is
 sourced from `app.css` again.
 
 The pill is the one part already verified against the real thing: its values
-come from `src-tauri/swift/pill_panel.swift`, which replaced the original
+come from `app/swift/pill_panel.swift`, which replaced the original
 implementation after these mocks were written.

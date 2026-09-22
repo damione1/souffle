@@ -3,14 +3,14 @@ set -euo pipefail
 
 # Cheap assertions for scripts/build-mcp-sidecar.sh: cargo metadata honors
 # CARGO_TARGET_DIR, and the script asks cargo rather than hardcoding
-# src-tauri/target. Does not build the sidecar.
+# app/target. Does not build the sidecar.
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 script="./scripts/build-mcp-sidecar.sh"
 
-if grep -qE 'src-tauri/target/(release|debug)/souffle-mcp' "${script}"; then
-  echo "fail: ${script} still hardcodes src-tauri/target/{release,debug}/souffle-mcp" >&2
+if grep -qE 'app/target/(release|debug)/souffle-mcp' "${script}"; then
+  echo "fail: ${script} still hardcodes app/target/{release,debug}/souffle-mcp" >&2
   exit 1
 fi
 

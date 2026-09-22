@@ -7,7 +7,7 @@
 //! whole point of the sidecar (it must build and run without pulling in
 //! Tauri, candle, or ort), at the cost of the schema being duplicated on the
 //! read side. `souffle-mcp` schema drift against the writer is caught by the
-//! contract test in `src-tauri/tests/mcp_sidecar_contract.rs`, which writes
+//! contract test in `app/tests/mcp_sidecar_contract.rs`, which writes
 //! through the real app `Database` and reads back through this module.
 
 use std::path::{Path, PathBuf};
@@ -882,7 +882,7 @@ mod tests {
     /// Minimal fixture mirroring the app's current schema (meetings v10 +
     /// segments + dictation_entries + text_search FTS5). Kept intentionally
     /// small: the schema-drift contract test in
-    /// `src-tauri/tests/mcp_sidecar_contract.rs` is what actually guards
+    /// `app/tests/mcp_sidecar_contract.rs` is what actually guards
     /// this against the real writer.
     fn fixture_db() -> (Connection, TempDir, PathBuf) {
         let dir = TempDir::new().unwrap();
