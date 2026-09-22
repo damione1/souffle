@@ -1,7 +1,8 @@
 import { ComboBox } from "std-widgets.slint";
+import { ThemedComboBox } from "components/themed_combo.slint";
 import { PermissionsStep, PermissionRow } from "components/onboarding/permissions_step.slint";
 import { ShortcutRecorderButton } from "components/settings/interface_section.slint";
-import { ModelPhase, PermissionKind } from "types.slint";
+import { AppLocale, ModelPhase, PermissionKind } from "types.slint";
 import { Theme } from "theme.slint";
 import { ThemedButton, ThemedButtonKind } from "components/themed_button.slint";
 import { ThemedSwitch } from "components/themed_switch.slint";
@@ -13,12 +14,12 @@ import { ThemedSwitch } from "components/themed_switch.slint";
 // Settings overlay are never visible at the same time, but keeping their
 // state separate avoids one leaking into the other's fields.
 export component OnboardingView inherits Rectangle {
-    in property <string> locale;
+    in property <AppLocale> locale;
     in property <int> step-index;
     in property <int> step-count;
     in property <string> step; // "permissions" | "microphone" | "model" | "shortcut"
-    in property <string> title;
-    in property <string> subtitle;
+    property <string> title: root.step == "permissions" ? @tr("Permissions") : root.step == "microphone" ? @tr("Choisissez votre microphone") : root.step == "model" ? @tr("Modèle de transcription") : root.step == "shortcut" ? @tr("Raccourci clavier") : "";
+    property <string> subtitle: root.step == "permissions" ? @tr("Soufflé a besoin de ces autorisations macOS pour fonctionner.") : root.step == "microphone" ? @tr("Vous pourrez changer ce choix plus tard dans les Réglages.") : root.step == "model" ? @tr("Téléchargé une seule fois, tout tourne ensuite hors ligne.") : root.step == "shortcut" ? @tr("Utilisé pour démarrer et arrêter la dictée depuis n'importe quelle application.") : "";
     in property <string> status-message;
 
     in property <[PermissionRow]> permission-rows;
@@ -44,9 +45,9 @@ export component OnboardingView inherits Rectangle {
 
     in property <bool> busy;
     in property <bool> continue-enabled: true;
-    in property <string> continue-label;
+    property <string> continue-label: root.step == "shortcut" ? @tr("Terminer") : (root.step == "model" && root.model-phase != ModelPhase.ready) ? @tr("Télécharger et continuer") : @tr("Continuer");
 
-    callback locale-changed(string);
+    callback locale-changed(AppLocale);
     callback grant-requested(PermissionKind);
     callback hint-action-requested(PermissionKind);
     callback repair-requested();
@@ -96,13 +97,13 @@ export component OnboardingView inherits Rectangle {
                     spacing: 4px;
                     ThemedButton {
                         text: @tr("English");
-                        kind: root.locale == "en" ? ThemedButtonKind.active : ThemedButtonKind.default;
-                        clicked => { root.locale-changed("en"); }
+                        kind: root.locale == AppLocale.en ? ThemedButtonKind.active : ThemedButtonKind.default;
+                        clicked => { root.locale-changed(AppLocale.en); }
                     }
                     ThemedButton {
                         text: @tr("Français");
-                        kind: root.locale == "fr" ? ThemedButtonKind.active : ThemedButtonKind.default;
-                        clicked => { root.locale-changed("fr"); }
+                        kind: root.locale == AppLocale.fr ? ThemedButtonKind.active : ThemedButtonKind.default;
+                        clicked => { root.locale-changed(AppLocale.fr); }
                     }
                 }
             }
@@ -141,7 +142,7 @@ export component OnboardingView inherits Rectangle {
                 VerticalLayout {
                     padding: 8px;
                     Text {
-                        text: root.status-message;
+                        text: root.status-message == "MODEL_ERROR" ? @tr("Le modèle est en erreur.") : root.status-message;
                         color: Theme.warning;
                         font-size: 11.5px;
                         wrap: word-wrap;
@@ -164,7 +165,7 @@ export component OnboardingView inherits Rectangle {
                 spacing: 6px;
                 HorizontalLayout {
                     spacing: 6px;
-                    ComboBox {
+                    ThemedComboBox {
                         model: root.device-labels;
                         current-value: root.selected-device-label;
                         selected(value) => { root.device-changed(value); }
@@ -212,7 +213,7 @@ export component OnboardingView inherits Rectangle {
                     font-size: 12px;
                     color: Theme.success;
                 }
-                if root.model-phase == ModelPhase.pick: ComboBox {
+                if root.model-phase == ModelPhase.pick: ThemedComboBox {
                     model: root.model-labels;
                     current-value: root.selected-model-label;
                     selected(value) => { root.model-picked(value); }

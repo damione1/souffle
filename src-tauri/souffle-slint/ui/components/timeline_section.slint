@@ -265,11 +265,11 @@ export component TimelineSection inherits VerticalLayout {
 
     if root.is-empty: EmptyState {
         title: @tr("Rien ici pour l'instant");
-        message: "Vos dictées et meetings apparaîtront ici, du plus récent au plus ancien.";
+        message: @tr("Vos dictées et meetings apparaîtront ici, du plus récent au plus ancien.");
     }
     if !root.is-empty && !root.has-matches: EmptyState {
         title: @tr("Aucun résultat");
-        message: "Essayez d'autres mots-clés — la recherche couvre toutes les transcriptions.";
+        message: @tr("Essayez d'autres mots-clés — la recherche couvre toutes les transcriptions.");
     }
     if !root.is-empty && root.has-matches: VerticalLayout {
         alignment: start;

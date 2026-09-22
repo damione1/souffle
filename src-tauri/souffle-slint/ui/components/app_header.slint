@@ -22,7 +22,6 @@ import { LucideIcon, IconSet } from "lucide_icon.slint";
 export component AppHeader inherits Rectangle {
     in property <bool> settings-open: false;
     in property <TranscriptionPhase> model-phase;
-    in property <string> model-status-label;
     in property <RecordingMode> recording-mode: RecordingMode.idle;
     in property <string> model-label: "";
 
@@ -33,7 +32,14 @@ export component AppHeader inherits Rectangle {
     callback theme-toggle-requested();
 
     property <string> status-label: root.recording-mode != RecordingMode.idle ? @tr("Enregistrement")
-        : root.model-status-label;
+        : root.model-phase == TranscriptionPhase.download-required ? @tr("Téléchargement requis")
+        : root.model-phase == TranscriptionPhase.downloading ? @tr("Téléchargement…")
+        : root.model-phase == TranscriptionPhase.load-required ? @tr("Chargement requis")
+        : root.model-phase == TranscriptionPhase.loading ? @tr("Chargement…")
+        : root.model-phase == TranscriptionPhase.ready ? @tr("Prêt")
+        : root.model-phase == TranscriptionPhase.unloading ? @tr("Déchargement…")
+        : root.model-phase == TranscriptionPhase.failed ? @tr("Erreur du modèle")
+        : "";
     property <color> status-color: root.recording-mode != RecordingMode.idle ? Theme.danger
         : root.model-phase == TranscriptionPhase.ready ? Theme.accent : Theme.warning;
     property <bool> show-model-label: root.recording-mode == RecordingMode.idle && root.model-phase == TranscriptionPhase.ready && root.model-label != "";

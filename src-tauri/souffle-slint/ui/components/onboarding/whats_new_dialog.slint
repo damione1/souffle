@@ -37,7 +37,7 @@ export component WhatsNewDialog inherits Rectangle {
                     color: Theme.text-primary;
                 }
                 Text {
-                    text: "Mis à jour vers v" + root.version;
+                    text: @tr("Mis à jour vers v{}", root.version);
                     font-size: 11.5px;
                     color: Theme.text-muted;
                 }

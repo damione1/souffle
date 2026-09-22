@@ -39,8 +39,8 @@ export component CalendarSection inherits VerticalLayout {
 
         SettingsField {
             show-divider: false;
-            label: "Intégration du calendrier";
-            description: "Afficher les réunions du jour sur l'accueil et rappeler avant qu'elles commencent.";
+            label: @tr("Intégration du calendrier");
+            description: @tr("Afficher les réunions du jour sur l'accueil et rappeler avant qu'elles commencent.");
 
             ThemedSwitch {
                 control-label: @tr("Intégration du calendrier");
@@ -75,8 +75,8 @@ export component CalendarSection inherits VerticalLayout {
         }
 
         if root.enabled && root.permission == AccessState.granted: SettingsField {
-            label: "Proposer au début de la réunion";
-            description: "Quand un événement commence et que l'audio système est actif, proposer de démarrer l'enregistrement.";
+            label: @tr("Proposer au début de la réunion");
+            description: @tr("Quand un événement commence et que l'audio système est actif, proposer de démarrer l'enregistrement.");
 
             ThemedSwitch {
                 control-label: @tr("Proposer au début de la réunion");
@@ -86,8 +86,8 @@ export component CalendarSection inherits VerticalLayout {
         }
 
         if root.enabled && root.permission == AccessState.granted: SettingsField {
-            label: "Délai du rappel";
-            description: "Minutes avant un événement pour proposer de démarrer une transcription.";
+            label: @tr("Délai du rappel");
+            description: @tr("Minutes avant un événement pour proposer de démarrer une transcription.");
 
             ThemedSpinBox {
                 control-label: @tr("Délai du rappel en minutes");

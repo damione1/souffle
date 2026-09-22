@@ -330,7 +330,7 @@ export component MeetingDetail inherits Rectangle {
                         notes-edit := ThemedTextArea {
                             text <=> root.notes;
                             area-height: 96px;
-                            placeholder: "Ajoutez les décisions, actions et noms importants…";
+                            placeholder: @tr("Ajoutez les décisions, actions et noms importants…");
                             control-label: @tr("Notes de la réunion");
                             edited(value) => { root.notes-changed(value); }
                         }

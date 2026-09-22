@@ -105,12 +105,12 @@ pub fn reorder_microphone_list(
 
 pub fn transport_label(transport: TransportType) -> &'static str {
     match transport {
-        TransportType::BuiltIn => "Intégré",
-        TransportType::Usb => "USB",
-        TransportType::Bluetooth | TransportType::BluetoothLe => "Bluetooth",
-        TransportType::Virtual => "Virtuel",
-        TransportType::Aggregate => "Agrégé",
-        TransportType::Unknown => "Inconnu",
+        TransportType::BuiltIn => "__BUILTIN__",
+        TransportType::Usb => "__USB__",
+        TransportType::Bluetooth | TransportType::BluetoothLe => "__BLUETOOTH__",
+        TransportType::Virtual => "__VIRTUAL__",
+        TransportType::Aggregate => "__AGGREGATE__",
+        TransportType::Unknown => "__UNKNOWN__",
     }
 }
 

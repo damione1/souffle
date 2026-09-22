@@ -198,6 +198,18 @@ fn settings_save_failure_message(outcome: &SettingsSaveOutcome) -> String {
     }
 }
 
+/// Switches the bundled Slint translation to the given locale. Called from
+/// `settings_values.rs` whenever the user changes the language in the
+/// Interface settings tab.
+pub(crate) fn select_app_locale(locale: AppLocale) {
+    let locale_str = settings_ui::locale_from_slint(locale);
+    if let Err(e) = slint::select_bundled_translation(locale_str) {
+        eprintln!("Translation error: {:?}", e);
+    } else {
+        eprintln!("Translation selected: {}", locale_str);
+    }
+}
+
 fn settle_onboarding_completion(
     outcome: &SettingsSaveOutcome,
     committed: impl FnOnce(),
@@ -1945,10 +1957,9 @@ fn project_startup_settings(
     let dark = settings_ui::resolve_dark(settings.theme);
     window.global::<Theme>().set_dark(dark);
     window.set_settings_calendar_enabled(settings.calendar_integration_enabled);
-    let safe_locale =
-        settings_ui::locale_from_slint(settings_ui::locale_to_slint(settings.locale.as_str()));
-    window.set_onboarding_locale(safe_locale.into());
-    let _ = slint::select_bundled_translation(safe_locale);
+    let locale = settings_ui::locale_to_slint(settings.locale.as_str());
+    window.set_settings_locale(locale);
+    select_app_locale(locale);
     let mut onboarding = onboarding.borrow_mut();
     onboarding.selected_device = settings.audio_device.clone().unwrap_or_default();
     onboarding.auto_paste = settings.auto_paste;
@@ -2053,11 +2064,8 @@ fn show_onboarding_step(
     window.set_onboarding_step(step.into());
     window.set_onboarding_step_index(step_index);
     window.set_onboarding_step_count(step_count);
-    window.set_onboarding_title(onboarding_ui::step_title(step).into());
-    window.set_onboarding_subtitle(onboarding_ui::step_subtitle(step).into());
     window.set_onboarding_busy(false);
     window.set_onboarding_continue_enabled(true);
-    window.set_onboarding_continue_label("Continuer".into());
     // Otherwise an error from a previous step (e.g. a failed download)
     // stays pinned to the banner forever, since nothing else clears it.
     window.set_onboarding_status_message("".into());
@@ -2120,11 +2128,6 @@ fn show_onboarding_step(
                 | None => ModelPhase::Pick,
             };
             window.set_onboarding_model_phase(model_phase);
-            if model_phase == ModelPhase::Ready {
-                window.set_onboarding_continue_label("Continuer".into());
-            } else {
-                window.set_onboarding_continue_label("Télécharger et continuer".into());
-            }
         }
         "shortcut" => {
             let guard = ob.borrow();
@@ -2135,7 +2138,6 @@ fn show_onboarding_step(
             window.set_onboarding_accessibility_granted(
                 permissions.status().accessibility == PermState::Granted,
             );
-            window.set_onboarding_continue_label("Terminer".into());
         }
         _ => {}
     }
@@ -2158,16 +2160,16 @@ fn wire_onboarding_callbacks(
     let weak = window.as_weak();
     let settings_io_for_locale = settings_io.clone();
     window.on_onboarding_locale_changed(move |locale| {
-        let locale_value = locale.to_string();
+        if let Some(window) = weak.upgrade() {
+            window.set_settings_locale(locale);
+        }
+        select_app_locale(locale);
+        let locale_value = settings_ui::locale_from_slint(locale).to_string();
         settings_io_for_locale.submit(
             souffle_lib::commands::SettingsSaveLane::General,
             move |settings| settings.locale = locale_value,
             |_, outcome| log_settings_save_outcome("onboarding locale", outcome),
         );
-        if let Some(window) = weak.upgrade() {
-            window.set_onboarding_locale(locale.clone());
-            let _ = slint::select_bundled_translation(locale.as_str());
-        }
     });
 
     let permissions_for_grant = permissions.clone();
@@ -6209,7 +6211,8 @@ mod tests {
         assert!(!dark);
         assert!(!window.global::<Theme>().get_dark());
         assert!(window.get_settings_calendar_enabled());
-        assert_eq!(window.get_onboarding_locale().as_str(), "fr");
+        // locale is now projected via slint::select_bundled_translation at startup;
+        // the window property is set later by settings_ui::populate()
         let onboarding = onboarding.borrow();
         assert_eq!(onboarding.selected_device, "mic-1");
         assert!(onboarding.auto_paste);

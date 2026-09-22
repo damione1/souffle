@@ -17,7 +17,7 @@ import { SnippetsSection, SnippetRow } from "components/settings/snippets_sectio
 import { Theme } from "theme.slint";
 import { LucideIcon, IconSet } from "components/lucide_icon.slint";
 import { SettingsTabBar, SettingsTabPage } from "components/settings/settings_tabs.slint";
-import { AppTheme, AppLocale, PasteMethod, MeetingLanguage, LogLevel, AudioRetention, AccessState, ShortcutField, SummaryProvider, AppleIntelligenceUnavailableReason, SettingsTab } from "types.slint";
+import { TranscriptionPhase, AppTheme, AppLocale, PasteMethod, MeetingLanguage, LogLevel, AudioRetention, AccessState, ShortcutField, SummaryProvider, AppleIntelligenceUnavailableReason, SettingsTab } from "types.slint";
 
 // Port of components/SettingsView.svelte's tab shell (SOU-188). Svelte
 // groups its 17 sections into 6 tabs (Transcription / IA / Audio / Interface
@@ -134,11 +134,11 @@ export component SettingsView inherits Rectangle {
     in-out property <string> editing-summary-template-name;
     in-out property <string> editing-summary-template-prompt;
     in-out property <string> new-summary-template-draft: "";
-    in property <string> model-status-text;
     in property <bool> model-ready;
     in property <[string]> model-labels;
     in property <string> selected-model-label;
     in property <bool> model-busy;
+    in property <TranscriptionPhase> model-phase;
     in property <bool> model-downloading;
     in property <string> model-download-progress-label;
     in property <float> model-download-progress-fraction;
@@ -344,7 +344,7 @@ export component SettingsView inherits Rectangle {
                     active: root.tab == SettingsTab.transcription;
 
                         ModelSection {
-                            status-text: root.model-status-text;
+                            model-phase: root.model-phase;
                             ready: root.model-ready;
                             model-labels: root.model-labels;
                             selected-model-label: root.selected-model-label;

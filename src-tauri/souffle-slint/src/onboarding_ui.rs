@@ -15,32 +15,10 @@
 use crate::{MainWindow, PermissionRow, settings_ui};
 use souffle_lib::permissions::{PermState, PermissionKind, PermissionStatus};
 
-struct RowSpec {
-    kind: PermissionKind,
-    label: &'static str,
-    description: &'static str,
-    action_label: &'static str,
-}
-
-const ROWS: [RowSpec; 3] = [
-    RowSpec {
-        kind: PermissionKind::Microphone,
-        label: "Microphone",
-        description: "Nécessaire pour la dictée et les réunions.",
-        action_label: "Autoriser",
-    },
-    RowSpec {
-        kind: PermissionKind::SystemAudio,
-        label: "Audio système",
-        description: "Capture l'autre côté d'un appel dans les réunions.",
-        action_label: "Autoriser",
-    },
-    RowSpec {
-        kind: PermissionKind::Accessibility,
-        label: "Accessibilité",
-        description: "Nécessaire pour le collage automatique et certains raccourcis.",
-        action_label: "Ouvrir les Réglages",
-    },
+const ROWS: [PermissionKind; 3] = [
+    PermissionKind::Microphone,
+    PermissionKind::SystemAudio,
+    PermissionKind::Accessibility,
 ];
 
 fn state_of(status: &PermissionStatus, kind: PermissionKind) -> PermState {
@@ -52,54 +30,16 @@ fn state_of(status: &PermissionStatus, kind: PermissionKind) -> PermState {
     }
 }
 
-fn hint_for(kind: PermissionKind, state: PermState) -> (&'static str, &'static str) {
-    match (kind, state) {
-        (PermissionKind::Accessibility, PermState::Denied) => (
-            "Refusé. Ouvrez Réglages Système > Confidentialité et sécurité > Accessibilité.",
-            "Réglages Système",
-        ),
-        (PermissionKind::Microphone, PermState::Denied) => (
-            "Refusé. Ouvrez Réglages Système pour l'autoriser.",
-            "Réglages Système",
-        ),
-        (PermissionKind::Microphone, PermState::NoDevice) => ("Aucun microphone détecté.", ""),
-        (
-            PermissionKind::Microphone,
-            PermState::Granted | PermState::Unknown | PermState::Unsupported,
-        )
-        | (
-            PermissionKind::SystemAudio | PermissionKind::Calendar,
-            PermState::Granted
-            | PermState::Denied
-            | PermState::Unknown
-            | PermState::Unsupported
-            | PermState::NoDevice,
-        )
-        | (
-            PermissionKind::Accessibility,
-            PermState::Granted | PermState::Unknown | PermState::Unsupported | PermState::NoDevice,
-        ) => ("", ""),
-    }
-}
-
-/// `busy` is parallel to the fixed 3-row order (microphone, system_audio,
-/// accessibility).
 pub fn populate_permission_rows(window: &MainWindow, status: &PermissionStatus, busy: [bool; 3]) {
     let rows: Vec<PermissionRow> = ROWS
         .iter()
         .enumerate()
-        .map(|(i, spec)| {
-            let state = state_of(status, spec.kind);
-            let (hint, hint_action_label) = hint_for(spec.kind, state);
+        .map(|(i, &kind)| {
+            let state = state_of(status, kind);
             PermissionRow {
-                kind: settings_ui::permission_kind_to_slint(spec.kind),
-                label: spec.label.into(),
-                description: spec.description.into(),
+                kind: settings_ui::permission_kind_to_slint(kind),
                 state: settings_ui::perm_state_to_slint(state),
                 busy: busy[i],
-                action_label: spec.action_label.into(),
-                hint: hint.into(),
-                hint_action_label: hint_action_label.into(),
             }
         })
         .collect();
@@ -107,27 +47,5 @@ pub fn populate_permission_rows(window: &MainWindow, status: &PermissionStatus, 
 }
 
 pub fn row_index(kind: PermissionKind) -> Option<usize> {
-    ROWS.iter().position(|r| r.kind == kind)
-}
-
-pub fn step_title(step: &str) -> &'static str {
-    match step {
-        "permissions" => "Permissions",
-        "microphone" => "Choisissez votre microphone",
-        "model" => "Modèle de transcription",
-        "shortcut" => "Raccourci clavier",
-        _ => "",
-    }
-}
-
-pub fn step_subtitle(step: &str) -> &'static str {
-    match step {
-        "permissions" => "Soufflé a besoin de ces autorisations macOS pour fonctionner.",
-        "microphone" => "Vous pourrez changer ce choix plus tard dans les Réglages.",
-        "model" => "Téléchargé une seule fois, tout tourne ensuite hors ligne.",
-        "shortcut" => {
-            "Utilisé pour démarrer et arrêter la dictée depuis n'importe quelle application."
-        }
-        _ => "",
-    }
+    ROWS.iter().position(|&k| k == kind)
 }

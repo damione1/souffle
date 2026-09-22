@@ -22,8 +22,8 @@ export component FeedbackSoundsSection inherits VerticalLayout {
 
         SettingsField {
             show-divider: false;
-            label: "Activer les sons";
-            description: "Jouer un son au démarrage et à l'arrêt de l'enregistrement.";
+            label: @tr("Activer les sons");
+            description: @tr("Jouer un son au démarrage et à l'arrêt de l'enregistrement.");
 
             ThemedSwitch {
                 control-label: @tr("Activer les sons");
@@ -33,7 +33,7 @@ export component FeedbackSoundsSection inherits VerticalLayout {
         }
 
         if root.enabled: SettingsField {
-            label: "Volume";
+            label: @tr("Volume");
 
             HorizontalLayout {
                 spacing: 10px;
@@ -49,7 +49,7 @@ export component FeedbackSoundsSection inherits VerticalLayout {
                 }
 
                 Text {
-                    text: root.volume + "%";
+                    text: @tr("{}%", root.volume);
                     color: Theme.text-muted;
                     font-size: 12px;
                     vertical-alignment: center;

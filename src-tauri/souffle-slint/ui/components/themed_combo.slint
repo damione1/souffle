@@ -69,7 +69,23 @@ export component ThemedComboBox inherits Rectangle {
         x: 12px;
         width: parent.width - 36px;
         height: parent.height;
-        text: root.current-value;
+        text: root.current-value == "__AUTOMATIC__" ? @tr("Automatique")
+            : root.current-value == "__FOLLOW_DEFAULT__" ? @tr("Suivre l'appareil par défaut")
+            : root.current-value == "__NEVER__" ? @tr("Jamais")
+            : root.current-value == "__DEFAULT__" ? @tr("Par défaut")
+            : root.current-value == "__DETAILED__" ? @tr("Compte rendu détaillé")
+            : root.current-value == "__BRIEF__" ? @tr("Aperçu bref")
+            : root.current-value == "__BUILTIN__" ? @tr("Intégré")
+            : root.current-value == "__USB__" ? @tr("USB")
+            : root.current-value == "__BLUETOOTH__" ? @tr("Bluetooth")
+            : root.current-value == "__VIRTUAL__" ? @tr("Virtuel")
+            : root.current-value == "__AGGREGATE__" ? @tr("Agrégé")
+            : root.current-value == "__UNKNOWN__" ? @tr("Inconnu")
+            : root.current-value == "__CLEANUP__" ? @tr("Nettoyage")
+            : root.current-value == "__PROFESSIONAL_EMAIL__" ? @tr("E-mail professionnel")
+            : root.current-value == "__BULLETS__" ? @tr("Puces")
+            : root.current-value == "__NO_FILLERS__" ? @tr("Sans fillers")
+            : root.current-value;
         font-size: 14px;
         color: Theme.text-secondary;
         vertical-alignment: center;
@@ -189,7 +205,23 @@ export component ThemedComboBox inherits Rectangle {
                             x: 10px;
                             width: parent.width - 20px;
                             height: parent.height;
-                            text: item;
+                            text: item == "__AUTOMATIC__" ? @tr("Automatique")
+                                : item == "__FOLLOW_DEFAULT__" ? @tr("Suivre l'appareil par défaut")
+                                : item == "__NEVER__" ? @tr("Jamais")
+                                : item == "__DEFAULT__" ? @tr("Par défaut")
+                                : item == "__DETAILED__" ? @tr("Compte rendu détaillé")
+                                : item == "__BRIEF__" ? @tr("Aperçu bref")
+                                : item == "__BUILTIN__" ? @tr("Intégré")
+                                : item == "__USB__" ? @tr("USB")
+                                : item == "__BLUETOOTH__" ? @tr("Bluetooth")
+                                : item == "__VIRTUAL__" ? @tr("Virtuel")
+                                : item == "__AGGREGATE__" ? @tr("Agrégé")
+                                : item == "__UNKNOWN__" ? @tr("Inconnu")
+                                : item == "__CLEANUP__" ? @tr("Nettoyage")
+                                : item == "__PROFESSIONAL_EMAIL__" ? @tr("E-mail professionnel")
+                                : item == "__BULLETS__" ? @tr("Puces")
+                                : item == "__NO_FILLERS__" ? @tr("Sans fillers")
+                                : item;
                             font-size: 13px;
                             color: item == root.current-value ? Theme.text-primary : Theme.text-secondary;
                             vertical-alignment: center;

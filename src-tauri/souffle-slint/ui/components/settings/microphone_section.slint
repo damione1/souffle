@@ -73,7 +73,7 @@ export struct MicrophoneRow {
     is-default: bool,
     connected: bool,
     hidden: bool,
-    last-seen-label: string,
+    last-seen-age-seconds: int,
     is-first: bool,
     is-last: bool,
 }
@@ -83,6 +83,14 @@ export struct MicrophoneRow {
 // build that label array) rather than an index or uid resolved in `.slint` -
 // same reason as the `MicrophoneRow` precomputation above.
 export component MicrophoneSection inherits VerticalLayout {
+    pure function format-last-seen(age: int) -> string {
+        if age < 0 { return ""; }
+        if age < 60 { return @tr("à l'instant"); }
+        if age < 3600 { return @tr("il y a {} min", age / 60); }
+        if age < 86400 { return @tr("il y a {} h", age / 3600); }
+        return @tr("il y a {} j", age / 86400);
+    }
+
     in property <[string]> device-labels;
     in property <string> selected-device-label;
     in property <bool> pin-unavailable;
@@ -110,8 +118,8 @@ export component MicrophoneSection inherits VerticalLayout {
 
     SettingsField {
         show-divider: false;
-        label: "Périphérique d'entrée";
-        description: "Choisissez le microphone que Soufflé écoute et configurez le traitement audio.";
+        label: @tr("Périphérique d'entrée");
+        description: @tr("Choisissez le microphone que Soufflé écoute et configurez le traitement audio.");
 
         HorizontalLayout {
             spacing: 6px;
@@ -144,8 +152,8 @@ export component MicrophoneSection inherits VerticalLayout {
     }
 
     if root.sample-rate-label != "": SettingsField {
-        label: "Fréquence d'échantillonnage";
-        description: "Fréquence native du périphérique sélectionné.";
+        label: @tr("Fréquence d'échantillonnage");
+        description: @tr("Fréquence native du périphérique sélectionné.");
 
         Rectangle {
             height: Theme.settings-control-height;
@@ -182,7 +190,7 @@ export component MicrophoneSection inherits VerticalLayout {
             alignment: end;
 
             ThemedButton {
-                text: root.resetting-sample-rate ? "Réinitialisation…" : "Réinitialiser à 48 kHz";
+                text: root.resetting-sample-rate ? @tr("Réinitialisation…") : @tr("Réinitialiser à 48 kHz");
                 enabled: !root.resetting-sample-rate;
                 clicked => { root.reset-sample-rate-requested(); }
             }
@@ -246,15 +254,21 @@ export component MicrophoneSection inherits VerticalLayout {
                                     vertical-alignment: center;
                                 }
                                 Text {
-                                    text: row.transport-label + (row.is-default ? " · par défaut" : "");
+                                    text: (row.transport-label == "__BUILTIN__" ? @tr("Intégré")
+                                        : row.transport-label == "__USB__" ? @tr("USB")
+                                        : row.transport-label == "__BLUETOOTH__" ? @tr("Bluetooth")
+                                        : row.transport-label == "__VIRTUAL__" ? @tr("Virtuel")
+                                        : row.transport-label == "__AGGREGATE__" ? @tr("Agrégé")
+                                        : row.transport-label == "__UNKNOWN__" ? @tr("Inconnu")
+                                        : row.transport-label) + (row.is-default ? @tr(" · par défaut") : "");
                                     font-size: 11px;
                                     color: Theme.text-muted;
                                     vertical-alignment: center;
                                     horizontal-stretch: 0;
                                 }
                             }
-                            if !row.connected && row.last-seen-label != "": Text {
-                                text: row.last-seen-label;
+                            if !row.connected && row.last-seen-age-seconds >= 0: Text {
+                                text: format-last-seen(row.last-seen-age-seconds);
                                 font-size: 11px;
                                 color: Theme.text-muted;
                             }
@@ -267,13 +281,13 @@ export component MicrophoneSection inherits VerticalLayout {
 
                             MicIconButton {
                                 kind: MicIconKind.up;
-                                control-label: "Monter " + row.name;
+                                control-label: @tr("Monter {}", row.name);
                                 enabled: !row.is-first;
                                 clicked => { root.move-device-requested(row.uid, -1); }
                             }
                             MicIconButton {
                                 kind: MicIconKind.down;
-                                control-label: "Descendre " + row.name;
+                                control-label: @tr("Descendre {}", row.name);
                                 enabled: !row.is-last;
                                 clicked => { root.move-device-requested(row.uid, 1); }
                             }
@@ -281,7 +295,7 @@ export component MicrophoneSection inherits VerticalLayout {
                                 spacing: 6px;
                                 alignment: center;
                                 ThemedSwitch {
-                                    control-label: "Masquer " + row.name;
+                                    control-label: @tr("Masquer {}", row.name);
                                     checked: row.hidden;
                                     toggled(new) => { root.toggle-hidden-requested(row.uid, new); }
                                 }
@@ -300,7 +314,7 @@ export component MicrophoneSection inherits VerticalLayout {
 
                                 if !row.connected: MicIconButton {
                                     kind: MicIconKind.trash;
-                                    control-label: "Supprimer " + row.name;
+                                    control-label: @tr("Supprimer {}", row.name);
                                     glyph-color: Theme.danger;
                                     clicked => { root.remove-device-requested(row.uid); }
                                 }
@@ -319,8 +333,8 @@ export component MicrophoneSection inherits VerticalLayout {
     }
 
     SettingsField {
-        label: "Autoriser les micros Bluetooth";
-        description: "Sinon, un casque Bluetooth n'est jamais sélectionné automatiquement (évite le mode mono basse qualité).";
+        label: @tr("Autoriser les micros Bluetooth");
+        description: @tr("Sinon, un casque Bluetooth n'est jamais sélectionné automatiquement (évite le mode mono basse qualité).");
 
         ThemedSwitch {
             control-label: @tr("Autoriser les micros Bluetooth");

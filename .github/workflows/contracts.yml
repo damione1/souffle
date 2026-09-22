@@ -74,4 +74,7 @@ jobs:
       - run: cargo test --manifest-path src-tauri/Cargo.toml --workspace
         timeout-minutes: 15
       - run: git diff --exit-code src/lib/types/generated.ts src/lib/api/generated.ts
+      # The catalogue gate extracts the @tr() calls before validating both PO
+      # files. Keep the extractor aligned with the Slint compiler in Cargo.lock.
+      - run: cargo install slint-tr-extractor --version 1.17.1 --locked
       - run: ./scripts/check_slint_translations.sh

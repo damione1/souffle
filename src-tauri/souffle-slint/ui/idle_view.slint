@@ -39,6 +39,25 @@ export component IdleView inherits Rectangle {
     callback calendar-setup-requested();
     callback calendar-event-start-requested(string);
 
+    pure function translate-error(error: string) -> string {
+        if error == "MODEL_NOT_DOWNLOADED" {
+            return @tr("Modèle non téléchargé - ouvrez Réglages pour le télécharger.");
+        }
+        if error == "MODEL_PREPARING" {
+            return @tr("Le modèle est en cours de préparation. Réessayez lorsqu’il est prêt.");
+        }
+        if error == "MODEL_ERROR" {
+            return @tr("Le modèle est en erreur. Réessayez depuis Réglages.");
+        }
+        if error == "MEETING_FINALIZATION_UNEXPECTED_STATE" {
+            return @tr("La réunion a quitté son état de finalisation de façon inattendue.");
+        }
+        if error == "MEETING_FINALIZATION_TIMEOUT" {
+            return @tr("La finalisation de la réunion a dépassé 30 secondes.");
+        }
+        return error;
+    }
+
     // No settings button here: `AppHeader` (mounted once in
     // `main_window.slint`, above every view) owns that control now.
     VerticalLayout {
@@ -50,7 +69,7 @@ export component IdleView inherits Rectangle {
 
         if root.transcription-status-message != "": StatusBanner {
             vertical-stretch: 0;
-            message: root.transcription-status-message;
+            message: root.translate-error(root.transcription-status-message);
             dismissed => { root.dismiss-transcription-status(); }
         }
         if root.dictation-recovery-text != "": DictationRecovery {
@@ -60,7 +79,7 @@ export component IdleView inherits Rectangle {
         }
         if root.meeting-status-message != "": StatusBanner {
             vertical-stretch: 0;
-            message: root.meeting-status-message;
+            message: root.translate-error(root.meeting-status-message);
             dismissed => { root.dismiss-meeting-status(); }
         }
 
@@ -76,7 +95,7 @@ export component IdleView inherits Rectangle {
         SearchField {
             vertical-stretch: 0;
             text <=> root.search-query;
-            placeholder: "Rechercher transcriptions et réunions";
+            placeholder: @tr("Rechercher transcriptions et réunions");
             edited(text) => { root.search-changed(text); }
         }
 

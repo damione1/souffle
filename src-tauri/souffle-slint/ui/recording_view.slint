@@ -25,7 +25,7 @@ export component RecordingView inherits Rectangle {
 
     property <string> combined-text: root.live-tentative == "" ? root.live-text
         : root.live-text == "" ? root.live-tentative
-        : root.live-text + " " + root.live-tentative;
+        : root.live-text + @tr(" {}", root.live-tentative);
     property <int> elapsed-seconds: 0;
     property <int> elapsed-minutes: root.elapsed-seconds / 60;
     property <int> elapsed-remainder: Math.mod(root.elapsed-seconds, 60);
@@ -74,7 +74,7 @@ export component RecordingView inherits Rectangle {
                         x: 27px;
                         width: self.preferred-width;
                         height: parent.height;
-                        text: root.mode == RecordingMode.meeting ? "Réunion en direct" : "Dictée";
+                        text: root.mode == RecordingMode.meeting ? @tr("Réunion en direct") : @tr("Dictée");
                         font-family: "Archivo SemiBold";
                         font-size: 12.5px;
                         color: Theme.on-danger;
@@ -246,7 +246,7 @@ export component RecordingView inherits Rectangle {
                         alignment: start;
                         Text {
                             width: parent.width;
-                            text: root.combined-text == "" ? "À l'écoute…" : root.combined-text;
+                            text: root.combined-text == "" ? @tr("À l'écoute…") : root.combined-text;
                             font-size: root.combined-text == "" ? 14px : 19px;
                             color: root.combined-text == "" ? Theme.text-muted : Theme.text-secondary;
                             wrap: word-wrap;
@@ -316,7 +316,7 @@ export component RecordingView inherits Rectangle {
                             background: root.system-audio-active ? Theme.accent : Theme.surface-4;
                         }
                         audio-label := Text {
-                            text: root.system-audio-active ? "Audio système demandé" : "Audio système indisponible";
+                            text: root.system-audio-active ? @tr("Audio système demandé") : @tr("Audio système indisponible");
                             font-size: 11.5px;
                             color: Theme.text-muted;
                             vertical-alignment: center;
@@ -438,7 +438,7 @@ export component RecordingView inherits Rectangle {
                     width: parent.width;
                     area-height: 76px;
                     text <=> root.notes;
-                    placeholder: "Notez décisions, actions, noms…";
+                    placeholder: @tr("Notez décisions, actions, noms…");
                     control-label: @tr("Notes de la réunion");
                     edited(value) => { root.notes-changed(value); }
                 }

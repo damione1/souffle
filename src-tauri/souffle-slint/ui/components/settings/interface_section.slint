@@ -35,7 +35,7 @@ export component ShortcutRecorderButton inherits FocusScope {
         background: root.recording ? Theme.accent.with-alpha(0.16) : Theme.input;
 
         Text {
-            text: root.recording ? "Appuyez…" : (root.shortcut-label == "" ? "Non défini" : root.shortcut-label);
+            text: root.recording ? @tr("Appuyez…") : (root.shortcut-label == "" ? @tr("Non défini") : root.shortcut-label);
             color: root.recording ? Theme.accent : (root.shortcut-label == "" ? Theme.text-muted : Theme.text-secondary);
             font-size: 13px;
             font-family: "JetBrains Mono";
@@ -79,9 +79,8 @@ export component ShortcutRecorderButton inherits FocusScope {
     }
 }
 
-// Port of InterfaceSettingsSection.svelte. Runtime locale switching is out
-// of scope for this Slint shell (the whole UI is hardcoded French so far) -
-// the locale field still round-trips through the real `AppSettings.locale`.
+// Port of InterfaceSettingsSection.svelte. The locale is projected from the
+// same durable AppSettings value used by the onboarding selector.
 export component InterfaceSection inherits VerticalLayout {
     in property <AppTheme> theme;
     in property <AppLocale> locale;
@@ -111,14 +110,14 @@ export component InterfaceSection inherits VerticalLayout {
     callback permissions-review-requested();
 
     pure function locale-label(value: AppLocale) -> string {
-        if value == AppLocale.fr { return "Français"; }
-        if value == AppLocale.en { return "Anglais"; }
+        if value == AppLocale.fr { return @tr("Français"); }
+        if value == AppLocale.en { return @tr("English"); }
         return "";
     }
     pure function paste-method-label(value: PasteMethod) -> string {
-        if value == PasteMethod.clipboard { return "Presse-papiers (⌘V)"; }
-        if value == PasteMethod.typing { return "Frappe simulée"; }
-        if value == PasteMethod.ax { return "Champ ciblé"; }
+        if value == PasteMethod.clipboard { return @tr("Presse-papiers (⌘V)"); }
+        if value == PasteMethod.typing { return @tr("Frappe simulée"); }
+        if value == PasteMethod.ax { return @tr("Champ ciblé"); }
         return "";
     }
 
@@ -130,8 +129,8 @@ export component InterfaceSection inherits VerticalLayout {
 
         SettingsField {
             show-divider: false;
-            label: "Langue";
-            description: "Choisissez la langue de l'interface.";
+            label: @tr("Langue");
+            description: @tr("Choisissez la langue de l'interface.");
 
             ThemedComboBox {
                 control-label: @tr("Langue de l'interface");
@@ -149,7 +148,7 @@ export component InterfaceSection inherits VerticalLayout {
         }
 
         SettingsField {
-            label: "Thème";
+            label: @tr("Thème");
 
             HorizontalLayout {
                 spacing: 0px;
@@ -175,8 +174,8 @@ export component InterfaceSection inherits VerticalLayout {
         }
 
         SettingsField {
-            label: "Collage automatique après dictée";
-            description: "Colle automatiquement la transcription à l'arrêt de l'enregistrement.";
+            label: @tr("Collage automatique après dictée");
+            description: @tr("Colle automatiquement la transcription à l'arrêt de l'enregistrement.");
 
             ThemedSwitch {
                 control-label: @tr("Collage automatique après dictée");
@@ -186,8 +185,8 @@ export component InterfaceSection inherits VerticalLayout {
         }
 
         if root.auto-paste: SettingsField {
-            label: "Méthode de collage";
-            description: "Le champ ciblé utilise l'accessibilité pour insérer dans la sélection. Utilisez la frappe simulée si une app refuse le ⌘V synthétique (terminaux, champs sécurisés).";
+            label: @tr("Méthode de collage");
+            description: @tr("Le champ ciblé utilise l'accessibilité pour insérer dans la sélection. Utilisez la frappe simulée si une app refuse le ⌘V synthétique (terminaux, champs sécurisés).");
 
             ThemedComboBox {
                 control-label: @tr("Méthode de collage");
@@ -212,8 +211,8 @@ export component InterfaceSection inherits VerticalLayout {
         }
 
         if root.auto-paste: SettingsField {
-            label: "Délai de collage (ms)";
-            description: "Temps d'attente avant le collage. Augmentez si le texte arrive dans la mauvaise application.";
+            label: @tr("Délai de collage (ms)");
+            description: @tr("Temps d'attente avant le collage. Augmentez si le texte arrive dans la mauvaise application.");
 
             ThemedSpinBox {
                 control-label: @tr("Délai de collage en millisecondes");
@@ -226,8 +225,8 @@ export component InterfaceSection inherits VerticalLayout {
         }
 
         SettingsField {
-            label: "Basculer l'enregistrement";
-            description: "Appuyez une fois pour démarrer ou arrêter la dictée.";
+            label: @tr("Basculer l'enregistrement");
+            description: @tr("Appuyez une fois pour démarrer ou arrêter la dictée.");
 
             HorizontalLayout {
                 spacing: 8px;
@@ -252,8 +251,8 @@ export component InterfaceSection inherits VerticalLayout {
         }
 
         SettingsField {
-            label: "Appuyer pour parler";
-            description: "Maintenez pour enregistrer, relâchez pour arrêter.";
+            label: @tr("Appuyer pour parler");
+            description: @tr("Maintenez pour enregistrer, relâchez pour arrêter.");
 
             HorizontalLayout {
                 spacing: 8px;
@@ -278,8 +277,8 @@ export component InterfaceSection inherits VerticalLayout {
         }
 
         SettingsField {
-            label: "Masquer l'overlay d'enregistrement";
-            description: "Ne pas afficher le HUD flottant pendant une dictée ou une réunion. Déplacez-le par glisser-déposer ; la position est mémorisée et reste à l'écran si la résolution change.";
+            label: @tr("Masquer l'overlay d'enregistrement");
+            description: @tr("Ne pas afficher le HUD flottant pendant une dictée ou une réunion. Déplacez-le par glisser-déposer ; la position est mémorisée et reste à l'écran si la résolution change.");
 
             ThemedSwitch {
                 control-label: @tr("Masquer l'overlay d'enregistrement");
