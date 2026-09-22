@@ -198,6 +198,17 @@ fn settings_save_failure_message(outcome: &SettingsSaveOutcome) -> String {
     }
 }
 
+/// SOU-226 AC2: a save-error banner from a previous Settings session must
+/// not resurface just because Settings is reopened - only an actual save
+/// failure this session should show it. `on_settings_requested` calls this
+/// before populating anything else, mirroring the
+/// `window.set_settings_save_error("".into())` reset that used to run here
+/// before it was dropped, unreplaced, in PR #260 (SOU-201).
+fn reset_stale_save_error(window: &MainWindow) {
+    window.set_settings_save_error("".into());
+    window.set_settings_save_error_unavailable(false);
+}
+
 /// Switches the bundled Slint translation to the given locale. Called from
 /// `settings_values.rs` whenever the user changes the language in the
 /// Interface settings tab.
@@ -2785,6 +2796,7 @@ fn wire_update_dialogs(
     window: &MainWindow,
     tauri_handle: AppHandle,
     settings_io: Rc<settings_io::SettingsIoCoordinator>,
+    settings_drafts: Rc<settings_drafts::SettingsDraftController>,
 ) {
     let settings_io_for_dismiss = settings_io.clone();
     window.on_whats_new_dismissed(move || {
@@ -2834,19 +2846,31 @@ fn wire_update_dialogs(
 
     let weak = window.as_weak();
     let handle = tauri_handle.clone();
+    let settings_drafts_for_install = settings_drafts.clone();
     window.on_update_install_requested(move || {
         let weak = weak.clone();
         let handle = handle.clone();
-        slint::spawn_local(async move {
-            let state = Arc::clone(&handle);
-            if let Err(e) = souffle_lib::commands::install_update(state).await
-                && let Some(window) = weak.upgrade()
-            {
-                window.set_update_error_message(e.into());
-            }
-            // On success the process restarts itself; nothing left to update here.
-        })
-        .expect("slint event loop not running");
+        let settings_drafts_for_install = settings_drafts_for_install.clone();
+        // SOU-226 AC1: route through the same flush barrier as native quit
+        // (`SettingsDraftController::flush_before_exit`) instead of calling
+        // `install_update` directly - a pending/retained Settings draft is
+        // written (or its failure surfaced, reopening Settings) before the
+        // process exits as part of `install_and_relaunch`'s relaunch.
+        let install: Rc<dyn Fn()> = Rc::new(move || {
+            let weak = weak.clone();
+            let handle = handle.clone();
+            slint::spawn_local(async move {
+                let state = Arc::clone(&handle);
+                if let Err(e) = souffle_lib::commands::install_update(state).await
+                    && let Some(window) = weak.upgrade()
+                {
+                    window.set_update_error_message(e.into());
+                }
+                // On success the process restarts itself; nothing left to update here.
+            })
+            .expect("slint event loop not running");
+        });
+        settings_drafts_for_install.flush_before_exit(install);
     });
 
     let weak = window.as_weak();
@@ -2964,6 +2988,7 @@ fn wire_callbacks(
     permissions: Rc<permissions_ui::PermissionController>,
     settings_state: SettingsCache,
     settings_io: Rc<settings_io::SettingsIoCoordinator>,
+    settings_drafts: Rc<settings_drafts::SettingsDraftController>,
 ) {
     let lists_models = lists_ui::SettingsListModels::install(window);
     // Shared with load_meeting_audio/stop_audio_player/open_meeting_detail
@@ -3549,9 +3574,11 @@ fn wire_callbacks(
     // the whole object back (matching `saveSettings()` in
     // controller.svelte.ts) - every field-level callback below mutates this
     // cache and re-saves it, it never redeclares state on the Slint side.
+    // `settings_drafts` itself is constructed by the caller and shared with
+    // `wire_update_dialogs` (SOU-226) so the updater's "Install and restart"
+    // flushes through the same controller instance as quit, rather than a
+    // second one that could drift out of sync.
     let settings_log_timer: Rc<RefCell<Option<slint::Timer>>> = Rc::new(RefCell::new(None));
-    let settings_drafts =
-        settings_drafts::SettingsDraftController::new(window, settings_io.clone());
     let settings_drafts_for_quit = settings_drafts.clone();
     let weak_quit = window.as_weak();
     let io_quit = settings_io.clone();
@@ -3638,6 +3665,7 @@ fn wire_callbacks(
         let Some(window) = weak.upgrade() else {
             return;
         };
+        reset_stale_save_error(&window);
         summary_refresh_state_for_open.begin_session();
         let token = settings_io_for_open.begin_open();
         if let Some(settings) = settings_state_for_open.known_snapshot() {
@@ -5990,13 +6018,25 @@ fn main() {
         settings_io.clone(),
         permissions.clone(),
     );
-    wire_update_dialogs(&window, handle.clone(), settings_io.clone());
+    // Constructed once and shared: `wire_update_dialogs`'s "Install and
+    // restart" and `wire_callbacks`'s native quit both flush drafts through
+    // this same `SettingsDraftController` instance (SOU-226 - see the
+    // ticket's "Zones à risque" against a second, divergent flush path).
+    let settings_drafts =
+        settings_drafts::SettingsDraftController::new(&window, settings_io.clone());
+    wire_update_dialogs(
+        &window,
+        handle.clone(),
+        settings_io.clone(),
+        settings_drafts.clone(),
+    );
     wire_callbacks(
         &window,
         handle.clone(),
         permissions.clone(),
         settings_state,
         settings_io.clone(),
+        settings_drafts,
     );
     let startup_app_handle = handle.clone();
 
@@ -6111,8 +6151,9 @@ mod tests {
         clear_committed_summary_add_draft, dictation_transcript_disposition,
         finish_startup_presentation, merge_recovery_text, prime_summary_template_editor,
         project_model_selection_snapshot, project_startup_settings, reset_live_buffers,
-        settle_audio_device_save, settle_model_selection_save, settle_onboarding_completion,
-        should_clear_committed_summary_add_draft, wire_summary_template_edit_callbacks,
+        reset_stale_save_error, settle_audio_device_save, settle_model_selection_save,
+        settle_onboarding_completion, should_clear_committed_summary_add_draft,
+        wire_summary_template_edit_callbacks,
     };
     use crate::model_ui;
     use crate::settings_drafts::SettingsDraftController;
@@ -6137,6 +6178,21 @@ mod tests {
     fn test_window() -> MainWindow {
         let _ = slint::platform::set_platform(Box::new(TestPlatform));
         MainWindow::new().unwrap()
+    }
+
+    // SOU-226 AC2: a save-error banner from a closed Settings session must
+    // not resurface just because Settings is reopened without any new save
+    // attempt.
+    #[test]
+    fn reopening_settings_clears_a_stale_save_error_banner() {
+        let window = test_window();
+        window.set_settings_save_error("previous session's error".into());
+        window.set_settings_save_error_unavailable(true);
+
+        reset_stale_save_error(&window);
+
+        assert_eq!(window.get_settings_save_error(), "");
+        assert!(!window.get_settings_save_error_unavailable());
     }
 
     #[test]
