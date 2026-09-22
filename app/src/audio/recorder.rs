@@ -295,7 +295,7 @@ pub fn deinterleave_stereo(interleaved: &[f32]) -> (Vec<f32>, Vec<f32>) {
     let frames = interleaved.len() / 2;
     let mut left = Vec::with_capacity(frames);
     let mut right = Vec::with_capacity(frames);
-    for frame in interleaved.chunks_exact(2) {
+    for frame in interleaved.as_chunks::<2>().0 {
         left.push(frame[0]);
         right.push(frame[1]);
     }
