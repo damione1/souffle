@@ -4,7 +4,6 @@ import { SettingsGroup } from "settings_group.slint";
 import { ThemedButton } from "../themed_button.slint";
 import { ThemedLineEdit } from "../themed_line_edit.slint";
 import { ThemedTextArea } from "../themed_text_area.slint";
-import { ListView } from "std-widgets.slint";
 
 // Port of SnippetsSettingsSection.svelte. Which row is being edited is
 // tracked in Rust (`snippets_editing` in main.rs), not local `.slint`
@@ -18,7 +17,16 @@ export struct SnippetRow {
 }
 
 export component SnippetsSection inherits VerticalLayout {
+    // Only the currently visible slice of the snippet list (SOU-229) -
+    // `lists_ui.rs` owns the full row list and windows it with the same
+    // spacer-before/spacer-after pattern as `transcript_section.slint`; see
+    // `dictionary_section.slint` for the full rationale.
     in property <[SnippetRow]> entries;
+    in property <int> entry-count: 0;
+    in property <float> list-content-height: 0.0;
+    in property <float> list-spacer-before: 0.0;
+    in property <float> list-spacer-after: 0.0;
+    in-out property <length> list-scroll-top: 0px;
     in-out property <string> new-trigger-draft: "";
     in-out property <string> new-expansion-draft: "";
     in property <string> add-error;
@@ -85,16 +93,25 @@ export component SnippetsSection inherits VerticalLayout {
             font-size: 11px;
         }
 
-        if root.entries.length == 0: Text {
+        if root.entry-count == 0: Text {
             text: @tr("Aucune formule.");
             color: Theme.text-muted;
             font-size: 12px;
         }
     }
 
-    snippets-list := ListView {
-        height: min(root.entries.length * 96px, 420px);
-        visible: root.entries.length > 0;
+    snippets-list := Flickable {
+        height: min(root.list-content-height * 1px, 420px);
+        visible: root.entry-count > 0;
+        viewport-width: self.width;
+        viewport-height: root.list-content-height * 1px;
+        viewport-y <=> root.list-scroll-top;
+
+        VerticalLayout {
+        width: snippets-list.width;
+        alignment: start;
+
+        Rectangle { height: root.list-spacer-before * 1px; }
 
         for row in root.entries: Rectangle {
             height: row.editing ? 236px : (root.delete-error != "" && root.delete-error-id == row.id ? 116px : 96px);
@@ -188,6 +205,9 @@ export component SnippetsSection inherits VerticalLayout {
                     }
                 }
             }
+        }
+
+        Rectangle { height: root.list-spacer-after * 1px; }
         }
     }
     }
