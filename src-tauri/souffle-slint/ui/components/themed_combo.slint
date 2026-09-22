@@ -75,6 +75,7 @@ export component ThemedComboBox inherits Rectangle {
         height: parent.height;
         text: root.current-value == "__AUTOMATIC__" ? @tr("Automatique")
             : root.current-value == "__FOLLOW_DEFAULT__" ? @tr("Suivre l'appareil par défaut")
+            : root.current-value == "__CLAMSHELL_DEVICE_UNAVAILABLE__" ? @tr("Appareil personnalisé (indisponible)")
             : root.current-value == "__NEVER__" ? @tr("Jamais")
             : root.current-value == "__DEFAULT__" ? @tr("Par défaut")
             : root.current-value == "__DETAILED__" ? @tr("Compte rendu détaillé")

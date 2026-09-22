@@ -12,6 +12,12 @@ use souffle_lib::audio::AudioInputDevice;
 
 const AUTOMATIC_LABEL: &str = "__AUTOMATIC__";
 const CLAMSHELL_FOLLOW_LABEL: &str = "__FOLLOW_DEFAULT__";
+// Distinct from `CLAMSHELL_FOLLOW_LABEL`: shown only when a *specific* device
+// was pinned for clamshell mode and it is not in the current catalogue
+// (unplugged, still enumerating). Keeping it distinct preserves the "a
+// specific device was configured" signal `CLAMSHELL_FOLLOW_LABEL` would
+// otherwise silently lose (SOU-225).
+const CLAMSHELL_UNAVAILABLE_LABEL: &str = "__CLAMSHELL_DEVICE_UNAVAILABLE__";
 
 fn device_label(device: &AudioInputDevice) -> String {
     if device.is_default {
@@ -54,11 +60,18 @@ pub fn populate_device_pickers(
     window.set_settings_clamshell_device_label(clamshell_device_label(devices, clamshell).into());
 }
 
+/// Falls back to a readable sentinel - never the raw CoreAudio UID - when the
+/// pinned clamshell device is not in `devices` (unplugged, catalogue not yet
+/// refreshed). `clamshell` itself is untouched by this lookup, so the caller
+/// still round-trips the real UID once the device reappears (AC4).
 pub fn clamshell_device_label(devices: &[AudioInputDevice], clamshell: Option<&str>) -> String {
     clamshell
         .and_then(|uid| devices.iter().find(|d| d.uid == uid))
         .map(device_label)
-        .unwrap_or_else(|| clamshell.unwrap_or(CLAMSHELL_FOLLOW_LABEL).to_string())
+        .unwrap_or_else(|| match clamshell {
+            Some(_) => CLAMSHELL_UNAVAILABLE_LABEL.to_string(),
+            None => CLAMSHELL_FOLLOW_LABEL.to_string(),
+        })
 }
 
 /// Inverse of `populate_device_pickers`' label building - `None` means the
@@ -215,5 +228,45 @@ mod tests {
         assert_eq!(resolve_device_uid(&devices, AUTOMATIC_LABEL), None);
         assert_eq!(resolve_device_uid(&devices, CLAMSHELL_FOLLOW_LABEL), None);
         assert_eq!(resolve_device_uid(&devices, "a"), Some("a".to_string()));
+    }
+
+    #[test]
+    fn clamshell_device_label_shows_the_device_name_when_present() {
+        let devices = vec![device("a", false), device("b", true)];
+        assert_eq!(clamshell_device_label(&devices, Some("a")), "a");
+    }
+
+    #[test]
+    fn clamshell_device_label_falls_back_to_follow_default_when_unset() {
+        let devices = vec![device("a", false)];
+        assert_eq!(
+            clamshell_device_label(&devices, None),
+            CLAMSHELL_FOLLOW_LABEL
+        );
+    }
+
+    // SOU-225: a pinned clamshell UID missing from the current catalogue
+    // (unplugged, not yet refreshed) must not leak the raw CoreAudio UID as
+    // a display label - it should fall back to a translatable sentinel
+    // distinct from "follow default" (AC3), while the UID itself stays
+    // exactly what the caller passed in for later round-trip (AC4).
+    #[test]
+    fn clamshell_device_label_falls_back_to_a_readable_sentinel_when_pinned_device_is_missing() {
+        let devices = vec![device("a", false)];
+        let label = clamshell_device_label(&devices, Some("AppleUSBAudioEngine:Vendor:Mic:2"));
+        assert_eq!(label, CLAMSHELL_UNAVAILABLE_LABEL);
+        assert_ne!(label, CLAMSHELL_FOLLOW_LABEL);
+        assert!(!label.contains("AppleUSBAudioEngine"));
+    }
+
+    #[test]
+    fn clamshell_device_label_recovers_the_real_name_once_the_device_reappears() {
+        let uid = "AppleUSBAudioEngine:Vendor:Mic:2";
+        assert_eq!(
+            clamshell_device_label(&[], Some(uid)),
+            CLAMSHELL_UNAVAILABLE_LABEL
+        );
+        let devices = vec![device(uid, false)];
+        assert_eq!(clamshell_device_label(&devices, Some(uid)), uid);
     }
 }

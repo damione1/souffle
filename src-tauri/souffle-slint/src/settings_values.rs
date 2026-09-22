@@ -87,20 +87,9 @@ impl SettingsCache {
         let Some(window) = self.window.upgrade() else {
             return;
         };
-        let message = match outcome {
-            SettingsSaveOutcome::Observed { result, .. } => match result {
-                Ok(()) => String::new(),
-                Err(error) => error.user_message(),
-            },
-            SettingsSaveOutcome::Unavailable { result, read_error } => match result {
-                Ok(()) => format!("Stored settings are unknown: {read_error}"),
-                Err(error) => format!(
-                    "{}. Stored settings are unknown: {read_error}",
-                    error.user_message()
-                ),
-            },
-        };
+        let (message, unavailable) = save_outcome_banner_detail(outcome);
         window.set_settings_save_error(message.into());
+        window.set_settings_save_error_unavailable(unavailable);
     }
 
     #[cfg(test)]
@@ -113,6 +102,37 @@ impl SettingsCache {
 pub(crate) enum SettingsCommitStatus {
     Committed,
     NotCommitted,
+}
+
+/// Decomposes a save outcome into the opaque detail text a banner should
+/// display plus whether the durable state afterwards is unknown
+/// (`SettingsSaveOutcome::Unavailable`, i.e. the post-save re-read failed).
+///
+/// The returned string never carries Rust-authored scaffolding prose - only
+/// `error.user_message()` (`SettingsSaveError`'s own domain, out of scope
+/// here per SOU-225's "Hors périmètre") and, for `Unavailable`, the raw
+/// `read_error` text, joined with a locale-neutral separator when both are
+/// present. Callers pick the actual sentence (`@tr()`'d in the `.slint`
+/// template, keyed off the returned bool) so the banner stays fully in the
+/// active UI locale instead of mixing a French template with a hardcoded
+/// English "Stored settings are unknown" phrase (SOU-225).
+pub(crate) fn save_outcome_banner_detail(outcome: &SettingsSaveOutcome) -> (String, bool) {
+    match outcome {
+        SettingsSaveOutcome::Observed { result, .. } => {
+            let message = match result {
+                Ok(()) => String::new(),
+                Err(error) => error.user_message(),
+            };
+            (message, false)
+        }
+        SettingsSaveOutcome::Unavailable { result, read_error } => {
+            let message = match result {
+                Ok(()) => read_error.clone(),
+                Err(error) => format!("{} — {read_error}", error.user_message()),
+            };
+            (message, true)
+        }
+    }
 }
 
 pub(crate) fn save_outcome_commit_status(outcome: &SettingsSaveOutcome) -> SettingsCommitStatus {
@@ -511,6 +531,50 @@ mod tests {
             transport: TransportType::Usb,
             is_default: false,
         }
+    }
+
+    #[test]
+    fn save_outcome_banner_detail_carries_no_rust_authored_english_scaffolding() {
+        let observed_ok = SettingsSaveOutcome::Observed {
+            settings: Box::new(AppSettings::default()),
+            result: Ok(()),
+        };
+        assert_eq!(
+            save_outcome_banner_detail(&observed_ok),
+            (String::new(), false)
+        );
+
+        let observed_err = SettingsSaveOutcome::Observed {
+            settings: Box::new(AppSettings::default()),
+            result: Err(SettingsSaveError::NotCommitted {
+                message: "db locked".into(),
+            }),
+        };
+        assert_eq!(
+            save_outcome_banner_detail(&observed_err),
+            ("db locked".to_string(), false)
+        );
+
+        let unavailable_ok = SettingsSaveOutcome::Unavailable {
+            result: Ok(()),
+            read_error: "reread failed".into(),
+        };
+        let (message, unavailable) = save_outcome_banner_detail(&unavailable_ok);
+        assert_eq!(message, "reread failed");
+        assert!(unavailable);
+        assert!(!message.contains("Stored settings"));
+
+        let unavailable_err = SettingsSaveOutcome::Unavailable {
+            result: Err(SettingsSaveError::NotCommitted {
+                message: "db locked".into(),
+            }),
+            read_error: "reread failed".into(),
+        };
+        let (message, unavailable) = save_outcome_banner_detail(&unavailable_err);
+        assert!(unavailable);
+        assert!(!message.contains("Stored settings"));
+        assert!(message.contains("db locked"));
+        assert!(message.contains("reread failed"));
     }
 
     fn summary_status() -> SummaryProvidersStatus {
@@ -1252,6 +1316,7 @@ mod tests {
         assert_eq!(window.get_settings_paste_delay_ms(), 150);
         assert_eq!(AppSettings::load(&db).unwrap().paste_delay_ms, 150);
         assert!(window.get_settings_save_error().contains("write rejected"));
+        assert!(!window.get_settings_save_error_unavailable());
 
         window.invoke_settings_paste_delay_changed(200);
         drain_until(&io, &step, 2);
@@ -1262,6 +1327,7 @@ mod tests {
                 .get_settings_save_error()
                 .contains("native effect failed after commit")
         );
+        assert!(!window.get_settings_save_error_unavailable());
         {
             let cached = cache.borrow();
             let cached = cached
@@ -1291,11 +1357,17 @@ mod tests {
         );
         assert_eq!(window.get_settings_paste_delay_ms(), 200);
         assert!(!cache.is_known());
-        assert!(
-            window
-                .get_settings_save_error()
-                .contains("Stored settings are unknown: injected reread failure")
+        // SOU-225: the banner detail carries only the raw technical text, no
+        // Rust-authored English scaffolding ("Stored settings are unknown")
+        // that would leak past the `.slint` template's `@tr()` translation
+        // regardless of the active UI locale. The wrapper sentence is chosen
+        // in `.slint` from `settings-save-error-unavailable` instead.
+        assert_eq!(
+            window.get_settings_save_error().as_str(),
+            "injected reread failure"
         );
+        assert!(!window.get_settings_save_error().contains("Stored settings"));
+        assert!(window.get_settings_save_error_unavailable());
 
         window.invoke_settings_feedback_sounds_volume_changed(23);
         drain_until(&io, &step, 4);
@@ -1306,6 +1378,7 @@ mod tests {
         assert_eq!(recovered.feedback_sounds_volume, 23);
         assert!(cache.is_known());
         assert!(window.get_settings_save_error().is_empty());
+        assert!(!window.get_settings_save_error_unavailable());
 
         // Legacy full-settings callbacks (calendar selection and microphone
         // list edits) use the same known-aware path. They must not revive an
