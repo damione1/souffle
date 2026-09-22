@@ -8,7 +8,7 @@
 use crate::{MainWindow, SettingsInteraction};
 use serde_json::json;
 use slint::{ComponentHandle, RenderingState};
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Instant;
 use uuid::Uuid;
@@ -130,7 +130,12 @@ impl SettingsTrace {
 #[derive(Default)]
 struct InstrumentationState {
     input: HashMap<SettingsScenario, Arc<SettingsTrace>>,
-    persistence: VecDeque<Arc<SettingsTrace>>,
+    /// Single trace awaiting its persistence consumer. Every instrumented
+    /// handler is followed synchronously (same UI-thread stack) by exactly one
+    /// consumer, so at most one trace can legitimately be pending; anything
+    /// still here when the next interaction starts is stale and is dropped
+    /// with a log instead of being mis-correlated by FIFO position (SOU-230).
+    persistence: Option<Arc<SettingsTrace>>,
     after_render: Vec<Arc<SettingsTrace>>,
 }
 
@@ -140,7 +145,7 @@ fn state() -> &'static Mutex<InstrumentationState> {
     STATE.get_or_init(|| Mutex::new(InstrumentationState::default()))
 }
 
-fn enabled() -> bool {
+pub(crate) fn enabled() -> bool {
     std::env::var("SOUFFLE_SETTINGS_INSTRUMENT").as_deref() == Ok("1")
 }
 
@@ -171,7 +176,14 @@ pub(crate) fn handler(scenario: SettingsScenario) {
     let mut state = state().lock().unwrap_or_else(|p| p.into_inner());
     if let Some(trace) = state.input.remove(&scenario) {
         trace.mark(SettingsMilestone::Handler, None);
-        state.persistence.push_back(trace);
+        if let Some(stale) = state.persistence.replace(trace) {
+            emit(json!({
+                "kind": "trace_dropped",
+                "run_id": stale.id.to_string(),
+                "scenario": stale.scenario.name(),
+                "reason": "unconsumed_before_next_interaction",
+            }));
+        }
     }
 }
 
@@ -180,7 +192,7 @@ pub(crate) fn take_persistence_trace() -> Option<Arc<SettingsTrace>> {
         .lock()
         .unwrap_or_else(|p| p.into_inner())
         .persistence
-        .pop_front()
+        .take()
 }
 
 pub(crate) fn snapshot(trace: Arc<SettingsTrace>) {
@@ -193,10 +205,23 @@ pub(crate) fn snapshot(trace: Arc<SettingsTrace>) {
 }
 
 pub(crate) fn snapshot_without_persistence(scenario: SettingsScenario) {
-    if let Some(trace) = take_persistence_trace() {
-        debug_assert_eq!(trace.scenario, scenario);
-        snapshot(trace);
+    let Some(trace) = take_persistence_trace() else {
+        return;
+    };
+    // A mismatched scenario means the pending trace belongs to another
+    // interaction whose consumer never ran. Skip it with a log instead of
+    // panicking (debug) or silently mis-attributing the snapshot (release).
+    if trace.scenario != scenario {
+        emit(json!({
+            "kind": "trace_mismatch",
+            "run_id": trace.id.to_string(),
+            "expected": scenario.name(),
+            "actual": trace.scenario.name(),
+            "action": "skipped",
+        }));
+        return;
     }
+    snapshot(trace);
 }
 
 fn after_render() {
