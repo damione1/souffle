@@ -4,7 +4,6 @@ Private, on-device speech-to-text for macOS (Apple Silicon only). Rust backend +
 
 Slint conventions (closed-set enums, house widgets, Metal/Skia, keep-alive tabs, memory, threads, PR checklist): [`docs/engineering/slint.md`](./docs/engineering/slint.md). Agent notes: [`AGENTS.md`](./AGENTS.md).
 
-`src/` (Svelte 5) and `package.json` are the retired Tauri-era frontend, kept only until the whole SOU-185 epic (Slint migration) is verified end to end on a real machine; nothing in the shipped app reads them anymore. Removing them is tracked in SOU-192 (AC8) and is a separate, deliberate step. Don't delete them as a drive-by cleanup.
 
 ## Commands
 
@@ -12,7 +11,6 @@ Slint conventions (closed-set enums, house widgets, Metal/Skia, keep-alive tabs,
 - `make nightly` builds the debug app as **Soufflé Nightly** (`com.souffle.desktop.nightly`) and opens it; `make nightly-fresh` wipes Nightly data and TCC first; `make nightly-dmg` wraps it in a `.dmg`. Does not touch the installed Soufflé.
 - `cargo test --manifest-path src-tauri/Cargo.toml --workspace` runs backend tests
 - `./scripts/codeql-local.sh` runs CodeQL (rust, javascript-typescript, actions) locally; required before opening or updating a PR. Needs `brew install --cask codeql`. CI CodeQL runs only on push to `develop`, not on PRs.
-- Retired, still present pending SOU-192 AC8: `npm test`, `npm run check`, `npm run build`, `npm run generate:types` (its Rust half, `export_typescript_bindings`, no longer exists — the command now runs 0 tests and touches nothing).
 
 ## Local gate (before every PR open / push)
 
@@ -27,7 +25,6 @@ cargo test --manifest-path src-tauri/Cargo.toml --workspace
 ./scripts/codeql-local.sh
 ```
 
-Until SOU-192 AC8 removes `src/`/`package.json`, also run the retired frontend's own checks if you touched anything under `src/`: `npm ci && npm test && npm run check`. Nothing in the shipped app depends on their result anymore, but `contracts.yml` still runs them on every push/PR.
 
 ## Release changelogs
 

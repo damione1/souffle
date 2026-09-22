@@ -31,8 +31,6 @@ reviews:
 
   # Generated and vendored code is not reviewable material.
   path_filters:
-    - "!src/lib/types/generated.ts"
-    - "!src/lib/api/generated.ts"
     - "!src-tauri/gen/**"
     - "!src-tauri/fixtures/**"
     - "!src-tauri/target/**"
@@ -59,11 +57,7 @@ reviews:
 
     - path: "src-tauri/src/commands/**"
       instructions: |
-        Tauri IPC boundary. Flag every new or modified `Result<_, String>`: the frontend cannot
-        discriminate a cause from a string, and a typed error already exists.
-        Flag session orchestration logic added here rather than in the layer below.
-        A changed #[tauri::command] signature requires `npm run generate:types`; if the
-        generated files are not in the diff, say so.
+        IPC boundary (pure Rust function calls to Slint). Flag every new or modified Result<_, String>: the frontend cannot discriminate a cause from a string, and a typed error already exists. Flag session orchestration logic added here rather than in the layer below.
 
     - path: "src-tauri/src/**"
       instructions: |
@@ -73,20 +67,6 @@ reviews:
         Flag a permission (TCC, Accessibility, microphone) reported as granted, repaired or
         successful without a verification step actually confirming it.
         Flag state written only in memory when a crash or restart must preserve it.
-
-    - path: "src/lib/features/**"
-      instructions: |
-        Flag state that lives only in the webview and is lost on reload or crash when the
-        backend is the owner of record. Flag an error path that is swallowed rather than
-        surfaced to the user. Flag a UI action that does not consult the state machine before
-        firing. When an alert asks the user to change a setting, it must offer the control,
-        not describe the path to it.
-
-    - path: "src/**/*.svelte"
-      instructions: |
-        Svelte 5 runes. Flag `setSize` or any resize called from JS on a window anchored to the
-        top of the screen: it moves the anchor. Flag derived state that reintroduces a
-        reactivity cycle. User-facing strings must exist in both locales.
 
     - path: "src-tauri/src/db/**"
       instructions: |

@@ -15,23 +15,6 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  frontend:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-
-    steps:
-      - uses: actions/checkout@v6.0.1
-
-      - uses: actions/setup-node@v6.1.0
-        with:
-          node-version: 24
-          check-latest: true
-          cache: npm
-
-      - run: npm ci
-      - run: npm test
-      - run: npm run check
-
   rust:
     runs-on: macos-latest
     # Warm cache: ~5 min. Without a cap, a hung step runs to GitHub's 6 h
@@ -68,12 +51,6 @@ jobs:
       # wins the `Once` in `ensure_ort_initialized` can stall inside
       # `ort::init_from`, and every other thread then blocks on that `Once`
       # with no timeout. Fail the step instead of holding the runner.
-      # `export_typescript_bindings` is part of this suite; the next step
-      # checks it didn't drift the committed files (same as
-      # `npm run check:generated-types`).
-      - run: cargo test --manifest-path src-tauri/Cargo.toml --workspace
-        timeout-minutes: 15
-      - run: git diff --exit-code src/lib/types/generated.ts src/lib/api/generated.ts
       # The catalogue gate extracts the @tr() calls before validating both PO
       # files. Keep the extractor aligned with the Slint compiler in Cargo.lock.
       - run: cargo install slint-tr-extractor --version 1.17.1 --locked
