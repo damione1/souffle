@@ -121,7 +121,7 @@ jobs:
       - name: Rust cache
         uses: Swatinem/rust-cache@v2.9.1
         with:
-          workspaces: "./src-tauri -> target"
+          workspaces: "./app -> target"
           save-if: false
 
       - name: Install minisign
@@ -133,9 +133,9 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           export VERSION="${TAG#v}"
-          sed -i '' "s/^version = .*/version = \"$VERSION\"/" src-tauri/Cargo.toml
+          sed -i '' "s/^version = .*/version = \"$VERSION\"/" app/Cargo.toml
           echo "App version set to $VERSION in Cargo.toml"
-        # The app version comes from src-tauri/Cargo.toml [package] version.
+        # The app version comes from app/Cargo.toml [package] version.
         # We patch it from the tag here so the tag is the single source of truth
         # for the release. The build reads this via env!("CARGO_PKG_VERSION").
 
@@ -175,8 +175,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release upload "${GITHUB_REF_NAME}" \
-            "src-tauri/target/release/bundle/dmg/Soufflé.dmg" \
-            "src-tauri/target/release/bundle/updater/"*.tar.gz \
-            "src-tauri/target/release/bundle/updater/"*.tar.gz.sig \
-            "src-tauri/target/release/bundle/updater/latest.json" \
+            "app/target/release/bundle/dmg/Soufflé.dmg" \
+            "app/target/release/bundle/updater/"*.tar.gz \
+            "app/target/release/bundle/updater/"*.tar.gz.sig \
+            "app/target/release/bundle/updater/latest.json" \
             --clobber

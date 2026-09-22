@@ -1,6 +1,6 @@
 # Slint development guide
 
-Senior checklist for the shipped Soufflé UI. The binary crate is `souffle-slint` (`src-tauri/souffle-slint/`). Rust owns the truth. Slint renders it. Nothing in the shipped app reads the retired Svelte tree under `src/`.
+Senior checklist for the shipped Soufflé UI. The binary crate is `souffle-slint` (`app/souffle-slint/`). Rust owns the truth. Slint renders it. Nothing in the shipped app reads the retired Svelte tree under `src/`.
 
 Read this before adding a `.slint` file, a Slint enum, a house widget, or a `VecModel` push. Official Slint docs this guide compresses: [best practices](https://docs.slint.dev/latest/docs/slint/guide/development/best-practices/), [reactivity](https://docs.slint.dev/latest/docs/slint/guide/language/concepts/reactivity/), [properties](https://docs.slint.dev/latest/docs/slint/guide/language/coding/properties/), [globals](https://docs.slint.dev/latest/docs/slint/guide/language/coding/globals/), [functions and callbacks](https://docs.slint.dev/latest/docs/slint/guide/language/coding/functions-and-callbacks/), [repetition and models](https://docs.slint.dev/latest/docs/slint/guide/language/coding/repetition-and-data-models/), [backends and renderers](https://docs.slint.dev/latest/docs/slint/guide/backends-and-renderers/backends_and_renderers/), [debugging](https://docs.slint.dev/latest/docs/slint/guide/development/debugging_techniques/), [ListView](https://docs.slint.dev/latest/docs/slint/reference/std-widgets/views/listview/).
 
@@ -15,7 +15,7 @@ A **closed set** is a set whose valid values are decided by the code, not by the
 ### Declare it once
 
 1. Domain enum in `souffle_lib` (the source of truth for persistence and engine).
-2. Matching `export enum` in [`ui/types.slint`](../../src-tauri/souffle-slint/ui/types.slint).
+2. Matching `export enum` in [`ui/types.slint`](../../app/souffle-slint/ui/types.slint).
 3. Exhaustive `match` both ways at the boundary (`settings_ui.rs`, `ia_ui.rs`, …). No string property. No string callback argument. No `to_string()` round-trip.
 
 ```
@@ -136,7 +136,7 @@ Same rule, different artefact: `#[derive(specta::Type)]` on the Rust enum, gener
 |---|---|
 | Closed-set Slint enums | `ui/types.slint` |
 | Exhaustive Rust `match` both ways | `settings_ui.rs` (`theme_to_slint` / `theme_from_slint`, …) |
-| Open-set catalogue | `TranscriptionCatalog`, `src-tauri/src/engine/mod.rs` |
+| Open-set catalogue | `TranscriptionCatalog`, `app/src/engine/mod.rs` |
 | Bounds from the backend, not the UI | `SettingsOptions::current()` in `settings_ui.rs` |
 | Theme as a reactive global | `ui/theme.slint` |
 | Tab keep-alive (no remount) | `ui/components/settings/settings_tabs.slint` (`SettingsTabPage`) |
@@ -148,7 +148,7 @@ Same rule, different artefact: `#[derive(specta::Type)]` on the Rust enum, gener
 Official recommendation: keep business logic, `.slint`, and assets in separate trees. We already do:
 
 ```
-src-tauri/souffle-slint/
+app/souffle-slint/
 ├── src/            Rust: callbacks, models, conversions
 └── ui/
     ├── main_window.slint    entry Window

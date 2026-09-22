@@ -1,24 +1,24 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Builds the souffle-mcp sidecar and copies it into src-tauri/binaries/ with
+# Builds the souffle-mcp sidecar and copies it into app/binaries/ with
 # the target-triple suffix Tauri's `externalBin` bundling expects (it strips
 # the suffix again when copying into the app bundle). Not needed for
 # `npm run dev` — the Settings UI handles a missing sidecar gracefully — but
 # must run before `tauri build` so release bundles include it (wired into
-# `beforeBuildCommand` in src-tauri/tauri.conf.json).
+# `beforeBuildCommand` in app/tauri.conf.json).
 #
 # Default is --release (LTO, the packaging profile). Pass --debug for CI:
 # Tauri's build script only checks that the file exists, and the debug
 # artifact is the same profile as `cargo test` / clippy.
 #
-# Cargo artifacts are not always at src-tauri/target. CARGO_TARGET_DIR and
+# Cargo artifacts are not always at app/target. CARGO_TARGET_DIR and
 # .cargo/config.toml `build.target-dir` relocate them. Ask cargo metadata.
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 cargo_target_dir() {
-  cargo metadata --format-version 1 --manifest-path src-tauri/Cargo.toml --no-deps \
+  cargo metadata --format-version 1 --manifest-path app/Cargo.toml --no-deps \
     | python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])'
 }
 
@@ -47,14 +47,14 @@ if [ -z "${target_triple}" ]; then
   exit 1
 fi
 
-bin_dir="src-tauri/binaries"
+bin_dir="app/binaries"
 dest="${bin_dir}/souffle-mcp-${target_triple}"
 
 echo "Building souffle-mcp sidecar (${profile}) for ${target_triple}..."
 if [ "${profile}" = "release" ]; then
-  cargo build --manifest-path src-tauri/Cargo.toml -p souffle-mcp --release
+  cargo build --manifest-path app/Cargo.toml -p souffle-mcp --release
 else
-  cargo build --manifest-path src-tauri/Cargo.toml -p souffle-mcp
+  cargo build --manifest-path app/Cargo.toml -p souffle-mcp
 fi
 
 target_dir="$(cargo_target_dir)"

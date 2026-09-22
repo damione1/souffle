@@ -8,7 +8,7 @@
 #   - binary + MCP sidecar + resources (VAD model, sounds) + the ONNX Runtime
 #     dylib (as a Framework, so it gets code-signed — notarization rejects
 #     any unsigned Mach-O anywhere in the bundle)
-#   - Info.plist merged from the base template below + src-tauri/Info.plist's
+#   - Info.plist merged from the base template below + app/Info.plist's
 #     usage-description keys (NSMicrophoneUsageDescription etc.)
 #   - entitlements + hardened runtime, signed with a real Developer ID
 #     identity (never ad hoc `--sign -`: TCC records key off the signing
@@ -72,17 +72,17 @@ fi
 # Identity, naming
 # ---------------------------------------------------------------------------
 
-app_version="$(sed -n 's/^version = "\(.*\)"/\1/p' src-tauri/Cargo.toml | head -1)"
+app_version="$(sed -n 's/^version = "\(.*\)"/\1/p' app/Cargo.toml | head -1)"
 
 if [[ "$nightly" -eq 1 ]]; then
   app_name="Soufflé Nightly"
   bundle_id="com.souffle.desktop.nightly"
-  entitlements="src-tauri/entitlements.nightly.plist"
-  [[ -f "$entitlements" ]] || entitlements="src-tauri/entitlements.plist"
+  entitlements="app/entitlements.nightly.plist"
+  [[ -f "$entitlements" ]] || entitlements="app/entitlements.plist"
 else
   app_name="Soufflé"
   bundle_id="com.souffle.desktop"
-  entitlements="src-tauri/entitlements.plist"
+  entitlements="app/entitlements.plist"
 fi
 
 export APPLE_SIGNING_IDENTITY="${APPLE_SIGNING_IDENTITY:-Developer ID Application: Damien Goehrig (X6H966RSDB)}"
@@ -99,22 +99,22 @@ fi
 
 echo "==> Building souffle-slint (${profile})"
 if [[ "$profile" == "release" ]]; then
-  cargo build --manifest-path src-tauri/Cargo.toml --release -p souffle-slint
+  cargo build --manifest-path app/Cargo.toml --release -p souffle-slint
   ./scripts/build-mcp-sidecar.sh
 else
-  cargo build --manifest-path src-tauri/Cargo.toml -p souffle-slint
+  cargo build --manifest-path app/Cargo.toml -p souffle-slint
   ./scripts/build-mcp-sidecar.sh --debug
 fi
 
-bin_src="src-tauri/target/${profile}/souffle-slint"
+bin_src="app/target/${profile}/souffle-slint"
 target_triple="$(rustc -vV | sed -n 's/^host: //p')"
-sidecar_src="src-tauri/binaries/souffle-mcp-${target_triple}"
+sidecar_src="app/binaries/souffle-mcp-${target_triple}"
 
 # ---------------------------------------------------------------------------
 # Assemble the bundle
 # ---------------------------------------------------------------------------
 
-bundle_root="src-tauri/target/${profile}/bundle/macos"
+bundle_root="app/target/${profile}/bundle/macos"
 app_dir="${bundle_root}/${app_name}.app"
 contents="${app_dir}/Contents"
 
@@ -129,21 +129,21 @@ else
   echo "WARNING: MCP sidecar not found at $sidecar_src; Settings > MCP will report it missing" >&2
 fi
 
-cp src-tauri/resources/silero_vad_v4.onnx "$contents/Resources/resources/silero_vad_v4.onnx"
+cp app/resources/silero_vad_v4.onnx "$contents/Resources/resources/silero_vad_v4.onnx"
 mkdir -p "$contents/Resources/resources/sounds"
-cp src-tauri/resources/sounds/dictation_start.wav "$contents/Resources/resources/sounds/dictation_start.wav"
-cp src-tauri/resources/sounds/dictation_stop.wav "$contents/Resources/resources/sounds/dictation_stop.wav"
+cp app/resources/sounds/dictation_start.wav "$contents/Resources/resources/sounds/dictation_start.wav"
+cp app/resources/sounds/dictation_stop.wav "$contents/Resources/resources/sounds/dictation_stop.wav"
 # In Frameworks, not Resources: notarization rejects an unsigned Mach-O
 # anywhere in the bundle, and only Frameworks/MacOS get individually signed
 # below (see ort_runtime.rs's resolve_resource for the matching lookup order).
-cp src-tauri/resources/libonnxruntime.dylib "$contents/Frameworks/libonnxruntime.dylib"
+cp app/resources/libonnxruntime.dylib "$contents/Frameworks/libonnxruntime.dylib"
 
-cp src-tauri/icons/icon.icns "$contents/Resources/icon.icns"
+cp app/icons/icon.icns "$contents/Resources/icon.icns"
 
 # Info.plist: base bundle keys, plus every usage-description key from
-# src-tauri/Info.plist (the file `tauri_build::build()` used to merge in
+# app/Info.plist (the file `tauri_build::build()` used to merge in
 # automatically). Merged with PlistBuddy rather than hand-formatted XML so a
-# key added to src-tauri/Info.plist later is picked up without touching this
+# key added to app/Info.plist later is picked up without touching this
 # script.
 cat > "$contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -174,8 +174,8 @@ cat > "$contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
-if [[ -f "src-tauri/Info.plist" ]]; then
-  python3 - "src-tauri/Info.plist" "$contents/Info.plist" <<'PY'
+if [[ -f "app/Info.plist" ]]; then
+  python3 - "app/Info.plist" "$contents/Info.plist" <<'PY'
 import plistlib
 import sys
 
@@ -241,7 +241,7 @@ fi
 # ---------------------------------------------------------------------------
 
 if [[ "$dmg_mode" -eq 1 ]]; then
-  dmg_dir="src-tauri/target/${profile}/bundle/dmg"
+  dmg_dir="app/target/${profile}/bundle/dmg"
   dmg_path="${dmg_dir}/${app_name}.dmg"
   echo "==> Creating ${dmg_path}"
   mkdir -p "$dmg_dir"
@@ -269,7 +269,7 @@ if [[ "$sign_updater" -eq 1 ]]; then
     echo "error: --sign-updater needs the minisign CLI (brew install minisign)" >&2
     exit 1
   fi
-  update_dir="src-tauri/target/${profile}/bundle/updater"
+  update_dir="app/target/${profile}/bundle/updater"
   mkdir -p "$update_dir"
   tar_path="${update_dir}/${app_name// /-}.app.tar.gz"
   echo "==> Building update artifact ${tar_path}"

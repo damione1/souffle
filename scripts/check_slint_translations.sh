@@ -2,7 +2,7 @@
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
-cd "$root/src-tauri/souffle-slint"
+cd "$root/app/souffle-slint"
 
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT

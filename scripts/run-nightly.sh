@@ -9,9 +9,9 @@ set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$root"
 
-app="$root/src-tauri/target/debug/bundle/macos/Soufflé Nightly.app"
-old_debug="$root/src-tauri/target/debug/bundle/macos/Soufflé.app"
-dmg="$root/src-tauri/target/debug/bundle/dmg/Soufflé Nightly.dmg"
+app="$root/app/target/debug/bundle/macos/Soufflé Nightly.app"
+old_debug="$root/app/target/debug/bundle/macos/Soufflé.app"
+dmg="$root/app/target/debug/bundle/dmg/Soufflé Nightly.dmg"
 nightly_id="com.souffle.desktop.nightly"
 
 fresh=0
