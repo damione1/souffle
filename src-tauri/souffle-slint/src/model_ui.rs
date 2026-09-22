@@ -159,7 +159,7 @@ impl From<crate::TranscriptionPhase> for TranscriptionRuntimePhase {
 
 pub fn populate_runtime(window: &MainWindow, phase: TranscriptionRuntimePhase) {
     window.set_model_runtime_phase(phase.into());
-    window.set_settings_model_status_text(phase_label(phase).into());
+    // window.set_settings_model_status_text(phase_label(phase).into());
 }
 
 /// The FSM already arbitrates StartLoad atomically. A losing concurrent caller
@@ -180,14 +180,14 @@ pub fn load_is_already_in_progress_or_ready(phase: TranscriptionRuntimePhase) ->
 /// minute_label(0)`'s "0 min".
 pub fn unload_timeout_label(value: u32) -> String {
     if value == 0 {
-        "Jamais".to_string()
+        "__NEVER__".to_string()
     } else {
         crate::audio_ui::minute_label(value)
     }
 }
 
 pub fn parse_unload_timeout_label(label: &str) -> Option<u32> {
-    if label == "Jamais" {
+    if label == "__NEVER__" {
         Some(0)
     } else {
         crate::audio_ui::parse_minute_label(label)
@@ -249,7 +249,7 @@ mod tests {
 
     #[test]
     fn unload_timeout_zero_is_never_not_zero_minutes() {
-        assert_eq!(unload_timeout_label(0), "Jamais");
+        assert_eq!(unload_timeout_label(0), "__NEVER__");
     }
 
     #[test]

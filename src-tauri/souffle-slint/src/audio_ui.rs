@@ -10,8 +10,8 @@ use crate::microphone_list::{self, MicrophoneListEntry};
 use crate::{MainWindow, MicrophoneRow};
 use souffle_lib::audio::AudioInputDevice;
 
-const AUTOMATIC_LABEL: &str = "Automatique";
-const CLAMSHELL_FOLLOW_LABEL: &str = "Suivre l'appareil par défaut";
+const AUTOMATIC_LABEL: &str = "__AUTOMATIC__";
+const CLAMSHELL_FOLLOW_LABEL: &str = "__CLAMSHELL_FOLLOW__";
 
 fn device_label(device: &AudioInputDevice) -> String {
     if device.is_default {

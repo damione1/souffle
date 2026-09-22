@@ -203,7 +203,11 @@ fn settings_save_failure_message(outcome: &SettingsSaveOutcome) -> String {
 /// Interface settings tab.
 pub(crate) fn select_app_locale(locale: AppLocale) {
     let locale_str = settings_ui::locale_from_slint(locale);
-    let _ = slint::select_bundled_translation(locale_str);
+    if let Err(e) = slint::select_bundled_translation(locale_str) {
+        println!("Translation error: {:?}", e);
+    } else {
+        println!("Translation selected: {}", locale_str);
+    }
 }
 
 fn settle_onboarding_completion(

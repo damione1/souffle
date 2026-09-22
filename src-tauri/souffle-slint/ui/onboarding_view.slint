@@ -1,4 +1,5 @@
 import { ComboBox } from "std-widgets.slint";
+import { ThemedComboBox } from "components/themed_combo.slint";
 import { PermissionsStep, PermissionRow } from "components/onboarding/permissions_step.slint";
 import { ShortcutRecorderButton } from "components/settings/interface_section.slint";
 import { AppLocale, ModelPhase, PermissionKind } from "types.slint";
@@ -164,7 +165,7 @@ export component OnboardingView inherits Rectangle {
                 spacing: 6px;
                 HorizontalLayout {
                     spacing: 6px;
-                    ComboBox {
+                    ThemedComboBox {
                         model: root.device-labels;
                         current-value: root.selected-device-label;
                         selected(value) => { root.device-changed(value); }
@@ -212,7 +213,7 @@ export component OnboardingView inherits Rectangle {
                     font-size: 12px;
                     color: Theme.success;
                 }
-                if root.model-phase == ModelPhase.pick: ComboBox {
+                if root.model-phase == ModelPhase.pick: ThemedComboBox {
                     model: root.model-labels;
                     current-value: root.selected-model-label;
                     selected(value) => { root.model-picked(value); }

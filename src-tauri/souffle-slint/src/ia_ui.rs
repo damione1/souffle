@@ -14,19 +14,19 @@ fn shared_string_vec(values: &[String]) -> slint::ModelRc<slint::SharedString> {
 
 fn dictation_polish_label(template: &DictationPolishTemplate) -> String {
     match template.id.as_str() {
-        "clean" => "Nettoyage".to_string(),
-        "email" => "E-mail professionnel".to_string(),
-        "bullets" => "Puces".to_string(),
-        "no_fillers" => "Sans fillers".to_string(),
+        "clean" => "__CLEANUP__".to_string(),
+        "email" => "__PROFESSIONAL_EMAIL__".to_string(),
+        "bullets" => "__BULLETS__".to_string(),
+        "no_fillers" => "__NO_FILLERS__".to_string(),
         _ => template.label.clone(),
     }
 }
 
 fn summary_template_label(template: &SummaryTemplate) -> String {
     match template.id.as_str() {
-        "default" => "Par défaut".to_string(),
-        "detailed_minutes" => "Compte rendu détaillé".to_string(),
-        "brief_overview" => "Aperçu bref".to_string(),
+        "default" => "__DEFAULT__".to_string(),
+        "detailed_minutes" => "__DETAILED_MINUTES__".to_string(),
+        "brief_overview" => "__BRIEF_OVERVIEW__".to_string(),
         _ => template.name.clone(),
     }
 }
