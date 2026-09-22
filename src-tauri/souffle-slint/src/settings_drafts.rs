@@ -476,11 +476,26 @@ impl SettingsDraftController {
         }
     }
 
-    /// Quit is the one flush that did not exist before SOU-201. Keep its DB
-    /// work off Slint's event loop, hide the window to prevent a newer edit
-    /// racing the final snapshot, and abort quitting on a non-commit so the
-    /// recoverable draft and visible error remain available.
+    /// Quit is the one flush that did not exist before SOU-201. Runs the
+    /// shared barrier (see [`Self::flush_before_exit`]) with `self.quit` -
+    /// `std::process::exit(0)` outside tests - as the terminal action.
     pub(crate) fn request_quit(self: &Rc<Self>) {
+        let on_exit = Rc::clone(&self.quit);
+        self.flush_before_exit(on_exit);
+    }
+
+    /// Flush any pending/retained Settings draft, then run `on_exit` once the
+    /// flush confirms nothing is left unsaved (`QuitCompletion::Exit`); a
+    /// non-commit instead re-opens Settings with the surviving draft and
+    /// error, and `on_exit` never runs. Keeps DB work off Slint's event
+    /// loop, and hides the window to prevent a newer edit racing the final
+    /// snapshot.
+    ///
+    /// Shared by native quit ([`Self::request_quit`]) and the updater's
+    /// "Install and restart" (SOU-226) so this barrier is written once - the
+    /// ticket's "Zones à risque" is explicit that the updater must not grow
+    /// a second copy of it and risk diverging from native-quit behavior.
+    pub(crate) fn flush_before_exit(self: &Rc<Self>, on_exit: Rc<dyn Fn()>) {
         let batch = match begin_quit_request(&self.state) {
             QuitFlushDecision::NothingPending => None,
             QuitFlushDecision::Start(batch) => Some(batch),
@@ -500,10 +515,8 @@ impl SettingsDraftController {
                 None => finish_barrier_quit(&controller.state.borrow(), status),
             };
             match completion {
-                QuitCompletion::Exit => {
-                    (controller.quit)();
-                }
-                QuitCompletion::ContinueFlush => controller.request_quit(),
+                QuitCompletion::Exit => on_exit(),
+                QuitCompletion::ContinueFlush => controller.flush_before_exit(on_exit),
                 QuitCompletion::RetainAndShow => {
                     if let Some(window) = controller.window.upgrade() {
                         window.set_settings_open(true);
@@ -719,6 +732,48 @@ mod tests {
                 assert!(controller.state.borrow().batch().is_empty());
             } else {
                 assert!(!quit_called.get(), "failed timer save must abort quit");
+                assert_eq!(
+                    controller.state.borrow().summary_prompts["summary-default"].text,
+                    "latest draft"
+                );
+                assert!(window.get_settings_open());
+            }
+        }
+    }
+
+    #[test]
+    fn update_install_flush_waits_for_blocked_draft_and_only_then_runs_its_own_exit_action() {
+        // SOU-226 AC1: "Install and restart" must reuse the same flush
+        // barrier as quit (`flush_before_exit`), not bypass it - a pending
+        // draft is written (or its failure surfaced) before the caller's own
+        // exit action - standing in for `install_and_relaunch`'s
+        // `std::process::exit(0)` - ever runs.
+        for commit in [false, true] {
+            let (window, controller, io, started, release, _quit_called) =
+                controlled_controller(commit);
+            started
+                .recv_timeout(Duration::from_secs(1))
+                .expect("timer save started");
+
+            let installed = Rc::new(Cell::new(false));
+            let installed_for_exit = installed.clone();
+            controller.flush_before_exit(Rc::new(move || installed_for_exit.set(true)));
+            assert!(
+                !installed.get(),
+                "install must wait behind the blocked draft save"
+            );
+
+            release.send(()).unwrap();
+            drain_until_idle(&io);
+
+            if commit {
+                assert!(
+                    installed.get(),
+                    "committed draft permits the updater's exit action"
+                );
+                assert!(controller.state.borrow().batch().is_empty());
+            } else {
+                assert!(!installed.get(), "failed draft save must abort the install");
                 assert_eq!(
                     controller.state.borrow().summary_prompts["summary-default"].text,
                     "latest draft"
