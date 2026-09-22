@@ -213,6 +213,31 @@ fn reset_stale_save_error(window: &MainWindow) {
     window.set_settings_save_error_unavailable(false);
 }
 
+/// SOU-231: shared by `on_close_requested` (hide) and
+/// `on_settings_quit_requested` (quit) so the two exit paths cannot drift -
+/// captures the window's physical size, converts it to logical pixels
+/// (rounding, not truncating, so a fractional scale factor cannot shave ~1px
+/// per save), and submits it through the serialized settings worker. FIFO
+/// ordering in `SettingsIoCoordinator::run_worker` guarantees this save is
+/// processed before a subsequently enqueued quit.
+fn capture_and_submit_window_geometry(
+    window: &MainWindow,
+    io: &Rc<settings_io::SettingsIoCoordinator>,
+) {
+    let size = window.window().size();
+    let scale = window.window().scale_factor();
+    let width = (size.width as f32 / scale).round() as u32;
+    let height = (size.height as f32 / scale).round() as u32;
+    io.submit(
+        souffle_lib::commands::SettingsSaveLane::General,
+        move |settings| {
+            settings.window_width = width;
+            settings.window_height = height;
+        },
+        |_order, _outcome| {},
+    );
+}
+
 /// Switches the bundled Slint translation to the given locale. Called from
 /// `settings_values.rs` whenever the user changes the language in the
 /// Interface settings tab.
@@ -3711,18 +3736,7 @@ fn wire_callbacks(
     let io_quit = settings_io.clone();
     window.on_settings_quit_requested(move || {
         if let Some(w) = weak_quit.upgrade() {
-            let size = w.window().size();
-            let scale = w.window().scale_factor();
-            let width = (size.width as f32 / scale) as u32;
-            let height = (size.height as f32 / scale) as u32;
-            io_quit.submit(
-                souffle_lib::commands::SettingsSaveLane::General,
-                move |settings| {
-                    settings.window_width = width;
-                    settings.window_height = height;
-                },
-                |_order, _outcome| {},
-            );
+            capture_and_submit_window_geometry(&w, &io_quit);
         }
         settings_drafts_for_quit.request_quit();
     });
@@ -6147,18 +6161,7 @@ fn main() {
     let io_close = settings_io.clone();
     window.window().on_close_requested(move || {
         if let Some(w) = weak_close.upgrade() {
-            let size = w.window().size();
-            let scale = w.window().scale_factor();
-            let width = (size.width as f32 / scale) as u32;
-            let height = (size.height as f32 / scale) as u32;
-            io_close.submit(
-                souffle_lib::commands::SettingsSaveLane::General,
-                move |settings| {
-                    settings.window_width = width;
-                    settings.window_height = height;
-                },
-                |_order, _outcome| {},
-            );
+            capture_and_submit_window_geometry(&w, &io_close);
         }
         slint::CloseRequestResponse::HideWindow
     });
@@ -6302,12 +6305,12 @@ mod tests {
         DictationTextBuffers, DictationTranscriptDisposition, MainWindow, OnboardingState,
         SettingsCache, StartupPresentationGate, SummaryRefreshState, Theme,
         apply_audio_device_projection_settlement, audio_device_load_configuration,
-        clear_committed_summary_add_draft, dictation_transcript_disposition,
-        finish_startup_presentation, merge_recovery_text, prime_summary_template_editor,
-        project_model_selection_snapshot, project_startup_settings, reset_live_buffers,
-        reset_stale_save_error, settle_audio_device_save, settle_model_selection_save,
-        settle_onboarding_completion, should_clear_committed_summary_add_draft,
-        wire_summary_template_edit_callbacks,
+        capture_and_submit_window_geometry, clear_committed_summary_add_draft,
+        dictation_transcript_disposition, finish_startup_presentation, merge_recovery_text,
+        prime_summary_template_editor, project_model_selection_snapshot, project_startup_settings,
+        reset_live_buffers, reset_stale_save_error, settle_audio_device_save,
+        settle_model_selection_save, settle_onboarding_completion,
+        should_clear_committed_summary_add_draft, wire_summary_template_edit_callbacks,
     };
     use crate::model_ui;
     use crate::settings_drafts::SettingsDraftController;
@@ -6347,6 +6350,52 @@ mod tests {
 
         assert_eq!(window.get_settings_save_error(), "");
         assert!(!window.get_settings_save_error_unavailable());
+    }
+
+    // SOU-231 AC2/AC3: the shared geometry-capture helper converts the
+    // physical size to logical pixels by rounding (a 2x scale over an odd
+    // physical size would truncate to 500x300 instead of 501x301) and the
+    // rounded value is what actually reaches the settings save.
+    #[test]
+    fn window_geometry_capture_rounds_logical_size_and_submits_it() {
+        let window = test_window();
+        let cache = SettingsCache::with_observed(&window, AppSettings::default());
+        let durable = Arc::new(Mutex::new(AppSettings::default()));
+        let save_state = Arc::clone(&durable);
+        let io = SettingsIoCoordinator::with_functions(
+            cache,
+            || Ok(AppSettings::default()),
+            || Ok(AppSettings::default()),
+            move |settings| {
+                *save_state.lock().unwrap() = settings.clone();
+                SettingsSaveOutcome::Observed {
+                    settings: Box::new(settings),
+                    result: Ok(()),
+                }
+            },
+            |settings| SettingsSaveOutcome::Observed {
+                settings: Box::new(settings),
+                result: Ok(()),
+            },
+        );
+        window
+            .window()
+            .dispatch_event(slint::platform::WindowEvent::ScaleFactorChanged { scale_factor: 2.0 });
+        window
+            .window()
+            .set_size(slint::PhysicalSize::new(1001, 601));
+
+        capture_and_submit_window_geometry(&window, &io);
+
+        let deadline = Instant::now() + Duration::from_secs(1);
+        while !io.is_idle_for_test() {
+            io.drain_for_test();
+            assert!(Instant::now() < deadline, "geometry save did not settle");
+            std::thread::yield_now();
+        }
+        let saved = durable.lock().unwrap();
+        assert_eq!(saved.window_width, 501, "1001px / 2.0 must round to 501");
+        assert_eq!(saved.window_height, 301, "601px / 2.0 must round to 301");
     }
 
     #[test]
