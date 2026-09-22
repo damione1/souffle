@@ -89,12 +89,22 @@ msgctxt "SettingsView"
 msgid "Paramètres"
 msgstr "Paramètres"
 
-#: src-tauri/souffle-slint/ui/settings_view.slint:316
+#: src-tauri/souffle-slint/ui/settings_view.slint:325
+msgctxt "SettingsView"
+msgid "État des réglages enregistrés inconnu : {}"
+msgstr "État des réglages enregistrés inconnu : {}"
+
+#: src-tauri/souffle-slint/ui/settings_view.slint:326
 msgctxt "SettingsView"
 msgid "Enregistrement des réglages : {}"
 msgstr "Enregistrement des réglages : {}"
 
-#: src-tauri/souffle-slint/ui/settings_view.slint:323
+#: src-tauri/souffle-slint/ui/settings_view.slint:334
+msgctxt "SettingsView"
+msgid "Brouillon conservé, état des réglages inconnu : {}"
+msgstr "Brouillon conservé, état des réglages inconnu : {}"
+
+#: src-tauri/souffle-slint/ui/settings_view.slint:335
 msgctxt "SettingsView"
 msgid "Brouillon conservé : {}"
 msgstr "Brouillon conservé : {}"
@@ -2473,6 +2483,11 @@ msgstr "Automatique"
 msgctxt "ThemedComboBox"
 msgid "Suivre l'appareil par défaut"
 msgstr "Suivre l'appareil par défaut"
+
+#: src-tauri/souffle-slint/ui/components/themed_combo.slint:78
+msgctxt "ThemedComboBox"
+msgid "Appareil personnalisé (indisponible)"
+msgstr "Appareil personnalisé (indisponible)"
 
 #: src-tauri/souffle-slint/ui/components/themed_combo.slint:74
 #: src-tauri/souffle-slint/ui/components/themed_combo.slint:74

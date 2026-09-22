@@ -16,7 +16,9 @@ use souffle_lib::settings::AppSettings;
 
 use crate::MainWindow;
 use crate::settings_io::{SettingsIoCoordinator, SettingsResponseOrder};
-use crate::settings_values::{SettingsCommitStatus, save_outcome_commit_status};
+use crate::settings_values::{
+    SettingsCommitStatus, save_outcome_banner_detail, save_outcome_commit_status,
+};
 
 const SETTINGS_DRAFT_DEBOUNCE: Duration = Duration::from_millis(400);
 
@@ -441,6 +443,7 @@ impl SettingsDraftController {
             DraftRemainder::Empty => {
                 if let Some(window) = self.window.upgrade() {
                     window.set_settings_draft_save_error("".into());
+                    window.set_settings_draft_save_error_unavailable(false);
                 }
             }
             DraftRemainder::Pending => {}
@@ -451,29 +454,25 @@ impl SettingsDraftController {
         let Some(window) = self.window.upgrade() else {
             return;
         };
-        window.set_settings_draft_save_error(Self::draft_retention_error(outcome).into());
+        let (message, unavailable) = Self::draft_retention_error(outcome);
+        window.set_settings_draft_save_error(message.into());
+        window.set_settings_draft_save_error_unavailable(unavailable);
     }
 
     /// Only a non-commit means the draft is still pending. Post-commit native
     /// effect or observation failures remain visible through the general
     /// Settings error without incorrectly claiming the draft was retained.
-    fn draft_retention_error(outcome: &SettingsSaveOutcome) -> String {
-        let detail = match outcome {
-            SettingsSaveOutcome::Observed { result, .. } => match result {
-                Ok(()) => String::new(),
-                Err(error) => error.user_message(),
-            },
-            SettingsSaveOutcome::Unavailable { result, read_error } => match result {
-                Ok(()) => format!("Stored settings are unknown: {read_error}"),
-                Err(error) => format!(
-                    "{}. Stored settings are unknown: {read_error}",
-                    error.user_message()
-                ),
-            },
-        };
+    ///
+    /// The detail text (and the `unavailable` flag driving which `@tr()`'d
+    /// wrapper sentence `.slint` picks) come from the same
+    /// `save_outcome_banner_detail` the general Settings banner uses, so
+    /// this draft banner does not carry its own separate hardcoded-English
+    /// "Stored settings are unknown" phrase (SOU-225).
+    fn draft_retention_error(outcome: &SettingsSaveOutcome) -> (String, bool) {
+        let (detail, unavailable) = save_outcome_banner_detail(outcome);
         match save_outcome_commit_status(outcome) {
-            SettingsCommitStatus::Committed => String::new(),
-            SettingsCommitStatus::NotCommitted => detail,
+            SettingsCommitStatus::Committed => (String::new(), false),
+            SettingsCommitStatus::NotCommitted => (detail, unavailable),
         }
     }
 
@@ -998,7 +997,7 @@ mod tests {
         };
         assert_eq!(
             SettingsDraftController::draft_retention_error(&rejected),
-            "injected database failure"
+            ("injected database failure".to_string(), false)
         );
 
         let effect_failed = SettingsSaveOutcome::Observed {
@@ -1009,13 +1008,40 @@ mod tests {
                 },
             }),
         };
-        assert!(SettingsDraftController::draft_retention_error(&effect_failed).is_empty());
+        assert_eq!(
+            SettingsDraftController::draft_retention_error(&effect_failed),
+            (String::new(), false)
+        );
 
         let observation_failed = SettingsSaveOutcome::Unavailable {
             result: Ok(()),
             read_error: "injected observation failure".into(),
         };
-        assert!(SettingsDraftController::draft_retention_error(&observation_failed).is_empty());
+        assert_eq!(
+            SettingsDraftController::draft_retention_error(&observation_failed),
+            (String::new(), false)
+        );
+    }
+
+    // SOU-225: when the draft save itself did not commit AND the reread came
+    // back unavailable, the banner detail must carry only raw technical
+    // text - no Rust-authored "Stored settings are unknown" English glue -
+    // and must flag `unavailable` so `.slint` picks the right `@tr()`'d
+    // wrapper sentence regardless of the active UI locale.
+    #[test]
+    fn draft_error_flags_unavailable_without_english_scaffolding() {
+        let not_committed_and_unavailable = SettingsSaveOutcome::Unavailable {
+            result: Err(SettingsSaveError::NotCommitted {
+                message: "injected database failure".into(),
+            }),
+            read_error: "injected observation failure".into(),
+        };
+        let (message, unavailable) =
+            SettingsDraftController::draft_retention_error(&not_committed_and_unavailable);
+        assert!(unavailable);
+        assert!(!message.contains("Stored settings"));
+        assert!(message.contains("injected database failure"));
+        assert!(message.contains("injected observation failure"));
     }
 
     #[test]

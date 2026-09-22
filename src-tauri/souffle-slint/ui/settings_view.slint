@@ -52,7 +52,15 @@ export component SettingsView inherits Rectangle {
     in property <ShortcutField> recording-field: ShortcutField.none;
     in-out property <string> shortcut-error: "";
     in property <string> save-error;
+    // True when `save-error` covers a `SettingsSaveOutcome::Unavailable`
+    // (the durable state could not be re-read after saving), so the wrapper
+    // sentence must say so instead of implying an ordinary save failure.
+    // Rust never bakes that wording into `save-error` itself - see
+    // `settings_values::save_outcome_banner_detail` - so the banner stays
+    // fully in the active UI locale (SOU-225).
+    in property <bool> save-error-unavailable;
     in property <string> draft-save-error;
+    in property <bool> draft-save-error-unavailable;
     in property <bool> calendar-enabled;
     in property <AccessState> calendar-permission;
     in property <bool> calendar-autostart-enabled;
@@ -313,14 +321,18 @@ export component SettingsView inherits Rectangle {
         }
 
         if root.save-error != "" && root.draft-save-error == "": Text {
-            text: @tr("Enregistrement des réglages : {}", root.save-error);
+            text: root.save-error-unavailable
+                ? @tr("État des réglages enregistrés inconnu : {}", root.save-error)
+                : @tr("Enregistrement des réglages : {}", root.save-error);
             color: Theme.danger;
             wrap: word-wrap;
             vertical-stretch: 0;
         }
 
         if root.draft-save-error != "": Text {
-            text: @tr("Brouillon conservé : {}", root.draft-save-error);
+            text: root.draft-save-error-unavailable
+                ? @tr("Brouillon conservé, état des réglages inconnu : {}", root.draft-save-error)
+                : @tr("Brouillon conservé : {}", root.draft-save-error);
             color: Theme.danger;
             wrap: word-wrap;
             vertical-stretch: 0;
