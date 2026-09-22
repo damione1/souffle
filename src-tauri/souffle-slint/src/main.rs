@@ -19,6 +19,7 @@ mod permissions_ui;
 mod settings_drafts;
 mod settings_instrumentation;
 mod settings_io;
+mod settings_log;
 mod settings_ui;
 mod settings_values;
 mod shortcut_capture;
@@ -72,6 +73,9 @@ const TRANSCRIPT_SCROLL_POLL: Duration = Duration::from_millis(80);
 /// Matches `DiagnosticsSettingsSection.svelte`'s `TAIL_LINES`/`POLL_MS`.
 const SETTINGS_LOG_TAIL_LINES: u32 = 80;
 const SETTINGS_LOG_POLL: Duration = Duration::from_millis(2000);
+/// Scroll re-window poll for the virtualized live log (SOU-224) - same
+/// rate and rationale as `TRANSCRIPT_SCROLL_POLL`.
+const SETTINGS_LOG_SCROLL_POLL: Duration = Duration::from_millis(80);
 const ARCHIVE_EXPORT_POLL: Duration = Duration::from_millis(150);
 
 /// Backing data for the virtualized transcript list: the full block list
@@ -641,11 +645,77 @@ fn start_audio_progress_timer(
     timer
 }
 
+/// Pushes a freshly fetched log tail into the virtualized state + window
+/// (SOU-224). A tick where the tail did not change is a full no-op. When it
+/// did change, the mounted slice is only rebuilt if the lines inside the
+/// current window actually differ - a poll that merely appends lines past
+/// the viewport leaves the rendered rows and the scroll position untouched
+/// (AC2), only the trailing spacer/line count grow.
+fn apply_settings_log_tail(
+    window: &MainWindow,
+    log_state: &Rc<RefCell<settings_log::SettingsLogState>>,
+    tail: &str,
+) {
+    let mut state = log_state.borrow_mut();
+    let lines = settings_log::split_tail(tail);
+    if lines == state.lines {
+        return;
+    }
+    let scroll_top = -window.get_settings_log_scroll_top_px();
+    let offsets = settings_log::compute_offsets(&lines);
+    let win = settings_log::visible_window(&offsets, scroll_top);
+    let slice_unchanged = win.start == state.mounted_start
+        && win.end == state.mounted_end
+        && state.mounted_end <= state.lines.len()
+        && lines[win.start..win.end] == state.lines[state.mounted_start..state.mounted_end];
+    state.lines = lines;
+    state.offsets = offsets;
+    state.mounted_start = win.start;
+    state.mounted_end = win.end;
+    window.set_settings_log_line_count(state.lines.len() as i32);
+    window.set_settings_log_spacer_before(win.spacer_before);
+    window.set_settings_log_spacer_after(win.spacer_after);
+    if !slice_unchanged {
+        window.set_settings_log_lines(
+            std::rc::Rc::new(slint::VecModel::from(
+                state.lines[win.start..win.end].to_vec(),
+            ))
+            .into(),
+        );
+    }
+}
+
+/// Re-windows the mounted log slice for a new scroll position - the log
+/// counterpart of `update_transcript_window`, and equally a no-op while the
+/// slice indices are unchanged.
+fn update_settings_log_window(
+    window: &MainWindow,
+    log_state: &Rc<RefCell<settings_log::SettingsLogState>>,
+    scroll_top: f32,
+) {
+    let mut state = log_state.borrow_mut();
+    let win = settings_log::visible_window(&state.offsets, scroll_top);
+    if win.start == state.mounted_start && win.end == state.mounted_end {
+        return;
+    }
+    state.mounted_start = win.start;
+    state.mounted_end = win.end;
+    window.set_settings_log_lines(
+        std::rc::Rc::new(slint::VecModel::from(
+            state.lines[win.start..win.end].to_vec(),
+        ))
+        .into(),
+    );
+    window.set_settings_log_spacer_before(win.spacer_before);
+    window.set_settings_log_spacer_after(win.spacer_after);
+}
+
 /// Re-fetches the log tail and pushes it into the Settings window - mirrors
 /// `DiagnosticsSettingsSection.svelte`'s `refreshTail()`.
 fn refresh_settings_log_tail(
     window: &MainWindow,
     settings_io: Rc<settings_io::SettingsIoCoordinator>,
+    log_state: Rc<RefCell<settings_log::SettingsLogState>>,
 ) {
     let Some(token) = settings_io.current_load_token() else {
         return;
@@ -660,7 +730,7 @@ fn refresh_settings_log_tail(
                 if settings_io.accepts_load(token)
                     && let Some(window) = weak.upgrade()
                 {
-                    window.set_settings_log_tail(tail.into());
+                    apply_settings_log_tail(&window, &log_state, &tail);
                 }
             }
             Ok(Err(error)) => eprintln!("Failed to read log tail: {error}"),
@@ -670,21 +740,66 @@ fn refresh_settings_log_tail(
     .expect("slint event loop not running");
 }
 
-/// Polls the log tail every 2s while Settings is open - mirrors the Svelte
-/// section's `setInterval`. Stopped on `settings-closed` (see
-/// `stop_settings_log_timer`), not left running once the sheet is gone.
-fn start_settings_log_timer(
-    weak: slint::Weak<MainWindow>,
-    settings_io: Rc<settings_io::SettingsIoCoordinator>,
-) -> slint::Timer {
-    let timer = slint::Timer::default();
-    timer.start(slint::TimerMode::Repeated, SETTINGS_LOG_POLL, move || {
+/// The two timers behind the live log module, held together so they start
+/// and stop as one unit: the 2s tail poll and the 80ms scroll re-window
+/// poll. Fields are only kept alive, never read.
+struct SettingsLogTimers {
+    _tail: slint::Timer,
+    _scroll: slint::Timer,
+}
+
+/// Starts or stops the live-log timers to match reality: they run only
+/// while the Settings sheet is open AND the Système tab is the active one
+/// (SOU-224 AC5) - not for the whole life of the sheet, since the other
+/// five tabs are keep-alive and would otherwise relayout the log rows on
+/// every real tail change while invisible. Entering the tab also does one
+/// immediate refresh so the module is not blank for up to 2s.
+fn sync_settings_log_timers(
+    window: &MainWindow,
+    timers: &Rc<RefCell<Option<SettingsLogTimers>>>,
+    settings_io: &Rc<settings_io::SettingsIoCoordinator>,
+    log_state: &Rc<RefCell<settings_log::SettingsLogState>>,
+) {
+    let active = window.get_settings_open() && window.get_settings_tab() == SettingsTab::System;
+    let mut slot = timers.borrow_mut();
+    if !active {
+        *slot = None;
+        return;
+    }
+    if slot.is_some() {
+        return;
+    }
+    refresh_settings_log_tail(window, settings_io.clone(), log_state.clone());
+    let weak = window.as_weak();
+    let tail_io = settings_io.clone();
+    let tail_state = log_state.clone();
+    let tail = slint::Timer::default();
+    tail.start(slint::TimerMode::Repeated, SETTINGS_LOG_POLL, move || {
         let Some(window) = weak.upgrade() else {
             return;
         };
-        refresh_settings_log_tail(&window, settings_io.clone());
+        refresh_settings_log_tail(&window, tail_io.clone(), tail_state.clone());
     });
-    timer
+    let weak = window.as_weak();
+    let scroll_state = log_state.clone();
+    let scroll = slint::Timer::default();
+    scroll.start(
+        slint::TimerMode::Repeated,
+        SETTINGS_LOG_SCROLL_POLL,
+        move || {
+            let Some(window) = weak.upgrade() else {
+                return;
+            };
+            // Flickable's viewport-y is negative-going-down, same as the
+            // transcript's scroll poll.
+            let scroll_top = -window.get_settings_log_scroll_top_px();
+            update_settings_log_window(&window, &scroll_state, scroll_top);
+        },
+    );
+    *slot = Some(SettingsLogTimers {
+        _tail: tail,
+        _scroll: scroll,
+    });
 }
 
 fn spawn_settings_load_stage<T: Send + 'static>(
@@ -3585,7 +3700,12 @@ fn wire_callbacks(
     // `wire_update_dialogs` (SOU-226) so the updater's "Install and restart"
     // flushes through the same controller instance as quit, rather than a
     // second one that could drift out of sync.
-    let settings_log_timer: Rc<RefCell<Option<slint::Timer>>> = Rc::new(RefCell::new(None));
+    let settings_log_timer: Rc<RefCell<Option<SettingsLogTimers>>> = Rc::new(RefCell::new(None));
+    // Full line list + window bookkeeping behind the virtualized live log
+    // (SOU-224) - `MainWindow.settings-log-lines` only ever holds the
+    // visible slice of this.
+    let settings_log_state: Rc<RefCell<settings_log::SettingsLogState>> =
+        Rc::new(RefCell::new(settings_log::SettingsLogState::default()));
     let settings_drafts_for_quit = settings_drafts.clone();
     let weak_quit = window.as_weak();
     let io_quit = settings_io.clone();
@@ -3662,6 +3782,7 @@ fn wire_callbacks(
     let snippets_list_state_for_open = snippets_list_state.clone();
     let snippet_editing_for_open = snippet_editing.clone();
     let settings_log_timer_for_open = settings_log_timer.clone();
+    let settings_log_state_for_open = settings_log_state.clone();
     let settings_drafts_for_open = settings_drafts.clone();
     let settings_io_for_open = settings_io.clone();
     let settings_values_for_open = settings_values.clone();
@@ -3689,11 +3810,15 @@ fn wire_callbacks(
         }
         window.set_settings_open(true);
         permissions_for_open.sync_activity();
-        refresh_settings_log_tail(&window, settings_io_for_open.clone());
-        *settings_log_timer_for_open.borrow_mut() = Some(start_settings_log_timer(
-            weak.clone(),
-            settings_io_for_open.clone(),
-        ));
+        // Only starts the live-log timers if the sheet opened straight onto
+        // the Système tab (AC5) - the usual Transcription/Meetings entry
+        // points leave them off until the user actually visits that tab.
+        sync_settings_log_timers(
+            &window,
+            &settings_log_timer_for_open,
+            &settings_io_for_open,
+            &settings_log_state_for_open,
+        );
         drop(window);
 
         let core_weak = weak.clone();
@@ -3890,12 +4015,23 @@ fn wire_callbacks(
 
     window.on_settings_instrument_input(settings_instrumentation::input);
     let weak = window.as_weak();
+    let settings_log_timer_for_tab = settings_log_timer.clone();
+    let settings_log_state_for_tab = settings_log_state.clone();
+    let settings_io_for_tab = settings_io.clone();
     window.on_settings_tab_changed(move || {
         settings_instrumentation::handler(settings_instrumentation::SettingsScenario::Tab);
         settings_instrumentation::snapshot_without_persistence(
             settings_instrumentation::SettingsScenario::Tab,
         );
         if let Some(window) = weak.upgrade() {
+            // AC5 (SOU-224): the live-log poll follows the Système tab, it
+            // does not run for the whole life of the sheet.
+            sync_settings_log_timers(
+                &window,
+                &settings_log_timer_for_tab,
+                &settings_io_for_tab,
+                &settings_log_state_for_tab,
+            );
             window.window().request_redraw();
         }
     });

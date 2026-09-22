@@ -6,12 +6,27 @@ import { ThemedButton } from "../themed_button.slint";
 import { ThemedComboBox } from "../themed_combo.slint";
 import { LogLevel } from "../../types.slint";
 
-// Port of DiagnosticsSettingsSection.svelte. `log-tail` is refreshed by
-// main.rs on a timer while the Diagnostics tab is visible.
+// Port of DiagnosticsSettingsSection.svelte. The live log is virtualized
+// (SOU-224): main.rs owns the full tail and only pushes the visible slice
+// (`log-lines`) plus estimated spacers, same pattern as TranscriptSection.
+// The refresh/scroll timers only run while the Système tab is actually
+// active (see `sync_settings_log_timers` in main.rs), not for the whole
+// life of the Settings sheet.
 export component DiagnosticsSection inherits VerticalLayout {
     in-out property <bool> debug-transcription;
     in property <LogLevel> log-level;
-    in property <string> log-tail;
+    // Only the currently visible slice of the log tail - main.rs owns the
+    // full line list and re-windows it as `log-scroll-top` moves (SOU-224).
+    in property <[string]> log-lines;
+    in property <int> log-line-count;
+    // Estimated px height of the lines scrolled past above/below the
+    // mounted slice - plain `float` for the same set_*/get_* reason as
+    // TranscriptSection's spacers.
+    in property <float> log-spacer-before: 0.0;
+    in property <float> log-spacer-after: 0.0;
+    // Two-way bound up to MainWindow so main.rs can poll the real scroll
+    // position and decide the next slice.
+    in-out property <length> log-scroll-top: 0px;
     in property <bool> copying-diagnostics: false;
 
     callback debug-transcription-changed(bool);
@@ -95,26 +110,50 @@ export component DiagnosticsSection inherits VerticalLayout {
                 border-color: Theme.ghost-border;
                 background: Theme.input;
                 vertical-stretch: 0;
+                clip: true;
+
+                accessible-role: groupbox;
+                accessible-label: @tr("Journal en direct");
 
                 Flickable {
                     width: 100%;
                     height: 100%;
                     viewport-width: self.width;
+                    viewport-y <=> root.log-scroll-top;
 
-                    TextInput {
-                        width: parent.width - 16px;
-                        height: max(parent.height - 16px, self.preferred-height);
-                        x: 8px;
-                        y: 8px;
-                        text: root.log-tail == "" ? @tr("Aucune entrée de journal pour l'instant.") : root.log-tail;
-                        font-family: "JetBrains Mono";
-                        font-size: 10.5px;
-                        color: Theme.text-secondary;
-                        wrap: word-wrap;
-                        single-line: false;
-                        read-only: true;
-                        selection-background-color: Theme.accent.with-alpha(0.28);
-                        accessible-label: @tr("Journal en direct");
+                    VerticalLayout {
+                        padding: 8px;
+                        spacing: 0px;
+                        alignment: start;
+
+                        Rectangle { height: root.log-spacer-before * 1px; }
+
+                        if root.log-line-count == 0: Text {
+                            text: @tr("Aucune entrée de journal pour l'instant.");
+                            font-family: "JetBrains Mono";
+                            font-size: 10.5px;
+                            color: Theme.text-secondary;
+                            wrap: word-wrap;
+                        }
+
+                        // One read-only TextInput per mounted line rather
+                        // than one for the whole tail, so a 2s poll that
+                        // appends lines never relayouts the already-rendered
+                        // ones (SOU-224). Selection/copy still works within
+                        // a line; the "Copier les diagnostics" button below
+                        // remains the way to grab the full text.
+                        for line in root.log-lines: TextInput {
+                            text: line;
+                            font-family: "JetBrains Mono";
+                            font-size: 10.5px;
+                            color: Theme.text-secondary;
+                            wrap: word-wrap;
+                            single-line: false;
+                            read-only: true;
+                            selection-background-color: Theme.accent.with-alpha(0.28);
+                        }
+
+                        Rectangle { height: root.log-spacer-after * 1px; }
                     }
                 }
             }
