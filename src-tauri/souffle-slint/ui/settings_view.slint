@@ -32,7 +32,12 @@ export component SettingsView inherits Rectangle {
     in property <bool> autostart-enabled;
     in property <bool> debug-transcription;
     in property <LogLevel> log-level;
-    in property <string> log-tail;
+    // Virtualized live-log slice + spacers, owned by main.rs (SOU-224).
+    in property <[string]> log-lines;
+    in property <int> log-line-count;
+    in property <float> log-spacer-before: 0.0;
+    in property <float> log-spacer-after: 0.0;
+    in-out property <length> log-scroll-top: 0px;
     in property <bool> copying-diagnostics: false;
     in property <AppTheme> theme;
     in property <AppLocale> locale;
@@ -601,7 +606,11 @@ export component SettingsView inherits Rectangle {
                         DiagnosticsSection {
                             debug-transcription: root.debug-transcription;
                             log-level: root.log-level;
-                            log-tail: root.log-tail;
+                            log-lines: root.log-lines;
+                            log-line-count: root.log-line-count;
+                            log-spacer-before: root.log-spacer-before;
+                            log-spacer-after: root.log-spacer-after;
+                            log-scroll-top <=> root.log-scroll-top;
                             copying-diagnostics: root.copying-diagnostics;
                             debug-transcription-changed(value) => { root.debug-transcription-changed(value); }
                             log-level-changed(value) => { root.log-level-changed(value); }

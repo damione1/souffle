@@ -133,7 +133,17 @@ export component MainWindow inherits Window {
     in property <bool> settings-autostart-enabled;
     in property <bool> settings-debug-transcription;
     in property <LogLevel> settings-log-level;
-    in property <string> settings-log-tail;
+    // SOU-224: virtualized live-log tail. Rust owns the full line list and
+    // only pushes the visible slice + estimated spacers, same pattern as
+    // `meeting-detail-transcript-*` above.
+    in property <[string]> settings-log-lines;
+    in property <int> settings-log-line-count;
+    in property <float> settings-log-spacer-before: 0.0;
+    in property <float> settings-log-spacer-after: 0.0;
+    in-out property <length> settings-log-scroll-top: 0px;
+    // What `main.rs` polls to decide the next visible slice - same
+    // float-conversion trick as `meeting-detail-transcript-scroll-top-px`.
+    out property <float> settings-log-scroll-top-px: root.settings-log-scroll-top / 1px;
     in property <bool> settings-copying-diagnostics;
     in property <AppTheme> settings-theme;
     in property <AppLocale> settings-locale;
@@ -596,7 +606,11 @@ export component MainWindow inherits Window {
         autostart-enabled: root.settings-autostart-enabled;
         debug-transcription: root.settings-debug-transcription;
         log-level: root.settings-log-level;
-        log-tail: root.settings-log-tail;
+        log-lines: root.settings-log-lines;
+        log-line-count: root.settings-log-line-count;
+        log-spacer-before: root.settings-log-spacer-before;
+        log-spacer-after: root.settings-log-spacer-after;
+        log-scroll-top <=> root.settings-log-scroll-top;
         copying-diagnostics: root.settings-copying-diagnostics;
         theme: root.settings-theme;
         locale: root.settings-locale;
