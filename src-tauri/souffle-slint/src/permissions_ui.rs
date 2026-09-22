@@ -85,6 +85,11 @@ pub(crate) struct PermissionController {
     cooldown_timer: RefCell<Option<slint::Timer>>,
     refresh_in_flight: Cell<bool>,
     repair_in_flight: Cell<bool>,
+    /// Internal anti-spam state for the Accessibility repair. Unlike the
+    /// `onboarding-repair-cooldown` window property (pure display), this must
+    /// stay armed even when the surface closes mid-repair, so reopening the
+    /// panel cannot immediately re-run `tccutil reset`.
+    cooldown_active: Cell<bool>,
     observation_revision: Cell<u64>,
     applied_revision: Cell<u64>,
 }
@@ -99,6 +104,7 @@ impl PermissionController {
             cooldown_timer: RefCell::new(None),
             refresh_in_flight: Cell::new(false),
             repair_in_flight: Cell::new(false),
+            cooldown_active: Cell::new(false),
             observation_revision: Cell::new(0),
             applied_revision: Cell::new(0),
         })
@@ -155,14 +161,24 @@ impl PermissionController {
                     },
                 );
                 *self.poll_timer.borrow_mut() = Some(timer);
+                // Re-project internal repair state on reopen: a repair still
+                // in flight shows busy again, and a cooldown armed while the
+                // surface was closed keeps the button disabled.
+                if let Some(window) = self.window.upgrade() {
+                    window.set_onboarding_repair_busy(self.repair_in_flight.get());
+                    window.set_onboarding_repair_cooldown(self.cooldown_active.get());
+                }
                 self.refresh();
             }
             PollTransition::Stop => {
                 *self.poll_timer.borrow_mut() = None;
-                *self.cooldown_timer.borrow_mut() = None;
+                // Keep `cooldown_timer` alive: the anti-spam cooldown is
+                // internal state and must expire on schedule even while the
+                // surface is closed.
                 if let Some(window) = self.window.upgrade() {
                     window.set_onboarding_repair_busy(false);
                     window.set_onboarding_repair_cooldown(false);
+                    window.set_onboarding_repair_success(false);
                 }
             }
             PollTransition::Unchanged => {}
@@ -276,7 +292,12 @@ impl PermissionController {
             controller.apply_observation(revision, observation);
             match repair {
                 Ok(_) => {
-                    window.set_onboarding_repair_success(true);
+                    // The success banner is display-only: it must not reappear
+                    // stale on the next open when the surface closed before
+                    // the repair finished.
+                    if controller.surface_active() {
+                        window.set_onboarding_repair_success(true);
+                    }
                     controller.start_repair_cooldown();
                 }
                 Err(error) => window.set_onboarding_permissions_error(error.into()),
@@ -286,20 +307,24 @@ impl PermissionController {
     }
 
     fn start_repair_cooldown(self: &Rc<Self>) {
-        let Some(window) = self.window.upgrade() else {
-            return;
-        };
-        if !self.surface_active() {
-            return;
+        // Arm the internal cooldown unconditionally: a repair that actually
+        // ran must not be re-triggerable right away, even when the surface
+        // closed before the async call resolved. Only the window property
+        // (display) is gated on the surface being visible.
+        self.cooldown_active.set(true);
+        if self.surface_active()
+            && let Some(window) = self.window.upgrade()
+        {
+            window.set_onboarding_repair_cooldown(true);
         }
-        window.set_onboarding_repair_cooldown(true);
         let timer = slint::Timer::default();
         let controller: Weak<Self> = Rc::downgrade(self);
         timer.start(slint::TimerMode::SingleShot, REPAIR_COOLDOWN, move || {
-            if let Some(controller) = controller.upgrade()
-                && let Some(window) = controller.window.upgrade()
-            {
-                window.set_onboarding_repair_cooldown(false);
+            if let Some(controller) = controller.upgrade() {
+                controller.cooldown_active.set(false);
+                if let Some(window) = controller.window.upgrade() {
+                    window.set_onboarding_repair_cooldown(false);
+                }
                 *controller.cooldown_timer.borrow_mut() = None;
             }
         });
