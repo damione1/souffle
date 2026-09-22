@@ -1,4 +1,4 @@
-import { LineEdit, ScrollView } from "std-widgets.slint";
+import { LineEdit } from "std-widgets.slint";
 import { NotesSaveState } from "types.slint";
 import { AudioPlayerSection } from "components/audio_player_section.slint";
 import { TranscriptSection, TranscriptBlock } from "components/transcript_section.slint";
@@ -288,57 +288,62 @@ export component MeetingDetail inherits Rectangle {
                 padding-right: 14px;
                 spacing: 22px;
 
-                    VerticalLayout {
-                        spacing: 10px;
+                    Flickable {
+                        vertical-stretch: 0;
+                        viewport-height: notes-inner.preferred-height;
+                        max-height: 250px;
+                        notes-inner := VerticalLayout {
+                            spacing: 10px;
 
-                        HorizontalLayout {
-                            height: 24px;
-                            vertical-stretch: 0;
-                            spacing: 8px;
+                            HorizontalLayout {
+                                height: 24px;
+                                vertical-stretch: 0;
+                                spacing: 8px;
 
-                            LucideIcon {
-                                width: 18px;
-                                height: 18px;
-                                icon: IconSet.PenLine;
-                                icon-color: Theme.accent;
+                                LucideIcon {
+                                    width: 18px;
+                                    height: 18px;
+                                    icon: IconSet.PenLine;
+                                    icon-color: Theme.accent;
+                                }
+
+                                Text {
+                                    text: @tr("Notes");
+                                    font-size: 13px;
+                                    font-family: "Archivo SemiBold";
+                                    font-weight: 600;
+                                    vertical-alignment: center;
+                                }
+
+                                Rectangle { horizontal-stretch: 1; }
+
+                                if root.notes-save-state == NotesSaveState.saved: Text {
+                                    text: @tr("Enregistr\u{e9}");
+                                    font-size: 11px;
+                                    color: Theme.text-muted;
+                                    vertical-alignment: center;
+                                }
+                                if root.notes-save-state == NotesSaveState.pending: Text {
+                                    text: @tr("Enregistrement\u{2026}");
+                                    font-size: 11px;
+                                    color: Theme.text-muted;
+                                    vertical-alignment: center;
+                                }
+                            }
+
+                            notes-edit := ThemedTextArea {
+                                text <=> root.notes;
+                                area-height: 96px;
+                                placeholder: @tr("Ajoutez les décisions, actions et noms importants…");
+                                control-label: @tr("Notes de la réunion");
+                                edited(value) => { root.notes-changed(value); }
                             }
 
                             Text {
-                                text: @tr("Notes");
-                                font-size: 13px;
-                                font-family: "Archivo SemiBold";
-                                font-weight: 600;
-                                vertical-alignment: center;
-                            }
-
-                            Rectangle { horizontal-stretch: 1; }
-
-                            if root.notes-save-state == NotesSaveState.saved: Text {
-                                text: @tr("Enregistr\u{e9}");
-                                font-size: 11px;
+                                text: @tr("Les notes sont enregistr\u{e9}es avec la r\u{e9}union et am\u{e9}liorent le r\u{e9}sum\u{e9}.");
                                 color: Theme.text-muted;
-                                vertical-alignment: center;
-                            }
-                            if root.notes-save-state == NotesSaveState.pending: Text {
-                                text: @tr("Enregistrement\u{2026}");
                                 font-size: 11px;
-                                color: Theme.text-muted;
-                                vertical-alignment: center;
                             }
-                        }
-
-                        notes-edit := ThemedTextArea {
-                            text <=> root.notes;
-                            area-height: 96px;
-                            placeholder: @tr("Ajoutez les décisions, actions et noms importants…");
-                            control-label: @tr("Notes de la réunion");
-                            edited(value) => { root.notes-changed(value); }
-                        }
-
-                        Text {
-                            text: @tr("Les notes sont enregistr\u{e9}es avec la r\u{e9}union et am\u{e9}liorent le r\u{e9}sum\u{e9}.");
-                            color: Theme.text-muted;
-                            font-size: 11px;
                         }
                     }
 
@@ -400,18 +405,23 @@ export component MeetingDetail inherits Rectangle {
                         alias-save-requested(term, pronunciation) => { root.transcript-alias-save-requested(term, pronunciation); }
                     }
 
-                    if !root.is-empty-meeting: SummarySection {
+                    if !root.is-empty-meeting: Flickable {
                         vertical-stretch: 0;
-                        summary: root.summary;
-                        summary-is-stale: root.summary-is-stale;
-                        summary-model-label: root.summary-model-label;
-                        key-points: root.summary-key-points;
-                        decisions: root.summary-decisions;
-                        action-items: root.summary-action-items;
-                        open-questions: root.summary-open-questions;
-                        is-generating: root.summary-is-generating;
-                        generation-progress: root.summary-generation-progress;
-                        generate-requested => { root.summarize-requested(); }
+                        viewport-height: summary-inner.preferred-height;
+                        max-height: 250px;
+                        summary-inner := SummarySection {
+                            vertical-stretch: 0;
+                            summary: root.summary;
+                            summary-is-stale: root.summary-is-stale;
+                            summary-model-label: root.summary-model-label;
+                            key-points: root.summary-key-points;
+                            decisions: root.summary-decisions;
+                            action-items: root.summary-action-items;
+                            open-questions: root.summary-open-questions;
+                            is-generating: root.summary-is-generating;
+                            generation-progress: root.summary-generation-progress;
+                            generate-requested => { root.summarize-requested(); }
+                        }
                     }
                 }
             }
