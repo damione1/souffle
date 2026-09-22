@@ -15,7 +15,10 @@ use souffle_lib::transcript::MeetingRecordingSession;
 
 use crate::TranscriptBlock;
 
-fn speaker_label(speaker: Option<Speaker>) -> String {
+/// Canonical display labels for the Me/Them lanes - the single source of
+/// truth shared by this post-meeting view and the live view
+/// (`live_transcript.rs`).
+pub(crate) fn speaker_label(speaker: Option<Speaker>) -> String {
     match speaker {
         Some(Speaker::Me) => "Moi".into(),
         Some(Speaker::Them) => "Eux".into(),
