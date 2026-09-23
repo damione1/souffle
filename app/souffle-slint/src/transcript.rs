@@ -565,4 +565,15 @@ mod tests {
         let markdown = build_markdown_text("aujourd'hui");
         assert_eq!(markdown, "[aujourd'hui](aujourd'hui)");
     }
+
+    /// SOU-223 "Couvrir les occurrences répétées": `build_markdown_text`
+    /// decides per-token via `is_clickable_word`, with no "already saw this
+    /// word" state, so every repeated clickable occurrence gets its own
+    /// independent link, and a repeated non-admissible token (here, a bare
+    /// digit) stays plain text every time.
+    #[test]
+    fn build_markdown_text_links_every_repeated_occurrence() {
+        let markdown = build_markdown_text("3 3 bien bien.");
+        assert_eq!(markdown, "3 3 [bien](bien) [bien](bien).");
+    }
 }

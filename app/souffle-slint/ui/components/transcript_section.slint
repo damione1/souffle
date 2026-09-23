@@ -24,6 +24,26 @@ export struct TranscriptBlock {
     // `i-slint-compiler-1.17.1/builtins.slint` - `Text`/`HorizontalLayout`
     // can't mix per-word click targets with natural wrapping), but
     // `StyledText`'s Markdown link support gives the same effect for free.
+    //
+    // SOU-223: the permanent underline on these clickable words (AC3) is a
+    // Slint 1.17.1 limitation, not a choice - `Style::Link` in
+    // `i-slint-common`'s `styled_text.rs` always pushes both a `links` entry
+    // (the click target `link-clicked` reads) *and* a `FormattedSpan` with
+    // `style: Style::Link` for the same range, and `i-slint-core`'s
+    // `textlayout/sharedparley.rs` unconditionally turns `Style::Link` into
+    // `Underline(true)`, painted with the *same brush* as the glyph fill
+    // (`draw_glyph_run`) - there is no public property, markup, or link
+    // color that can suppress it independently of the text color. The
+    // alternative that avoids `StyledText` entirely - a `FlexboxLayout` of
+    // plain, unstyled `Text` words with `flex-wrap` doing the reflow - does
+    // not compile on the pinned Slint version: `FlexboxLayout` is stripped
+    // from `TypeRegister::builtin()` (the stable/production element set) in
+    // `i-slint-compiler-1.17.1` and only ships behind `builtin_experimental()`;
+    // it becomes a stable builtin starting Slint 1.18.1. Upgrading Slint is
+    // out of scope for this fix - see the SOU-223 ticket's journal for the
+    // resulting call: keep this proven, natively-wrapping `StyledText`
+    // render (click works exactly as before the regression) and treat the
+    // underline as a documented, non-blocking limitation.
     markdown-text: styled-text,
     // -1 when the paragraph isn't attributed to any recorded audio session.
     recording-session-index: int,
@@ -286,6 +306,12 @@ export component TranscriptSection inherits VerticalLayout {
                             }
                         }
 
+                        // SOU-223: click-to-correct is restored here (AC1/AC2/AC4)
+                        // and `link-color` already matches body text so this
+                        // never reads as a web link by color - see the
+                        // `markdown-text` doc comment above for why the
+                        // remaining underline (AC3) can't be removed on this
+                        // Slint version.
                         StyledText {
                             width: parent.width;
                             text: block.markdown-text;
