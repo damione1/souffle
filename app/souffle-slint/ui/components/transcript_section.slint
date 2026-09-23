@@ -1,5 +1,6 @@
 import { Theme } from "../theme.slint";
 import { ThemedLineEdit } from "themed_line_edit.slint";
+import { LucideIcon, IconSet } from "lucide_icon.slint";
 
 // Port of MeetingTranscriptSection.svelte - paragraph grouping with speaker
 // labels and session-break dividers, click-to-seek on a paragraph's
@@ -90,8 +91,11 @@ export component TranscriptSection inherits VerticalLayout {
     // instance per word (there can be hundreds of words on screen at once
     // even virtualized).
     alias-popup := PopupWindow {
-        width: 260px;
-        height: 190px;
+        // Damien, 2026-09-23: the previous 260x190 with a 16px close button
+        // and an 11px title read as dated/cramped next to a full-width
+        // Save button - widened and given a touch more breathing room.
+        width: 288px;
+        height: 210px;
         // The default `close-policy` (`close-on-click`, now deprecated)
         // dismisses the popup on *any* click, including ones on its own
         // `LineEdit`s/button - not just clicks outside it (found the hard
@@ -117,36 +121,42 @@ export component TranscriptSection inherits VerticalLayout {
                 border-color: Theme.accent;
 
                 VerticalLayout {
-                    padding: 12px;
-                    spacing: 8px;
+                    padding: 16px;
+                    spacing: 12px;
 
                     HorizontalLayout {
                         alignment: space-between;
 
                         Text {
                             text: @tr("Alias de dictionnaire");
-                            font-size: 11px;
+                            font-family: "Archivo SemiBold";
+                            font-size: 13px;
                             font-weight: 600;
-                            color: Theme.text-secondary;
+                            color: Theme.text-primary;
                             vertical-alignment: center;
                         }
 
                         cancel-btn := Rectangle {
-                            width: 16px;
-                            height: 16px;
+                            width: 24px;
+                            height: 24px;
+                            border-radius: 4px;
+                            background: cancel-area.has-hover ? Theme.surface-3 : transparent;
 
                             accessible-role: button;
                             accessible-label: @tr("Fermer");
                             accessible-action-default => { alias-popup.close(); }
 
-                            TouchArea {
+                            cancel-area := TouchArea {
+                                mouse-cursor: pointer;
                                 clicked => { alias-popup.close(); }
                             }
 
-                            Text {
-                                text: @tr("\u{2715}");
-                                font-size: 11px;
-                                color: Theme.text-muted;
+                            LucideIcon {
+                                icon: IconSet.X;
+                                icon-color: cancel-area.has-hover ? Theme.text-primary : Theme.text-muted;
+                                size: 14px;
+                                x: (parent.width - self.width) / 2;
+                                y: (parent.height - self.height) / 2;
                             }
                         }
                     }
@@ -164,7 +174,8 @@ export component TranscriptSection inherits VerticalLayout {
                     }
 
                     save-btn := Rectangle {
-                        height: 26px;
+                        height: 32px;
+                        border-radius: 4px;
                         background: root.alias-term-draft == "" ? Theme.surface-4 : (save-area.has-hover ? Theme.accent-hover : Theme.accent);
 
                         accessible-role: button;
@@ -173,11 +184,14 @@ export component TranscriptSection inherits VerticalLayout {
 
                         save-area := TouchArea {
                             enabled: root.alias-term-draft != "";
+                            mouse-cursor: pointer;
                             clicked => { root.save-and-close-alias-popup(); }
                         }
 
                         Text {
                             text: @tr("Enregistrer");
+                            font-size: 13px;
+                            font-weight: 600;
                             color: Theme.text-primary;
                             horizontal-alignment: center;
                             vertical-alignment: center;
