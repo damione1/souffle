@@ -650,6 +650,13 @@ fn start_live_transcript_timer(
             let content_h = window.get_live_transcript_content_height();
             let viewport_h = window.get_live_transcript_viewport_height();
             if content_h <= viewport_h {
+                // Everything fits - any leftover offset from an earlier tick
+                // (e.g. the viewport was still tiny before layout settled)
+                // would otherwise clip the top of the first line forever,
+                // since this branch never used to touch scroll_top again.
+                if scroll_y != 0.0 {
+                    window.set_live_transcript_scroll_top(0.0);
+                }
                 return;
             }
             let bottom = -(content_h - viewport_h);
