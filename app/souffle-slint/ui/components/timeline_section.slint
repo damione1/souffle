@@ -40,6 +40,14 @@ export component TimelineSection inherits VerticalLayout {
     callback calendar-setup-requested();
     callback event-start-requested(string /* occurrence id */);
 
+    // Shared across every `TimelineItemRow`: at most one row is ever
+    // "confirming delete" at a time. Owning this here (not locally per row)
+    // is what lets clicking a *different* row's title/copy/delete discard
+    // an in-flight confirm on the row you clicked away from - a plain
+    // `TouchArea` click doesn't grab keyboard focus in Slint, so there is no
+    // per-row "focus lost" signal to hook instead (Damien, 2026-09-23).
+    property <string> confirming-delete-id: "";
+
     // Same predicate as TimelineSection.svelte's `showCalendarSetupCta`.
     property <bool> show-calendar-setup: root.upcoming.length == 0 && (!root.calendar-enabled || root.calendar-permission == AccessState.denied);
 
@@ -293,9 +301,20 @@ export component TimelineSection inherits VerticalLayout {
                     entry: entry;
                     is-live: entry.kind == TimelineKind.meeting && entry.id == root.live-meeting-id;
                     expanded: entry.kind == TimelineKind.dictation && entry.id == root.expanded-dictation-id;
-                    opened => { root.item-opened(entry.kind, entry.id); }
-                    removed => { root.item-removed(entry.kind, entry.id); }
-                    copy-requested => { root.item-copy-requested(entry.title); }
+                    confirming-delete: root.confirming-delete-id == entry.id;
+                    confirm-delete-requested => { root.confirming-delete-id = entry.id; }
+                    opened => {
+                        root.confirming-delete-id = "";
+                        root.item-opened(entry.kind, entry.id);
+                    }
+                    removed => {
+                        root.confirming-delete-id = "";
+                        root.item-removed(entry.kind, entry.id);
+                    }
+                    copy-requested => {
+                        root.confirming-delete-id = "";
+                        root.item-copy-requested(entry.title);
+                    }
                 }
             }
         }
