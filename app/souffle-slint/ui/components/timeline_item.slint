@@ -21,11 +21,18 @@ export component TimelineItemRow inherits Rectangle {
     in property <bool> is-live: false;
     in property <bool> expanded: false;
 
+    // Driven by the parent list (`TimelineSection`), not owned locally: a
+    // plain `TouchArea` click doesn't grab keyboard focus in Slint, so a
+    // local `focus-lost`-based reset never fired when clicking a *different*
+    // row - only a single shared "which row is confirming" id one level up
+    // can be cleared by any other row's click. See `TimelineSection`'s
+    // `confirming-delete-id`.
+    in property <bool> confirming-delete: false;
     callback opened();
     callback removed();
     callback copy-requested();
+    callback confirm-delete-requested();
 
-    property <bool> confirming-delete: false;
     property <bool> copied: false;
     property <bool> is-dictation: root.entry.kind == TimelineKind.dictation;
     // Confirm stays visible after the first click even if hover is lost
@@ -59,6 +66,8 @@ export component TimelineItemRow inherits Rectangle {
         HorizontalLayout {
             padding-top: 12px;
             padding-bottom: 12px;
+            padding-left: 16px;
+            padding-right: 16px;
             spacing: 8px;
 
             row-area := TouchArea {
@@ -66,16 +75,14 @@ export component TimelineItemRow inherits Rectangle {
                 accessible-role: button;
                 accessible-label: root.entry.title;
                 accessible-action-default => {
-                    root.confirming-delete = false;
                     root.opened();
                 }
                 clicked => {
-                    root.confirming-delete = false;
                     root.opened();
                 }
 
                 HorizontalLayout {
-                    spacing: 12px;
+                    spacing: 16px;
 
                     VerticalLayout {
                         alignment: start;
@@ -104,113 +111,11 @@ export component TimelineItemRow inherits Rectangle {
                     }
 
                     VerticalLayout {
-                        alignment: center;
-                        vertical-stretch: 0;
-
-                        actions := Rectangle {
-                            width: (root.is-dictation ? 88px : 0px) + (root.is-live ? 0px : (root.confirming-delete ? 72px : 28px));
-                            height: 28px;
-                            opacity: root.actions-visible ? 1.0 : 0.0;
-                            animate opacity { duration: 100ms; }
-
-                            copy-area := TouchArea {
-                                x: 0;
-                                y: 0;
-                                width: root.is-dictation ? 88px : 0px;
-                                height: 28px;
-                                mouse-cursor: pointer;
-                                accessible-role: button;
-                                accessible-label: root.copied ? @tr("Copié !") : @tr("Copier");
-                                accessible-action-default => {
-                                    root.copy-requested();
-                                    root.copied = true;
-                                }
-                                clicked => {
-                                    root.copy-requested();
-                                    root.copied = true;
-                                }
-
-                                Rectangle {
-                                    border-radius: 4px;
-                                    background: copy-area.has-hover ? Theme.surface-2 : transparent;
-
-                                    LucideIcon {
-                                        icon: IconSet.Copy;
-                                        icon-color: copy-area.has-hover ? Theme.text-primary : Theme.text-muted;
-                                        size: 14px;
-                                        x: 10px;
-                                        y: (parent.height - self.height) / 2;
-                                    }
-                                    Text {
-                                        text: root.copied ? @tr("Copié !") : @tr("Copier");
-                                        font-size: 12.5px;
-                                        color: copy-area.has-hover ? Theme.text-primary : Theme.text-muted;
-                                        x: 28px;
-                                        height: 100%;
-                                        vertical-alignment: center;
-                                    }
-                                }
-                            }
-
-                            delete-area := TouchArea {
-                                x: copy-area.width;
-                                y: 0;
-                                width: root.is-live ? 0px : (root.confirming-delete ? 72px : 28px);
-                                height: 28px;
-                                mouse-cursor: pointer;
-                                accessible-role: button;
-                                accessible-label: root.confirming-delete ? @tr("Confirmer la suppression") : @tr("Supprimer");
-                                accessible-action-default => {
-                                    if root.confirming-delete {
-                                        root.confirming-delete = false;
-                                        root.removed();
-                                    } else {
-                                        root.confirming-delete = true;
-                                    }
-                                }
-                                clicked => {
-                                    if root.confirming-delete {
-                                        root.confirming-delete = false;
-                                        root.removed();
-                                    } else {
-                                        root.confirming-delete = true;
-                                    }
-                                }
-
-                                Rectangle {
-                                    border-radius: 4px;
-                                    background: root.confirming-delete
-                                        ? (delete-area.has-hover ? Theme.danger.with-alpha(0.15) : transparent)
-                                        : (delete-area.has-hover ? Theme.surface-3 : transparent);
-
-                                    if !root.confirming-delete: LucideIcon {
-                                        icon: IconSet.Trash2;
-                                        icon-color: delete-area.has-hover ? Theme.danger-soft : Theme.text-muted;
-                                        size: 14px;
-                                        x: (parent.width - self.width) / 2;
-                                        y: (parent.height - self.height) / 2;
-                                    }
-                                    if root.confirming-delete: Text {
-                                        text: @tr("Confirmer");
-                                        color: Theme.danger-soft;
-                                        font-family: "Archivo SemiBold";
-                                        font-size: 12px;
-                                        width: 100%;
-                                        height: 100%;
-                                        horizontal-alignment: center;
-                                        vertical-alignment: center;
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    VerticalLayout {
                         alignment: start;
                         vertical-stretch: 0;
 
                         HorizontalLayout {
-                            spacing: 11px;
+                            spacing: 10px;
                             alignment: end;
 
                             if root.entry.has-summary: LucideIcon {
@@ -241,16 +146,136 @@ export component TimelineItemRow inherits Rectangle {
                                 vertical-alignment: center;
                             }
 
-                            Rectangle {
-                                width: Theme.row-action-width;
-                                height: 22px;
+                            // Copy (dictation only): to the right of the
+                            // time, reserved space always allocated so
+                            // nothing else in the row shifts - only its own
+                            // opacity fades in/out with hover. Per Damien's
+                            // 2026-09-23 feedback on SOU-241 (icons floating
+                            // mid-row, between title and time, read as
+                            // misplaced) and the Tauri reference: hover-only,
+                            // right of the time, no overlap on confirm.
+                            copy-area := TouchArea {
+                                // Sized to content (icon + "Copier"/"Copy"),
+                                // not a wide arbitrary box - the previous
+                                // 88px left a dead gap before delete-area,
+                                // reading as a floating, disconnected button
+                                // instead of part of the same action cluster
+                                // (Damien, 2026-09-23).
+                                width: root.is-dictation ? 72px : 0px;
+                                height: 28px;
+                                mouse-cursor: pointer;
+                                accessible-role: button;
+                                accessible-label: root.copied ? @tr("Copié !") : @tr("Copier");
+                                accessible-action-default => {
+                                    root.copy-requested();
+                                    root.copied = true;
+                                }
+                                clicked => {
+                                    root.copy-requested();
+                                    root.copied = true;
+                                }
 
-                                if root.entry.kind == TimelineKind.meeting: LucideIcon {
-                                    icon: IconSet.ChevronRight;
-                                    icon-color: Theme.text-muted;
-                                    size: 15px;
-                                    x: (parent.width - self.width) / 2;
-                                    y: (parent.height - self.height) / 2;
+                                Rectangle {
+                                    // SOU-241: `clip: true` is load-bearing,
+                                    // not decorative - copy-area is 0px wide
+                                    // for meetings (no copy action there),
+                                    // but its icon/text children are
+                                    // positioned by absolute x, which Slint
+                                    // does not clip to the parent's bounds by
+                                    // default. Without this, the "Copier"
+                                    // icon+label bled into whatever sat to
+                                    // its right (the delete/confirm slot),
+                                    // producing garbled overlapping text on
+                                    // meeting rows.
+                                    clip: true;
+                                    border-radius: 4px;
+                                    background: copy-area.has-hover ? Theme.surface-2 : transparent;
+                                    opacity: root.actions-visible ? 1.0 : 0.0;
+                                    animate opacity { duration: 100ms; }
+
+                                    LucideIcon {
+                                        icon: IconSet.Copy;
+                                        icon-color: copy-area.has-hover ? Theme.text-primary : Theme.text-muted;
+                                        size: 14px;
+                                        x: 8px;
+                                        y: (parent.height - self.height) / 2;
+                                    }
+                                    Text {
+                                        text: root.copied ? @tr("Copié !") : @tr("Copier");
+                                        font-size: 12.5px;
+                                        color: copy-area.has-hover ? Theme.text-primary : Theme.text-muted;
+                                        x: 25px;
+                                        height: 100%;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                            }
+
+                            // Single trailing slot, reused for chevron (idle,
+                            // meetings), trash (hover, any deletable row) and
+                            // the "Confirmer" pill (after a delete click) -
+                            // one reserved area that only ever grows for the
+                            // widest of the three, never stacks two of them.
+                            // `confirming-delete` is an input driven by
+                            // `TimelineSection.confirming-delete-id`, not
+                            // owned here: this row only asks to enter
+                            // confirm mode via `confirm-delete-requested()`,
+                            // so any other row's click (or this row's own
+                            // `opened`/`copy-requested`) can clear it from
+                            // one shared place - per Damien's 2026-09-23
+                            // request, confirming delete must not linger
+                            // once you've clicked away from it.
+                            delete-area := TouchArea {
+                                width: root.is-live ? 0px : (root.confirming-delete ? 72px : Theme.row-action-width);
+                                height: 28px;
+                                mouse-cursor: pointer;
+                                accessible-role: button;
+                                accessible-label: root.confirming-delete ? @tr("Confirmer la suppression") : @tr("Supprimer");
+                                accessible-action-default => {
+                                    if root.confirming-delete {
+                                        root.removed();
+                                    } else {
+                                        root.confirm-delete-requested();
+                                    }
+                                }
+                                clicked => {
+                                    if root.confirming-delete {
+                                        root.removed();
+                                    } else {
+                                        root.confirm-delete-requested();
+                                    }
+                                }
+
+                                Rectangle {
+                                    border-radius: 4px;
+                                    background: root.confirming-delete
+                                        ? (delete-area.has-hover ? Theme.danger.with-alpha(0.15) : transparent)
+                                        : (delete-area.has-hover ? Theme.surface-3 : transparent);
+
+                                    if root.confirming-delete: Text {
+                                        text: @tr("Confirmer");
+                                        color: Theme.danger-soft;
+                                        font-family: "Archivo SemiBold";
+                                        font-size: 12px;
+                                        width: 100%;
+                                        height: 100%;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
+                                    if !root.confirming-delete && root.actions-visible: LucideIcon {
+                                        icon: IconSet.Trash2;
+                                        icon-color: delete-area.has-hover ? Theme.danger-soft : Theme.text-muted;
+                                        size: 14px;
+                                        x: (parent.width - self.width) / 2;
+                                        y: (parent.height - self.height) / 2;
+                                    }
+                                    if !root.confirming-delete && !root.actions-visible && root.entry.kind == TimelineKind.meeting: LucideIcon {
+                                        icon: IconSet.ChevronRight;
+                                        icon-color: Theme.text-muted;
+                                        size: 15px;
+                                        x: (parent.width - self.width) / 2;
+                                        y: (parent.height - self.height) / 2;
+                                    }
                                 }
                             }
                         }
