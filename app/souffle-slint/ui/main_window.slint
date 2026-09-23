@@ -40,11 +40,20 @@ import "assets/fonts/jetbrains-mono.ttf";
 
 export component MainWindow inherits Window {
     title: @tr("Soufflé");
-    // Matches tauri.conf.json's window (860x1040, min 680x560) - the home
-    // page content is centered in a 720px column with side margins at this
-    // width, same as the reference.
-    preferred-width: 860px;
-    preferred-height: 1040px;
+    // SOU-242: bumped from the original Tauri window (860x1040, still in
+    // tauri.conf.json for the retired frontend) - onboarding/permissions and
+    // the home view rendered visibly cramped at the old default on a fresh
+    // install with no saved geometry yet (`window_width`/`window_height` in
+    // `AppSettings::default()`, applied via `with_inner_size` in
+    // `main.rs::main()`). This `preferred-*` pair is the value actually used
+    // outside the macOS `with_inner_size` hook (non-macOS dev builds); keep
+    // it in sync with `AppSettings::default()`. Home content still caps at a
+    // 720px column (idle_view.slint) and onboarding at 512px
+    // (onboarding_view.slint), so the extra width only adds side margin -
+    // the fix is mainly the extra height. `min-width`/`min-height` are the
+    // user-resizable floor (SOU-219) and are unrelated to this default.
+    preferred-width: 1040px;
+    preferred-height: 1280px;
     min-width: 680px;
     min-height: 560px;
     default-font-family: "Archivo";

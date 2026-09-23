@@ -307,8 +307,16 @@ impl SettingsOptions {
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
-            window_width: 860,
-            window_height: 1040,
+            // SOU-242: bumped from the original Tauri window (860x1040).
+            // Onboarding/permissions and the home view rendered visibly
+            // cramped at the old default on a fresh install (no saved
+            // window_width/window_height row yet - see
+            // `main.rs::main()`'s `initial_settings` read). Keep every
+            // occurrence of this pair in sync; the test literals in this
+            // file were already redundant with `..AppSettings::default()`
+            // and were removed instead of updated (SOU-242).
+            window_width: 1040,
+            window_height: 1280,
             theme: Theme::Light,
             locale: String::new(),
             auto_paste: false,
@@ -1370,8 +1378,8 @@ mod tests {
     fn app_settings_round_trip() {
         let (db, _dir) = test_db();
         let settings = AppSettings {
-            window_width: 860,
-            window_height: 1040,
+            window_width: 1040,
+            window_height: 1280,
             auto_update_check_enabled: false,
             theme: Theme::Light,
             locale: "fr".into(),
@@ -1516,8 +1524,6 @@ mod tests {
     fn autostart_explicit_value_round_trips() {
         let (db, _dir) = test_db();
         let settings = AppSettings {
-            window_width: 860,
-            window_height: 1040,
             autostart_enabled: true,
             ..AppSettings::default()
         };
@@ -1527,8 +1533,6 @@ mod tests {
         // An explicit `false` is written too, so it stays distinguishable
         // from the never-written key above.
         let settings = AppSettings {
-            window_width: 860,
-            window_height: 1040,
             autostart_enabled: false,
             ..AppSettings::default()
         };
@@ -1544,8 +1548,6 @@ mod tests {
     fn blank_audio_device_is_removed_on_save() {
         let (db, _dir) = test_db();
         let settings = AppSettings {
-            window_width: 860,
-            window_height: 1040,
             audio_device: Some("   ".into()),
             ..AppSettings::default()
         };
@@ -1559,8 +1561,6 @@ mod tests {
     fn blank_clamshell_audio_device_is_removed_on_save() {
         let (db, _dir) = test_db();
         let settings = AppSettings {
-            window_width: 860,
-            window_height: 1040,
             clamshell_audio_device: Some("   ".into()),
             ..AppSettings::default()
         };
@@ -1882,8 +1882,6 @@ mod tests {
     fn dictation_polish_settings_round_trip() {
         let (db, _dir) = test_db();
         let settings = AppSettings {
-            window_width: 860,
-            window_height: 1040,
             dictation_polish_enabled: true,
             dictation_polish_template_id: "bullets".into(),
             dictation_polish_templates: vec![super::DictationPolishTemplate {
@@ -1914,8 +1912,6 @@ mod tests {
     fn summary_template_settings_round_trip_keeps_custom_templates() {
         let (db, _dir) = test_db();
         let settings = AppSettings {
-            window_width: 860,
-            window_height: 1040,
             default_summary_template_id: "custom-1".into(),
             summary_templates: vec![
                 super::SummaryTemplate {
@@ -1963,8 +1959,6 @@ mod tests {
     #[test]
     fn unknown_default_summary_template_falls_back_to_first() {
         let settings = AppSettings {
-            window_width: 860,
-            window_height: 1040,
             default_summary_template_id: "deleted-id".into(),
             ..AppSettings::default()
         };
