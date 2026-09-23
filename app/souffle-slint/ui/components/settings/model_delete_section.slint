@@ -1,0 +1,83 @@
+import { SettingsField } from "settings_field.slint";
+import { SettingsGroup } from "settings_group.slint";
+import { Theme } from "../../theme.slint";
+import { TranscriptionPhase } from "../../types.slint";
+import { ThemedButton, ThemedButtonKind } from "../themed_button.slint";
+
+// Destructive "delete the downloaded model" action for Settings > Système
+// (SOU-195-slice: the section itself was entirely missing from the Slint
+// port). Two-step inline confirm rather than a modal - the sandbox blocks
+// `confirm()`/`alert()`, and `timeline_item.slint`'s hover-reveal delete
+// already established the same "click again to confirm" pattern for a
+// destructive action in this codebase.
+//
+// The state machine (whether delete is even legal right now) is not
+// reimplemented here: `commands::model::delete_model` in Rust is the single
+// source of truth and refuses a currently-loaded or mid-transition model
+// with a clear error string that `delete-error` surfaces verbatim.
+// `can-delete` below only decides whether to invite the click - it narrows
+// to the one phase (downloaded, not loaded) that can never race that guard.
+export component ModelDeleteSection inherits VerticalLayout {
+    in property <TranscriptionPhase> model-phase;
+    in property <string> model-label;
+    in property <string> delete-error;
+
+    callback delete-requested();
+
+    property <bool> confirming: false;
+    property <bool> can-delete: root.model-phase == TranscriptionPhase.load-required;
+
+    spacing: 22px;
+    alignment: start;
+
+    SettingsGroup {
+        title: @tr("ZONE DE DANGER");
+
+        SettingsField {
+            show-divider: false;
+            label: @tr("Supprimer le mod\u{e8}le t\u{e9}l\u{e9}charg\u{e9}");
+            description: root.can-delete
+                ? @tr("Supprime les fichiers de {} du disque. Il faudra le t\u{e9}l\u{e9}charger \u{e0} nouveau pour l'utiliser.", root.model-label)
+                : @tr("Le mod\u{e8}le doit \u{ea}tre t\u{e9}l\u{e9}charg\u{e9} et d\u{e9}charg\u{e9} (pas en cours d'utilisation) pour \u{ea}tre supprim\u{e9}.");
+
+            HorizontalLayout {
+                spacing: 8px;
+                horizontal-stretch: 0;
+
+                if !root.confirming: ThemedButton {
+                    text: @tr("Supprimer");
+                    kind: ThemedButtonKind.danger;
+                    enabled: root.can-delete;
+                    clicked => { root.confirming = true; }
+                }
+
+                if root.confirming: ThemedButton {
+                    text: @tr("Confirmer");
+                    kind: ThemedButtonKind.danger;
+                    clicked => {
+                        root.confirming = false;
+                        root.delete-requested();
+                    }
+                }
+
+                if root.confirming: ThemedButton {
+                    text: @tr("Annuler");
+                    kind: ThemedButtonKind.ghost;
+                    clicked => { root.confirming = false; }
+                }
+            }
+        }
+
+        if root.delete-error != "": VerticalLayout {
+            padding-left: Theme.settings-inset;
+            padding-right: Theme.settings-inset;
+            padding-bottom: 12px;
+            Text {
+                text: root.delete-error;
+                color: Theme.danger;
+                font-size: 11.5px;
+                wrap: word-wrap;
+            }
+        }
+    }
+}

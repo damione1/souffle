@@ -2775,3 +2775,79 @@ msgctxt "SpeakerLabels"
 msgid "Eux"
 msgstr "Eux"
 
+
+msgctxt "MeetingDetail"
+msgid "Markdown"
+msgstr "Markdown"
+
+msgctxt "MeetingDetail"
+msgid "JSON"
+msgstr "JSON"
+
+msgctxt "MeetingDetail"
+msgid "SRT"
+msgstr "SRT"
+
+msgctxt "MeetingDetail"
+msgid "VTT"
+msgstr "VTT"
+
+msgctxt "MeetingDetail"
+msgid "Format d'export"
+msgstr "Format d'export"
+
+msgctxt "MeetingDetail"
+msgid "Exporter la réunion"
+msgstr "Exporter la réunion"
+
+msgctxt "MeetingDetail"
+msgid "Exporter"
+msgstr "Exporter"
+
+msgctxt "AudioPlayerSection"
+msgid "Audio"
+msgstr "Audio"
+
+msgctxt "AudioPlayerSection"
+msgid "Télécharger l'audio"
+msgstr "Télécharger l'audio"
+
+msgctxt "AudioPlayerSection"
+msgid "Télécharger"
+msgstr "Télécharger"
+
+msgctxt "TranscriptSection"
+msgid "Copier la transcription"
+msgstr "Copier la transcription"
+
+msgctxt "TranscriptSection"
+msgid "Copier"
+msgstr "Copier"
+
+msgctxt "ModelDeleteSection"
+msgid "ZONE DE DANGER"
+msgstr "ZONE DE DANGER"
+
+msgctxt "ModelDeleteSection"
+msgid "Supprimer le modèle téléchargé"
+msgstr "Supprimer le modèle téléchargé"
+
+msgctxt "ModelDeleteSection"
+msgid "Supprime les fichiers de {} du disque. Il faudra le télécharger à nouveau pour l'utiliser."
+msgstr "Supprime les fichiers de {} du disque. Il faudra le télécharger à nouveau pour l'utiliser."
+
+msgctxt "ModelDeleteSection"
+msgid "Le modèle doit être téléchargé et déchargé (pas en cours d'utilisation) pour être supprimé."
+msgstr "Le modèle doit être téléchargé et déchargé (pas en cours d'utilisation) pour être supprimé."
+
+msgctxt "ModelDeleteSection"
+msgid "Supprimer"
+msgstr "Supprimer"
+
+msgctxt "ModelDeleteSection"
+msgid "Confirmer"
+msgstr "Confirmer"
+
+msgctxt "ModelDeleteSection"
+msgid "Annuler"
+msgstr "Annuler"

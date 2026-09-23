@@ -12,6 +12,7 @@ import { IntelligenceSection } from "components/settings/intelligence_section.sl
 import { DictationPolishSection } from "components/settings/dictation_polish_section.slint";
 import { SummaryTemplatesSection } from "components/settings/summary_templates_section.slint";
 import { ModelSection } from "components/settings/model_section.slint";
+import { ModelDeleteSection } from "components/settings/model_delete_section.slint";
 import { DictionarySection, DictionaryRow } from "components/settings/dictionary_section.slint";
 import { SnippetsSection, SnippetRow } from "components/settings/snippets_section.slint";
 import { Theme } from "theme.slint";
@@ -158,6 +159,7 @@ export component SettingsView inherits Rectangle {
     in property <[string]> unload-timeout-labels;
     in property <string> unload-timeout-label;
     in property <string> model-error-message;
+    in property <string> model-delete-error;
     in property <bool> dictation-learn-from-edit;
     // `dictionary-entries` / `snippets` are windowed slices, not the full
     // lists - see the SOU-229 comment in `dictionary_section.slint`.
@@ -256,6 +258,7 @@ export component SettingsView inherits Rectangle {
     callback summary-template-add-requested(string);
     callback model-changed(string);
     callback unload-timeout-changed(string);
+    callback delete-model-requested();
     callback dictation-learn-from-edit-changed(bool);
     callback dictionary-add-requested(string, string, string);
     callback dictionary-delete-requested(int);
@@ -658,6 +661,13 @@ export component SettingsView inherits Rectangle {
                             copy-desktop-snippet-requested => { root.mcp-copy-desktop-snippet-requested(); }
                             copy-code-command-requested => { root.mcp-copy-code-command-requested(); }
                             test-mcp-requested => { root.mcp-test-requested(); }
+                        }
+
+                        ModelDeleteSection {
+                            model-phase: root.model-phase;
+                            model-label: root.selected-model-label;
+                            delete-error: root.model-delete-error;
+                            delete-requested => { root.delete-model-requested(); }
                         }
 
                         AboutSection {

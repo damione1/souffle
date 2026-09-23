@@ -12,9 +12,14 @@ export component AudioPlayerSection inherits VerticalLayout {
     in property <float> progress; // 0.0..1.0
     in property <string> position-label;
     in property <string> duration-label;
+    in property <string> download-error;
 
     callback play-pause-requested();
     callback seek-requested(float); // 0.0..1.0
+    // Native save panel + copy of the recorded session(s) to disk
+    // (SOU-195-slice, backed by the already-existing `native::dialog`/
+    // `commands::meetings::save_meeting_audio_export` from SOU-191).
+    callback download-requested();
 
     spacing: 8px;
 
@@ -22,6 +27,78 @@ export component AudioPlayerSection inherits VerticalLayout {
         text: @tr("Aucun enregistrement audio pour cette r\u{e9}union.");
         color: Theme.text-muted;
         font-size: 12px;
+    }
+
+    if root.has-audio: HorizontalLayout {
+        vertical-stretch: 0;
+        alignment: space-between;
+
+        Text {
+            text: @tr("Audio");
+            font-family: "Archivo SemiBold";
+            font-size: 13px;
+            color: Theme.text-primary;
+            vertical-alignment: center;
+        }
+
+        download-btn := Rectangle {
+            width: download-content.preferred-width + 16px;
+            height: 24px;
+            horizontal-stretch: 0;
+            border-radius: 4px;
+            border-width: download-focus.has-focus ? 2px : 0px;
+            border-color: Theme.accent;
+            background: download-area.pressed ? Theme.surface-4 : download-area.has-hover ? Theme.surface-3 : Theme.surface-2;
+
+            accessible-role: button;
+            accessible-label: @tr("T\u{e9}l\u{e9}charger l'audio");
+            accessible-action-default => { root.download-requested(); }
+
+            forward-focus: download-focus;
+            download-focus := FocusScope {
+                key-pressed(event) => {
+                    if event.text == Key.Return || event.text == Key.Space {
+                        root.download-requested();
+                        return accept;
+                    }
+                    return reject;
+                }
+            }
+
+            download-area := TouchArea {
+                clicked => {
+                    download-focus.focus();
+                    root.download-requested();
+                }
+            }
+
+            download-content := HorizontalLayout {
+                padding-left: 8px;
+                padding-right: 8px;
+                spacing: 5px;
+                alignment: center;
+
+                LucideIcon {
+                    width: 13px;
+                    height: 13px;
+                    icon: IconSet.Download;
+                    icon-color: Theme.text-secondary;
+                }
+                Text {
+                    text: @tr("T\u{e9}l\u{e9}charger");
+                    font-size: 11px;
+                    color: Theme.text-secondary;
+                    vertical-alignment: center;
+                }
+            }
+        }
+    }
+
+    if root.download-error != "": Text {
+        text: root.download-error;
+        color: Theme.danger;
+        font-size: 11px;
+        wrap: word-wrap;
     }
 
     if root.has-audio: HorizontalLayout {

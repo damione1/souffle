@@ -1,5 +1,6 @@
-import { NotesSaveState } from "types.slint";
+import { NotesSaveState, MeetingExportFormat } from "types.slint";
 import { ThemedLineEdit } from "components/themed_line_edit.slint";
+import { ThemedComboBox } from "components/themed_combo.slint";
 import { AudioPlayerSection } from "components/audio_player_section.slint";
 import { TranscriptSection, TranscriptBlock } from "components/transcript_section.slint";
 import { SummarySection, StructuredActionItem } from "components/summary_section.slint";
@@ -17,11 +18,14 @@ import { Theme } from "theme.slint";
 // Milestones 6-9 scope, said here rather than hidden: header (title,
 // rename, date/duration/segment count, participants) + notes (load, edit,
 // debounced autosave) + native audio playback/waveform + read-only
-// transcript with speaker labels, virtualized for long meetings + read-only
-// summary (raw + structured). Not yet ported: transcript bulk/per-word edit
-// + dictionary alias popover, summary generation itself (model/template
-// pickers, streaming), export menu and resume-recording (need the native
-// file dialog from SOU-191, not available to this headless bridge yet).
+// transcript with speaker labels, virtualized for long meetings +
+// summary (raw + structured, generation included, Copy) + whole-meeting
+// export (Markdown/JSON/SRT/VTT through the native save panel), audio
+// download and a transcript "Copy" (SOU-195-slice) + resume + delete. Not
+// yet ported: transcript bulk/per-word edit (the "Edit" affordance next to
+// the Transcription title - a materially bigger feature than copy/export,
+// left for its own ticket).
+//
 // Parts of the header meta line (date, duration, segment and session
 // counts). Zero-padded strings from Rust; the order and wording are @tr()
 // patterns below, so English can read the date month-first (SOU-246).
@@ -90,6 +94,8 @@ export component MeetingDetail inherits Rectangle {
     // Why the last delete failed; empty otherwise. On success Rust closes
     // the view, so there is no success state to show here.
     in property <string> delete-error;
+    in property <string> export-error;
+    in property <string> audio-export-error;
 
     callback back-requested();
     callback resume-requested();
@@ -103,6 +109,15 @@ export component MeetingDetail inherits Rectangle {
     callback audio-seek-requested(float);
     callback transcript-paragraph-clicked(int, float);
     callback transcript-alias-save-requested(string, string);
+    // Whole-meeting export (notes + summary + transcript) to a file the
+    // user picks via the native save panel (SOU-195-slice, SOU-191's
+    // dialog). `format` is the export's file format, not the confirmed
+    // path - Rust owns the save panel end to end.
+    callback export-requested(MeetingExportFormat);
+    // Copy recorded audio session(s) to a file via the same native panel.
+    callback export-audio-requested();
+    // Copy just the transcript text to the pasteboard.
+    callback copy-transcript-requested();
 
     property <bool> editing-title: false;
     property <string> title-draft;
@@ -113,6 +128,15 @@ export component MeetingDetail inherits Rectangle {
         root.delete-requested();
     }
     property <bool> is-empty-meeting: !root.has-audio && root.transcript-segment-count == 0 && root.summary == "";
+    property <MeetingExportFormat> export-format: MeetingExportFormat.markdown;
+
+    pure function export-format-label(value: MeetingExportFormat) -> string {
+        if value == MeetingExportFormat.markdown { return @tr("Markdown"); }
+        if value == MeetingExportFormat.json { return @tr("JSON"); }
+        if value == MeetingExportFormat.srt { return @tr("SRT"); }
+        if value == MeetingExportFormat.vtt { return @tr("VTT"); }
+        return "";
+    }
 
     function commit-title(value: string) {
         // `accepted` (Enter) removes the field, which then also reports a
@@ -353,10 +377,95 @@ export component MeetingDetail inherits Rectangle {
                 }
             }
 
-            if root.can-resume || root.resume-error != "": VerticalLayout {
+            if !root.is-empty-meeting || root.can-resume || root.resume-error != "": VerticalLayout {
                 spacing: 8px;
                 alignment: start;
                 horizontal-stretch: 0;
+
+                if !root.is-empty-meeting: HorizontalLayout {
+                    spacing: 6px;
+                    alignment: end;
+                    vertical-stretch: 0;
+
+                    export-format-combo := ThemedComboBox {
+                        control-label: @tr("Format d'export");
+                        model: [
+                            root.export-format-label(MeetingExportFormat.markdown),
+                            root.export-format-label(MeetingExportFormat.json),
+                            root.export-format-label(MeetingExportFormat.srt),
+                            root.export-format-label(MeetingExportFormat.vtt),
+                        ];
+                        current-value: root.export-format-label(root.export-format);
+                        combo-width: 112px;
+                        selected(value) => {
+                            if value == root.export-format-label(MeetingExportFormat.markdown) { root.export-format = MeetingExportFormat.markdown; }
+                            if value == root.export-format-label(MeetingExportFormat.json) { root.export-format = MeetingExportFormat.json; }
+                            if value == root.export-format-label(MeetingExportFormat.srt) { root.export-format = MeetingExportFormat.srt; }
+                            if value == root.export-format-label(MeetingExportFormat.vtt) { root.export-format = MeetingExportFormat.vtt; }
+                        }
+                    }
+
+                    export-btn := Rectangle {
+                        width: export-content.preferred-width + 20px;
+                        height: 32px;
+                        horizontal-stretch: 0;
+                        vertical-stretch: 0;
+                        border-radius: 4px;
+                        border-width: export-focus.has-focus ? 2px : 1px;
+                        border-color: export-focus.has-focus ? Theme.accent : Theme.ghost-border;
+                        background: export-area.pressed ? Theme.surface-2 : export-area.has-hover ? Theme.surface-4 : Theme.surface-3;
+
+                        accessible-role: button;
+                        accessible-label: @tr("Exporter la r\u{e9}union");
+                        accessible-action-default => { root.export-requested(root.export-format); }
+
+                        forward-focus: export-focus;
+                        export-focus := FocusScope {
+                            key-pressed(event) => {
+                                if event.text == Key.Return || event.text == Key.Space {
+                                    root.export-requested(root.export-format);
+                                    return accept;
+                                }
+                                return reject;
+                            }
+                        }
+
+                        export-area := TouchArea {
+                            clicked => {
+                                export-focus.focus();
+                                root.export-requested(root.export-format);
+                            }
+                        }
+
+                        export-content := HorizontalLayout {
+                            padding-left: 10px;
+                            padding-right: 10px;
+                            spacing: 6px;
+                            alignment: center;
+
+                            LucideIcon {
+                                width: 14px;
+                                height: 14px;
+                                icon: IconSet.FileText;
+                                icon-color: Theme.text-primary;
+                            }
+                            Text {
+                                text: @tr("Exporter");
+                                font-size: 13px;
+                                color: Theme.text-primary;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+                }
+
+                if root.export-error != "": Text {
+                    text: root.export-error;
+                    color: Theme.danger;
+                    font-size: 11px;
+                    horizontal-alignment: right;
+                    wrap: word-wrap;
+                }
 
                 if root.can-resume: resume-btn := Rectangle {
                     width: resume-txt.preferred-width + 24px;
@@ -539,8 +648,10 @@ export component MeetingDetail inherits Rectangle {
                     progress: root.audio-progress;
                     position-label: root.audio-position-label;
                     duration-label: root.audio-duration-label;
+                    download-error: root.audio-export-error;
                     play-pause-requested => { root.audio-play-pause-requested(); }
                     seek-requested(fraction) => { root.audio-seek-requested(fraction); }
+                    download-requested => { root.export-audio-requested(); }
                 }
 
                 if !root.is-empty-meeting: TranscriptSection {
@@ -553,6 +664,7 @@ export component MeetingDetail inherits Rectangle {
                     paragraph-clicked(session, time) => { root.transcript-paragraph-clicked(session, time); }
                     background-clicked => { focus-sink.focus(); }
                     alias-save-requested(term, pronunciation) => { root.transcript-alias-save-requested(term, pronunciation); }
+                    copy-requested => { root.copy-transcript-requested(); }
                 }
 
                 if !root.is-empty-meeting: SummarySection {

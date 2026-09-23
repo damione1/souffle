@@ -85,6 +85,12 @@ export enum PermissionKind { microphone, system-audio, accessibility, calendar }
 
 export enum ShortcutField { none, toggle, ptt }
 
+// Mirrors souffle_lib::export::ExportFormat at the UI boundary
+// (`export_format_from_slint`/`export_format_label` in main.rs, exhaustive
+// both ways). Used by MeetingDetail's export picker only - never a free
+// string across this callback.
+export enum MeetingExportFormat { markdown, json, srt, vtt }
+
 export enum SummaryProvider { auto, apple-intelligence, ollama }
 
 // Normalized at the FoundationModels FFI boundary. `unknown` is the real

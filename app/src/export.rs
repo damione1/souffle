@@ -232,24 +232,33 @@ fn render_markdown(meeting: &MeetingTranscript) -> String {
     }
 
     out.push_str("\n## Transcript\n\n");
+    out.push_str(&render_transcript_text(meeting));
+    out.push('\n');
+
+    out
+}
+
+/// Just the transcript, as Markdown paragraphs with speaker/timestamp
+/// prefixes - the edited transcript verbatim when there is one, otherwise
+/// the same paragraph grouping `render_markdown`'s Transcript section uses.
+/// Factored out of `render_markdown` so the meeting detail's "Copy" action
+/// (souffle-slint) can copy just this text to the clipboard without also
+/// carrying the notes/summary sections around it.
+pub fn render_transcript_text(meeting: &MeetingTranscript) -> String {
     match non_empty(meeting.edited_transcript.as_deref()) {
-        Some(edited) => out.push_str(edited),
+        Some(edited) => edited.to_string(),
         None => {
             let grouped = paragraphs::group_into_paragraphs(
                 &meeting.segments,
                 paragraphs::PAUSE_THRESHOLD_SECONDS,
             );
-            let rendered = grouped
+            grouped
                 .iter()
                 .map(render_paragraph_markdown)
                 .collect::<Vec<_>>()
-                .join("\n\n");
-            out.push_str(&rendered);
+                .join("\n\n")
         }
     }
-    out.push('\n');
-
-    out
 }
 
 fn non_empty(text: Option<&str>) -> Option<&str> {
@@ -691,6 +700,26 @@ mod tests {
         // The raw segment text ("Hello world") must not also appear as a
         // paragraph; only the edited text represents the transcript.
         assert!(!rendered.contains("[0:00] Hello world"));
+    }
+
+    // ── render_transcript_text (meeting detail "Copy") ──────────────────
+
+    #[test]
+    fn transcript_text_uses_edited_transcript_verbatim() {
+        let mut meeting = sample_meeting("m1");
+        meeting.edited_transcript = Some("This is the cleaned-up transcript.".to_string());
+        assert_eq!(
+            render_transcript_text(&meeting),
+            "This is the cleaned-up transcript."
+        );
+    }
+
+    #[test]
+    fn transcript_text_falls_back_to_paragraphs_without_notes_or_summary() {
+        let meeting = sample_meeting("m1");
+        let text = render_transcript_text(&meeting);
+        assert!(text.contains("[0:00] Hello world"));
+        assert!(!text.contains("## "));
     }
 
     #[test]
