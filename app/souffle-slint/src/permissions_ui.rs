@@ -140,7 +140,7 @@ impl PermissionController {
         self.window.upgrade().is_some_and(|window| {
             window.get_settings_open()
                 || (window.get_onboarding_open()
-                    && window.get_onboarding_step().as_str() == "permissions")
+                    && window.get_onboarding_step() == crate::OnboardingStep::Permissions)
         })
     }
 

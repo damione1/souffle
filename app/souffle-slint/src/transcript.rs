@@ -1,17 +1,14 @@
-//! Port of `buildMeetingTranscriptBlocks`/`groupIntoParagraphsWithRanges`
-//! (`src/lib/utils/paragraphs.ts`) for a completed meeting's transcript -
-//! milestone 8a. Deliberately a simplified grouping rule, not the exact
-//! algorithm: the real one clusters into speaker "turns" first, then splits
-//! each turn into paragraphs by pause/sentence-count/char-length caps, with
-//! extra handoff/interrupt/crosstalk timing heuristics on top. Reproducing
-//! that exactly is a substantial, separate port; this groups consecutive
-//! segments by pause threshold and speaker continuity only - real
-//! paragraphs with real speaker labels and real session breaks, just not
-//! byte-identical boundaries to the Svelte reference. Said here rather than
-//! silently approximated as done.
+//! Transcript blocks for a completed meeting's post-meeting view. Paragraph
+//! boundaries come from `souffle_schema::paragraphs::group_into_paragraphs`,
+//! the same grouper the Markdown export, the summary turns and the MCP
+//! sidecar use, so this screen and an export of the same meeting show the
+//! same paragraphs. This module adds what is specific to the screen:
+//! session-break rows between recording sessions, the `mm:ss` timestamp
+//! format, and the clickable-word Markdown `StyledText` renders.
 
 use souffle_lib::engine::{Speaker, TranscriptionSegment};
 use souffle_lib::transcript::MeetingRecordingSession;
+use souffle_schema::paragraphs::{PAUSE_THRESHOLD_SECONDS, group_into_paragraphs};
 
 use crate::TranscriptBlock;
 
@@ -23,14 +20,6 @@ pub(crate) fn speaker_label(speaker: Option<Speaker>) -> String {
         Some(Speaker::Me) => "Moi".into(),
         Some(Speaker::Them) => "Eux".into(),
         None => String::new(),
-    }
-}
-
-fn seg_end(seg: &TranscriptionSegment) -> f64 {
-    if seg.end_time > 0.0 {
-        seg.end_time
-    } else {
-        seg.start_time
     }
 }
 
@@ -114,62 +103,27 @@ fn styled_transcript_text(text: &str) -> slint::StyledText {
 }
 
 /// Groups one contiguous run of segments (already known to belong to a
-/// single recording session, or none) into paragraph blocks: a new
-/// paragraph starts when the pause since the previous segment exceeds
-/// `pause_threshold`, or the speaker changes.
-fn group_paragraphs(
+/// single recording session, or none) into paragraph blocks with the shared
+/// grouper. The timestamp is re-formatted as `mm:ss` (the Slint display
+/// format) rather than the paragraph's own `m:ss` export form.
+fn paragraph_blocks(
     segments: &[TranscriptionSegment],
-    segment_offset: usize,
     session_index: Option<usize>,
-    pause_threshold: f64,
 ) -> Vec<TranscriptBlock> {
-    let mut blocks = Vec::new();
-    let mut current: Vec<&TranscriptionSegment> = Vec::new();
-    let mut last_end = 0.0f64;
-
-    let flush = |current: &mut Vec<&TranscriptionSegment>, blocks: &mut Vec<TranscriptBlock>| {
-        if current.is_empty() {
-            return;
-        }
-        let text = current
-            .iter()
-            .map(|s| s.text.trim())
-            .filter(|t| !t.is_empty())
-            .collect::<Vec<_>>()
-            .join(" ");
-        let first = current[0];
-        blocks.push(TranscriptBlock {
+    group_into_paragraphs(segments, PAUSE_THRESHOLD_SECONDS)
+        .into_iter()
+        .map(|p| TranscriptBlock {
             is_session_break: false,
-            speaker_label: speaker_label(first.speaker).into(),
-            timestamp: crate::timeline::format_duration(first.start_time).into(),
-            markdown_text: styled_transcript_text(&text),
-            text: text.into(),
+            speaker_label: speaker_label(p.speaker).into(),
+            timestamp: crate::timeline::format_duration(p.start_time).into(),
+            markdown_text: styled_transcript_text(&p.text),
+            text: p.text.into(),
             recording_session_index: session_index.map(|i| i as i32).unwrap_or(-1),
-            start_time: first.start_time as f32,
+            start_time: p.start_time as f32,
             end_label: "".into(),
             start_label: "".into(),
-        });
-        current.clear();
-    };
-
-    for (i, seg) in segments.iter().enumerate() {
-        let text_offset = segment_offset + i;
-        let _ = text_offset; // segment ranges aren't tracked in this simplified port
-        let starts_new = if current.is_empty() {
-            true
-        } else {
-            let gap = seg.start_time - last_end;
-            let speaker_changed = current.last().unwrap().speaker != seg.speaker;
-            gap > pause_threshold || speaker_changed
-        };
-        if starts_new {
-            flush(&mut current, &mut blocks);
-        }
-        last_end = seg_end(seg);
-        current.push(seg);
-    }
-    flush(&mut current, &mut blocks);
-    blocks
+        })
+        .collect()
 }
 
 fn session_break_block() -> TranscriptBlock {
@@ -192,7 +146,6 @@ fn push_range(
     start: usize,
     end: usize,
     session_index: Option<usize>,
-    pause_threshold: f64,
     appended_any: &mut bool,
 ) {
     if end <= start {
@@ -201,17 +154,9 @@ fn push_range(
     if *appended_any {
         blocks.push(session_break_block());
     }
-    blocks.extend(group_paragraphs(
-        &segments[start..end],
-        start,
-        session_index,
-        pause_threshold,
-    ));
+    blocks.extend(paragraph_blocks(&segments[start..end], session_index));
     *appended_any = true;
 }
-
-/// `pauseThreshold` in the Svelte reference is a constant 1.5s.
-const PAUSE_THRESHOLD_SECONDS: f64 = 1.5;
 
 pub fn build_transcript_blocks(
     segments: &[TranscriptionSegment],
@@ -247,7 +192,6 @@ pub fn build_transcript_blocks(
                 consumed_until,
                 start,
                 None,
-                PAUSE_THRESHOLD_SECONDS,
                 &mut appended_any,
             );
         }
@@ -257,7 +201,6 @@ pub fn build_transcript_blocks(
             start,
             end,
             Some(session_index),
-            PAUSE_THRESHOLD_SECONDS,
             &mut appended_any,
         );
         consumed_until = consumed_until.max(end);
@@ -269,7 +212,6 @@ pub fn build_transcript_blocks(
             consumed_until,
             segments.len(),
             None,
-            PAUSE_THRESHOLD_SECONDS,
             &mut appended_any,
         );
     }
@@ -416,6 +358,64 @@ mod tests {
         assert_eq!(blocks.len(), 3);
         assert_eq!(blocks[0].speaker_label.as_str(), "Moi");
         assert_eq!(blocks[2].speaker_label.as_str(), "Eux");
+    }
+
+    /// The post-meeting view runs the same grouper as the export, proven on
+    /// the shared fixture's diarized cases: block texts and speaker labels
+    /// must match the pinned paragraphs (through `TranscriptionSegment`'s
+    /// `SegmentLike` impl and this module's label mapping).
+    #[test]
+    fn diarized_blocks_match_the_shared_paragraph_fixture() {
+        use serde_json::Value;
+
+        fn speaker_of(value: &Value) -> Option<Speaker> {
+            value["speaker"].as_str().and_then(Speaker::parse)
+        }
+
+        let raw = include_str!("../../souffle-schema/tests/fixtures/paragraph_grouping.json");
+        let fixture: Value = serde_json::from_str(raw).expect("valid fixture JSON");
+        let cases = fixture["cases"].as_array().expect("cases array");
+        let wanted = [
+            "diarized_crosstalk_word_level",
+            "diarized_monologue_interjection",
+        ];
+        for name in wanted {
+            let case = cases
+                .iter()
+                .find(|c| c["name"] == name)
+                .unwrap_or_else(|| panic!("fixture case '{name}' missing"));
+            let segments: Vec<TranscriptionSegment> = case["segments"]
+                .as_array()
+                .expect("segments array")
+                .iter()
+                .map(|s| {
+                    seg(
+                        s["text"].as_str().expect("text"),
+                        s["start_time"].as_f64().expect("start_time"),
+                        s["end_time"].as_f64().expect("end_time"),
+                        speaker_of(s),
+                    )
+                })
+                .collect();
+
+            let blocks = build_transcript_blocks(&segments, &[]);
+            let actual: Vec<(String, String)> = blocks
+                .iter()
+                .map(|b| (b.speaker_label.to_string(), b.text.to_string()))
+                .collect();
+            let expected: Vec<(String, String)> = case["expected"]
+                .as_array()
+                .expect("expected array")
+                .iter()
+                .map(|p| {
+                    (
+                        speaker_label(speaker_of(p)),
+                        p["text"].as_str().expect("text").to_string(),
+                    )
+                })
+                .collect();
+            assert_eq!(actual, expected, "case '{name}'");
+        }
     }
 
     #[test]

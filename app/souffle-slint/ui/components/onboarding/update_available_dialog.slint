@@ -1,24 +1,33 @@
-import { Button, ScrollView, Palette } from "std-widgets.slint";
 import { MarkdownBlock } from "markdown_block.slint";
-import { MarkdownView } from "markdown_view.slint";
+import { ReleaseNotesBox } from "markdown_view.slint";
+import { ModalDialog } from "../modal_dialog.slint";
+import { ThemedButton, ThemedButtonKind } from "../themed_button.slint";
+import { InstallBlockReason, UpdatePhase } from "../../types.slint";
 import { Theme } from "../../theme.slint";
 
 // Port of UpdateAvailableDialog.svelte + UpdateAction.svelte. `download_update`/
-// `install_update` are real commands (`commands/updater.rs`) already built on
-// `tauri-plugin-updater` - the ticket's own documented transition debt if this
-// lands before SOU-191 replaces that plugin. No live download progress here
-// (same simplification as the Data tab's archive export in SOU-188): the
-// button shows a busy state and the final result, `get_update_install_block`
-// is a real state-machine query for why "Install and restart" may be greyed
-// out (recording/downloading/loading/unloading), not a guess. Release notes
-// go through the same pre-parsed `MarkdownBlock` rendering as What's New -
-// see `markdown.rs`'s doc comment.
-export component UpdateAvailableDialog inherits Rectangle {
+// `install_update` are real commands (`commands/updater.rs`). No live download
+// progress here (same simplification as the Data tab's archive export in
+// SOU-188): the button shows a busy state and the final result.
+// `get_update_install_block` is a real state-machine query for why "Install
+// and restart" may be greyed out; Rust projects it onto the
+// `install-blocked` / `install-block-reason` pair (`update_ui.rs`) and the
+// label per reason lives here, one `@tr` per variant - never the raw enum
+// token. Release notes go through the same pre-parsed `MarkdownBlock`
+// rendering as What's New (`markdown.rs`).
+//
+// Action row follows UpdateAction.svelte per phase: idle → Télécharger;
+// downloading → disabled busy label; ready → Installer (disabled while
+// blocked, reason underneath); failed → error text, Réessayer, and the
+// GitHub fallback. Not ported: cancelling an in-flight download (no
+// `cancel_update_download` wiring in this shell yet).
+export component UpdateAvailableDialog inherits ModalDialog {
     in property <string> latest-version;
     in property <[MarkdownBlock]> release-notes-blocks;
-    in property <string> phase; // "idle" | "downloading" | "ready" | "failed"
+    in property <UpdatePhase> phase: UpdatePhase.idle;
     in property <string> error-message;
-    in property <string> install-blocked-reason; // "" when installable
+    in property <bool> install-blocked: false;
+    in property <InstallBlockReason> install-block-reason;
 
     callback download-requested();
     callback install-requested();
@@ -26,83 +35,77 @@ export component UpdateAvailableDialog inherits Rectangle {
     callback dismiss-requested();
     callback link-clicked(string);
 
-    background: #000000aa;
+    pure function block-label(reason: InstallBlockReason) -> string {
+        if reason == InstallBlockReason.recording-dictation { return @tr("Terminez la dictée avant d'installer."); }
+        if reason == InstallBlockReason.recording-meeting { return @tr("Arrêtez la réunion avant d'installer."); }
+        if reason == InstallBlockReason.stopping { return @tr("Attendez la fin de l'arrêt de l'enregistrement."); }
+        if reason == InstallBlockReason.downloading { return @tr("Attendez la fin du téléchargement du modèle."); }
+        if reason == InstallBlockReason.loading { return @tr("Attendez la fin du chargement du modèle."); }
+        if reason == InstallBlockReason.unloading { return @tr("Attendez la fin du déchargement du modèle."); }
+        return "";
+    }
 
-    Rectangle {
-        width: 440px;
-        height: 380px;
-        background: Theme.canvas;
-        border-width: 1px;
-        border-color: Theme.surface-4;
-        border-radius: 8px;
+    title: @tr("Mise à jour disponible");
+    subtitle: @tr("Version {}", root.latest-version);
+    panel-height: 440px;
+    close-requested => { root.dismiss-requested(); }
 
-        VerticalLayout {
-            padding: 20px;
-            spacing: 14px;
+    ReleaseNotesBox {
+        blocks: root.release-notes-blocks;
+        link-clicked(url) => { root.link-clicked(url); }
+    }
 
-            VerticalLayout {
-                spacing: 2px;
-                Text {
-                    text: @tr("Mise à jour disponible");
-                    font-size: 16px;
-                    font-weight: 700;
-                    color: Theme.text-primary;
-                }
-                Text {
-                    text: @tr("Version {}", root.latest-version);
-                    font-size: 11.5px;
-                    color: Theme.text-muted;
-                }
-            }
+    if root.error-message != "": Text {
+        text: root.error-message;
+        color: Theme.danger-soft;
+        font-size: 12px;
+        wrap: word-wrap;
+        vertical-stretch: 0;
+    }
 
-            ScrollView {
-                MarkdownView {
-                    blocks: root.release-notes-blocks;
-                    link-clicked(url) => { root.link-clicked(url); }
-                }
-            }
+    if root.phase == UpdatePhase.ready && root.install-blocked: Text {
+        text: block-label(root.install-block-reason);
+        color: Theme.text-muted;
+        font-size: 12px;
+        wrap: word-wrap;
+        vertical-stretch: 0;
+    }
 
-            if root.error-message != "": Text {
-                text: root.error-message;
-                color: Theme.danger;
-                font-size: 11px;
-                wrap: word-wrap;
-            }
+    HorizontalLayout {
+        alignment: end;
+        spacing: 8px;
+        vertical-stretch: 0;
 
-            if root.install-blocked-reason != "": Text {
-                text: @tr("Installation impossible pour l'instant : {}", root.install-blocked-reason);
-                color: Theme.warning;
-                font-size: 11px;
-                wrap: word-wrap;
-            }
+        ThemedButton {
+            text: @tr("Plus tard");
+            clicked => { root.dismiss-requested(); }
+        }
 
-            HorizontalLayout {
-                alignment: space-between;
-                spacing: 8px;
-
-                Button {
-                    text: @tr("Voir sur GitHub");
-                    clicked => { root.open-release-requested(); }
-                }
-
-                HorizontalLayout {
-                    spacing: 8px;
-                    Button {
-                        text: @tr("Plus tard");
-                        clicked => { root.dismiss-requested(); }
-                    }
-                    if root.phase == "ready": Button {
-                        text: @tr("Installer et redémarrer");
-                        enabled: root.install-blocked-reason == "";
-                        clicked => { root.install-requested(); }
-                    }
-                    if root.phase != "ready": Button {
-                        text: root.phase == "downloading" ? @tr("Téléchargement…") : @tr("Télécharger");
-                        enabled: root.phase != "downloading";
-                        clicked => { root.download-requested(); }
-                    }
-                }
-            }
+        if root.phase == UpdatePhase.idle: ThemedButton {
+            text: @tr("Télécharger la mise à jour");
+            kind: ThemedButtonKind.active;
+            clicked => { root.download-requested(); }
+        }
+        if root.phase == UpdatePhase.downloading: ThemedButton {
+            text: @tr("Téléchargement…");
+            kind: ThemedButtonKind.active;
+            enabled: false;
+        }
+        if root.phase == UpdatePhase.ready: ThemedButton {
+            text: @tr("Installer et redémarrer");
+            kind: ThemedButtonKind.active;
+            enabled: !root.install-blocked;
+            clicked => { root.install-requested(); }
+        }
+        if root.phase == UpdatePhase.failed: ThemedButton {
+            text: @tr("Réessayer");
+            kind: ThemedButtonKind.active;
+            clicked => { root.download-requested(); }
+        }
+        if root.phase == UpdatePhase.failed: ThemedButton {
+            text: @tr("Ouvrir la page de release");
+            kind: ThemedButtonKind.ghost;
+            clicked => { root.open-release-requested(); }
         }
     }
 }

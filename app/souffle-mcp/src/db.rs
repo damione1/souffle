@@ -17,14 +17,12 @@ use std::time::Duration;
 use rusqlite::{Connection, OpenFlags, params};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use souffle_schema::Speaker;
+use souffle_schema::paragraphs::{PAUSE_THRESHOLD_SECONDS, SegmentLike, group_into_paragraphs};
 use thiserror::Error;
 
 /// Must match `constants::APP_IDENTIFIER` in the main crate.
 const APP_IDENTIFIER: &str = "com.souffle.desktop";
-
-/// Gap between segments, in seconds, that starts a new paragraph in the
-/// simplified transcript renderer below.
-const PARAGRAPH_GAP_SECONDS: f64 = 1.5;
 
 #[derive(Debug, Error)]
 pub enum McpDbError {
@@ -232,13 +230,31 @@ pub struct DictationSummary {
     pub timestamp: String,
 }
 
-/// Raw `segments` row from SQLite; diarized meetings are re-sorted by time
-/// before rendering (see `time_ordered_segments`).
+/// Raw `segments` row from SQLite, in `sort_order` (storage order). The
+/// shared paragraph grouper does its own per-speaker ordering, so nothing
+/// is re-sorted here.
 struct SegmentRow {
     text: String,
     start_time: f64,
     end_time: f64,
-    speaker: Option<String>,
+    /// Leftover `spk:<id>` labels (and anything else) read as `None`, via
+    /// `Speaker::parse`.
+    speaker: Option<Speaker>,
+}
+
+impl SegmentLike for SegmentRow {
+    fn text(&self) -> &str {
+        &self.text
+    }
+    fn start_time(&self) -> f64 {
+        self.start_time
+    }
+    fn end_time(&self) -> f64 {
+        self.end_time
+    }
+    fn speaker(&self) -> Option<Speaker> {
+        self.speaker
+    }
 }
 
 struct MeetingRow {
@@ -539,13 +555,13 @@ impl McpDb {
                     text: row.get(0)?,
                     start_time: row.get(1)?,
                     end_time: row.get(2)?,
-                    speaker: normalize_speaker(speaker),
+                    speaker: speaker.as_deref().and_then(Speaker::parse),
                 })
             })
             .map_err(McpDbError::Query)?
             .collect::<Result<Vec<_>, _>>()
             .map_err(McpDbError::Query)?;
-        Ok(time_ordered_segments(segments))
+        Ok(segments)
     }
 
     pub fn search_meetings(
@@ -623,22 +639,6 @@ fn map_meeting_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<MeetingRow> {
     })
 }
 
-/// Diarized meetings interleave Me/Them segments by processing frame in
-/// storage order, not strictly by time — mirror export's
-/// `time_ordered_segments` so MCP transcript text reads as a conversation.
-fn time_ordered_segments(mut segments: Vec<SegmentRow>) -> Vec<SegmentRow> {
-    let diarized = segments.iter().any(|s| s.speaker.is_some());
-    if diarized {
-        segments.sort_by(|a, b| {
-            a.start_time
-                .partial_cmp(&b.start_time)
-                .unwrap_or(std::cmp::Ordering::Equal)
-                .then_with(|| a.speaker.cmp(&b.speaker))
-        });
-    }
-    segments
-}
-
 fn query_meeting_rows(
     stmt: &mut rusqlite::Statement<'_>,
     params: impl rusqlite::Params,
@@ -649,208 +649,18 @@ fn query_meeting_rows(
         .map_err(McpDbError::Query)
 }
 
-/// Sentence-ending punctuation, allowing closing quotes/brackets after it.
-/// Simplified mirror of the TS `SENTENCE_END` regex
-/// (`/[.!?…]["»”')\]]*\s*$/`), only used here to decide when an interrupted
-/// turn (see `cluster_into_turns`) should close.
-fn ends_sentence(text: &str) -> bool {
-    const CLOSING_CHARS: [char; 6] = ['"', '\u{00bb}', '\u{201d}', '\'', ')', ']'];
-    const SENTENCE_END_CHARS: [char; 4] = ['.', '!', '?', '\u{2026}'];
-
-    let mut chars: Vec<char> = text.trim_end().chars().collect();
-    while matches!(chars.last(), Some(c) if CLOSING_CHARS.contains(c)) {
-        chars.pop();
-    }
-    matches!(chars.last(), Some(c) if SENTENCE_END_CHARS.contains(c))
-}
-
-/// Cluster time-ordered segments into per-speaker turns, then emit them
-/// ordered by each turn's start time (turn segments stay contiguous and
-/// chronological internally). A segment joins its speaker's currently open
-/// turn if the gap since that turn's last segment is under
-/// `PARAGRAPH_GAP_SECONDS`; otherwise that speaker's turn closes and a new
-/// one opens. Simplified mirror of `clusterIntoTurns` in
-/// `src/lib/utils/paragraphs.ts`, kept a stand-in rather than a faithful
-/// port: same idea (during crosstalk, keep each speaker's words together
-/// instead of breaking on every interleaved segment), no sentence/length
-/// heuristics beyond the interruption rule below.
-///
-/// Without a pause, a monologue would otherwise absorb everything
-/// indefinitely, so a second speaker's interjection would render far below
-/// the point in the monologue it actually responded to. To keep
-/// interjections anchored near their moment: opening a new turn marks every
-/// other speaker's currently open turn as interrupted. An interrupted turn
-/// still keeps absorbing segments, but closes as soon as one of them ends a
-/// sentence, so the speaker's next segment opens a fresh turn that sorts
-/// after the interjection. A turn that never hits a sentence end (no
-/// punctuation) still only closes on pause, same as before.
-fn cluster_into_turns(segments: &[SegmentRow]) -> Vec<&SegmentRow> {
-    struct Turn<'a> {
-        start: f64,
-        last_end: f64,
-        segments: Vec<&'a SegmentRow>,
-        interrupted: bool,
-    }
-
-    let mut open: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
-    let mut turns: Vec<Turn> = Vec::new();
-
-    for seg in segments {
-        let end = seg.end_time.max(seg.start_time);
-        let Some(speaker) = seg.speaker.as_deref() else {
-            turns.push(Turn {
-                start: seg.start_time,
-                last_end: end,
-                segments: vec![seg],
-                interrupted: false,
-            });
-            continue;
-        };
-
-        let joins = open
-            .get(speaker)
-            .is_some_and(|&idx| seg.start_time - turns[idx].last_end < PARAGRAPH_GAP_SECONDS);
-
-        if joins {
-            let idx = open[speaker];
-            turns[idx].segments.push(seg);
-            turns[idx].last_end = turns[idx].last_end.max(end);
-            if turns[idx].interrupted && ends_sentence(seg.text.trim()) {
-                // First sentence end at or after the interruption: close now
-                // so the speaker's next segment starts a fresh, later-sorting
-                // turn.
-                open.remove(speaker);
-            }
-        } else {
-            turns.push(Turn {
-                start: seg.start_time,
-                last_end: end,
-                segments: vec![seg],
-                interrupted: false,
-            });
-            open.insert(speaker, turns.len() - 1);
-            for (&other_speaker, &idx) in open.iter() {
-                if other_speaker != speaker {
-                    turns[idx].interrupted = true;
-                }
-            }
-        }
-    }
-
-    turns.sort_by(|a, b| {
-        a.start
-            .partial_cmp(&b.start)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
-    turns.into_iter().flat_map(|t| t.segments).collect()
-}
-
-/// Mirror of the app's `engine::Speaker`. The sidecar is a standalone binary
-/// that depends on neither `souffle` nor `tauri`, so the enum is restated
-/// here rather than imported. Restating it as an enum is what matters: both
-/// helpers below branch on it exhaustively, so a third speaker cannot be
-/// silently folded into an existing one.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Speaker {
-    Me,
-    Them,
-}
-
-impl Speaker {
-    /// DB encoding, identical to `Speaker::as_str` in the app.
-    fn as_str(self) -> &'static str {
-        match self {
-            Speaker::Me => "me",
-            Speaker::Them => "them",
-        }
-    }
-
-    /// Display prefix, identical to `Speaker::display_name` in the app.
-    fn display_name(self) -> &'static str {
-        match self {
-            Speaker::Me => "Me",
-            Speaker::Them => "Them",
-        }
-    }
-
-    /// Leftover `spk:<id>` labels (and anything else) become `None`,
-    /// matching the app's `Speaker::parse`.
-    fn parse(raw: &str) -> Option<Speaker> {
-        match raw {
-            "me" => Some(Speaker::Me),
-            "them" => Some(Speaker::Them),
-            _ => None,
-        }
-    }
-}
-
-fn normalize_speaker(raw: Option<String>) -> Option<String> {
-    raw.as_deref()
-        .and_then(Speaker::parse)
-        .map(|speaker| speaker.as_str().to_string())
-}
-
-fn speaker_label(raw: &str) -> Option<&'static str> {
-    Speaker::parse(raw).map(Speaker::display_name)
-}
-
-/// Simplified stand-in for the frontend's paragraph engine
-/// (`src/lib/utils/paragraphs.ts`): breaks on every speaker/turn change and
-/// on gaps over `PARAGRAPH_GAP_SECONDS`, prefixing each new paragraph with
-/// the speaker label when known. Diarized input is first clustered into
-/// per-speaker turns (see `cluster_into_turns`) so crosstalk reads as
-/// flowing per-speaker phrases rather than breaking on every interleaved
-/// segment. It does not replicate the sentence/length heuristics the app
-/// uses for on-screen readability: this is meant to be a faithful, readable
-/// text dump for an AI assistant, not pixel-identical to the app's
-/// transcript view.
+/// Plain-text transcript for an AI assistant: the same paragraphs the app
+/// exports and shows (`souffle_schema::paragraphs`), each prefixed with the
+/// speaker label when known, separated by blank lines, no timestamps.
 fn render_transcript(segments: &[SegmentRow]) -> String {
-    let diarized = segments.iter().any(|s| s.speaker.is_some());
-    let ordered: Vec<&SegmentRow> = if diarized {
-        cluster_into_turns(segments)
-    } else {
-        segments.iter().collect()
-    };
-
-    let mut paragraphs: Vec<String> = Vec::new();
-    let mut current = String::new();
-    let mut current_speaker: Option<String> = None;
-    let mut last_end = 0.0_f64;
-    let mut started = false;
-
-    for seg in ordered {
-        let text = seg.text.trim();
-        if text.is_empty() {
-            continue;
-        }
-
-        let speaker_changed = started && seg.speaker != current_speaker;
-        let big_gap = started && (seg.start_time - last_end) > PARAGRAPH_GAP_SECONDS;
-
-        if (speaker_changed || big_gap) && !current.is_empty() {
-            paragraphs.push(std::mem::take(&mut current));
-        }
-
-        if current.is_empty() {
-            if let Some(label) = seg.speaker.as_deref().and_then(speaker_label) {
-                current.push_str(label);
-                current.push_str(": ");
-            }
-        } else {
-            current.push(' ');
-        }
-        current.push_str(text);
-
-        current_speaker = seg.speaker.clone();
-        last_end = seg.end_time.max(seg.start_time);
-        started = true;
-    }
-
-    if !current.is_empty() {
-        paragraphs.push(current);
-    }
-
-    paragraphs.join("\n\n")
+    group_into_paragraphs(segments, PAUSE_THRESHOLD_SECONDS)
+        .into_iter()
+        .map(|p| match p.speaker {
+            Some(speaker) => format!("{}: {}", speaker.display_name(), p.text),
+            None => p.text,
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n")
 }
 
 #[cfg(test)]
@@ -1207,11 +1017,76 @@ mod tests {
             .unwrap()
             .transcript
             .unwrap();
-        let me_pos = transcript.find("Me: First line").expect("me segment");
-        let them_pos = transcript.find("Them: Second line").expect("them segment");
-        let me2_pos = transcript.find("Me: Third line").expect("me segment 2");
-        assert!(me_pos < them_pos);
-        assert!(them_pos < me2_pos);
+        assert_eq!(
+            transcript,
+            "Me: First line\n\nThem: Second line\n\nMe: Third line"
+        );
+    }
+
+    /// The sidecar's `SegmentRow` runs the shared grouper through the same
+    /// pinned fixture as the app: inserted through SQLite in storage order,
+    /// read back as the fixture's paragraphs with `Me: `/`Them: ` prefixes.
+    #[test]
+    fn get_meeting_matches_the_shared_paragraph_fixture() {
+        let raw = include_str!("../../souffle-schema/tests/fixtures/paragraph_grouping.json");
+        let fixture: serde_json::Value = serde_json::from_str(raw).expect("valid fixture JSON");
+        let case = fixture["cases"]
+            .as_array()
+            .expect("cases array")
+            .iter()
+            .find(|c| c["name"] == "diarized_crosstalk_word_level")
+            .expect("fixture case present");
+
+        let segments: Vec<(String, f64, f64, Option<String>)> = case["segments"]
+            .as_array()
+            .expect("segments array")
+            .iter()
+            .map(|s| {
+                (
+                    s["text"].as_str().expect("text").to_string(),
+                    s["start_time"].as_f64().expect("start_time"),
+                    s["end_time"].as_f64().expect("end_time"),
+                    s["speaker"].as_str().map(str::to_string),
+                )
+            })
+            .collect();
+        let rows: Vec<(&str, f64, f64, Option<&str>)> = segments
+            .iter()
+            .map(|(text, start, end, speaker)| (text.as_str(), *start, *end, speaker.as_deref()))
+            .collect();
+
+        let (conn, _dir, path) = fixture_db();
+        insert_meeting(
+            &conn,
+            "m1",
+            "Standup",
+            "2026-01-01T10:00:00+00:00",
+            &rows,
+            None,
+        );
+        drop(conn);
+
+        let expected = case["expected"]
+            .as_array()
+            .expect("expected array")
+            .iter()
+            .map(|p| {
+                let text = p["text"].as_str().expect("text");
+                match p["speaker"].as_str().and_then(Speaker::parse) {
+                    Some(speaker) => format!("{}: {text}", speaker.display_name()),
+                    None => text.to_string(),
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n\n");
+
+        let db = McpDb::open(&path).unwrap();
+        let transcript = db
+            .get_meeting("m1", IncludeSet::all())
+            .unwrap()
+            .transcript
+            .unwrap();
+        assert_eq!(transcript, expected);
     }
 
     #[test]

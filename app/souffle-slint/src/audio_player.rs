@@ -5,6 +5,11 @@
 //! `souffle_lib::audio::recorder::decode_ogg_opus` and plays it back through
 //! a `cpal` output stream driven by a shared sample position.
 //!
+//! The decoded buffer is always a 48kHz **mono downmix** of whatever channel
+//! layout the file has: a legacy mono recording as-is, a diarized stereo
+//! recording (left = you, right = the other participants) folded into one
+//! "merged meeting" mix. No lane selector is exposed here.
+//!
 //! Known limitation, not solved here: the entire recording is held decoded
 //! in memory as f32 (48kHz mono is ~192KB/s), which is fine for a typical
 //! meeting but would be a real memory cost for a multi-hour one. Streaming

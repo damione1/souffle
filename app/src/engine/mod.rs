@@ -296,52 +296,11 @@ pub trait TranscriptionEngine {
     }
 }
 
-/// Who produced a segment in a meeting: the microphone is the local user
-/// (`Me`), system audio is everyone else (`Them`). `None` = single-stream
-/// session (dictation, or a meeting recorded without system-audio capture).
-///
-/// Wire and DB encoding is the snake_case variant name, "me" or "them", and
-/// specta emits the union `"me" | "them"` so the frontend branches on the
-/// contract instead of re-declaring the two values.
-///
-/// The DB column is free `TEXT` and still holds `spk:<id>` labels from the
-/// dropped persistent-speaker feature. `Speaker::parse` and
-/// `deserialize_optional_speaker` absorb those into `None` so old meetings
-/// keep loading; that tolerance lives there, not in `Deserialize`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Speaker {
-    Me,
-    Them,
-}
-
-impl Speaker {
-    /// Wire and DB encoding. Must stay in step with `#[serde(rename_all)]`
-    /// above; `speaker_wire_encoding_matches_as_str` proves it does.
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Speaker::Me => "me",
-            Speaker::Them => "them",
-        }
-    }
-
-    /// Plain, non-localized label used by every exporter. The frontend
-    /// mirrors it in `speakerPlainLabel`.
-    pub fn display_name(self) -> &'static str {
-        match self {
-            Speaker::Me => "Me",
-            Speaker::Them => "Them",
-        }
-    }
-
-    pub fn parse(s: &str) -> Option<Speaker> {
-        match s {
-            "me" => Some(Speaker::Me),
-            "them" => Some(Speaker::Them),
-            _ => None,
-        }
-    }
-}
+/// Who produced a segment: declared in `souffle-schema` because the MCP
+/// sidecar reads the same `segments.speaker` column and renders the same
+/// paragraphs. Re-exported here so the pipeline, the DB layer and the UI
+/// keep addressing it as `engine::Speaker`.
+pub use souffle_schema::Speaker;
 
 /// A piece of transcribed text with metadata
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -353,8 +312,25 @@ pub struct TranscriptionSegment {
     pub language: Option<String>,
     pub confidence: Option<f32>,
     /// Set by the pipeline for meetings with Me/Them lanes; `None` otherwise.
+    /// Legacy `spk:<id>` labels deserialize to `None` via
+    /// `deserialize_optional_speaker` so old meetings keep loading.
     #[serde(default, deserialize_with = "deserialize_optional_speaker")]
     pub speaker: Option<Speaker>,
+}
+
+impl souffle_schema::paragraphs::SegmentLike for TranscriptionSegment {
+    fn text(&self) -> &str {
+        &self.text
+    }
+    fn start_time(&self) -> f64 {
+        self.start_time
+    }
+    fn end_time(&self) -> f64 {
+        self.end_time
+    }
+    fn speaker(&self) -> Option<Speaker> {
+        self.speaker
+    }
 }
 
 fn deserialize_optional_speaker<'de, D>(deserializer: D) -> Result<Option<Speaker>, D::Error>

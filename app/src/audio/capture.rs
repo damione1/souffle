@@ -11,7 +11,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tracing::{debug, error, info, warn};
 
 use super::mixer::MeetingMixer;
-use super::recorder::MeetingRecorder;
+use super::recorder::{MeetingRecorder, interleave_stereo};
 use super::resampler::Resampler;
 use crate::audio::device::AudioInputDevice;
 use crate::audio::priority::{InputPriority, ResolveInputParams, resolve_input};
@@ -2244,7 +2244,12 @@ impl AudioCapture {
             self.retired_tap_samples = 0;
             self.retired_tap_signal = 0;
         }
-        self.sync_recorder(session_id, record_path.as_deref(), target_sample_rate);
+        self.sync_recorder(
+            session_id,
+            record_path.as_deref(),
+            target_sample_rate,
+            diarize,
+        );
 
         // Stored before any fallible step so a failed (re)build is retried
         // by the next mic health check instead of killing the session.
@@ -2448,6 +2453,12 @@ impl AudioCapture {
     ///   stale recorder and start a new one.
     /// - No path (dictation, or retention off): finalize any stale recorder.
     ///
+    /// A diarized meeting records stereo (L = me, R = them, see
+    /// `push_recording_diarized`); everything else records mono. `diarize`
+    /// comes from the session's start parameters and a rebuild replays the
+    /// same parameters, so the layout is fixed for the recorder's lifetime,
+    /// and a same-session rebuild never needs to (and cannot) switch it.
+    ///
     /// A failure to start the recorder is logged and otherwise ignored —
     /// recording is a best-effort opt-in feature, never a reason to fail the
     /// audio session itself.
@@ -2456,6 +2467,7 @@ impl AudioCapture {
         session_id: u64,
         record_path: Option<&std::path::Path>,
         sample_rate: u32,
+        diarize: bool,
     ) {
         let same_session = self
             .recorder
@@ -2465,7 +2477,13 @@ impl AudioCapture {
             Some(_) if same_session => {}
             Some(path) => {
                 self.finish_recording();
-                match MeetingRecorder::start(path.to_path_buf(), sample_rate, session_id) {
+                let channels = if diarize {
+                    opus::Channels::Stereo
+                } else {
+                    opus::Channels::Mono
+                };
+                match MeetingRecorder::start(path.to_path_buf(), sample_rate, session_id, channels)
+                {
                     Ok(recorder) => self.recorder = Some(recorder),
                     Err(e) => warn!("Failed to start meeting audio recorder: {e}"),
                 }
@@ -2501,26 +2519,20 @@ impl AudioCapture {
         }
     }
 
-    /// Feed one diarized meeting-audio tick to the active recorder, if any:
-    /// the two legs are summed with soft clipping into the single mixed
-    /// stream the recording represents (lane split only affects
-    /// transcription, not the recorded audio).
+    /// Feed one diarized meeting-audio tick to the active recorder, if any,
+    /// as L/R interleaved stereo: left = `me` (mic, post-AEC, what the
+    /// engine hears), right = `them` (system audio). The lanes stay
+    /// separable on disk; the L+R mix the user hears happens at playback
+    /// (`recorder::decode_ogg_opus`). The shorter lane is zero-padded so
+    /// the two never drift against each other.
     fn push_recording_diarized(&self, me: &[f32], them: &[f32]) {
         let Some(recorder) = &self.recorder else {
             return;
         };
-        let n = me.len().max(them.len());
-        if n == 0 {
+        if me.is_empty() && them.is_empty() {
             return;
         }
-        let mixed: Vec<f32> = (0..n)
-            .map(|i| {
-                let a = me.get(i).copied().unwrap_or(0.0);
-                let b = them.get(i).copied().unwrap_or(0.0);
-                (a + b).clamp(-1.0, 1.0)
-            })
-            .collect();
-        recorder.push(&mixed);
+        recorder.push(&interleave_stereo(me, them));
     }
 
     /// Meeting mode: the cpal callback only pushes raw samples into a ring

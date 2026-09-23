@@ -1,5 +1,5 @@
-import { LineEdit } from "std-widgets.slint";
 import { NotesSaveState } from "types.slint";
+import { ThemedLineEdit } from "components/themed_line_edit.slint";
 import { AudioPlayerSection } from "components/audio_player_section.slint";
 import { TranscriptSection, TranscriptBlock } from "components/transcript_section.slint";
 import { SummarySection, StructuredActionItem } from "components/summary_section.slint";
@@ -183,13 +183,17 @@ export component MeetingDetail inherits Rectangle {
                     }
                 }
 
-                if root.editing-title: LineEdit {
+                // Created on demand, so `init` is the moment the user just
+                // asked to rename: focus the field right away instead of
+                // making them click into it a second time.
+                if root.editing-title: ThemedLineEdit {
                     text <=> root.title-draft;
-                    accessible-label: @tr("Titre de la réunion");
-                    accepted => {
+                    control-label: @tr("Titre de la réunion");
+                    init => { self.focus(); }
+                    accepted(value) => {
                         root.editing-title = false;
-                        if (root.title-draft != "" && root.title-draft != root.title) {
-                            root.rename-requested(root.title-draft);
+                        if (value != "" && value != root.title) {
+                            root.rename-requested(value);
                         }
                     }
                 }

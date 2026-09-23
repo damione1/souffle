@@ -26,6 +26,7 @@ mod shortcut_capture;
 mod summary;
 mod timeline;
 mod transcript;
+mod update_ui;
 
 use settings_values::SettingsCache;
 use slint::Model;
@@ -2229,7 +2230,7 @@ async fn finalize_dictation(
 /// cross-feature borrow-conflict risk.
 #[derive(Default)]
 struct OnboardingState {
-    steps: Vec<&'static str>,
+    steps: Vec<OnboardingStep>,
     step_index: usize,
     recovery_only: bool,
     devices: Vec<AudioInputDevice>,
@@ -2347,13 +2348,20 @@ fn show_onboarding_step(
 ) {
     let (step, step_index, step_count) = {
         let guard = ob.borrow();
-        (
-            guard.steps.get(guard.step_index).copied().unwrap_or(""),
-            guard.step_index as i32,
-            guard.steps.len() as i32,
-        )
+        let Some(step) = guard.steps.get(guard.step_index).copied() else {
+            // `wizard_steps` never returns an empty list and `step_index`
+            // is clamped by advance/back, so this is a programming error,
+            // not a state to render.
+            eprintln!(
+                "onboarding: step index {} out of range ({} steps)",
+                guard.step_index,
+                guard.steps.len()
+            );
+            return;
+        };
+        (step, guard.step_index as i32, guard.steps.len() as i32)
     };
-    window.set_onboarding_step(step.into());
+    window.set_onboarding_step(step);
     window.set_onboarding_step_index(step_index);
     window.set_onboarding_step_count(step_count);
     window.set_onboarding_busy(false);
@@ -2363,10 +2371,10 @@ fn show_onboarding_step(
     window.set_onboarding_status_message("".into());
 
     match step {
-        "permissions" => {
+        OnboardingStep::Permissions => {
             permissions.project();
         }
-        "microphone" => {
+        OnboardingStep::Microphone => {
             let guard = ob.borrow();
             let mut labels: Vec<slint::SharedString> = vec!["Automatique".into()];
             labels.extend(guard.devices.iter().map(|d| device_option_label(d).into()));
@@ -2381,7 +2389,7 @@ fn show_onboarding_step(
                 .unwrap_or_else(|| "Automatique".to_string());
             window.set_onboarding_selected_device_label(selected_label.into());
         }
-        "model" => {
+        OnboardingStep::Model => {
             let guard = ob.borrow();
             let labels: Vec<slint::SharedString> = guard
                 .model_options
@@ -2421,7 +2429,7 @@ fn show_onboarding_step(
             };
             window.set_onboarding_model_phase(model_phase);
         }
-        "shortcut" => {
+        OnboardingStep::Shortcut => {
             let guard = ob.borrow();
             window.set_onboarding_toggle_shortcut_label(
                 format_shortcut_label(&guard.toggle_shortcut).into(),
@@ -2431,7 +2439,6 @@ fn show_onboarding_step(
                 permissions.status().accessibility == PermState::Granted,
             );
         }
-        _ => {}
     }
 }
 
@@ -2638,9 +2645,8 @@ fn wire_onboarding_callbacks(
         let Some(window) = weak.upgrade() else {
             return;
         };
-        let step = window.get_onboarding_step().to_string();
-        match step.as_str() {
-            "permissions" => {
+        match window.get_onboarding_step() {
+            OnboardingStep::Permissions => {
                 onboarding_flags::mark_permissions_done();
                 advance_onboarding_step(
                     &window,
@@ -2649,7 +2655,7 @@ fn wire_onboarding_callbacks(
                     &permissions_for_continue,
                 );
             }
-            "microphone" => {
+            OnboardingStep::Microphone => {
                 let uid = ob_for_continue.borrow().selected_device.clone();
                 window.set_onboarding_busy(true);
                 window.set_onboarding_continue_enabled(false);
@@ -2704,7 +2710,7 @@ fn wire_onboarding_callbacks(
                     },
                 );
             }
-            "model" => {
+            OnboardingStep::Model => {
                 let phase = window.get_onboarding_model_phase();
                 if phase == ModelPhase::Ready {
                     advance_onboarding_step(
@@ -2766,7 +2772,7 @@ fn wire_onboarding_callbacks(
                     },
                 );
             }
-            "shortcut" => {
+            OnboardingStep::Shortcut => {
                 let (auto_paste, recovery_only) = {
                     let guard = ob_for_continue.borrow();
                     (guard.auto_paste, guard.recovery_only)
@@ -2808,7 +2814,6 @@ fn wire_onboarding_callbacks(
                     },
                 );
             }
-            _ => {}
         }
     });
 
@@ -3033,7 +3038,7 @@ fn wire_update_dialogs(
         let Some(window) = weak.upgrade() else {
             return;
         };
-        window.set_update_phase("downloading".into());
+        window.set_update_phase(UpdatePhase::Downloading);
         window.set_update_error_message("".into());
         let weak = weak.clone();
         slint::spawn_local(async move {
@@ -3049,14 +3054,16 @@ fn wire_update_dialogs(
             let Some(window) = weak.upgrade() else {
                 return;
             };
+            // `download_update` only returns once the pipeline has settled
+            // (Ready, Failed, or Idle after a cancel), so its own phase is
+            // the truth - not a guess derived from `error.is_none()`.
             match result {
-                Ok(status) if status.error.is_none() => window.set_update_phase("ready".into()),
                 Ok(status) => {
-                    window.set_update_phase("failed".into());
+                    window.set_update_phase(update_ui::update_phase_to_slint(status.phase));
                     window.set_update_error_message(status.error.unwrap_or_default().into());
                 }
                 Err(e) => {
-                    window.set_update_phase("failed".into());
+                    window.set_update_phase(UpdatePhase::Failed);
                     window.set_update_error_message(e.into());
                 }
             }
@@ -3176,17 +3183,12 @@ fn apply_startup_update_dialogs(
                     std::rc::Rc::new(slint::VecModel::from(blocks)).into(),
                 );
                 window.set_update_release_url(result.release_url.unwrap_or_default().into());
-                window.set_update_phase("idle".into());
+                window.set_update_phase(UpdatePhase::Idle);
                 let state = Arc::clone(&handle);
                 let blocked = souffle_lib::commands::get_update_install_block(state)
                     .ok()
                     .flatten();
-                window.set_update_install_blocked_reason(
-                    blocked
-                        .map(|r| r.as_str().to_string())
-                        .unwrap_or_default()
-                        .into(),
-                );
+                update_ui::project_install_block(&window, blocked);
                 window.set_update_available_open(true);
             }
         })
@@ -6159,16 +6161,11 @@ fn dispatch_native_action(
                 std::rc::Rc::new(slint::VecModel::from(blocks)).into(),
             );
             window.set_update_release_url(release_url.unwrap_or_default().into());
-            window.set_update_phase("idle".into());
+            window.set_update_phase(UpdatePhase::Idle);
             let blocked = souffle_lib::commands::get_update_install_block(Arc::clone(handle))
                 .ok()
                 .flatten();
-            window.set_update_install_blocked_reason(
-                blocked
-                    .map(|r| r.as_str().to_string())
-                    .unwrap_or_default()
-                    .into(),
-            );
+            update_ui::project_install_block(window, blocked);
             window.set_update_available_open(true);
         }
     }

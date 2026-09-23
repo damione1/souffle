@@ -15,7 +15,7 @@ import { SnippetRow } from "components/settings/snippets_section.slint";
 import { TimelineDayGroup, UpcomingEvent } from "components/timeline_section.slint";
 import { TranscriptBlock } from "components/transcript_section.slint";
 import { StructuredActionItem } from "components/summary_section.slint";
-import { RecordingMode, SpeakerRole, TimelineFilter, TimelineKind, NotesSaveState, ModelPhase, TranscriptionPhase, UpcomingPhase, SettingsTab, SettingsInteraction, AppTheme, AppLocale, PasteMethod, MeetingLanguage, LogLevel, AudioRetention, AccessState, PermissionKind, ShortcutField, SummaryProvider, AppleIntelligenceUnavailableReason } from "types.slint";
+import { RecordingMode, SpeakerRole, TimelineFilter, TimelineKind, NotesSaveState, ModelPhase, TranscriptionPhase, UpcomingPhase, SettingsTab, SettingsInteraction, AppTheme, AppLocale, PasteMethod, MeetingLanguage, LogLevel, AudioRetention, AccessState, PermissionKind, ShortcutField, SummaryProvider, AppleIntelligenceUnavailableReason, OnboardingStep, UpdatePhase, InstallBlockReason } from "types.slint";
 export { SettingsTab, SettingsInteraction, AppTheme, AppLocale, PasteMethod, MeetingLanguage, LogLevel, AudioRetention, AccessState, PermissionKind, ShortcutField, SummaryProvider, AppleIntelligenceUnavailableReason, SpeakerRole }
 import { Theme } from "theme.slint";
 // Re-exported (not just imported) so Slint's codegen generates a Rust
@@ -422,7 +422,7 @@ export component MainWindow inherits Window {
     in-out property <bool> onboarding-open: false;
     in property <int> onboarding-step-index;
     in property <int> onboarding-step-count;
-    in property <string> onboarding-step;
+    in property <OnboardingStep> onboarding-step;
     in property <string> onboarding-status-message;
     in property <[PermissionRow]> onboarding-permission-rows;
     in property <string> onboarding-permissions-error;
@@ -471,9 +471,12 @@ export component MainWindow inherits Window {
     in property <string> update-latest-version;
     in property <[MarkdownBlock]> update-release-notes-blocks;
     in property <string> update-release-url;
-    in property <string> update-phase;
+    in property <UpdatePhase> update-phase;
     in property <string> update-error-message;
-    in property <string> update-install-blocked-reason;
+    // `Option<InstallBlockReason>` split across the boundary: Rust
+    // (`update_ui::project_install_block`) always writes the pair together.
+    in property <bool> update-install-blocked: false;
+    in property <InstallBlockReason> update-install-block-reason;
     callback update-download-requested();
     callback update-install-requested();
     callback update-open-release-requested();
@@ -943,7 +946,8 @@ export component MainWindow inherits Window {
         release-notes-blocks: root.update-release-notes-blocks;
         phase: root.update-phase;
         error-message: root.update-error-message;
-        install-blocked-reason: root.update-install-blocked-reason;
+        install-blocked: root.update-install-blocked;
+        install-block-reason: root.update-install-block-reason;
         download-requested => { root.update-download-requested(); }
         install-requested => { root.update-install-requested(); }
         open-release-requested => { root.update-open-release-requested(); }

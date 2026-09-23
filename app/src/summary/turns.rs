@@ -1,5 +1,6 @@
+use souffle_schema::paragraphs;
+
 use crate::engine::TranscriptionSegment;
-use crate::export::{PARAGRAPH_PAUSE_THRESHOLD_SECONDS, paragraphs};
 
 /// Format one grouped paragraph as a labeled turn for the summary LLM.
 fn format_turn(paragraph: &paragraphs::Paragraph) -> String {
@@ -15,14 +16,14 @@ fn format_turn(paragraph: &paragraphs::Paragraph) -> String {
 }
 
 /// Speaker-labeled turns with timestamps, using the same grouping as the
-/// transcript UI / Markdown export (`paragraphs.ts`).
+/// transcript view and the Markdown export (`souffle_schema::paragraphs`).
 pub fn turns_from_segments(segments: &[TranscriptionSegment]) -> Vec<String> {
     let nonempty: Vec<TranscriptionSegment> = segments
         .iter()
         .filter(|segment| !segment.text.trim().is_empty())
         .cloned()
         .collect();
-    paragraphs::group_into_paragraphs(&nonempty, PARAGRAPH_PAUSE_THRESHOLD_SECONDS)
+    paragraphs::group_into_paragraphs(&nonempty, paragraphs::PAUSE_THRESHOLD_SECONDS)
         .into_iter()
         .map(|paragraph| format_turn(&paragraph))
         .collect()

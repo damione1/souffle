@@ -1,4 +1,6 @@
+import { ScrollView } from "std-widgets.slint";
 import { MarkdownBlock } from "markdown_block.slint";
+import { MarkdownBlockKind } from "../../types.slint";
 import { Theme } from "../../theme.slint";
 
 export component MarkdownView inherits VerticalLayout {
@@ -10,14 +12,14 @@ export component MarkdownView inherits VerticalLayout {
     spacing: 6px;
 
     for block in root.blocks: VerticalLayout {
-        if block.kind == "heading": Text {
+        if block.kind == MarkdownBlockKind.heading: Text {
             text: block.text;
             font-size: 13.5px;
             font-weight: 700;
             color: Theme.text-primary;
             wrap: word-wrap;
         }
-        if block.kind == "bullet": HorizontalLayout {
+        if block.kind == MarkdownBlockKind.bullet: HorizontalLayout {
             spacing: 6px;
             Text { text: @tr("•"); color: Theme.text-muted; font-size: 12px; }
             Text {
@@ -28,19 +30,46 @@ export component MarkdownView inherits VerticalLayout {
                 horizontal-stretch: 1;
             }
         }
-        if block.kind == "paragraph": Text {
+        if block.kind == MarkdownBlockKind.paragraph: Text {
             text: block.text;
             color: Theme.text-secondary;
             font-size: 12px;
             wrap: word-wrap;
         }
-        if block.kind == "link": TouchArea {
+        if block.kind == MarkdownBlockKind.link: TouchArea {
             clicked => { root.link-clicked(block.url); }
             Text {
                 text: block.text;
                 color: Theme.accent;
                 font-size: 11.5px;
                 wrap: word-wrap;
+            }
+        }
+    }
+}
+
+// The scrollable notes box both update dialogs share - Tauri's
+// `.release-notes` (`rounded-default p-4 outline-1 outline-ghost-border`).
+// A stock `ScrollView` is acceptable here: the scrollbar is not the visual
+// identity, the bordered box around it is (docs/engineering/slint.md §2).
+export component ReleaseNotesBox inherits Rectangle {
+    in property <[MarkdownBlock]> blocks;
+
+    callback link-clicked(string);
+
+    vertical-stretch: 1;
+    border-width: 1px;
+    border-color: Theme.ghost-border;
+    border-radius: 4px;
+    clip: true;
+
+    VerticalLayout {
+        padding: 12px;
+
+        ScrollView {
+            MarkdownView {
+                blocks: root.blocks;
+                link-clicked(url) => { root.link-clicked(url); }
             }
         }
     }
