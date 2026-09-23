@@ -50,12 +50,19 @@ export component TimelineItemRow inherits Rectangle {
         }
 
         content := Rectangle {
+        // Reuses `actions-visible`: copy-area/delete-area sit on top of
+        // row-area, so hovering the action buttons alone does not also
+        // report `row-area.has-hover`, and the row highlight must track
+        // the same hover surface the action buttons use.
+        background: root.actions-visible ? Theme.surface-2 : transparent;
+
         HorizontalLayout {
             padding-top: 12px;
             padding-bottom: 12px;
             spacing: 8px;
 
             row-area := TouchArea {
+                mouse-cursor: pointer;
                 accessible-role: button;
                 accessible-label: root.entry.title;
                 accessible-action-default => {
@@ -111,6 +118,7 @@ export component TimelineItemRow inherits Rectangle {
                                 y: 0;
                                 width: root.is-dictation ? 88px : 0px;
                                 height: 28px;
+                                mouse-cursor: pointer;
                                 accessible-role: button;
                                 accessible-label: root.copied ? @tr("Copié !") : @tr("Copier");
                                 accessible-action-default => {
@@ -149,6 +157,7 @@ export component TimelineItemRow inherits Rectangle {
                                 y: 0;
                                 width: root.is-live ? 0px : (root.confirming-delete ? 72px : 28px);
                                 height: 28px;
+                                mouse-cursor: pointer;
                                 accessible-role: button;
                                 accessible-label: root.confirming-delete ? @tr("Confirmer la suppression") : @tr("Supprimer");
                                 accessible-action-default => {
