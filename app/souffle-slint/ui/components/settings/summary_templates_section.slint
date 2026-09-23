@@ -100,6 +100,13 @@ export component SummaryTemplatesSection inherits VerticalLayout {
             : @tr("Prompt envoyé à l'IA pour générer le résumé.");
 
         ThemedTextArea {
+            // Explicit cross-axis width (SOU-216): SettingsFieldVertical's
+            // inner wrapper insets both sides by Theme.settings-inset, so
+            // spell out the same full-width formula here instead of relying
+            // on the layout's implicit stretch, matching the pattern already
+            // used for full-bleed rows in snippets_section.slint /
+            // dictionary_section.slint.
+            width: parent.width - 2 * Theme.settings-inset;
             text <=> root.editing-prompt;
             area-height: 220px;
             placeholder: @tr("Instruction de génération du résumé");

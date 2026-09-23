@@ -84,6 +84,13 @@ export component DictationPolishSection inherits VerticalLayout {
         description: @tr("Prompt envoyé à l'IA pour retoucher le texte transcrit.");
 
         ThemedTextArea {
+            // Explicit cross-axis width (SOU-216): SettingsFieldVertical's
+            // inner wrapper insets both sides by Theme.settings-inset, so
+            // spell out the same full-width formula here instead of relying
+            // on the layout's implicit stretch, matching the pattern already
+            // used for full-bleed rows in snippets_section.slint /
+            // dictionary_section.slint.
+            width: parent.width - 2 * Theme.settings-inset;
             text <=> root.active-prompt;
             area-height: 160px;
             placeholder: @tr("Instruction de retouche");
