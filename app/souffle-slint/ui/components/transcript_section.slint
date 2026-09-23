@@ -75,6 +75,21 @@ export component TranscriptSection inherits VerticalLayout {
     property <string> alias-term-draft;
     property <string> alias-pronunciation-draft;
 
+    // SOU-243: this component now sits in the page's single scroll flow
+    // (meeting_detail.slint) instead of a fixed-height column, so it can no
+    // longer rely on `vertical-stretch: 1` to fill leftover window space -
+    // there is no bounded "leftover" inside a Flickable's own content, only
+    // a preferred-height. It gets an explicit height instead: the smaller of
+    // its natural content height (so a short transcript never reserves dead
+    // space or an internal scrollbar it doesn't need, AC3) and this cap (so
+    // a long transcript still gets a bounded box for `flick` below to
+    // virtualize inside, AC2/AC15, rather than expanding to its full
+    // unvirtualized height inside the page scroll). The cap is a
+    // placeholder: chosen to read as clearly the primary section without
+    // crowding Notes/Audio/Résumé out of view, but not visually verified
+    // (see SOU-243 PR) - a value Damien should confirm/adjust on screen.
+    property <length> max-visible-height: 440px;
+
     spacing: 8px;
 
     // One shared popup, repositioned/relabeled per click rather than one
@@ -206,7 +221,7 @@ export component TranscriptSection inherits VerticalLayout {
     }
 
     if root.segment-count > 0: Rectangle {
-        vertical-stretch: 1;
+        height: min(flick-inner.preferred-height, root.max-visible-height);
         border-width: 1px;
         border-color: Theme.surface-4;
         clip: true;
@@ -217,7 +232,7 @@ export component TranscriptSection inherits VerticalLayout {
             viewport-width: self.width;
             viewport-y <=> root.scroll-top;
 
-            VerticalLayout {
+            flick-inner := VerticalLayout {
                 width: flick.width;
                 padding: 12px;
                 spacing: 12px;
