@@ -254,18 +254,30 @@ export component RecordingView inherits Rectangle {
                 padding-bottom: 18px;
                 spacing: 14px;
 
-                ScrollView {
+                // Wrapper Rectangle owns vertical-stretch:1 and gives the
+                // ScrollView an unambiguous height:100% target - the
+                // ScrollView itself doesn't grow its preferred height from
+                // stretch alone (std-widgets quirk, unlike a plain
+                // Flickable), but height:100% directly on it here would
+                // measure against a layout that also holds the auto-paste
+                // row below, overflowing past the card (see live-scroll's
+                // doc comment further down for the same bug/fix pair).
+                Rectangle {
                     vertical-stretch: 1;
 
-                    VerticalLayout {
-                        width: parent.width;
-                        alignment: start;
-                        Text {
+                    ScrollView {
+                        height: 100%;
+
+                        VerticalLayout {
                             width: parent.width;
-                            text: root.combined-text == "" ? @tr("À l'écoute…") : root.combined-text;
-                            font-size: root.combined-text == "" ? 14px : 19px;
-                            color: root.combined-text == "" ? Theme.text-muted : Theme.text-secondary;
-                            wrap: word-wrap;
+                            alignment: start;
+                            Text {
+                                width: parent.width;
+                                text: root.combined-text == "" ? @tr("À l'écoute…") : root.combined-text;
+                                font-size: root.combined-text == "" ? 14px : 19px;
+                                color: root.combined-text == "" ? Theme.text-muted : Theme.text-secondary;
+                                wrap: word-wrap;
+                            }
                         }
                     }
                 }
@@ -342,48 +354,61 @@ export component RecordingView inherits Rectangle {
                     }
                 }
 
-                live-scroll := ScrollView {
+                // See the dictation ScrollView's doc comment above: this
+                // wrapper Rectangle takes vertical-stretch:1 from the
+                // header+scroll VerticalLayout so live-scroll's height:100%
+                // measures against just this wrapper, not the header too -
+                // `height: 100%` directly on live-scroll previously
+                // overflowed past the header's height (CodeRabbit caught
+                // that, 709afdd), but dropping height entirely brought back
+                // the ~3-line collapse (2da5043) since ScrollView doesn't
+                // grow from vertical-stretch alone.
+                Rectangle {
                     vertical-stretch: 1;
-                    viewport-y <=> root.live-transcript-scroll-top;
 
-                    live-content := VerticalLayout {
-                        width: parent.width;
-                        alignment: start;
-                        spacing: 10px;
+                    live-scroll := ScrollView {
+                        height: 100%;
+                        viewport-y <=> root.live-transcript-scroll-top;
 
-                        if root.live-transcript-empty: Text {
-                            text: @tr("À l'écoute…");
-                            font-size: 14px;
-                            color: Theme.text-muted;
-                        }
-
-                        for block[i] in root.live-transcript-blocks: VerticalLayout {
+                        live-content := VerticalLayout {
+                            width: parent.width;
                             alignment: start;
-                            spacing: 2px;
+                            spacing: 10px;
 
-                            HorizontalLayout {
-                                alignment: start;
-                                spacing: 8px;
-
-                                Text {
-                                    text: block.speaker-label;
-                                    font-family: "Archivo SemiBold";
-                                    font-size: 11.5px;
-                                    color: Theme.accent;
-                                }
-                                Text {
-                                    text: block.timestamp;
-                                    font-family: "JetBrains Mono";
-                                    font-size: 10.5px;
-                                    color: Theme.text-faint;
-                                }
+                            if root.live-transcript-empty: Text {
+                                text: @tr("À l'écoute…");
+                                font-size: 14px;
+                                color: Theme.text-muted;
                             }
-                            Text {
-                                width: parent.width;
-                                text: block.text;
-                                font-size: 15px;
-                                color: Theme.text-secondary;
-                                wrap: word-wrap;
+
+                            for block[i] in root.live-transcript-blocks: VerticalLayout {
+                                alignment: start;
+                                spacing: 2px;
+
+                                HorizontalLayout {
+                                    alignment: start;
+                                    spacing: 8px;
+
+                                    Text {
+                                        text: block.speaker-label;
+                                        font-family: "Archivo SemiBold";
+                                        font-size: 11.5px;
+                                        color: Theme.accent;
+                                    }
+                                    Text {
+                                        text: block.timestamp;
+                                        font-family: "JetBrains Mono";
+                                        font-size: 10.5px;
+                                        color: Theme.text-faint;
+                                    }
+                                }
+                                Text {
+                                    width: parent.width;
+                                    text: block.text;
+                                    font-size: 15px;
+                                    color: Theme.text-secondary;
+                                    wrap: word-wrap;
+                                }
                             }
                         }
                     }
