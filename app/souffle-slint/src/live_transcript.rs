@@ -15,7 +15,19 @@ use souffle_schema::paragraphs::PAUSE_THRESHOLD_SECONDS;
 use std::time::{Duration, Instant};
 
 use crate::transcript::speaker_label;
-use crate::{TranscriptBlock, timeline};
+use crate::{TranscriptBlock, TranscriptWord, timeline};
+
+/// The live view renders `TranscriptBlock.text` directly
+/// (`recording_view.slint`), never `.words` - no per-word dictionary-alias
+/// click here (SOU-223 is post-meeting only). This just satisfies the
+/// shared struct's field with a single non-clickable word wrapping the
+/// whole text, matching the old `StyledText::from_plain_text` intent.
+fn plain_words(text: &str) -> slint::ModelRc<TranscriptWord> {
+    slint::ModelRc::new(slint::VecModel::from(vec![TranscriptWord {
+        text: text.into(),
+        clickable: false,
+    }]))
+}
 
 /// Tail window before a paragraph is committed (immutable).
 const TAIL_WINDOW_S: f64 = 8.0;
@@ -82,7 +94,7 @@ impl LivePara {
             speaker_label: speaker_label(self.speaker).into(),
             timestamp: self.timestamp.clone().into(),
             text: text.clone().into(),
-            markdown_text: slint::StyledText::from_plain_text(&text),
+            words: plain_words(&text),
             recording_session_index: -1,
             start_time: self.start_time as f32,
             end_label: "".into(),
@@ -271,7 +283,7 @@ impl LiveTranscript {
                 speaker_label: speaker_label(Some(Speaker::Me)).into(),
                 timestamp: "".into(),
                 text: text.into(),
-                markdown_text: slint::StyledText::from_plain_text(text),
+                words: plain_words(text),
                 recording_session_index: -1,
                 start_time: 0.0,
                 end_label: "".into(),
@@ -285,7 +297,7 @@ impl LiveTranscript {
                 speaker_label: speaker_label(Some(Speaker::Them)).into(),
                 timestamp: "".into(),
                 text: text.into(),
-                markdown_text: slint::StyledText::from_plain_text(text),
+                words: plain_words(text),
                 recording_session_index: -1,
                 start_time: 0.0,
                 end_label: "".into(),

@@ -1,30 +1,40 @@
 import { Theme } from "../theme.slint";
 import { ThemedLineEdit } from "themed_line_edit.slint";
+import { LucideIcon, IconSet } from "lucide_icon.slint";
 
 // Port of MeetingTranscriptSection.svelte - paragraph grouping with speaker
 // labels and session-break dividers, click-to-seek on a paragraph's
 // timestamp, virtualized scrolling (AC15), and per-word dictionary-alias
 // popover (TranscriptWordLine.svelte, milestone 8d). Not yet ported: bulk
 // edit mode.
+// One token of a paragraph's text (see `TranscriptBlock.words`): either a
+// clickable word (dictionary-alias candidate) or a literal run of
+// whitespace/punctuation/short/numeric text rendered as-is. Built in Rust
+// (`transcript::build_words`) from the same `tokenize_words`/
+// `is_clickable_word` logic `build_markdown_text` used to feed `StyledText`.
+export struct TranscriptWord {
+    text: string,
+    clickable: bool,
+}
+
 export struct TranscriptBlock {
     is-session-break: bool,
     speaker-label: string,
     timestamp: string,
     text: string,
-    // Same content as `text`, but with clickable words wrapped as Markdown
-    // links, pre-parsed in Rust (`slint::StyledText::from_markdown`, see
-    // `transcript::build_markdown_text`) - `@markdown(...)` only accepts a
-    // compile-time string literal (interpolated `\{value}` slots are
-    // inserted as literal escaped text, not re-parsed as markup, confirmed
-    // empirically: a dynamic string through `@markdown("\{expr}")` renders
-    // its brackets/parens literally instead of becoming links). Rendered
-    // via `StyledText` instead of `Text` so individual words stay clickable
-    // while the paragraph still wraps normally: Slint has no inline-flow
-    // layout primitive (confirmed against
-    // `i-slint-compiler-1.17.1/builtins.slint` - `Text`/`HorizontalLayout`
-    // can't mix per-word click targets with natural wrapping), but
-    // `StyledText`'s Markdown link support gives the same effect for free.
-    markdown-text: styled-text,
+    // SOU-223: rendered as a `FlexboxLayout` of `Text`/`TouchArea` items
+    // (see the `words` loop below) instead of a `StyledText` Markdown link
+    // render. The previous approach could make a word clickable but could
+    // not stop `StyledText`'s `Style::Link` from forcing an underline
+    // painted with the same brush as the glyph fill (`i-slint-core`'s
+    // `textlayout/sharedparley.rs`) - no public property could suppress
+    // that independently of link color. `FlexboxLayout` with `flex-wrap`
+    // gives natural paragraph reflow without going through `StyledText` at
+    // all, so a clickable word is just a `Text` with normal styling inside
+    // a `TouchArea`, no link semantics and no underline. Only became viable
+    // once Slint moved `FlexboxLayout` from `builtin_experimental()` to the
+    // stable builtin set in 1.18.1 (SOU-223 bumped the pin from 1.17.1).
+    words: [TranscriptWord],
     // -1 when the paragraph isn't attributed to any recorded audio session.
     recording-session-index: int,
     start-time: float,
@@ -81,8 +91,11 @@ export component TranscriptSection inherits VerticalLayout {
     // instance per word (there can be hundreds of words on screen at once
     // even virtualized).
     alias-popup := PopupWindow {
-        width: 260px;
-        height: 190px;
+        // Damien, 2026-09-23: the previous 260x190 with a 16px close button
+        // and an 11px title read as dated/cramped next to a full-width
+        // Save button - widened and given a touch more breathing room.
+        width: 288px;
+        height: 210px;
         // The default `close-policy` (`close-on-click`, now deprecated)
         // dismisses the popup on *any* click, including ones on its own
         // `LineEdit`s/button - not just clicks outside it (found the hard
@@ -108,36 +121,42 @@ export component TranscriptSection inherits VerticalLayout {
                 border-color: Theme.accent;
 
                 VerticalLayout {
-                    padding: 12px;
-                    spacing: 8px;
+                    padding: 16px;
+                    spacing: 12px;
 
                     HorizontalLayout {
                         alignment: space-between;
 
                         Text {
                             text: @tr("Alias de dictionnaire");
-                            font-size: 11px;
+                            font-family: "Archivo SemiBold";
+                            font-size: 13px;
                             font-weight: 600;
-                            color: Theme.text-secondary;
+                            color: Theme.text-primary;
                             vertical-alignment: center;
                         }
 
                         cancel-btn := Rectangle {
-                            width: 16px;
-                            height: 16px;
+                            width: 24px;
+                            height: 24px;
+                            border-radius: 4px;
+                            background: cancel-area.has-hover ? Theme.surface-3 : transparent;
 
                             accessible-role: button;
                             accessible-label: @tr("Fermer");
                             accessible-action-default => { alias-popup.close(); }
 
-                            TouchArea {
+                            cancel-area := TouchArea {
+                                mouse-cursor: pointer;
                                 clicked => { alias-popup.close(); }
                             }
 
-                            Text {
-                                text: @tr("\u{2715}");
-                                font-size: 11px;
-                                color: Theme.text-muted;
+                            LucideIcon {
+                                icon: IconSet.X;
+                                icon-color: cancel-area.has-hover ? Theme.text-primary : Theme.text-muted;
+                                size: 14px;
+                                x: (parent.width - self.width) / 2;
+                                y: (parent.height - self.height) / 2;
                             }
                         }
                     }
@@ -155,7 +174,8 @@ export component TranscriptSection inherits VerticalLayout {
                     }
 
                     save-btn := Rectangle {
-                        height: 26px;
+                        height: 32px;
+                        border-radius: 4px;
                         background: root.alias-term-draft == "" ? Theme.surface-4 : (save-area.has-hover ? Theme.accent-hover : Theme.accent);
 
                         accessible-role: button;
@@ -164,11 +184,14 @@ export component TranscriptSection inherits VerticalLayout {
 
                         save-area := TouchArea {
                             enabled: root.alias-term-draft != "";
+                            mouse-cursor: pointer;
                             clicked => { root.save-and-close-alias-popup(); }
                         }
 
                         Text {
                             text: @tr("Enregistrer");
+                            font-size: 13px;
+                            font-weight: 600;
                             color: Theme.text-primary;
                             horizontal-alignment: center;
                             vertical-alignment: center;
@@ -286,13 +309,31 @@ export component TranscriptSection inherits VerticalLayout {
                             }
                         }
 
-                        StyledText {
+                        // SOU-223: click-to-correct (AC1/AC2/AC4) with no
+                        // underline and no web-link appearance (AC3) - see
+                        // the `words` doc comment on `TranscriptBlock` above.
+                        // Clickable words are plain `Text` in a `TouchArea`;
+                        // literal runs (whitespace/punctuation/short/numeric
+                        // tokens) are plain `Text` with no touch handling.
+                        FlexboxLayout {
                             width: parent.width;
-                            text: block.markdown-text;
-                            default-color: Theme.text-primary;
-                            default-font-size: 13px;
-                            link-color: Theme.text-primary;
-                            link-clicked(word) => { root.open-alias-popup(word); }
+                            flex-wrap: wrap;
+                            spacing: 0px;
+
+                            for word in block.words: TouchArea {
+                                enabled: word.clickable;
+                                clicked => {
+                                    if word.clickable {
+                                        root.open-alias-popup(word.text);
+                                    }
+                                }
+
+                                Text {
+                                    text: word.text;
+                                    color: Theme.text-primary;
+                                    font-size: 13px;
+                                }
+                            }
                         }
                     }
 
