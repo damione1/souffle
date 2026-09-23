@@ -207,7 +207,7 @@ export component RecordingView inherits Rectangle {
         }
 
         if root.mode == RecordingMode.meeting && root.system-audio == LiveSystemAudio.unavailable: Rectangle {
-            height: 48px;
+            min-height: 48px;
             vertical-stretch: 0;
             border-radius: 4px;
             border-width: 1px;
@@ -220,14 +220,24 @@ export component RecordingView inherits Rectangle {
             HorizontalLayout {
                 padding-left: 14px;
                 padding-right: 14px;
+                padding-top: 10px;
+                padding-bottom: 10px;
                 spacing: 10px;
                 alignment: start;
 
-                LucideIcon {
+                // A fixed-size child of a HorizontalLayout is top-aligned
+                // in its cell, not centred: wrap it and centre by hand, the
+                // same recipe as the Stop button icon above.
+                Rectangle {
                     width: 17px;
-                    height: 17px;
-                    icon: IconSet.TriangleAlert;
-                    icon-color: Theme.warning;
+                    horizontal-stretch: 0;
+
+                    LucideIcon {
+                        size: 17px;
+                        y: (parent.height - self.height) / 2;
+                        icon: IconSet.TriangleAlert;
+                        icon-color: Theme.warning;
+                    }
                 }
 
                 Text {
@@ -237,6 +247,7 @@ export component RecordingView inherits Rectangle {
                     color: Theme.text-secondary;
                     wrap: word-wrap;
                     vertical-alignment: center;
+                    horizontal-stretch: 1;
                 }
             }
         }
@@ -328,14 +339,22 @@ export component RecordingView inherits Rectangle {
                         spacing: 6px;
                         alignment: center;
 
+                        // Centred by hand for the same reason as the banner
+                        // icon above: a bare 6px dot sat on the top edge.
                         Rectangle {
                             width: 6px;
-                            height: 6px;
-                            border-radius: 3px;
-                            // LiveSessionCard.svelte's SYSTEM_AUDIO_DOT.
-                            background: root.system-audio == LiveSystemAudio.active ? Theme.accent
-                                : root.system-audio == LiveSystemAudio.pending ? Theme.warning
-                                : Theme.surface-4;
+                            horizontal-stretch: 0;
+
+                            Rectangle {
+                                y: (parent.height - self.height) / 2;
+                                width: 6px;
+                                height: 6px;
+                                border-radius: 3px;
+                                // LiveSessionCard.svelte's SYSTEM_AUDIO_DOT.
+                                background: root.system-audio == LiveSystemAudio.active ? Theme.accent
+                                    : root.system-audio == LiveSystemAudio.pending ? Theme.warning
+                                    : Theme.surface-4;
+                            }
                         }
                         audio-label := Text {
                             text: root.system-audio == LiveSystemAudio.active ? @tr("Audio système actif")

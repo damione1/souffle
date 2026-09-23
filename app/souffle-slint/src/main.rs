@@ -398,6 +398,18 @@ fn live_system_audio(
     }
 }
 
+/// Display name of the summary model `id` from the loaded catalogue, like
+/// MeetingSummarySection.svelte's `generatedWithLabel`: the catalogue label
+/// ("Apple Intelligence") when the id is listed, else the id itself.
+fn summary_model_label(window: &MainWindow, id: &str) -> slint::SharedString {
+    let ids = window.get_meeting_detail_summary_available_model_ids();
+    let labels = window.get_meeting_detail_summary_available_models();
+    (0..ids.row_count())
+        .find(|&i| ids.row_data(i).as_deref() == Some(id))
+        .and_then(|i| labels.row_data(i))
+        .unwrap_or_else(|| id.into())
+}
+
 /// Port of the inline template in MeetingHeaderSection.svelte:
 /// `{name}{is_organizer ? " (organisateur)" : ""}{is_current_user ? " (vous)" : ""}`.
 fn participant_label(p: &MeetingParticipant) -> String {
@@ -462,9 +474,10 @@ fn populate_meeting_detail(window: &MainWindow, meeting: &MeetingTranscript) {
         .collect();
     window.set_meeting_detail_summary(summary_text.into());
     window.set_meeting_detail_summary_is_stale(meeting.summary_is_stale);
-    window.set_meeting_detail_summary_model_label(
-        meeting.summary_model.clone().unwrap_or_default().into(),
-    );
+    window.set_meeting_detail_summary_model_label(summary_model_label(
+        window,
+        meeting.summary_model.as_deref().unwrap_or_default(),
+    ));
     window.set_meeting_detail_summary_key_points(
         std::rc::Rc::new(slint::VecModel::from(key_points)).into(),
     );
@@ -526,6 +539,10 @@ fn load_meeting_summary_models(window_weak: slint::Weak<MainWindow>, state: Arc<
                     w.set_meeting_detail_summary_available_model_ids(
                         std::rc::Rc::new(slint::VecModel::from(ids)).into(),
                     );
+                    // The meeting was populated before the catalogue arrived, so
+                    // its "generated with" label may still be a raw id.
+                    let shown = w.get_meeting_detail_summary_model_label();
+                    w.set_meeting_detail_summary_model_label(summary_model_label(&w, &shown));
 
                     // Don't overwrite if the user already selected something else while this loaded,
                     // or if it's already set to a valid choice.

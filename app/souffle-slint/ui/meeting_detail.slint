@@ -175,6 +175,12 @@ export component MeetingDetail inherits Rectangle {
                     }
 
                     Text {
+                        // Pinned to the left edge: without an explicit x/width a
+                        // Text child is centred in this full-width hover box, which
+                        // is what pushed the title right of "History" and the meta
+                        // line below (SOU-241 AC1, seen live).
+                        x: 0px;
+                        width: parent.width;
                         text: root.title;
                         font-family: "Archivo SemiBold";
                         font-size: 24px;
