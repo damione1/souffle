@@ -6,45 +6,34 @@ import { ThemedLineEdit } from "themed_line_edit.slint";
 // timestamp, virtualized scrolling (AC15), and per-word dictionary-alias
 // popover (TranscriptWordLine.svelte, milestone 8d). Not yet ported: bulk
 // edit mode.
+// One token of a paragraph's text (see `TranscriptBlock.words`): either a
+// clickable word (dictionary-alias candidate) or a literal run of
+// whitespace/punctuation/short/numeric text rendered as-is. Built in Rust
+// (`transcript::build_words`) from the same `tokenize_words`/
+// `is_clickable_word` logic `build_markdown_text` used to feed `StyledText`.
+export struct TranscriptWord {
+    text: string,
+    clickable: bool,
+}
+
 export struct TranscriptBlock {
     is-session-break: bool,
     speaker-label: string,
     timestamp: string,
     text: string,
-    // Same content as `text`, but with clickable words wrapped as Markdown
-    // links, pre-parsed in Rust (`slint::StyledText::from_markdown`, see
-    // `transcript::build_markdown_text`) - `@markdown(...)` only accepts a
-    // compile-time string literal (interpolated `\{value}` slots are
-    // inserted as literal escaped text, not re-parsed as markup, confirmed
-    // empirically: a dynamic string through `@markdown("\{expr}")` renders
-    // its brackets/parens literally instead of becoming links). Rendered
-    // via `StyledText` instead of `Text` so individual words stay clickable
-    // while the paragraph still wraps normally: Slint has no inline-flow
-    // layout primitive (confirmed against
-    // `i-slint-compiler-1.17.1/builtins.slint` - `Text`/`HorizontalLayout`
-    // can't mix per-word click targets with natural wrapping), but
-    // `StyledText`'s Markdown link support gives the same effect for free.
-    //
-    // SOU-223: the permanent underline on these clickable words (AC3) is a
-    // Slint 1.17.1 limitation, not a choice - `Style::Link` in
-    // `i-slint-common`'s `styled_text.rs` always pushes both a `links` entry
-    // (the click target `link-clicked` reads) *and* a `FormattedSpan` with
-    // `style: Style::Link` for the same range, and `i-slint-core`'s
-    // `textlayout/sharedparley.rs` unconditionally turns `Style::Link` into
-    // `Underline(true)`, painted with the *same brush* as the glyph fill
-    // (`draw_glyph_run`) - there is no public property, markup, or link
-    // color that can suppress it independently of the text color. The
-    // alternative that avoids `StyledText` entirely - a `FlexboxLayout` of
-    // plain, unstyled `Text` words with `flex-wrap` doing the reflow - does
-    // not compile on the pinned Slint version: `FlexboxLayout` is stripped
-    // from `TypeRegister::builtin()` (the stable/production element set) in
-    // `i-slint-compiler-1.17.1` and only ships behind `builtin_experimental()`;
-    // it becomes a stable builtin starting Slint 1.18.1. Upgrading Slint is
-    // out of scope for this fix - see the SOU-223 ticket's journal for the
-    // resulting call: keep this proven, natively-wrapping `StyledText`
-    // render (click works exactly as before the regression) and treat the
-    // underline as a documented, non-blocking limitation.
-    markdown-text: styled-text,
+    // SOU-223: rendered as a `FlexboxLayout` of `Text`/`TouchArea` items
+    // (see the `words` loop below) instead of a `StyledText` Markdown link
+    // render. The previous approach could make a word clickable but could
+    // not stop `StyledText`'s `Style::Link` from forcing an underline
+    // painted with the same brush as the glyph fill (`i-slint-core`'s
+    // `textlayout/sharedparley.rs`) - no public property could suppress
+    // that independently of link color. `FlexboxLayout` with `flex-wrap`
+    // gives natural paragraph reflow without going through `StyledText` at
+    // all, so a clickable word is just a `Text` with normal styling inside
+    // a `TouchArea`, no link semantics and no underline. Only became viable
+    // once Slint moved `FlexboxLayout` from `builtin_experimental()` to the
+    // stable builtin set in 1.18.1 (SOU-223 bumped the pin from 1.17.1).
+    words: [TranscriptWord],
     // -1 when the paragraph isn't attributed to any recorded audio session.
     recording-session-index: int,
     start-time: float,
@@ -306,19 +295,31 @@ export component TranscriptSection inherits VerticalLayout {
                             }
                         }
 
-                        // SOU-223: click-to-correct is restored here (AC1/AC2/AC4)
-                        // and `link-color` already matches body text so this
-                        // never reads as a web link by color - see the
-                        // `markdown-text` doc comment above for why the
-                        // remaining underline (AC3) can't be removed on this
-                        // Slint version.
-                        StyledText {
+                        // SOU-223: click-to-correct (AC1/AC2/AC4) with no
+                        // underline and no web-link appearance (AC3) - see
+                        // the `words` doc comment on `TranscriptBlock` above.
+                        // Clickable words are plain `Text` in a `TouchArea`;
+                        // literal runs (whitespace/punctuation/short/numeric
+                        // tokens) are plain `Text` with no touch handling.
+                        FlexboxLayout {
                             width: parent.width;
-                            text: block.markdown-text;
-                            default-color: Theme.text-primary;
-                            default-font-size: 13px;
-                            link-color: Theme.text-primary;
-                            link-clicked(word) => { root.open-alias-popup(word); }
+                            flex-wrap: wrap;
+                            spacing: 0px;
+
+                            for word in block.words: TouchArea {
+                                enabled: word.clickable;
+                                clicked => {
+                                    if word.clickable {
+                                        root.open-alias-popup(word.text);
+                                    }
+                                }
+
+                                Text {
+                                    text: word.text;
+                                    color: Theme.text-primary;
+                                    font-size: 13px;
+                                }
+                            }
                         }
                     }
 

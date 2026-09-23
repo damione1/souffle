@@ -4,13 +4,14 @@
 //! sidecar use, so this screen and an export of the same meeting show the
 //! same paragraphs. This module adds what is specific to the screen:
 //! session-break rows between recording sessions, the `mm:ss` timestamp
-//! format, and the clickable-word Markdown `StyledText` renders.
+//! format, and the per-word clickable breakdown (`TranscriptBlock.words`,
+//! SOU-223) a `FlexboxLayout` in `transcript_section.slint` renders.
 
 use souffle_lib::engine::{Speaker, TranscriptionSegment};
 use souffle_lib::transcript::MeetingRecordingSession;
 use souffle_schema::paragraphs::{PAUSE_THRESHOLD_SECONDS, group_into_paragraphs};
 
-use crate::TranscriptBlock;
+use crate::{TranscriptBlock, TranscriptWord};
 
 /// Canonical display labels for the Me/Them lanes - the single source of
 /// truth shared by this post-meeting view and the live view
@@ -63,43 +64,27 @@ fn tokenize_words(text: &str) -> Vec<&str> {
     tokens
 }
 
-/// Builds the Markdown source `StyledText` renders (see the doc comment on
-/// `TranscriptBlock.markdown-text`): clickable words become Markdown links
-/// (`[word](word)`, the word itself as both label and target - simpler than
-/// an index since a click only ever needs to know which word text was
-/// clicked, not which occurrence), everything else passes through with
-/// Markdown special characters escaped. Word tokens never need escaping:
-/// `is_word_char` never matches `\`, `*`, `_`, `[`, `]`, `<`, or `>`.
-fn build_markdown_text(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    for token in tokenize_words(text) {
-        if is_word_char(token.chars().next().unwrap_or(' ')) && is_clickable_word(token) {
-            out.push('[');
-            out.push_str(token);
-            out.push_str("](");
-            out.push_str(token);
-            out.push(')');
-        } else {
-            for c in token.chars() {
-                if matches!(c, '\\' | '*' | '_' | '[' | ']' | '<' | '>') {
-                    out.push('\\');
-                }
-                out.push(c);
-            }
-        }
-    }
-    out
+/// Builds `TranscriptBlock.words` (see its doc comment): one entry per
+/// token from `tokenize_words`, `clickable` deciding whether it renders as a
+/// `TouchArea`-wrapped word or a plain literal run in the `FlexboxLayout`.
+/// The token text itself is never modified - a click hands the exact
+/// original word back to Rust, same as the old Markdown-link target did.
+fn build_words(text: &str) -> Vec<TranscriptWord> {
+    tokenize_words(text)
+        .into_iter()
+        .map(|token| TranscriptWord {
+            clickable: is_word_char(token.chars().next().unwrap_or(' '))
+                && is_clickable_word(token),
+            text: token.into(),
+        })
+        .collect()
 }
 
-/// Parses `text` (via `build_markdown_text`) into the real `StyledText`
-/// value `TranscriptBlock.markdown-text` needs - `slint::StyledText` isn't
-/// constructible from a plain Slint expression (see the doc comment on
-/// that field), so this has to happen in Rust. Falls back to unstyled
-/// plain text on a parse error rather than panicking: better to show the
-/// paragraph without clickable words than to crash on one malformed one.
-fn styled_transcript_text(text: &str) -> slint::StyledText {
-    slint::StyledText::from_markdown(&build_markdown_text(text))
-        .unwrap_or_else(|_| slint::StyledText::from_plain_text(text))
+/// Wraps `build_words` in the `ModelRc` the generated `TranscriptBlock.words`
+/// field needs - a Slint struct field of array type is always a model, never
+/// a plain `Vec`, regardless of nesting.
+fn transcript_words(text: &str) -> slint::ModelRc<TranscriptWord> {
+    slint::ModelRc::new(slint::VecModel::from(build_words(text)))
 }
 
 /// Groups one contiguous run of segments (already known to belong to a
@@ -116,7 +101,7 @@ fn paragraph_blocks(
             is_session_break: false,
             speaker_label: speaker_label(p.speaker).into(),
             timestamp: crate::timeline::format_duration(p.start_time).into(),
-            markdown_text: styled_transcript_text(&p.text),
+            words: transcript_words(&p.text),
             text: p.text.into(),
             recording_session_index: session_index.map(|i| i as i32).unwrap_or(-1),
             start_time: p.start_time as f32,
@@ -132,7 +117,7 @@ fn session_break_block() -> TranscriptBlock {
         speaker_label: "".into(),
         timestamp: "".into(),
         text: "".into(),
-        markdown_text: slint::StyledText::from_plain_text(""),
+        words: slint::ModelRc::new(slint::VecModel::from(Vec::<TranscriptWord>::new())),
         recording_session_index: -1,
         start_time: 0.0,
         end_label: "Fin de l'enregistrement pr\u{e9}c\u{e9}dent".into(),
@@ -449,7 +434,7 @@ mod tests {
             is_session_break: false,
             speaker_label: "Moi".into(),
             timestamp: "00:00".into(),
-            markdown_text: styled_transcript_text(text),
+            words: transcript_words(text),
             text: text.into(),
             recording_session_index: -1,
             start_time: 0.0,
@@ -545,35 +530,88 @@ mod tests {
         assert!(!is_clickable_word(""));
     }
 
-    #[test]
-    fn build_markdown_text_links_clickable_words_only() {
-        // "42" is numeric-only (not clickable), "ans" is a real word (linked).
-        let markdown = build_markdown_text("Bonjour, 42 ans.");
-        assert_eq!(markdown, "[Bonjour](Bonjour), 42 [ans](ans).");
+    fn word(text: &str, clickable: bool) -> TranscriptWord {
+        TranscriptWord {
+            text: text.into(),
+            clickable,
+        }
     }
 
     #[test]
-    fn build_markdown_text_escapes_special_characters_outside_words() {
-        let markdown = build_markdown_text("valeur * 2 <ok>");
-        assert_eq!(markdown, "[valeur](valeur) \\* 2 \\<[ok](ok)\\>");
+    fn build_words_marks_clickable_words_only() {
+        // "42" is numeric-only (not clickable), "ans" is a real word.
+        let words = build_words("Bonjour, 42 ans.");
+        assert_eq!(
+            words,
+            vec![
+                word("Bonjour", true),
+                word(", ", false),
+                word("42", false),
+                word(" ", false),
+                word("ans", true),
+                word(".", false),
+            ]
+        );
     }
 
     #[test]
-    fn build_markdown_text_round_trips_through_the_real_link_target() {
-        // The link target is the raw word, unescaped - what `link-clicked`
-        // hands back to Rust must match the original word exactly.
-        let markdown = build_markdown_text("aujourd'hui");
-        assert_eq!(markdown, "[aujourd'hui](aujourd'hui)");
+    fn build_words_never_alters_token_text() {
+        // No Markdown escaping needed anymore - a word's text round-trips
+        // through `build_words` unchanged, including characters that used
+        // to need escaping in the old Markdown-link render.
+        let words = build_words("valeur * 2 <ok>");
+        assert_eq!(
+            words,
+            vec![
+                word("valeur", true),
+                // "2" is its own word-char run (digits count as word chars
+                // for tokenization, just not for clickability), so it does
+                // not merge with the surrounding punctuation/whitespace.
+                word(" * ", false),
+                word("2", false),
+                word(" <", false),
+                word("ok", true),
+                word(">", false),
+            ]
+        );
     }
 
-    /// SOU-223 "Couvrir les occurrences répétées": `build_markdown_text`
-    /// decides per-token via `is_clickable_word`, with no "already saw this
-    /// word" state, so every repeated clickable occurrence gets its own
-    /// independent link, and a repeated non-admissible token (here, a bare
-    /// digit) stays plain text every time.
     #[test]
-    fn build_markdown_text_links_every_repeated_occurrence() {
-        let markdown = build_markdown_text("3 3 bien bien.");
-        assert_eq!(markdown, "3 3 [bien](bien) [bien](bien).");
+    fn build_words_round_trips_through_the_real_click_target() {
+        // What `TouchArea.clicked` hands back to Rust (`word.text`) must
+        // match the original word exactly, apostrophe included.
+        let words = build_words("aujourd'hui");
+        assert_eq!(words, vec![word("aujourd'hui", true)]);
+    }
+
+    /// SOU-223 "Couvrir les occurrences répétées": `build_words` decides per
+    /// token via `is_clickable_word`, with no "already saw this word" state,
+    /// so every repeated clickable occurrence is independently marked, and a
+    /// repeated non-admissible token (here, a bare digit) stays non-clickable
+    /// every time.
+    #[test]
+    fn build_words_marks_every_repeated_occurrence() {
+        let words = build_words("3 3 bien bien.");
+        assert_eq!(
+            words,
+            vec![
+                word("3", false),
+                word(" ", false),
+                word("3", false),
+                word(" ", false),
+                word("bien", true),
+                word(" ", false),
+                word("bien", true),
+                word(".", false),
+            ]
+        );
+    }
+
+    #[test]
+    fn build_words_concatenation_never_loses_characters() {
+        let text = "Bonjour, comment \u{e7}a va - super bien !";
+        let words = build_words(text);
+        let rebuilt: String = words.iter().map(|w| w.text.as_str()).collect();
+        assert_eq!(rebuilt, text);
     }
 }

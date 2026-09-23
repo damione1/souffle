@@ -25,7 +25,10 @@ workspace = true
 # selects Skia, which uses Metal on macOS. Without it, tab switches and
 # scrolling feel like a webview. Keep `unstable-winit-030` for the overlay
 # titlebar hook in main.rs.
-slint = { version = "1.9", features = ["unstable-winit-030", "renderer-skia", "gettext"] }
+# SOU-223: floor raised to 1.18 - FlexboxLayout (used by the transcript's
+# per-word click rendering, see transcript_section.slint) only became a
+# stable builtin in 1.18.1; 1.17.x fails to compile it.
+slint = { version = "1.18", features = ["unstable-winit-030", "renderer-skia", "gettext"] }
 souffle_lib = { path = "..", package = "souffle" }
 # SOU-137: the paragraph grouper and its pause threshold, declared once for
 # the export, the summary, this UI and the MCP sidecar.
@@ -46,11 +49,11 @@ arboard = "3.6"
 # SOU-188: new custom summary-template/dictionary-entry/snippet ids, same
 # crate/version the main `souffle` crate already uses (src/state.rs).
 uuid = { version = "1", features = ["v4"] }
-slint-build = "1.9"
+slint-build = "1.18"
 
 [build-dependencies]
 lucide-slint = "1.46.0"
-slint-build = "1.9"
+slint-build = "1.18"
 
 [dev-dependencies]
 tempfile = "3"
