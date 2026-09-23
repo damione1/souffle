@@ -93,16 +93,39 @@ export component ThemedSlider inherits Rectangle {
         border-color: Theme.ghost-border;
     }
 
-    TouchArea {
+    track := TouchArea {
         enabled: root.enabled;
+        // SOU-217: drive the fraction from this TouchArea's own geometry
+        // (`self.mouse-x` / `self.width`) instead of the parent `root`'s.
+        // Both happen to match today (TouchArea has no explicit geometry,
+        // so it expands to fill `root`), but computing the ratio from two
+        // different elements' properties was a latent trap: any future
+        // padding/margin added around the track (or a change to how this
+        // TouchArea is sized) would silently desync `mouse-x`'s origin from
+        // the denominator, producing a fraction that no longer lines up
+        // with the pointer - i.e. exactly the "erratic" drag this ticket
+        // reports. Keeping both halves of the ratio on `self` makes the
+        // mapping correct by construction.
+        //
+        // `pointer-event` (Down) additionally snaps the thumb to the
+        // initial press position immediately, matching native slider
+        // behaviour: previously a press-and-hold with no movement left the
+        // thumb untouched until either a `moved` (drag) or the matching
+        // `clicked` (release) fired, which made a click that started a
+        // (later aborted) drag look like it had been silently ignored.
+        pointer-event(event) => {
+            if event.button == PointerEventButton.left && event.kind == PointerEventKind.down {
+                key-focus.focus();
+                root.apply(self.mouse-x, self.width);
+            }
+        }
         moved => {
             if (self.pressed) {
-                root.apply(self.mouse-x);
+                root.apply(self.mouse-x, self.width);
             }
         }
         clicked => {
-            key-focus.focus();
-            root.apply(self.mouse-x);
+            root.apply(self.mouse-x, self.width);
         }
     }
 
@@ -124,10 +147,10 @@ export component ThemedSlider inherits Rectangle {
         root.publish(root.value - root.step);
     }
 
-    function apply(mouse-x: length) {
-        if !root.enabled || root.width <= 0 {
+    function apply(mouse-x: length, track-width: length) {
+        if !root.enabled || track-width <= 0px {
             return;
         }
-        root.publish(round(root.minimum + (root.maximum - root.minimum) * max(0, min(1, mouse-x / root.width))));
+        root.publish(round(root.minimum + (root.maximum - root.minimum) * max(0, min(1, mouse-x / track-width))));
     }
 }
