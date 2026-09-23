@@ -1,5 +1,5 @@
 import { ScrollView } from "std-widgets.slint";
-import { RecordingMode, SpeakerRole } from "types.slint";
+import { RecordingMode, SpeakerRole, LiveSystemAudio } from "types.slint";
 import { Theme } from "theme.slint";
 import { LucideIcon, IconSet } from "components/lucide_icon.slint";
 import { ThemedTextArea } from "components/themed_text_area.slint";
@@ -23,7 +23,8 @@ export component RecordingView inherits Rectangle {
     in property <int> live-elapsed-offset-seconds: 0;
     in property <float> audio-level: 0.0;
     in-out property <string> notes;
-    in property <bool> system-audio-active: true;
+    // Live verdict on the meeting's system-audio leg (see LiveSystemAudio).
+    in property <LiveSystemAudio> system-audio: LiveSystemAudio.pending;
     in property <bool> auto-paste: false;
 
     callback stop-requested();
@@ -205,7 +206,7 @@ export component RecordingView inherits Rectangle {
             }
         }
 
-        if root.mode == RecordingMode.meeting && !root.system-audio-active: Rectangle {
+        if root.mode == RecordingMode.meeting && root.system-audio == LiveSystemAudio.unavailable: Rectangle {
             height: 48px;
             vertical-stretch: 0;
             border-radius: 4px;
@@ -331,10 +332,15 @@ export component RecordingView inherits Rectangle {
                             width: 6px;
                             height: 6px;
                             border-radius: 3px;
-                            background: root.system-audio-active ? Theme.accent : Theme.surface-4;
+                            // LiveSessionCard.svelte's SYSTEM_AUDIO_DOT.
+                            background: root.system-audio == LiveSystemAudio.active ? Theme.accent
+                                : root.system-audio == LiveSystemAudio.pending ? Theme.warning
+                                : Theme.surface-4;
                         }
                         audio-label := Text {
-                            text: root.system-audio-active ? @tr("Audio système demandé") : @tr("Audio système indisponible");
+                            text: root.system-audio == LiveSystemAudio.active ? @tr("Audio système actif")
+                                : root.system-audio == LiveSystemAudio.pending ? @tr("Vérification de l’audio système")
+                                : @tr("Micro seul");
                             font-size: 11.5px;
                             color: Theme.text-muted;
                             vertical-alignment: center;

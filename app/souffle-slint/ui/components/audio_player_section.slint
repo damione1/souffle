@@ -1,4 +1,5 @@
 import { Theme } from "../theme.slint";
+import { LucideIcon, IconSet } from "lucide_icon.slint";
 // Native audio player for MeetingDetail (SOU-187 milestone 7, AC14/AC16).
 // New engineering, not a port: MeetingAudioPlayerSection.svelte is a bare
 // `<input type="range">` next to an HTML `<audio>` element, no waveform at
@@ -32,7 +33,7 @@ export component AudioPlayerSection inherits VerticalLayout {
             border-radius: 18px;
             border-width: play-focus.has-focus ? 2px : 0px;
             border-color: Theme.accent;
-            background: play-area.pressed ? Theme.surface-3 : Theme.surface-4;
+            background: play-area.pressed ? Theme.surface-2 : play-area.has-hover ? Theme.surface-3 : Theme.surface-4;
 
             accessible-role: button;
             accessible-label: root.is-playing ? @tr("Pause") : @tr("Lecture");
@@ -56,10 +57,16 @@ export component AudioPlayerSection inherits VerticalLayout {
                 }
             }
 
-            Text {
-                text: root.is-playing ? @tr("\u{23f8}") : @tr("\u{25b6}");
-                horizontal-alignment: center;
-                vertical-alignment: center;
+            // Lucide Play/Pause like MeetingAudioPlayerSection.svelte, not a
+            // bare U+23F8/U+25B6 glyph: those fall through to the emoji
+            // font on macOS and render as a colored emoji tile.
+            LucideIcon {
+                size: 16px;
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                icon: root.is-playing ? IconSet.Pause : IconSet.Play;
+                icon-color: Theme.text-primary;
+                filled: true;
             }
         }
 

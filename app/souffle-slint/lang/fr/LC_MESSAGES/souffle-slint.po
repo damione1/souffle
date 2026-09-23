@@ -172,6 +172,34 @@ msgctxt "RecordingView"
 msgid "Audio système demandé"
 msgstr "Audio système demandé"
 
+msgctxt "RecordingView"
+msgid "Audio système actif"
+msgstr "Audio système actif"
+
+msgctxt "RecordingView"
+msgid "Vérification de l’audio système"
+msgstr "Vérification de l’audio système"
+
+msgctxt "RecordingView"
+msgid "Micro seul"
+msgstr "Micro seul"
+
+msgctxt "SummarySection"
+msgid "Points clés et actions, générés sur l’appareil"
+msgstr "Points clés et actions, générés sur l’appareil"
+
+msgctxt "SummarySection"
+msgid "Aucun fournisseur de résumé disponible. Activez Apple Intelligence ou connectez Ollama dans Réglages › IA."
+msgstr "Aucun fournisseur de résumé disponible. Activez Apple Intelligence ou connectez Ollama dans Réglages › IA."
+
+msgctxt "SummarySection"
+msgid "La génération du résumé a échoué : {}"
+msgstr "La génération du résumé a échoué : {}"
+
+msgctxt "SummarySection"
+msgid "Générer"
+msgstr "Générer"
+
 #: app/souffle-slint/ui/recording_view.slint:337
 msgctxt "RecordingView"
 msgid "Audio système indisponible"

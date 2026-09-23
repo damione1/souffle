@@ -15,7 +15,7 @@ import { SnippetRow } from "components/settings/snippets_section.slint";
 import { TimelineDayGroup, UpcomingEvent } from "components/timeline_section.slint";
 import { TranscriptBlock } from "components/transcript_section.slint";
 import { StructuredActionItem } from "components/summary_section.slint";
-import { RecordingMode, SpeakerRole, TimelineFilter, TimelineKind, NotesSaveState, ModelPhase, TranscriptionPhase, UpcomingPhase, SettingsTab, SettingsInteraction, AppTheme, AppLocale, PasteMethod, MeetingLanguage, LogLevel, AudioRetention, AccessState, PermissionKind, ShortcutField, SummaryProvider, AppleIntelligenceUnavailableReason, OnboardingStep, UpdatePhase, InstallBlockReason } from "types.slint";
+import { RecordingMode, LiveSystemAudio, SpeakerRole, TimelineFilter, TimelineKind, NotesSaveState, ModelPhase, TranscriptionPhase, UpcomingPhase, SettingsTab, SettingsInteraction, AppTheme, AppLocale, PasteMethod, MeetingLanguage, LogLevel, AudioRetention, AccessState, PermissionKind, ShortcutField, SummaryProvider, AppleIntelligenceUnavailableReason, OnboardingStep, UpdatePhase, InstallBlockReason } from "types.slint";
 export { SettingsTab, SettingsInteraction, AppTheme, AppLocale, PasteMethod, MeetingLanguage, LogLevel, AudioRetention, AccessState, PermissionKind, ShortcutField, SummaryProvider, AppleIntelligenceUnavailableReason, SpeakerRole }
 import { Theme } from "theme.slint";
 // Re-exported (not just imported) so Slint's codegen generates a Rust
@@ -87,6 +87,10 @@ export component MainWindow inherits Window {
     in-out property <float> live-transcript-content-height;
     in-out property <float> live-transcript-viewport-height;
     in property <float> audio-level: 0.0;
+    // Polled from souffle_lib's live system-audio snapshot while a meeting
+    // records (main.rs). Not derived from Settings: the Settings flags say
+    // what was *asked for*, not whether the tap actually came up.
+    in property <LiveSystemAudio> live-system-audio: LiveSystemAudio.pending;
     in-out property <string> live-notes;
 
     // Non-empty while a completed meeting is open in MeetingDetail. Empty
@@ -127,6 +131,7 @@ export component MainWindow inherits Window {
     in property <[string]> meeting-detail-summary-open-questions;
     in property <bool> meeting-detail-summary-is-generating: false;
     in property <string> meeting-detail-summary-generation-progress: "";
+    in property <string> meeting-detail-summary-generation-error: "";
     in property <[string]> meeting-detail-summary-available-models;
     in property <[string]> meeting-detail-summary-available-model-ids;
     in-out property <string> meeting-detail-summary-selected-model-id;
@@ -587,6 +592,7 @@ export component MainWindow inherits Window {
         summary-open-questions: root.meeting-detail-summary-open-questions;
         summary-is-generating: root.meeting-detail-summary-is-generating;
         summary-generation-progress: root.meeting-detail-summary-generation-progress;
+        summary-generation-error: root.meeting-detail-summary-generation-error;
         summary-available-models: root.meeting-detail-summary-available-models;
         summary-available-model-ids: root.meeting-detail-summary-available-model-ids;
         summary-selected-model-id <=> root.meeting-detail-summary-selected-model-id;
@@ -618,7 +624,7 @@ export component MainWindow inherits Window {
         live-transcript-viewport-height <=> root.live-transcript-viewport-height;
         audio-level: root.audio-level;
         notes <=> root.live-notes;
-        system-audio-active: root.settings-system-audio-supported && root.settings-capture-system-audio;
+        system-audio: root.live-system-audio;
         auto-paste: root.settings-auto-paste;
         stop-requested => { root.stop-requested(); }
         

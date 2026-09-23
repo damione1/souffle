@@ -385,6 +385,19 @@ fn refresh_timeline(window: &MainWindow, tauri_handle: &AppHandle) {
     window.set_timeline_is_empty(is_empty);
 }
 
+/// system-audio.ts's `liveSystemAudioState`: no snapshot yet means the
+/// capture thread has not decided (mic still opening, tap still probing),
+/// which is not the same as the tap having failed.
+fn live_system_audio(
+    status: Option<&souffle_lib::app_events::SystemAudioStatus>,
+) -> LiveSystemAudio {
+    match status {
+        None => LiveSystemAudio::Pending,
+        Some(s) if s.active => LiveSystemAudio::Active,
+        Some(_) => LiveSystemAudio::Unavailable,
+    }
+}
+
 /// Port of the inline template in MeetingHeaderSection.svelte:
 /// `{name}{is_organizer ? " (organisateur)" : ""}{is_current_user ? " (vous)" : ""}`.
 fn participant_label(p: &MeetingParticipant) -> String {
@@ -429,6 +442,7 @@ fn populate_meeting_detail(window: &MainWindow, meeting: &MeetingTranscript) {
     window.set_meeting_detail_model_label(meeting.transcription_profile.model_label.clone().into());
     window.set_meeting_detail_can_resume(meeting.ended_at.is_none());
     window.set_meeting_detail_resume_error("".into());
+    window.set_meeting_detail_summary_generation_error("".into());
     let participants: Vec<slint::SharedString> = meeting
         .participants
         .iter()
@@ -3601,7 +3615,10 @@ fn wire_callbacks(
             return;
         };
         window.set_meeting_detail_summary_is_generating(true);
-        window.set_meeting_detail_summary_generation_progress("Démarrage...".into());
+        // Empty lets summary_section.slint show its own translated
+        // "generating" placeholder until the first progress event.
+        window.set_meeting_detail_summary_generation_progress("".into());
+        window.set_meeting_detail_summary_generation_error("".into());
         let id = window.get_active_meeting_id().to_string();
         let state = handle_sum.clone();
 
@@ -3643,11 +3660,15 @@ fn wire_callbacks(
                                 populate_meeting_detail(&w, &m);
                             }
                         }
-                        Err(e) => {
-                            w.set_meeting_detail_summary_generation_progress(
-                                format!("Erreur: {}", e).into(),
-                            );
+                        // Its own property, not `generation_progress`: that one
+                        // is only on screen while `is_generating`, so an error
+                        // written there disappeared with the spinner and a
+                        // failed click read as "the button does nothing". The
+                        // "failed:" wording lives in Slint behind @tr().
+                        Err(e) if w.get_active_meeting_id().as_str() == id => {
+                            w.set_meeting_detail_summary_generation_error(e.into());
                         }
+                        Err(e) => eprintln!("Summary of meeting {id} failed: {e}"),
                     }
                 }
             });
@@ -6413,6 +6434,33 @@ fn main() {
         },
     );
 
+    // The live "Audio système" label and the mic-only banner of a meeting
+    // being recorded. The capture thread only publishes a snapshot (the
+    // Tauri UI read the same one through `get_system_audio_status` after a
+    // reload), so poll it while a meeting records. This used to be
+    // `settings-system-audio-supported && settings-capture-system-audio`,
+    // i.e. what Settings asked for, not what the tap did - and the first flag
+    // is only filled in once the Settings panel has been opened, so a meeting
+    // started straight from Home always claimed system audio was unavailable.
+    let system_audio_timer = slint::Timer::default();
+    let weak = window.as_weak();
+    system_audio_timer.start(
+        slint::TimerMode::Repeated,
+        Duration::from_millis(500),
+        move || {
+            let Some(window) = weak.upgrade() else {
+                return;
+            };
+            let live = match window.get_recording_mode() {
+                RecordingMode::Meeting => {
+                    live_system_audio(souffle_lib::commands::get_system_audio_status().as_ref())
+                }
+                RecordingMode::Idle | RecordingMode::Dictation => LiveSystemAudio::Pending,
+            };
+            window.set_live_system_audio(live);
+        },
+    );
+
     // The first window is deliberately shown only after the async startup
     // snapshot is projected, and closing it hides rather than destroys it.
     // Keep the native tray/shortcut process alive across both intervals.
@@ -7063,5 +7111,51 @@ mod tests {
     fn committed_add_clears_after_close_but_preserves_a_newer_draft() {
         assert_add_draft_settlement_after_close(None);
         assert_add_draft_settlement_after_close(Some("Newer draft"));
+    }
+}
+
+#[cfg(test)]
+mod live_system_audio_tests {
+    use super::{LiveSystemAudio, live_system_audio};
+    use souffle_lib::app_events::{SystemAudioReason, SystemAudioStatus};
+
+    fn status(active: bool, reason_code: Option<SystemAudioReason>) -> SystemAudioStatus {
+        SystemAudioStatus {
+            active,
+            reason: None,
+            reason_code,
+            samples: 0,
+            signal_samples: 0,
+        }
+    }
+
+    #[test]
+    fn no_snapshot_is_pending_not_unavailable() {
+        assert_eq!(live_system_audio(None), LiveSystemAudio::Pending);
+    }
+
+    #[test]
+    fn active_tap_is_active_even_before_any_signal() {
+        // Nobody has spoken yet at the top of a meeting: zero signal on a
+        // live tap is not a warning (system-audio.ts, SOU-119).
+        assert_eq!(
+            live_system_audio(Some(&status(true, None))),
+            LiveSystemAudio::Active
+        );
+    }
+
+    #[test]
+    fn inactive_tap_is_unavailable_whatever_the_reason() {
+        for reason in [
+            None,
+            Some(SystemAudioReason::PermissionDenied),
+            Some(SystemAudioReason::Disabled),
+            Some(SystemAudioReason::Unsupported),
+        ] {
+            assert_eq!(
+                live_system_audio(Some(&status(false, reason))),
+                LiveSystemAudio::Unavailable
+            );
+        }
     }
 }

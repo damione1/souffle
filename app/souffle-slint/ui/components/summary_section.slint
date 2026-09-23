@@ -1,13 +1,12 @@
 import { Theme } from "../theme.slint";
 import { ThemedComboBox } from "themed_combo.slint";
+import { LucideIcon, IconSet } from "lucide_icon.slint";
 
 // Port of MeetingSummarySection.svelte + MeetingStructuredSummarySection.svelte
-// - read-only display only (SOU-187 milestone 9, remaining part of AC13).
-// Generation itself (model/template pickers, the "Générer"/"Régénérer"
-// button, streaming progress) is not wired here: it needs the same
-// Channel-based streaming plumbing as milestone 5's live transcript, which
-// is a separate, substantial piece of work. Said here rather than a
-// missing button being mistaken for an oversight.
+// (SOU-187 milestone 9, SOU-221/SOU-233): display, model picker and
+// generation ("Générer"/"Régénérer" -> `generate-requested`, handled by
+// `on_meeting_detail_summarize` in main.rs). Not ported: the template
+// picker (generation always uses the Settings default template).
 export struct StructuredActionItem {
     text: string,
     owner: string, // empty when there's no owner
@@ -32,26 +31,83 @@ export component SummarySection inherits VerticalLayout {
     in property <[string]> open-questions;
     in property <bool> is-generating: false;
     in property <string> generation-progress: "";
+    // Last generation failure, empty when the last attempt succeeded or none
+    // was made. Kept apart from `generation-progress`, which is only
+    // rendered while `is-generating` - an error written there vanished the
+    // instant generation stopped, so a failed click looked like a no-op.
+    in property <string> generation-error: "";
 
     callback generate-requested();
 
     spacing: 8px;
 
-    if root.summary == "" && !root.is-generating: VerticalLayout {
-        spacing: 4px;
+    // MeetingSummarySection.svelte's collapsed "generate" CTA card, with the
+    // model picker kept inline (SOU-233 AC4) instead of Tauri's picker-less
+    // one-click card.
+    if root.summary == "" && !root.is-generating: Rectangle {
+        border-width: 1px;
+        border-color: Theme.ghost-border;
 
-        Text {
-            text: @tr("R\u{e9}sum\u{e9}");
-            font-size: 11px;
-            font-weight: 600;
-            color: Theme.text-muted;
-        }
+        VerticalLayout {
+        padding: 18px;
+        spacing: 14px;
 
         HorizontalLayout {
+            spacing: 13px;
+            alignment: start;
+
+            Rectangle {
+                width: 26px;
+                height: 34px;
+                horizontal-stretch: 0;
+
+                LucideIcon {
+                    size: 20px;
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
+                    icon: IconSet.WandSparkles;
+                    icon-color: Theme.accent;
+                }
+            }
+
+            VerticalLayout {
+                spacing: 2px;
+                alignment: center;
+
+                Text {
+                    text: @tr("Générer le résumé");
+                    font-family: "Archivo SemiBold";
+                    font-size: 14px;
+                    color: Theme.text-primary;
+                }
+                Text {
+                    text: @tr("Points clés et actions, générés sur l’appareil");
+                    font-size: 12px;
+                    color: Theme.text-muted;
+                    wrap: word-wrap;
+                }
+            }
+        }
+
+        if root.available-models.length == 0: Text {
+            text: @tr("Aucun fournisseur de résumé disponible. Activez Apple Intelligence ou connectez Ollama dans Réglages › IA.");
+            font-size: 12px;
+            color: Theme.text-muted;
+            wrap: word-wrap;
+        }
+
+        if root.generation-error != "": Text {
+            text: @tr("La génération du résumé a échoué : {}", root.generation-error);
+            font-size: 12px;
+            color: Theme.danger;
+            wrap: word-wrap;
+        }
+
+        if root.available-models.length > 0: HorizontalLayout {
             alignment: start;
             spacing: 8px;
-            
-            if root.available-models.length > 0 : ThemedComboBox {
+
+            ThemedComboBox {
                 model: root.available-models;
                 option-values: root.available-model-ids;
                 current-value: root.selected-model-label;
@@ -95,7 +151,7 @@ export component SummarySection inherits VerticalLayout {
                 }
 
                 gen-txt := Text {
-                    text: @tr("Générer le résumé");
+                    text: @tr("Générer");
                     font-family: "Archivo SemiBold";
                     font-size: 13px;
                     color: Theme.text-primary;
@@ -103,6 +159,7 @@ export component SummarySection inherits VerticalLayout {
                     vertical-alignment: center;
                 }
             }
+        }
         }
     }
 
@@ -202,6 +259,13 @@ export component SummarySection inherits VerticalLayout {
                     }
                 }
             }
+        }
+
+        if root.generation-error != "": Text {
+            text: @tr("La génération du résumé a échoué : {}", root.generation-error);
+            font-size: 12px;
+            color: Theme.danger;
+            wrap: word-wrap;
         }
 
         if root.summary-is-stale: Text {
