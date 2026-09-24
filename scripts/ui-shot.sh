@@ -25,8 +25,17 @@ fi
 
 name="$(basename "$app" .app)"
 
-pkill -f "$app/Contents/MacOS/" 2>/dev/null || true
-sleep 0.5
+# Launch Services starts the binary with a decomposed (NFD) path, so a bundle
+# name with an accent ("Soufflé Nightly") typed precomposed never matches:
+# kill on both forms, then wait for the old instance to actually exit.
+app_nfd="$(printf '%s' "$app" | iconv -f UTF-8 -t UTF-8-MAC)"
+for pattern in "$app/Contents/MacOS/" "$app_nfd/Contents/MacOS/"; do
+  pkill -f "$pattern" 2>/dev/null || true
+done
+for _ in $(seq 1 50); do
+  pgrep -f "$app/Contents/MacOS/" >/dev/null || pgrep -f "$app_nfd/Contents/MacOS/" >/dev/null || break
+  sleep 0.1
+done
 
 open -a "$app"
 
