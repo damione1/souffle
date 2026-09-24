@@ -194,7 +194,7 @@ export component MeetingDetail inherits Rectangle {
         // (and the sticky header) used to swallow the scroll. Scrolls over
         // the transcript box never get here - its own Flickable takes them.
         scroll-event(event) => {
-            root.page-scroll-top = clamp(root.page-scroll-top + event.delta-y, min(0px, page-scroll.height - page-scroll.viewport-height), 0px);
+            root.page-scroll-top = clamp(root.page-scroll-top + event.delta-y, min(0px, page-scroll.height - page-scroll.content-height), 0px);
             accept
         }
     }
@@ -673,16 +673,16 @@ export component MeetingDetail inherits Rectangle {
         // of paragraphs at once.
         page-scroll := Flickable {
             vertical-stretch: 1;
-            viewport-width: self.width;
-            viewport-height: page-inner.preferred-height;
-            viewport-y <=> root.page-scroll-top;
+            content-width: self.width;
+            content-height: page-inner.preferred-height;
+            content-y <=> root.page-scroll-top;
 
             // Same click-away sink as the root one, inside the scroller: a
             // Flickable keeps any press its content does not handle, so the
             // root sink never sees clicks made on the page body.
             TouchArea {
-                width: parent.viewport-width;
-                height: parent.viewport-height;
+                width: parent.content-width;
+                height: parent.content-height;
                 clicked => { focus-sink.focus(); }
             }
 

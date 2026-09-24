@@ -118,8 +118,8 @@ export component DiagnosticsSection inherits VerticalLayout {
                 Flickable {
                     width: 100%;
                     height: 100%;
-                    viewport-width: self.width;
-                    viewport-y <=> root.log-scroll-top;
+                    content-width: self.width;
+                    content-y <=> root.log-scroll-top;
 
                     VerticalLayout {
                         padding: 8px;

@@ -648,7 +648,7 @@ fn start_transcript_scroll_timer(
             let Some(window) = weak.upgrade() else {
                 return;
             };
-            // Flickable's viewport-y (and its `-px` mirror) is negative-going-
+            // Flickable's content-y (and its `-px` mirror) is negative-going-
             // down; scroll_top here is the usual positive "distance scrolled
             // from the top".
             let scroll_top = -window.get_meeting_detail_transcript_scroll_top_px();
@@ -860,7 +860,7 @@ fn sync_settings_log_timers(
             let Some(window) = weak.upgrade() else {
                 return;
             };
-            // Flickable's viewport-y is negative-going-down, same as the
+            // Flickable's content-y is negative-going-down, same as the
             // transcript's scroll poll.
             let scroll_top = -window.get_settings_log_scroll_top_px();
             update_settings_log_window(&window, &scroll_state, scroll_top);

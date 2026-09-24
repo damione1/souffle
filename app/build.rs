@@ -76,7 +76,6 @@ fn build_apple_intelligence_bridge() {
     // Stub linkage is surfaced at runtime via is_stub_linked().
     let source_file = if has_foundation_models {
         println!("cargo:rustc-cfg=apple_intelligence_real");
-        println!("cargo:warning=Building with Apple Intelligence support.");
         REAL_SWIFT_FILE
     } else if framework_path.exists() {
         println!("cargo:rustc-cfg=apple_intelligence_stub");

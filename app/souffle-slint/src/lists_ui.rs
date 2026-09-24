@@ -168,7 +168,7 @@ impl SettingsListModels {
     /// the current scroll position and patches the view model, but only when
     /// the slice actually changed (or `force`, after a repopulate).
     fn update_dictionary_window(&self, window: &MainWindow, force: bool) {
-        // Flickable's viewport-y is negative-going-down, same as the
+        // Flickable's content-y is negative-going-down, same as the
         // transcript's scroll mirror.
         let scroll_top = -window.get_settings_dictionary_scroll_top_px();
         let error_id = window.get_settings_dictionary_delete_error_id();
