@@ -1229,6 +1229,16 @@ msgctxt "InterfaceSection"
 msgid "Thème"
 msgstr "Theme"
 
+#: app/souffle-slint/ui/components/settings/interface_section.slint:152
+msgctxt "InterfaceSection"
+msgid "Choisissez l'apparence de l'interface."
+msgstr "Choose the interface's appearance."
+
+#: app/souffle-slint/ui/components/settings/interface_section.slint:155
+msgctxt "InterfaceSection"
+msgid "Thème de l'interface"
+msgstr "Interface theme"
+
 #: app/souffle-slint/ui/components/settings/interface_section.slint:159
 msgctxt "InterfaceSection"
 msgid "Sombre"
@@ -1410,7 +1420,7 @@ msgstr "Play a sound when recording starts and stops."
 #: app/souffle-slint/ui/components/settings/feedback_sounds_section.slint:36
 msgctxt "FeedbackSoundsSection"
 msgid "Volume"
-msgstr "Vol"
+msgstr "Sound volume"
 
 #: app/souffle-slint/ui/components/settings/feedback_sounds_section.slint:44
 msgctxt "FeedbackSoundsSection"

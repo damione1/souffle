@@ -114,6 +114,12 @@ export component InterfaceSection inherits VerticalLayout {
         if value == AppLocale.en { return @tr("English"); }
         return "";
     }
+    pure function theme-label(value: AppTheme) -> string {
+        if value == AppTheme.dark { return @tr("Sombre"); }
+        if value == AppTheme.light { return @tr("Clair"); }
+        if value == AppTheme.system { return @tr("Système"); }
+        return "";
+    }
     pure function paste-method-label(value: PasteMethod) -> string {
         if value == PasteMethod.clipboard { return @tr("Presse-papiers (⌘V)"); }
         if value == PasteMethod.typing { return @tr("Frappe simulée"); }
@@ -149,26 +155,26 @@ export component InterfaceSection inherits VerticalLayout {
 
         SettingsField {
             label: @tr("Thème");
+            description: @tr("Choisissez l'apparence de l'interface.");
 
-            HorizontalLayout {
-                spacing: 0px;
-                horizontal-stretch: 0;
-                vertical-stretch: 0;
-
-                ThemedButton {
-                    text: @tr("Sombre");
-                    kind: root.theme == AppTheme.dark ? ThemedButtonKind.active : ThemedButtonKind.default;
-                    clicked => { root.theme-changed(AppTheme.dark); }
-                }
-                ThemedButton {
-                    text: @tr("Clair");
-                    kind: root.theme == AppTheme.light ? ThemedButtonKind.active : ThemedButtonKind.default;
-                    clicked => { root.theme-changed(AppTheme.light); }
-                }
-                ThemedButton {
-                    text: @tr("Système");
-                    kind: root.theme == AppTheme.system ? ThemedButtonKind.active : ThemedButtonKind.default;
-                    clicked => { root.theme-changed(AppTheme.system); }
+            ThemedComboBox {
+                control-label: @tr("Thème de l'interface");
+                model: [
+                    root.theme-label(AppTheme.dark),
+                    root.theme-label(AppTheme.light),
+                    root.theme-label(AppTheme.system),
+                ];
+                current-value: root.theme-label(root.theme);
+                selected(value) => {
+                    if value == root.theme-label(AppTheme.dark) {
+                        root.theme-changed(AppTheme.dark);
+                    }
+                    if value == root.theme-label(AppTheme.light) {
+                        root.theme-changed(AppTheme.light);
+                    }
+                    if value == root.theme-label(AppTheme.system) {
+                        root.theme-changed(AppTheme.system);
+                    }
                 }
             }
         }

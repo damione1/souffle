@@ -69,13 +69,18 @@ export component ThemedSlider inherits Rectangle {
         : max(0, min(1, (root.value - root.minimum) / (root.maximum - root.minimum)));
 
     Rectangle {
+        x: 0px;
         y: 7px;
         height: 4px;
         width: parent.width;
         border-radius: 2px;
         background: Theme.surface-3;
     }
+    // SOU-217: pin the fill to the track's left edge. Without an explicit
+    // `x`, Slint centres a child Rectangle in its parent, so the accent fill
+    // grew outward from the middle of the track and never met the thumb.
     Rectangle {
+        x: 0px;
         y: 7px;
         height: 4px;
         width: parent.width * root.fraction;
@@ -93,16 +98,24 @@ export component ThemedSlider inherits Rectangle {
         border-color: Theme.ghost-border;
     }
 
-    TouchArea {
+    track := TouchArea {
         enabled: root.enabled;
+        // Both halves of the drag ratio come from this TouchArea (`self.mouse-x`
+        // / `self.width`) so they share one origin. Pointer-down snaps the
+        // thumb to the press position immediately, like a native slider.
+        pointer-event(event) => {
+            if event.button == PointerEventButton.left && event.kind == PointerEventKind.down {
+                key-focus.focus();
+                root.apply(self.mouse-x, self.width);
+            }
+        }
         moved => {
             if (self.pressed) {
-                root.apply(self.mouse-x);
+                root.apply(self.mouse-x, self.width);
             }
         }
         clicked => {
-            key-focus.focus();
-            root.apply(self.mouse-x);
+            root.apply(self.mouse-x, self.width);
         }
     }
 
@@ -124,10 +137,10 @@ export component ThemedSlider inherits Rectangle {
         root.publish(root.value - root.step);
     }
 
-    function apply(mouse-x: length) {
-        if !root.enabled || root.width <= 0 {
+    function apply(mouse-x: length, track-width: length) {
+        if !root.enabled || track-width <= 0px {
             return;
         }
-        root.publish(round(root.minimum + (root.maximum - root.minimum) * max(0, min(1, mouse-x / root.width))));
+        root.publish(round(root.minimum + (root.maximum - root.minimum) * max(0, min(1, mouse-x / track-width))));
     }
 }
