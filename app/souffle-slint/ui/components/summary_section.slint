@@ -1,13 +1,12 @@
 import { Theme } from "../theme.slint";
 import { ThemedComboBox } from "themed_combo.slint";
+import { LucideIcon, IconSet } from "lucide_icon.slint";
 
 // Port of MeetingSummarySection.svelte + MeetingStructuredSummarySection.svelte
-// - read-only display only (SOU-187 milestone 9, remaining part of AC13).
-// Generation itself (model/template pickers, the "Générer"/"Régénérer"
-// button, streaming progress) is not wired here: it needs the same
-// Channel-based streaming plumbing as milestone 5's live transcript, which
-// is a separate, substantial piece of work. Said here rather than a
-// missing button being mistaken for an oversight.
+// (SOU-187 milestone 9, SOU-221/SOU-233): display, model picker and
+// generation ("Générer"/"Régénérer" -> `generate-requested`, handled by
+// `on_meeting_detail_summarize` in main.rs). Not ported: the template
+// picker (generation always uses the Settings default template).
 export struct StructuredActionItem {
     text: string,
     owner: string, // empty when there's no owner
@@ -32,26 +31,83 @@ export component SummarySection inherits VerticalLayout {
     in property <[string]> open-questions;
     in property <bool> is-generating: false;
     in property <string> generation-progress: "";
+    // Last generation failure, empty when the last attempt succeeded or none
+    // was made. Kept apart from `generation-progress`, which is only
+    // rendered while `is-generating` - an error written there vanished the
+    // instant generation stopped, so a failed click looked like a no-op.
+    in property <string> generation-error: "";
 
     callback generate-requested();
 
     spacing: 8px;
 
-    if root.summary == "" && !root.is-generating: VerticalLayout {
-        spacing: 4px;
+    // MeetingSummarySection.svelte's collapsed "generate" CTA card, with the
+    // model picker kept inline (SOU-233 AC4) instead of Tauri's picker-less
+    // one-click card.
+    if root.summary == "" && !root.is-generating: Rectangle {
+        border-width: 1px;
+        border-color: Theme.ghost-border;
 
-        Text {
-            text: @tr("R\u{e9}sum\u{e9}");
-            font-size: 11px;
-            font-weight: 600;
-            color: Theme.text-muted;
-        }
+        VerticalLayout {
+        padding: 18px;
+        spacing: 14px;
 
         HorizontalLayout {
+            spacing: 13px;
+            alignment: start;
+
+            Rectangle {
+                width: 26px;
+                height: 34px;
+                horizontal-stretch: 0;
+
+                LucideIcon {
+                    size: 20px;
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
+                    icon: IconSet.WandSparkles;
+                    icon-color: Theme.accent;
+                }
+            }
+
+            VerticalLayout {
+                spacing: 2px;
+                alignment: center;
+
+                Text {
+                    text: @tr("Générer le résumé");
+                    font-family: "Archivo SemiBold";
+                    font-size: 14px;
+                    color: Theme.text-primary;
+                }
+                Text {
+                    text: @tr("Points clés et actions, générés sur l’appareil");
+                    font-size: 12px;
+                    color: Theme.text-muted;
+                    wrap: word-wrap;
+                }
+            }
+        }
+
+        if root.available-models.length == 0: Text {
+            text: @tr("Aucun fournisseur de résumé disponible. Activez Apple Intelligence ou connectez Ollama dans Réglages › IA.");
+            font-size: 12px;
+            color: Theme.text-muted;
+            wrap: word-wrap;
+        }
+
+        if root.generation-error != "": Text {
+            text: @tr("La génération du résumé a échoué : {}", root.generation-error);
+            font-size: 12px;
+            color: Theme.danger;
+            wrap: word-wrap;
+        }
+
+        if root.available-models.length > 0: HorizontalLayout {
             alignment: start;
             spacing: 8px;
-            
-            if root.available-models.length > 0 : ThemedComboBox {
+
+            ThemedComboBox {
                 model: root.available-models;
                 option-values: root.available-model-ids;
                 current-value: root.selected-model-label;
@@ -66,7 +122,7 @@ export component SummarySection inherits VerticalLayout {
 
             gen-btn := Rectangle {
                 width: gen-txt.preferred-width + 24px;
-                height: 28px;
+                height: Theme.settings-control-height;
                 border-radius: 4px;
                 border-width: gen-focus.has-focus ? 2px : 0px;
                 border-color: Theme.text-primary;
@@ -95,7 +151,7 @@ export component SummarySection inherits VerticalLayout {
                 }
 
                 gen-txt := Text {
-                    text: @tr("Générer le résumé");
+                    text: @tr("Générer");
                     font-family: "Archivo SemiBold";
                     font-size: 13px;
                     color: Theme.text-primary;
@@ -104,104 +160,106 @@ export component SummarySection inherits VerticalLayout {
                 }
             }
         }
+        }
     }
 
     if root.is-generating: VerticalLayout {
-        spacing: 4px;
+        spacing: 10px;
 
-        Text {
-            text: @tr("R\u{e9}sum\u{e9}");
-            font-size: 11px;
-            font-weight: 600;
-            color: Theme.text-muted;
+        HorizontalLayout {
+            height: 22px;
+            vertical-stretch: 0;
+            spacing: 8px;
+
+            Rectangle {
+                width: 15px;
+                horizontal-stretch: 0;
+
+                LucideIcon {
+                    size: 15px;
+                    y: (parent.height - self.height) / 2;
+                    icon: IconSet.Sparkles;
+                    icon-color: Theme.accent;
+                    filled: true;
+                }
+            }
+
+            Text {
+                text: @tr("R\u{e9}sum\u{e9}");
+                font-family: "Archivo SemiBold";
+                font-size: 13px;
+                color: Theme.text-primary;
+                vertical-alignment: center;
+            }
         }
 
-        Text {
-            text: root.generation-progress != "" ? root.generation-progress : @tr("Génération en cours...");
-            color: Theme.text-muted;
-            font-size: 12px;
+        Rectangle {
+            min-height: 80px;
+            border-width: 1px;
+            border-color: Theme.surface-4;
+
+            VerticalLayout {
+                padding: 12px;
+
+                Text {
+                    text: root.generation-progress != "" ? root.generation-progress : @tr("Génération en cours...");
+                    color: Theme.text-muted;
+                    font-size: 12.5px;
+                    wrap: word-wrap;
+                }
+            }
         }
     }
 
     if root.summary != "" && !root.is-generating: VerticalLayout {
         spacing: 10px;
 
+        // Title row as in MeetingSummarySection.svelte: icon + title on the
+        // left, the model that produced it on the right. The picker and
+        // "Régénérer" live in their own row at the bottom (below), where a
+        // 36px combo no longer towers over a 24px button in the title line.
         HorizontalLayout {
+            height: 22px;
+            vertical-stretch: 0;
             spacing: 8px;
-            alignment: space-between;
+
+            Rectangle {
+                width: 15px;
+                horizontal-stretch: 0;
+
+                LucideIcon {
+                    size: 15px;
+                    y: (parent.height - self.height) / 2;
+                    icon: IconSet.Sparkles;
+                    icon-color: Theme.accent;
+                    filled: true;
+                }
+            }
 
             Text {
                 text: @tr("R\u{e9}sum\u{e9}");
+                font-family: "Archivo SemiBold";
+                font-size: 13px;
+                color: Theme.text-primary;
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+            }
+
+            if root.summary-model-label != "": Text {
+                text: root.summary-model-label;
+                font-family: "JetBrains Mono";
                 font-size: 11px;
-                font-weight: 600;
                 color: Theme.text-muted;
                 vertical-alignment: center;
+                horizontal-stretch: 0;
             }
+        }
 
-            HorizontalLayout {
-                spacing: 8px;
-                alignment: end;
-                if root.summary-model-label != "": Text {
-                    text: root.summary-model-label;
-                    font-family: "monospace";
-                    font-size: 10.5px;
-                    color: Theme.text-faint;
-                    vertical-alignment: center;
-                }
-                
-                if root.available-models.length > 0 : ThemedComboBox {
-                    model: root.available-models;
-                    option-values: root.available-model-ids;
-                    current-value: root.selected-model-label;
-                    combo-width: 250px;
-                    selected(id) => { root.selected-model-id = id; }
-                selected-index(idx) => {
-                    root.selected-model-label = (idx >= 0 && idx < root.available-models.length)
-                        ? root.available-models[idx]
-                        : root.selected-model-id;
-                }
-                }
-
-                Rectangle {
-                    width: regen-txt.preferred-width + 16px;
-                    height: 24px;
-                    border-radius: 4px;
-                    border-width: regen-focus.has-focus ? 2px : 0px;
-                    border-color: Theme.accent;
-                    background: regen-area.pressed ? Theme.surface-4 : regen-area.has-hover ? Theme.surface-3 : Theme.surface-2;
-
-                    accessible-role: button;
-                    accessible-label: @tr("Régénérer");
-                    accessible-action-default => { root.generate-requested(); }
-
-                    forward-focus: regen-focus;
-                    regen-focus := FocusScope {
-                        key-pressed(event) => {
-                            if event.text == Key.Return || event.text == Key.Space {
-                                root.generate-requested();
-                                return accept;
-                            }
-                            return reject;
-                        }
-                    }
-
-                    regen-area := TouchArea {
-                        clicked => {
-                            regen-focus.focus();
-                            root.generate-requested();
-                        }
-                    }
-
-                    regen-txt := Text {
-                        text: @tr("Régénérer");
-                        font-family: "Archivo SemiBold";
-                        font-size: 11px;
-                        color: Theme.text-secondary;
-                        horizontal-alignment: center;
-                        vertical-alignment: center;
-                    }
-                }
-            }
+        if root.generation-error != "": Text {
+            text: @tr("La génération du résumé a échoué : {}", root.generation-error);
+            font-size: 12px;
+            color: Theme.danger;
+            wrap: word-wrap;
         }
 
         if root.summary-is-stale: Text {
@@ -302,6 +360,65 @@ export component SummarySection inherits VerticalLayout {
                 font-size: 12px;
                 color: Theme.text-secondary;
                 wrap: word-wrap;
+            }
+        }
+
+        if root.available-models.length > 0: HorizontalLayout {
+            alignment: start;
+            spacing: 8px;
+
+            ThemedComboBox {
+                model: root.available-models;
+                option-values: root.available-model-ids;
+                current-value: root.selected-model-label;
+                combo-width: 250px;
+                selected(id) => { root.selected-model-id = id; }
+                selected-index(idx) => {
+                    root.selected-model-label = (idx >= 0 && idx < root.available-models.length)
+                        ? root.available-models[idx]
+                        : root.selected-model-id;
+                }
+            }
+
+            Rectangle {
+                width: regen-txt.preferred-width + 24px;
+                height: Theme.settings-control-height;
+                horizontal-stretch: 0;
+                border-radius: 4px;
+                border-width: regen-focus.has-focus ? 2px : 1px;
+                border-color: regen-focus.has-focus ? Theme.accent : Theme.ghost-border;
+                background: regen-area.pressed ? Theme.surface-2 : regen-area.has-hover ? Theme.surface-4 : Theme.surface-3;
+
+                accessible-role: button;
+                accessible-label: @tr("Régénérer");
+                accessible-action-default => { root.generate-requested(); }
+
+                forward-focus: regen-focus;
+                regen-focus := FocusScope {
+                    key-pressed(event) => {
+                        if event.text == Key.Return || event.text == Key.Space {
+                            root.generate-requested();
+                            return accept;
+                        }
+                        return reject;
+                    }
+                }
+
+                regen-area := TouchArea {
+                    clicked => {
+                        regen-focus.focus();
+                        root.generate-requested();
+                    }
+                }
+
+                regen-txt := Text {
+                    text: @tr("Régénérer");
+                    font-family: "Archivo SemiBold";
+                    font-size: 13px;
+                    color: Theme.text-primary;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
             }
         }
     }

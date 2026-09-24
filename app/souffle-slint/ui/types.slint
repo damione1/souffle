@@ -5,6 +5,14 @@
 
 export enum RecordingMode { idle, dictation, meeting }
 
+// Where the system-audio leg of the meeting being recorded stands, from
+// souffle_lib's live `SystemAudioStatus` snapshot (system-audio.ts's
+// `liveSystemAudioState` in the Tauri UI). Three states, not a bool: until
+// the capture thread has the tap up or has given up on it there is no
+// verdict yet, and reading that gap as "unavailable" is exactly the false
+// warning a healthy meeting used to show.
+export enum LiveSystemAudio { pending, active, unavailable }
+
 // Mirrors souffle_lib::engine::Speaker at the compiled UI boundary.
 export enum SpeakerRole { me, them }
 

@@ -48,6 +48,7 @@ export component MeetingDetail inherits Rectangle {
     in property <[string]> summary-open-questions;
     in property <bool> summary-is-generating: false;
     in property <string> summary-generation-progress: "";
+    in property <string> summary-generation-error: "";
     in property <[string]> summary-available-models;
     in property <[string]> summary-available-model-ids;
     in-out property <string> summary-selected-model-id;
@@ -174,6 +175,12 @@ export component MeetingDetail inherits Rectangle {
                     }
 
                     Text {
+                        // Pinned to the left edge: without an explicit x/width a
+                        // Text child is centred in this full-width hover box, which
+                        // is what pushed the title right of "History" and the meta
+                        // line below (SOU-241 AC1, seen live).
+                        x: 0px;
+                        width: parent.width;
                         text: root.title;
                         font-family: "Archivo SemiBold";
                         font-size: 24px;
@@ -229,14 +236,47 @@ export component MeetingDetail inherits Rectangle {
                     }
                 }
 
+                // MeetingHeaderSection.svelte's participant row: a Users icon
+                // then one outlined chip per name, same 1px square outline
+                // as the model chip above. Flexbox so a long invite list
+                // wraps instead of overflowing the header.
                 if root.participant-labels.length > 0: HorizontalLayout {
-                    spacing: 8px;
+                    spacing: 7px;
                     alignment: start;
 
-                    for label in root.participant-labels: Text {
-                        text: label;
-                        color: Theme.text-secondary;
-                        font-size: 11px;
+                    Rectangle {
+                        width: 13px;
+                        height: 22px;
+                        horizontal-stretch: 0;
+                        vertical-stretch: 0;
+
+                        LucideIcon {
+                            size: 13px;
+                            y: (parent.height - self.height) / 2;
+                            icon: IconSet.Users;
+                            icon-color: Theme.text-muted;
+                        }
+                    }
+
+                    FlexboxLayout {
+                        flex-wrap: wrap;
+                        spacing: 7px;
+                        horizontal-stretch: 1;
+
+                        for label in root.participant-labels: Rectangle {
+                            width: chip-text.preferred-width + 18px;
+                            height: 22px;
+                            border-width: 1px;
+                            border-color: Theme.rule;
+
+                            chip-text := Text {
+                                text: label;
+                                color: Theme.text-tertiary;
+                                font-size: 11.5px;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                        }
                     }
                 }
             }
@@ -447,6 +487,7 @@ export component MeetingDetail inherits Rectangle {
                     open-questions: root.summary-open-questions;
                     is-generating: root.summary-is-generating;
                     generation-progress: root.summary-generation-progress;
+                    generation-error: root.summary-generation-error;
                     generate-requested => { root.summarize-requested(); }
                 }
             }
