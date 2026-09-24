@@ -23,8 +23,33 @@ for arg in "$@"; do
   esac
 done
 
+# Match on the ASCII tail only: Launch Services starts the binary with a
+# decomposed "é" (e + U+0301) in its path, so a pattern typed with the
+# precomposed "é" never matches and the old Nightly survives - `open` then just
+# brings the stale build forward. "Nightly.app/" never matches
+# /Applications/Soufflé.app.
+nightly_proc="Nightly.app/Contents/MacOS/souffle"
+
+# Stop every running Nightly and wait until it has exited, so `open` launches
+# the fresh bundle instead of re-activating a dying instance.
+stop_nightly() {
+  pkill -f "$nightly_proc" 2>/dev/null || true
+  local i
+  for i in {1..50}; do
+    pgrep -f "$nightly_proc" >/dev/null || return 0
+    sleep 0.1
+  done
+  pkill -9 -f "$nightly_proc" 2>/dev/null || true
+  for i in {1..20}; do
+    pgrep -f "$nightly_proc" >/dev/null || return 0
+    sleep 0.1
+  done
+  echo "error: Soufflé Nightly is still running after SIGKILL" >&2
+  return 1
+}
+
 # Always stop Nightly before a rebuild. Never touch /Applications/Soufflé.
-pkill -f "Soufflé Nightly.app/Contents/MacOS/souffle" 2>/dev/null || true
+stop_nightly
 # Same-name debug bundle from earlier builds: TCC shows "Soufflé" and
 # Launch Services can pick it over Nightly.
 if [[ -d "$old_debug" ]]; then
@@ -60,7 +85,7 @@ bundle_args=(--debug --nightly)
 [[ "$dmg_mode" -eq 1 ]] && bundle_args+=(--dmg)
 "$root/scripts/bundle-macos.sh" "${bundle_args[@]}"
 
-pkill -f "Soufflé Nightly.app/Contents/MacOS/souffle" 2>/dev/null || true
+stop_nightly
 
 if [[ "$dmg_mode" -eq 1 ]]; then
   open "$dmg"
