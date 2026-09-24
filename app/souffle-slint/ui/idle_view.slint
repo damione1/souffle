@@ -65,7 +65,7 @@ export component IdleView inherits Rectangle {
     // nothing else took.
     TouchArea {
         scroll-event(event) => {
-            history-scroll.viewport-y = clamp(history-scroll.viewport-y + event.delta-y, min(0px, history-scroll.height - history-scroll.viewport-height), 0px);
+            history-scroll.content-y = clamp(history-scroll.content-y + event.delta-y, min(0px, history-scroll.height - history-scroll.content-height), 0px);
             accept
         }
     }
@@ -135,11 +135,11 @@ export component IdleView inherits Rectangle {
             }
         }
 
-        // Stretch pool leftover. Do not bind `viewport-height` to the
+        // Stretch pool leftover. Do not bind `content-height` to the
         // child's `.height` (binding loop, see transcript_section.slint).
         history-scroll := Flickable {
             vertical-stretch: 1;
-            viewport-width: self.width;
+            content-width: self.width;
 
             VerticalLayout {
                 width: parent.width;

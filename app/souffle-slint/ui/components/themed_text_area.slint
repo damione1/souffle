@@ -29,7 +29,7 @@ export component ThemedTextArea inherits Rectangle {
         y: 8px;
         width: parent.width - 24px;
         height: parent.height - 16px;
-        viewport-width: self.width;
+        content-width: self.width;
 
         input := TextInput {
             width: parent.width;
@@ -44,18 +44,18 @@ export component ThemedTextArea inherits Rectangle {
             accessible-label: root.control-label;
             edited => { root.edited(self.text); }
             cursor-position-changed(position) => {
-                // Slint's viewport-y is the translation applied to the
+                // Slint's content-y is the translation applied to the
                 // content: 0px is the top and scrolling down makes it
                 // negative. Convert it to a positive visible offset only for
                 // the caret math, then write the clamped negative translation.
-                if position.y < -parent.viewport-y {
-                    parent.viewport-y = -max(0px, min(
-                        max(0px, parent.viewport-height - parent.height),
+                if position.y < -parent.content-y {
+                    parent.content-y = -max(0px, min(
+                        max(0px, parent.content-height - parent.height),
                         position.y - 4px
                     ));
-                } else if position.y + self.font-size * 1.5 > -parent.viewport-y + parent.height {
-                    parent.viewport-y = -max(0px, min(
-                        max(0px, parent.viewport-height - parent.height),
+                } else if position.y + self.font-size * 1.5 > -parent.content-y + parent.height {
+                    parent.content-y = -max(0px, min(
+                        max(0px, parent.content-height - parent.height),
                         position.y + self.font-size * 1.5 - parent.height
                     ));
                 }

@@ -70,7 +70,7 @@ export component TranscriptSection inherits VerticalLayout {
     in property <float> spacer-before: 0.0;
     in property <float> spacer-after: 0.0;
     // Two-way bound down from `MeetingDetail`/`MainWindow` to
-    // `flick.viewport-y` below, so `main.rs` can poll the real scroll
+    // `flick.content-y` below, so `main.rs` can poll the real scroll
     // position and decide the next slice - see the doc comment on
     // `visible_window` in `transcript.rs` for why this can't be pure Slint
     // (variable-height rows need real text layout to size precisely, which
@@ -214,12 +214,12 @@ export component TranscriptSection inherits VerticalLayout {
         flick := Flickable {
             width: parent.width - 10px;
             height: 100%;
-            viewport-width: self.width;
-            viewport-y <=> root.scroll-top;
+            content-width: self.width;
+            content-y <=> root.scroll-top;
 
             TouchArea {
-                width: parent.viewport-width;
-                height: parent.viewport-height;
+                width: parent.content-width;
+                height: parent.content-height;
                 clicked => { root.background-clicked(); }
             }
 

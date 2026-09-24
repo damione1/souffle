@@ -103,9 +103,9 @@ export component SnippetsSection inherits VerticalLayout {
     snippets-list := Flickable {
         height: min(root.list-content-height * 1px, 420px);
         visible: root.entry-count > 0;
-        viewport-width: self.width;
-        viewport-height: root.list-content-height * 1px;
-        viewport-y <=> root.list-scroll-top;
+        content-width: self.width;
+        content-height: root.list-content-height * 1px;
+        content-y <=> root.list-scroll-top;
 
         VerticalLayout {
         width: snippets-list.width;
