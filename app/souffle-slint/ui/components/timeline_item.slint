@@ -113,6 +113,15 @@ export component TimelineItemRow inherits Rectangle {
                     VerticalLayout {
                         alignment: start;
                         vertical-stretch: 0;
+                        // Trailing column (duration, time, copy, delete/confirm):
+                        // only its children have widths, not the column itself,
+                        // so without this it keeps the default non-zero stretch
+                        // and competes with the title `Text` for leftover space.
+                        // Pin it to exactly its content width, so the title is
+                        // the only thing that grows or elides, and the
+                        // "Confirmer" pill widening the delete slot can only take
+                        // space from the title, never from the time (SOU-215).
+                        horizontal-stretch: 0;
 
                         HorizontalLayout {
                             spacing: 10px;
