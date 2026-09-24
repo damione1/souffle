@@ -15,8 +15,8 @@
       {
         "label": "main",
         "title": "Soufflé",
-        "width": 860,
-        "height": 1040,
+        "width": 1040,
+        "height": 1280,
         "minWidth": 680,
         "minHeight": 560,
         "resizable": true,
