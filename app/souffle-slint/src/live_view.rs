@@ -78,14 +78,18 @@ pub fn push_live_blocks(window: &MainWindow, live_state: &LiveTranscriptState) {
     window.set_live_transcript_empty(is_empty);
 }
 
-/// What a live row renders. `words` is deliberately left out: it is rebuilt
-/// from `text` on every `build_blocks`, so comparing it would always differ.
+/// What a live row renders. `words` is compared by content, not by model
+/// identity (a fresh model is built on every `build_blocks`): the same text
+/// can flip from provisional to finalized, which only changes which words
+/// are clickable.
 fn same_rendering(a: &TranscriptBlock, b: &TranscriptBlock) -> bool {
     a.text == b.text
         && a.has_speaker == b.has_speaker
         && a.speaker == b.speaker
         && a.timestamp == b.timestamp
         && a.start_time == b.start_time
+        && a.words.row_count() == b.words.row_count()
+        && a.words.iter().zip(b.words.iter()).all(|(x, y)| x == y)
 }
 
 fn sync_blocks(model: &VecModel<TranscriptBlock>, blocks: Vec<TranscriptBlock>) {
@@ -241,7 +245,8 @@ mod tests {
             scroll.size().height
         );
 
-        let text = text_element(&window, "Bonjour tout le monde");
+        // Words render as separate items (click-to-alias), so look one up.
+        let text = text_element(&window, "monde");
         assert!(text.size().height > 0.0);
         let (top, bottom) = (
             scroll.absolute_position().y,
@@ -276,7 +281,7 @@ mod tests {
         }
 
         let scroll = element(&window, "RecordingView::live-scroll");
-        let newest = text_element(&window, &format!("{long} n23"));
+        let newest = text_element(&window, "n23");
         let bottom = scroll.absolute_position().y + scroll.size().height;
         let newest_bottom = newest.absolute_position().y + newest.size().height;
         assert!(
@@ -344,7 +349,7 @@ mod tests {
                 &live_state,
                 &final_seg(
                     &format!(
-                        "Paragraphe {i} assez long pour prendre de la place à l'écran pendant la réunion."
+                        "Marque{i} assez long pour prendre de la place à l'écran pendant la réunion."
                     ),
                     f64::from(i) * 10.0,
                     speaker,
@@ -356,9 +361,9 @@ mod tests {
             push(i);
         }
         assert!(
-            visible_rows(&window, "Paragraphe ")
+            visible_rows(&window, "Marque")
                 .iter()
-                .any(|(label, _)| label.starts_with("Paragraphe 19 ")),
+                .any(|(label, _)| label == "Marque19"),
             "not following the bottom before the scroll up"
         );
 
@@ -378,21 +383,132 @@ mod tests {
                 delta_y: 400.0,
             });
         settle();
-        let before = visible_rows(&window, "Paragraphe ");
+        let before = visible_rows(&window, "Marque");
         assert!(
-            !before
-                .iter()
-                .any(|(label, _)| label.starts_with("Paragraphe 19 ")),
+            !before.iter().any(|(label, _)| label == "Marque19"),
             "the scroll up did not move away from the bottom: {before:?}"
         );
 
         for i in 20..24 {
             push(i);
         }
-        let after = visible_rows(&window, "Paragraphe ");
+        let after = visible_rows(&window, "Marque");
         assert_eq!(
             before, after,
             "the view moved while the reader was scrolled up"
+        );
+    }
+
+    fn click(window: &MainWindow, element: &ElementHandle) {
+        let position = slint::LogicalPosition::new(
+            element.absolute_position().x + element.size().width / 2.0,
+            element.absolute_position().y + element.size().height / 2.0,
+        );
+        let button = slint::platform::PointerEventButton::Left;
+        window
+            .window()
+            .dispatch_event(slint::platform::WindowEvent::PointerMoved { position });
+        window
+            .window()
+            .dispatch_event(slint::platform::WindowEvent::PointerPressed { position, button });
+        window
+            .window()
+            .dispatch_event(slint::platform::WindowEvent::PointerReleased { position, button });
+        settle();
+    }
+
+    /// The popover's text inputs whose current value is `value`.
+    fn inputs_with_value(window: &MainWindow, value: &'static str) -> Vec<ElementHandle> {
+        use i_slint_backend_testing::ElementRoot;
+        window
+            .root_element()
+            .query_descendants()
+            .match_predicate(move |e| e.accessible_value().is_some_and(|v| v == value))
+            .find_all()
+    }
+
+    // SOU-256 AC5: clicking a finalized live word opens the same dictionary
+    // popover as the post-meeting transcript, prefilled with the heard word;
+    // it survives more text streaming in underneath, and Save reaches the
+    // live callback with (term, heard word).
+    #[test]
+    fn clicking_a_final_live_word_saves_a_dictionary_alias() {
+        let window = meeting_window();
+        let saved: Rc<std::cell::RefCell<Vec<(String, String)>>> = Rc::default();
+        let sink = saved.clone();
+        window.on_live_transcript_alias_save_requested(move |term, heard| {
+            sink.borrow_mut().push((term.into(), heard.into()));
+        });
+        let live_state: LiveTranscriptState = Arc::new(Mutex::new(LiveTranscript::new()));
+        apply_live_segment(
+            &window,
+            &live_state,
+            &final_seg("On migre vers Cubernetis demain", 0.0, Speaker::Me),
+        );
+        settle();
+
+        click(&window, &text_element(&window, "Cubernetis"));
+        assert_eq!(
+            inputs_with_value(&window, "Cubernetis").len(),
+            1,
+            "the popover did not open prefilled with the clicked word"
+        );
+
+        // Text keeps arriving (a partial, then finals) under the open popover.
+        let mut partial = final_seg("et ensuite", 2.0, Speaker::Them);
+        partial.is_final = false;
+        apply_live_segment(&window, &live_state, &partial);
+        apply_live_segment(
+            &window,
+            &live_state,
+            &final_seg("et ensuite on verra", 2.0, Speaker::Them),
+        );
+        apply_live_segment(&window, &live_state, &final_seg("oui", 2.5, Speaker::Me));
+        settle();
+
+        let term = inputs_with_value(&window, "");
+        assert!(
+            !term.is_empty(),
+            "the popover closed while text streamed in"
+        );
+        term[0].set_accessible_value("Kubernetes");
+        settle();
+        use i_slint_backend_testing::ElementRoot;
+        let save = window
+            .root_element()
+            .query_descendants()
+            .match_predicate(|e| {
+                e.accessible_role() == Some(i_slint_backend_testing::AccessibleRole::Button)
+                    && e.accessible_label()
+                        .is_some_and(|l| l.to_lowercase().contains("alias"))
+            })
+            .find_first()
+            .expect("no save button in the popover");
+        save.invoke_accessible_default_action();
+        settle();
+
+        assert_eq!(
+            saved.borrow().as_slice(),
+            &[("Kubernetes".to_string(), "Cubernetis".to_string())]
+        );
+    }
+
+    // SOU-256 AC5: the provisional tail is still being rewritten by the
+    // engine - its words do not open the popover.
+    #[test]
+    fn provisional_live_words_are_not_clickable() {
+        let window = meeting_window();
+        let live_state: LiveTranscriptState = Arc::new(Mutex::new(LiveTranscript::new()));
+        let mut partial = final_seg("Provisoire", 0.0, Speaker::Me);
+        partial.is_final = false;
+        apply_live_segment(&window, &live_state, &partial);
+        settle();
+        settle();
+
+        click(&window, &text_element(&window, "Provisoire"));
+        assert!(
+            inputs_with_value(&window, "Provisoire").is_empty(),
+            "a provisional word opened the dictionary popover"
         );
     }
 

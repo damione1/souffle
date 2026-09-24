@@ -1730,6 +1730,24 @@ fn clear_live_transcript(window: &MainWindow, live_state: &LiveTranscriptState) 
     push_live_blocks(window, live_state);
 }
 
+/// Saves a dictionary alias from a transcript word's popover - the
+/// post-meeting transcript and the live meeting view share it (SOU-223,
+/// SOU-256 AC5). A blank term is ignored, a blank pronunciation stored as
+/// none.
+fn save_dictionary_alias(handle: &AppHandle, term: &str, pronunciation: &str) {
+    let term = term.trim().to_string();
+    if term.is_empty() {
+        return;
+    }
+    let pronunciation = pronunciation.trim();
+    let pronunciation = (!pronunciation.is_empty()).then(|| pronunciation.to_string());
+    if let Err(e) =
+        souffle_lib::commands::add_dictionary_entry(Arc::clone(handle), term, pronunciation, None)
+    {
+        eprintln!("Failed to add dictionary alias: {e}");
+    }
+}
+
 /// Anchors the live elapsed clock to the real recording start time (AC6,
 /// SOU-022): seeds the view's offset from the accumulator's
 /// `session_started_at` wall clock, so the toolbar chrono neither drifts
@@ -3769,18 +3787,12 @@ fn wire_callbacks(
 
     let handle = tauri_handle.clone();
     window.on_meeting_detail_transcript_alias_save_requested(move |term, pronunciation| {
-        let term = term.trim().to_string();
-        if term.is_empty() {
-            return;
-        }
-        let pronunciation = pronunciation.trim();
-        let pronunciation = (!pronunciation.is_empty()).then(|| pronunciation.to_string());
-        let state = Arc::clone(&handle);
-        if let Err(e) =
-            souffle_lib::commands::add_dictionary_entry(state, term, pronunciation, None)
-        {
-            eprintln!("Failed to add dictionary alias: {e}");
-        }
+        save_dictionary_alias(&handle, &term, &pronunciation);
+    });
+    // SOU-256 AC5: the live meeting view's word click saves the same way.
+    let handle = tauri_handle.clone();
+    window.on_live_transcript_alias_save_requested(move |term, pronunciation| {
+        save_dictionary_alias(&handle, &term, &pronunciation);
     });
 
     let weak = window.as_weak();

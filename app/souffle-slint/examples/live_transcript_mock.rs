@@ -113,6 +113,10 @@ fn main() {
         RecordingMode::Meeting
     });
     window.set_live_system_audio(LiveSystemAudio::Active);
+    // The app saves to the dictionary here; the mock just reports it.
+    window.on_live_transcript_alias_save_requested(|term, pronunciation| {
+        eprintln!("alias saved: {term:?} <- {pronunciation:?}");
+    });
 
     let live_state: LiveTranscriptState = Arc::new(Mutex::new(LiveTranscript::new()));
     let _poll = live_view::start_live_transcript_timer(window.as_weak(), live_state.clone());

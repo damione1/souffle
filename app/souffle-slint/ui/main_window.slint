@@ -427,6 +427,8 @@ export component MainWindow inherits Window {
     callback meeting-detail-audio-seek-requested(float);
     callback meeting-detail-transcript-paragraph-clicked(int, float);
     callback meeting-detail-transcript-alias-save-requested(string, string);
+    // Same save as above, from a word clicked in the live meeting view.
+    callback live-transcript-alias-save-requested(string, string);
     callback meeting-detail-export-requested(MeetingExportFormat);
     callback meeting-detail-export-audio-requested();
     callback meeting-detail-copy-transcript-requested();
@@ -648,6 +650,7 @@ export component MainWindow inherits Window {
         system-audio: root.live-system-audio;
         auto-paste: root.settings-auto-paste;
         stop-requested => { root.stop-requested(); }
+        alias-save-requested(term, pronunciation) => { root.live-transcript-alias-save-requested(term, pronunciation); }
         
         
     }

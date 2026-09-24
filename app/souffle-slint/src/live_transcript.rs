@@ -14,19 +14,29 @@ use souffle_lib::engine::{Speaker, TranscriptionSegment};
 use souffle_schema::paragraphs::PAUSE_THRESHOLD_SECONDS;
 use std::time::{Duration, Instant};
 
-use crate::transcript::speaker_fields;
+use crate::transcript::{build_words, speaker_fields};
 use crate::{SpeakerRole, TranscriptBlock, TranscriptWord, timeline};
 
-/// The live view renders `TranscriptBlock.text` directly
-/// (`recording_view.slint`), never `.words` - no per-word dictionary-alias
-/// click here (SOU-223 is post-meeting only). This just satisfies the
-/// shared struct's field with a single non-clickable word wrapping the
-/// whole text, matching the old `StyledText::from_plain_text` intent.
-fn plain_words(text: &str) -> slint::ModelRc<TranscriptWord> {
-    slint::ModelRc::new(slint::VecModel::from(vec![TranscriptWord {
-        text: text.into(),
-        clickable: false,
-    }]))
+/// `TranscriptBlock.words` for a live paragraph (SOU-256 AC5): finalized
+/// text tokenized like the post-meeting transcript, so its words open the
+/// dictionary-alias popover when clicked, followed by the provisional
+/// (tentative) tail with every token non-clickable - that text is still
+/// being rewritten by the engine and is not worth a dictionary entry yet.
+fn live_words(finalized: &str, provisional: Option<&str>) -> slint::ModelRc<TranscriptWord> {
+    let mut words = build_words(finalized);
+    if let Some(tail) = provisional.filter(|t| !t.is_empty()) {
+        if !finalized.is_empty() {
+            words.push(TranscriptWord {
+                text: " ".into(),
+                clickable: false,
+            });
+        }
+        words.extend(build_words(tail).into_iter().map(|w| TranscriptWord {
+            clickable: false,
+            ..w
+        }));
+    }
+    slint::ModelRc::new(slint::VecModel::from(words))
 }
 
 /// Tail window before a paragraph is committed (immutable).
@@ -96,7 +106,7 @@ impl LivePara {
             speaker,
             timestamp: self.timestamp.clone().into(),
             text: text.clone().into(),
-            words: plain_words(&text),
+            words: live_words(&self.text, tentative_suffix),
             recording_session_index: -1,
             start_time: self.start_time as f32,
             end_label: "".into(),
@@ -243,16 +253,21 @@ impl LiveTranscript {
     /// tentative text appended as a greyed suffix on the last paragraph of
     /// each speaker lane. Bounded to `LIVE_PARAGRAPH_WINDOW` entries.
     pub fn build_blocks(&self) -> Vec<TranscriptBlock> {
-        // Merge committed + tail into a single chronological list.
-        let all: Vec<&LivePara> = self.committed.iter().chain(self.tail.iter()).collect();
+        // Merge committed + tail into a single chronological list, ordered
+        // by paragraph start like the post-meeting grouper. Committed-then-
+        // tail order alone is by commit time: a short interjection committed
+        // before a still-running monologue jumped above it (SOU-256). The
+        // sort is stable, so equal starts keep their creation order.
+        let mut all: Vec<&LivePara> = self.committed.iter().chain(self.tail.iter()).collect();
+        all.sort_by(|a, b| {
+            a.start_time
+                .partial_cmp(&b.start_time)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
 
         // Take the last LIVE_PARAGRAPH_WINDOW entries.
         let start = all.len().saturating_sub(LIVE_PARAGRAPH_WINDOW);
         let window = &all[start..];
-
-        if window.is_empty() {
-            return Vec::new();
-        }
 
         // Find the last paragraph index for each speaker to attach tentative.
         let last_me_idx = window.iter().rposition(|p| p.speaker == Some(Speaker::Me));
@@ -290,7 +305,7 @@ impl LiveTranscript {
                 speaker: SpeakerRole::Me,
                 timestamp: "".into(),
                 text: text.into(),
-                words: plain_words(text),
+                words: live_words("", Some(text)),
                 recording_session_index: -1,
                 start_time: 0.0,
                 end_label: "".into(),
@@ -305,7 +320,7 @@ impl LiveTranscript {
                 speaker: SpeakerRole::Them,
                 timestamp: "".into(),
                 text: text.into(),
-                words: plain_words(text),
+                words: live_words("", Some(text)),
                 recording_session_index: -1,
                 start_time: 0.0,
                 end_label: "".into(),
@@ -448,6 +463,77 @@ pub mod tests {
         // The committed block's text must still be just "Alpha".
         assert!(!lt.committed.is_empty());
         assert_eq!(lt.committed[0].text, "Alpha");
+    }
+
+    // SOU-256 (reported live by Damien): a short Me interjection during a
+    // long Them monologue showed under it, then jumped above it once Me's
+    // paragraph was committed first - committed paragraphs were listed
+    // before tail ones regardless of time. Paragraphs are ordered by start
+    // time, like the post-meeting grouper, and never move once shown.
+    #[test]
+    fn committing_a_paragraph_does_not_reorder_the_view() {
+        let mut lt = LiveTranscript::new();
+        let order = |lt: &LiveTranscript| -> Vec<SpeakerRole> {
+            lt.build_blocks().iter().map(|b| b.speaker).collect()
+        };
+        // Them talks without a pause from 0:05 to 0:40 (one paragraph);
+        // Me says one thing at 0:17, long enough ago by the end to have
+        // left the tail window and been committed.
+        let mut me_spoke = false;
+        for i in 0..30 {
+            let t = 5.0 + f64::from(i) * 1.2;
+            lt.push_final(&seg("et encore", t, t + 1.0, true, Some(Speaker::Them)));
+            if t >= 17.0 && !me_spoke {
+                lt.push_final(&seg("Un deux trois", 17.0, 18.0, true, Some(Speaker::Me)));
+                assert_eq!(order(&lt), vec![SpeakerRole::Them, SpeakerRole::Me]);
+                me_spoke = true;
+            }
+        }
+        assert!(
+            !lt.committed.is_empty(),
+            "Me's paragraph should be committed"
+        );
+        assert_eq!(order(&lt), vec![SpeakerRole::Them, SpeakerRole::Me]);
+    }
+
+    // SOU-256: the very first partial of a meeting, before any final,
+    // must show - it used to be dropped by an early return on an empty
+    // paragraph window, leaving a blank view with the placeholder hidden.
+    #[test]
+    fn first_partial_shows_before_any_final() {
+        let mut lt = LiveTranscript::new();
+        lt.push_tentative(&seg("Bonjour", 0.0, 0.5, false, Some(Speaker::Them)));
+        let blocks = lt.build_blocks();
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0].text.as_str(), "Bonjour");
+        assert!(!lt.is_empty());
+    }
+
+    // SOU-256 AC5: finalized words are clickable (dictionary alias), the
+    // provisional tail never is.
+    #[test]
+    fn only_finalized_live_words_are_clickable() {
+        use slint::Model;
+        let mut lt = LiveTranscript::new();
+        lt.push_final(&seg(
+            "Bonjour Kubernetes",
+            0.0,
+            1.0,
+            true,
+            Some(Speaker::Me),
+        ));
+        lt.push_tentative(&seg("provisoire", 1.1, 1.3, false, Some(Speaker::Me)));
+        let blocks = lt.build_blocks();
+        assert_eq!(blocks.len(), 1);
+        let words: Vec<(String, bool)> = blocks[0]
+            .words
+            .iter()
+            .map(|w| (w.text.to_string(), w.clickable))
+            .collect();
+        assert!(words.contains(&("Kubernetes".into(), true)));
+        assert!(words.contains(&("provisoire".into(), false)));
+        let rebuilt: String = words.iter().map(|(t, _)| t.as_str()).collect();
+        assert_eq!(rebuilt, blocks[0].text.as_str());
     }
 
     // No zipper: same-speaker segments retain insertion order even with

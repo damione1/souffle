@@ -4,6 +4,7 @@ import { Theme } from "theme.slint";
 import { LucideIcon, IconSet } from "components/lucide_icon.slint";
 import { ThemedTextArea } from "components/themed_text_area.slint";
 import { TranscriptBlock, SpeakerLabels } from "components/transcript_section.slint";
+import { TranscriptWordFlow, DictionaryAliasPopover } from "components/transcript_words.slint";
 
 // LiveSessionCard.svelte parity surface. The two modes deliberately share
 // the session toolbar, while their bodies stay distinct: dictation is a
@@ -29,6 +30,9 @@ export component RecordingView inherits Rectangle {
 
     callback stop-requested();
     callback notes-changed(string);
+    // (term, pronunciation) saved from a live word's alias popover - the
+    // same handler as the post-meeting transcript's.
+    callback alias-save-requested(string, string);
 
     // Live meeting autoscroll (LiveSessionCard.svelte's scheduleAutoscroll),
     // done here rather than from Rust: follow the bottom while the reader
@@ -319,11 +323,20 @@ export component RecordingView inherits Rectangle {
             border-width: 1px;
             border-color: Theme.border-soft;
 
+            // Click a finalized word -> add it to the dictionary, same popover
+            // as the post-meeting transcript (SOU-223). Shared by all rows,
+            // so rows updating or scrolling underneath never touch it.
+            live-alias := DictionaryAliasPopover {
+                save-requested(term, pronunciation) => { root.alias-save-requested(term, pronunciation); }
+            }
+
             VerticalLayout {
                 padding-left: 18px;
                 padding-right: 18px;
                 padding-top: 16px;
-                padding-bottom: 16px;
+                // Bottom padding is inside live-content, not here: text that
+                // overflows scrolls to the card's border instead of stopping
+                // on a blank 16px strip that reads as a clipped UI.
                 spacing: 16px;
                 // SOU-256: no `alignment` here, on purpose. Any alignment
                 // other than the default `stretch` makes a layout give each
@@ -417,6 +430,7 @@ export component RecordingView inherits Rectangle {
                         width: parent.width;
                         alignment: start;
                         spacing: 10px;
+                        padding-bottom: 16px;
 
                         if root.live-transcript-empty: Text {
                             text: @tr("À l'écoute…");
@@ -445,12 +459,15 @@ export component RecordingView inherits Rectangle {
                                     color: Theme.text-faint;
                                 }
                             }
-                            Text {
+                            // Words of finalized text are clickable; the
+                            // provisional tail (tentative) never is, see
+                            // `LivePara::to_slint_block`.
+                            TranscriptWordFlow {
                                 width: parent.width;
-                                text: block.text;
+                                words: block.words;
                                 font-size: 15px;
                                 color: Theme.text-secondary;
-                                wrap: word-wrap;
+                                word-clicked(word) => { live-alias.open(word); }
                             }
                         }
                     }

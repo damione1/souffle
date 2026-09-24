@@ -1,0 +1,194 @@
+import { Theme } from "../theme.slint";
+import { ThemedLineEdit } from "themed_line_edit.slint";
+import { LucideIcon, IconSet } from "lucide_icon.slint";
+
+// Click-a-word -> dictionary alias (SOU-223), shared by the post-meeting
+// transcript (transcript_section.slint) and the live meeting view
+// (recording_view.slint, SOU-256).
+
+// One token of a paragraph's text (see `TranscriptBlock.words`): either a
+// clickable word (dictionary-alias candidate) or a literal run of
+// whitespace/punctuation/short/numeric text rendered as-is. Built in Rust
+// (`transcript::build_words`) from the same `tokenize_words`/
+// `is_clickable_word` logic `build_markdown_text` used to feed `StyledText`.
+export struct TranscriptWord {
+    text: string,
+    clickable: bool,
+}
+
+// SOU-223: a paragraph as a wrapping `FlexboxLayout` of `Text` items, a
+// clickable word being a plain `Text` in a `TouchArea` - no link styling,
+// no underline (see `TranscriptBlock.words` in transcript_section.slint for
+// why not `StyledText`).
+export component TranscriptWordFlow inherits FlexboxLayout {
+    in property <[TranscriptWord]> words;
+    in property <length> font-size: 13px;
+    in property <brush> color: Theme.text-primary;
+    // The exact token text of the clicked word.
+    callback word-clicked(string);
+
+    flex-wrap: wrap;
+    spacing: 0px;
+
+    for word in root.words: TouchArea {
+        enabled: word.clickable;
+        mouse-cursor: word.clickable ? pointer : default;
+        clicked => {
+            if word.clickable {
+                root.word-clicked(word.text);
+            }
+        }
+
+        Text {
+            text: word.text;
+            color: root.color;
+            font-size: root.font-size;
+        }
+    }
+}
+
+// The "add to dictionary" popover. One instance per view, opened for the
+// clicked word with `open(word)`; the popup shows at this element's
+// position. It keeps its own drafts, so the text underneath can keep
+// changing (live transcript) while it is open.
+//
+// A zero-size anchor rather than a `PopupWindow` subclass: Slint rejects any
+// access from an enclosing component to something inside a `PopupWindow`
+// (only builtin `show()`/`close()` are reachable), so the drafts and `open`
+// live on this wrapper and the popup content just reads `root.*`. Place it
+// under a plain (non-layout) parent so it takes no layout space.
+export component DictionaryAliasPopover inherits Rectangle {
+    // (term, pronunciation) once the user saves.
+    callback save-requested(string, string);
+
+    width: 0px;
+    height: 0px;
+
+    property <string> term-draft;
+    property <string> pronunciation-draft;
+
+    public function open(heard-as: string) {
+        root.term-draft = "";
+        root.pronunciation-draft = heard-as;
+        popup.show();
+    }
+
+    function save-and-close() {
+        if root.term-draft != "" {
+            root.save-requested(root.term-draft, root.pronunciation-draft);
+            popup.close();
+        }
+    }
+
+    popup := PopupWindow {
+        // Damien, 2026-09-23: the previous 260x190 with a 16px close button
+        // and an 11px title read as dated/cramped next to a full-width
+        // Save button - widened and given a touch more breathing room.
+        width: 288px;
+        height: 210px;
+        // The default `close-policy` (`close-on-click`, now deprecated)
+        // dismisses the popup on *any* click, including ones on its own
+        // `LineEdit`s/button - not just clicks outside it (found the hard
+        // way: every attempt to focus a field or press Save just closed the
+        // popup instead, confirmed by reading `i-slint-core-1.17.1/window.rs`:
+        // the old property maps to closing on every pressed event, while
+        // `close-on-click-outside` specifically checks `!mouse_inside_popup()`).
+        close-policy: PopupClosePolicy.close-on-click-outside;
+
+        FocusScope {
+            key-pressed(event) => {
+                if event.text == Key.Escape {
+                    popup.close();
+                    accept
+                } else {
+                    reject
+                }
+            }
+
+            Rectangle {
+                background: Theme.surface-2;
+                border-width: 1px;
+                border-color: Theme.accent;
+
+                VerticalLayout {
+                    padding: 16px;
+                    spacing: 12px;
+
+                    HorizontalLayout {
+                        alignment: space-between;
+
+                        Text {
+                            text: @tr("Alias de dictionnaire");
+                            font-family: "Archivo SemiBold";
+                            font-size: 13px;
+                            font-weight: 600;
+                            color: Theme.text-primary;
+                            vertical-alignment: center;
+                        }
+
+                        Rectangle {
+                            width: 24px;
+                            height: 24px;
+                            border-radius: 4px;
+                            background: cancel-area.has-hover ? Theme.surface-3 : transparent;
+
+                            accessible-role: button;
+                            accessible-label: @tr("Fermer");
+                            accessible-action-default => { popup.close(); }
+
+                            cancel-area := TouchArea {
+                                mouse-cursor: pointer;
+                                clicked => { popup.close(); }
+                            }
+
+                            LucideIcon {
+                                icon: IconSet.X;
+                                icon-color: cancel-area.has-hover ? Theme.text-primary : Theme.text-muted;
+                                size: 14px;
+                                x: (parent.width - self.width) / 2;
+                                y: (parent.height - self.height) / 2;
+                            }
+                        }
+                    }
+
+                    ThemedLineEdit {
+                        placeholder: @tr("Terme correct");
+                        text <=> root.term-draft;
+                        accepted => { root.save-and-close(); }
+                    }
+
+                    ThemedLineEdit {
+                        placeholder: @tr("Prononciation entendue");
+                        text <=> root.pronunciation-draft;
+                        accepted => { root.save-and-close(); }
+                    }
+
+                    Rectangle {
+                        height: 32px;
+                        border-radius: 4px;
+                        background: root.term-draft == "" ? Theme.surface-4 : (save-area.has-hover ? Theme.accent-hover : Theme.accent);
+
+                        accessible-role: button;
+                        accessible-label: @tr("Enregistrer l'alias");
+                        accessible-action-default => { root.save-and-close(); }
+
+                        save-area := TouchArea {
+                            enabled: root.term-draft != "";
+                            mouse-cursor: pointer;
+                            clicked => { root.save-and-close(); }
+                        }
+
+                        Text {
+                            text: @tr("Enregistrer");
+                            font-size: 13px;
+                            font-weight: 600;
+                            color: Theme.text-primary;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
