@@ -82,10 +82,6 @@ export component MainWindow inherits Window {
     in property <[TranscriptBlock]> live-transcript-blocks;
     in property <bool> live-transcript-empty: true;
     in property <int> live-elapsed-offset-seconds: 0;
-    in-out property <length> live-transcript-scroll-top: 0px;
-    out property <float> live-transcript-scroll-top-px: root.live-transcript-scroll-top / 1px;
-    in-out property <float> live-transcript-content-height;
-    in-out property <float> live-transcript-viewport-height;
     in property <float> audio-level: 0.0;
     // Polled from souffle_lib's live system-audio snapshot while a meeting
     // records (main.rs). Not derived from Settings: the Settings flags say
@@ -647,9 +643,6 @@ export component MainWindow inherits Window {
         live-transcript-blocks: root.live-transcript-blocks;
         live-transcript-empty: root.live-transcript-empty;
         live-elapsed-offset-seconds: root.live-elapsed-offset-seconds;
-        live-transcript-scroll-top <=> root.live-transcript-scroll-top;
-        live-transcript-content-height <=> root.live-transcript-content-height;
-        live-transcript-viewport-height <=> root.live-transcript-viewport-height;
         audio-level: root.audio-level;
         notes <=> root.live-notes;
         system-audio: root.live-system-audio;

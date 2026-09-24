@@ -222,17 +222,21 @@ impl LiveTranscript {
         }
     }
 
-    /// Expire stale tentative slots. Call this from the tick timer.
-    pub fn expire_tentatives(&mut self) {
-        if self.tentative_me.is_expired() {
-            self.tentative_me.clear();
+    /// Expire stale tentative slots. Call this from the tick timer. Returns
+    /// whether anything was dropped, i.e. whether the view needs a refresh.
+    pub fn expire_tentatives(&mut self) -> bool {
+        let mut expired = false;
+        for slot in [
+            &mut self.tentative_me,
+            &mut self.tentative_them,
+            &mut self.tentative_none,
+        ] {
+            if slot.is_expired() {
+                slot.clear();
+                expired = true;
+            }
         }
-        if self.tentative_them.is_expired() {
-            self.tentative_them.clear();
-        }
-        if self.tentative_none.is_expired() {
-            self.tentative_none.clear();
-        }
+        expired
     }
 
     /// Build the Slint model: committed + tail paragraphs, with the active
