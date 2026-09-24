@@ -1813,6 +1813,7 @@ fn show_recording_starting(
     pending_stop: &AtomicBool,
 ) {
     pending_stop.store(false, Ordering::Release);
+    window.set_recording_stop_pending(false);
     clear_live_transcript(window, live_state);
     window.set_live_elapsed_offset_seconds(0);
     if mode == RecordingMode::Meeting {
@@ -1828,6 +1829,7 @@ fn show_recording_starting(
 fn settle_recording_start(window: &MainWindow, result: Result<(), String>) -> Result<(), String> {
     window.set_recording_starting(false);
     if result.is_err() {
+        window.set_recording_stop_pending(false);
         window.set_recording_mode(RecordingMode::Idle);
     }
     result
@@ -3442,11 +3444,11 @@ fn wire_callbacks(
         let _ = &live_transcript_timer_keepalive;
         // The session does not exist yet: stopping now would fail and
         // leave the start to complete into a recording nobody asked for.
-        if weak
-            .upgrade()
-            .is_some_and(|current| current.get_recording_starting())
+        if let Some(current) = weak.upgrade()
+            && current.get_recording_starting()
         {
             pending_stop_for_request.store(true, Ordering::Release);
+            current.set_recording_stop_pending(true);
             return;
         }
         if stop_in_flight_for_request.swap(true, Ordering::AcqRel) {
@@ -6778,6 +6780,7 @@ mod tests {
         let pending_stop = std::sync::atomic::AtomicBool::new(true);
         window.set_live_notes("previous meeting".into());
         window.set_live_elapsed_offset_seconds(42);
+        window.set_recording_stop_pending(true);
 
         show_recording_starting(&window, &live_state, RecordingMode::Meeting, &pending_stop);
 
@@ -6787,6 +6790,7 @@ mod tests {
         assert_eq!(window.get_live_elapsed_offset_seconds(), 0);
         // A stale deferred stop from an earlier start never leaks into this one.
         assert!(!pending_stop.load(std::sync::atomic::Ordering::Acquire));
+        assert!(!window.get_recording_stop_pending());
     }
 
     #[test]
@@ -6801,12 +6805,16 @@ mod tests {
             RecordingMode::Dictation,
             &pending_stop,
         );
+        // A Stop clicked during the start dims the button (SOU-258)...
+        window.set_recording_stop_pending(true);
         assert_eq!(
             settle_recording_start(&window, Err("Model not loaded".into())),
             Err("Model not loaded".to_string())
         );
         assert_eq!(window.get_recording_mode(), RecordingMode::Idle);
         assert!(!window.get_recording_starting());
+        // ...and a failed start never leaves it dimmed for the next one.
+        assert!(!window.get_recording_stop_pending());
 
         show_recording_starting(
             &window,

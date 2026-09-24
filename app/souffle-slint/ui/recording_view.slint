@@ -29,9 +29,13 @@ export component RecordingView inherits Rectangle {
     in property <bool> auto-paste: false;
     // SOU-258: the view mounts on the click, before the session exists (a
     // meeting's engine reset takes seconds). While true, nothing is
-    // captured yet: the clock holds at 0:00, the body says so and Stop is
-    // not offered (a stop arriving meanwhile is deferred by main.rs).
+    // captured yet: the clock holds at 0:00 and the body says so. Stop
+    // stays live: main.rs defers a stop clicked now until the session
+    // exists, then stops it like any other.
     in property <bool> starting: false;
+    // A stop clicked during the start is queued behind it: the button dims
+    // and ignores further clicks until that stop has run.
+    in property <bool> stop-pending: false;
 
     callback stop-requested();
     callback notes-changed(string);
@@ -167,12 +171,12 @@ export component RecordingView inherits Rectangle {
                 height: 38px;
                 horizontal-stretch: 0;
                 accessible-role: button;
-                accessible-label: root.starting ? @tr("Démarrage…") : @tr("Arrêter l'enregistrement");
-                accessible-enabled: !root.starting;
+                accessible-label: @tr("Arrêter l'enregistrement");
+                accessible-enabled: !root.stop-pending;
                 accessible-action-default => { root.stop-requested(); }
 
                 key-pressed(event) => {
-                    if !root.starting && (event.text == Key.Return || event.text == Key.Space) {
+                    if !root.stop-pending && (event.text == Key.Return || event.text == Key.Space) {
                         root.stop-requested();
                         return accept;
                     }
@@ -183,10 +187,10 @@ export component RecordingView inherits Rectangle {
                     border-radius: 4px;
                     border-width: stop-control.has-focus ? 2px : 0px;
                     border-color: Theme.text-primary;
-                    background: root.starting ? Theme.danger.with-alpha(0.5) : stop-area.pressed ? Theme.danger-strong : stop-area.has-hover ? Theme.danger.with-alpha(0.9) : Theme.danger;
+                    background: root.stop-pending ? Theme.danger.with-alpha(0.5) : stop-area.pressed ? Theme.danger-strong : stop-area.has-hover ? Theme.danger.with-alpha(0.9) : Theme.danger;
 
                     stop-area := TouchArea {
-                        enabled: !root.starting;
+                        enabled: !root.stop-pending;
                         clicked => {
                             stop-control.focus();
                             root.stop-requested();

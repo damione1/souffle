@@ -79,6 +79,8 @@ export component MainWindow inherits Window {
     // failed start puts the mode back to idle.
     in-out property <RecordingMode> recording-mode: RecordingMode.idle;
     in property <bool> recording-starting: false;
+    // A stop that arrived during `recording-starting` and waits for it.
+    in property <bool> recording-stop-pending: false;
     in-out property <string> live-text;
     in-out property <string> live-tentative;
     in-out property <string> dictation-recovery-text;
@@ -648,6 +650,7 @@ export component MainWindow inherits Window {
         height: 100%;
         mode: root.recording-mode;
         starting: root.recording-starting;
+        stop-pending: root.recording-stop-pending;
         live-text: root.live-text;
         live-tentative: root.live-tentative;
         live-transcript-blocks: root.live-transcript-blocks;
