@@ -14,6 +14,10 @@ import { LucideIcon, IconSet } from "lucide_icon.slint";
 export struct TranscriptWord {
     text: string,
     clickable: bool,
+    // A word the engine is still holding (tentative): shown dimmed rather
+    // than hidden, so a word that was heard is visibly on screen even
+    // while its final form is pending.
+    provisional: bool,
 }
 
 // SOU-223: a paragraph as a wrapping `FlexboxLayout` of `Text` items, a
@@ -44,6 +48,7 @@ export component TranscriptWordFlow inherits FlexboxLayout {
             text: word.text;
             color: root.color;
             font-size: root.font-size;
+            opacity: word.provisional ? Theme.provisional-opacity : 1.0;
         }
     }
 }

@@ -45,7 +45,7 @@ use souffle_lib::state::AppState;
 mod live_transcript;
 mod live_view;
 use live_transcript::LiveTranscript;
-use live_view::{LiveTranscriptState, push_live_blocks, start_live_transcript_timer};
+use live_view::{LiveTranscriptState, push_dictation_words, push_live_blocks};
 use souffle_lib::transcript::{MeetingCalendarContext, MeetingParticipant, MeetingTranscript};
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -1774,6 +1774,7 @@ fn clear_live_transcript(window: &MainWindow, live_state: &LiveTranscriptState) 
     window.set_live_text(buffers.live.into());
     window.set_live_tentative(buffers.tentative.into());
     window.set_dictation_recovery_text(buffers.recovery.into());
+    push_dictation_words(window);
 
     {
         let mut live = live_state.lock().unwrap();
@@ -3291,13 +3292,6 @@ fn wire_callbacks(
     live_state: LiveTranscriptState,
 ) {
     let lists_models = lists_ui::SettingsListModels::install(window);
-    // Owned here (not by the caller): the keepalive clone below is captured
-    // by the long-lived stop callback, which is what actually keeps the
-    // repeating live-transcript timer alive for the window's lifetime.
-    let live_transcript_timer: Rc<RefCell<Option<slint::Timer>>> = Rc::new(RefCell::new(Some(
-        start_live_transcript_timer(window.as_weak(), live_state.clone()),
-    )));
-    let live_transcript_timer_keepalive = live_transcript_timer.clone();
 
     // Shared with load_meeting_audio/stop_audio_player/open_meeting_detail
     // and the play-pause/seek callbacks below - one loaded player at a
@@ -3443,7 +3437,6 @@ fn wire_callbacks(
     let handle_for_stop_request = tauri_handle.clone();
     window.on_stop_requested(move || {
         let _ = &live_notes_timer_keepalive;
-        let _ = &live_transcript_timer_keepalive;
         // The session does not exist yet: stopping now would fail and
         // leave the start to complete into a recording nobody asked for.
         // Capture is already running (SOU-260), so it stops here, at the

@@ -54,7 +54,7 @@ unsafe extern "C" {
         stop_label: *const std::ffi::c_char,
         a11y_label: *const std::ffi::c_char,
     );
-    fn pill_panel_set_live_text(text: *const std::ffi::c_char);
+    fn pill_panel_set_live_text(text: *const std::ffi::c_char, provisional_utf16: i32);
     fn pill_panel_push_rms(level: f32);
     fn pill_panel_restore_origin(x: f64, y: f64);
     fn pill_panel_get_origin(out_x: *mut f64, out_y: *mut f64) -> i32;
@@ -74,7 +74,7 @@ unsafe fn pill_panel_set_mode(
 ) {
 }
 #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
-unsafe fn pill_panel_set_live_text(_text: *const std::ffi::c_char) {}
+unsafe fn pill_panel_set_live_text(_text: *const std::ffi::c_char, _provisional_utf16: i32) {}
 #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
 unsafe fn pill_panel_push_rms(_level: f32) {}
 #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
@@ -362,7 +362,7 @@ pub fn sync(state: &AppState, machine: &AppStateMachine) {
     if !show {
         persist_position(state);
         if let Some(empty) = to_cstring("") {
-            unsafe { pill_panel_set_live_text(empty.as_ptr()) };
+            unsafe { pill_panel_set_live_text(empty.as_ptr(), 0) };
         }
     }
 
@@ -376,10 +376,35 @@ pub fn sync(state: &AppState, machine: &AppStateMachine) {
 /// Push a new live-text tail to the Swift panel. Thread-safe; Swift hops
 /// to the main thread internally.
 pub fn push_live_text(text: &str) {
+    push_live_text_with_provisional(text, "");
+}
+
+/// Like [`push_live_text`], where `text` ends with `provisional`: a word the
+/// engine is still holding, drawn dimmed instead of left out, so the user
+/// sees it was heard before it is confirmed.
+pub fn push_live_text_with_provisional(text: &str, provisional: &str) {
     let Some(cstr) = to_cstring(text) else {
         return;
     };
-    unsafe { pill_panel_set_live_text(cstr.as_ptr()) };
+    unsafe { pill_panel_set_live_text(cstr.as_ptr(), provisional_utf16_len(text, provisional)) };
+}
+
+/// How many UTF-16 units at the end of `text` are `provisional` (what
+/// `NSString` counts). Zero when `text` does not end with it, e.g. after
+/// the tail was cut inside the provisional word.
+fn provisional_utf16_len(text: &str, provisional: &str) -> i32 {
+    let provisional = provisional.trim();
+    if provisional.is_empty() {
+        return 0;
+    }
+    let trimmed = text.trim_end();
+    if !trimmed.ends_with(provisional) {
+        return 0;
+    }
+    let trailing = text.len() - trimmed.len();
+    let units =
+        provisional.encode_utf16().count() + text[text.len() - trailing..].encode_utf16().count();
+    i32::try_from(units).unwrap_or(i32::MAX)
 }
 
 /// Push a new RMS level (0.0–1.0) for the waveform animation.
@@ -535,6 +560,18 @@ mod tests {
             should_emit_live_text(Some(t0), t0 + Duration::from_millis(150), interval),
             "past the interval must emit"
         );
+    }
+
+    #[test]
+    fn the_provisional_word_is_measured_in_utf16_at_the_end_of_the_text() {
+        use super::provisional_utf16_len;
+        assert_eq!(provisional_utf16_len("hello world", "world"), 5);
+        // NSString counts UTF-16 units: "é" is one, an emoji two.
+        assert_eq!(provisional_utf16_len("bonjour été", " été"), 3);
+        assert_eq!(provisional_utf16_len("ok 👍", "👍"), 2);
+        assert_eq!(provisional_utf16_len("hello", ""), 0);
+        // The tail cut inside the word: nothing to dim rather than too much.
+        assert_eq!(provisional_utf16_len("rld", "world"), 0);
     }
 
     #[test]

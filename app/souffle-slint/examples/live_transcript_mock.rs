@@ -119,7 +119,6 @@ fn main() {
     });
 
     let live_state: LiveTranscriptState = Arc::new(Mutex::new(LiveTranscript::new()));
-    let _poll = live_view::start_live_transcript_timer(window.as_weak(), live_state.clone());
 
     // Streaming cursor: (sentence index, words already emitted, clock).
     let sentence = Rc::new(Cell::new(0usize));

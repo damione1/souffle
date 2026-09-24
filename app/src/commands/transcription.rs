@@ -597,7 +597,7 @@ fn build_dictation_on_segment(
             let preview = dictation_live_preview(&state.accumulated, &text);
             let tail = crate::pill::live_text_tail(&preview, crate::pill::LIVE_TEXT_MAX_CHARS);
             drop(state);
-            crate::pill::push_live_text(&tail);
+            crate::pill::push_live_text_with_provisional(&tail, &text);
             return;
         }
         if !state.accumulated.is_empty()

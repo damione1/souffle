@@ -78,6 +78,7 @@ pub(crate) fn build_words(text: &str) -> Vec<TranscriptWord> {
             clickable: is_word_char(token.chars().next().unwrap_or(' '))
                 && is_clickable_word(token),
             text: token.into(),
+            provisional: false,
         })
         .collect()
 }
@@ -548,6 +549,7 @@ mod tests {
         TranscriptWord {
             text: text.into(),
             clickable,
+            provisional: false,
         }
     }
 

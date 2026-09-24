@@ -25,6 +25,9 @@ export global Theme {
     out property <color> text-tertiary: root.dark ? #c2b39a : #55432e;
     out property <color> text-muted: root.dark ? #b3a284 : #6b573c;
     out property <color> text-faint: root.dark ? #9c8c70 : #7b6547;
+    // Opacity of a word the engine has heard but not confirmed yet (live
+    // meeting and dictation views; the pill HUD uses the same value).
+    out property <float> provisional-opacity: 0.55;
 
     out property <color> success: root.dark ? #e9ae55 : #4f7a52;
     out property <color> warning: root.dark ? #e0a458 : #a8701a;
