@@ -283,8 +283,10 @@ export component RecordingView inherits Rectangle {
                     VerticalLayout {
                         width: parent.width;
                         alignment: start;
+                        // Gutter for the overlay scrollbar, so it never
+                        // sits on the last characters of a line.
+                        padding-right: 12px;
                         Text {
-                            width: parent.width;
                             text: root.combined-text == "" ? @tr("À l'écoute…") : root.combined-text;
                             font-size: root.combined-text == "" ? 14px : 19px;
                             color: root.combined-text == "" ? Theme.text-muted : Theme.text-secondary;
@@ -431,6 +433,9 @@ export component RecordingView inherits Rectangle {
                         alignment: start;
                         spacing: 10px;
                         padding-bottom: 16px;
+                        // Gutter for the overlay scrollbar, so it never
+                        // sits on the last characters of a line.
+                        padding-right: 12px;
 
                         if root.live-transcript-empty: Text {
                             text: @tr("À l'écoute…");
@@ -467,7 +472,7 @@ export component RecordingView inherits Rectangle {
                                 words: block.words;
                                 font-size: 15px;
                                 color: Theme.text-secondary;
-                                word-clicked(word) => { live-alias.open(word); }
+                                word-clicked(word, at-x, at-y) => { live-alias.open(word, at-x, at-y); }
                             }
                         }
                     }
@@ -479,9 +484,12 @@ export component RecordingView inherits Rectangle {
             height: 132px;
             vertical-stretch: 0;
 
+            // Same width as the transcript card above, like the Svelte
+            // MeetingNotesSection sibling: no side padding, and the text
+            // area sized by this layout (a `width: parent.width` here
+            // counted the padding too and pushed the box 12px past the
+            // card's right edge).
             VerticalLayout {
-                padding-left: 12px;
-                padding-right: 12px;
                 spacing: 0px;
 
                 Rectangle {
@@ -521,7 +529,6 @@ export component RecordingView inherits Rectangle {
                 }
 
                 notes-input := ThemedTextArea {
-                    width: parent.width;
                     area-height: 76px;
                     text <=> root.notes;
                     placeholder: @tr("Notez décisions, actions, noms…");

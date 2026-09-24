@@ -24,8 +24,9 @@ export component TranscriptWordFlow inherits FlexboxLayout {
     in property <[TranscriptWord]> words;
     in property <length> font-size: 13px;
     in property <brush> color: Theme.text-primary;
-    // The exact token text of the clicked word.
-    callback word-clicked(string);
+    // The exact token text of the clicked word, and the window position
+    // of its bottom-left corner (where the alias popover opens).
+    callback word-clicked(string, length, length);
 
     flex-wrap: wrap;
     spacing: 0px;
@@ -35,7 +36,7 @@ export component TranscriptWordFlow inherits FlexboxLayout {
         mouse-cursor: word.clickable ? pointer : default;
         clicked => {
             if word.clickable {
-                root.word-clicked(word.text);
+                root.word-clicked(word.text, self.absolute-position.x, self.absolute-position.y + self.height);
             }
         }
 
@@ -48,9 +49,9 @@ export component TranscriptWordFlow inherits FlexboxLayout {
 }
 
 // The "add to dictionary" popover. One instance per view, opened for the
-// clicked word with `open(word)`; the popup shows at this element's
-// position. It keeps its own drafts, so the text underneath can keep
-// changing (live transcript) while it is open.
+// clicked word with `open(word, x, y)`, which moves this anchor under the
+// word before showing the popup. It keeps its own drafts, so the text
+// underneath can keep changing (live transcript) while it is open.
 //
 // A zero-size anchor rather than a `PopupWindow` subclass: Slint rejects any
 // access from an enclosing component to something inside a `PopupWindow`
@@ -61,13 +62,24 @@ export component DictionaryAliasPopover inherits Rectangle {
     // (term, pronunciation) once the user saves.
     callback save-requested(string, string);
 
+    // Moved under the clicked word by `open`. Left to the default, a child
+    // of a plain Rectangle is centred in it, so the popup opened from the
+    // middle of the card/transcript box, far from the word, and ran off
+    // the bottom of a short window.
+    x: 0px;
+    y: 0px;
     width: 0px;
     height: 0px;
 
     property <string> term-draft;
     property <string> pronunciation-draft;
 
-    public function open(heard-as: string) {
+    // `at-x`/`at-y`: window position to open at, e.g. a word's bottom-left
+    // (`TranscriptWordFlow.word-clicked`). Slint keeps the popup inside the
+    // window.
+    public function open(heard-as: string, at-x: length, at-y: length) {
+        root.x = at-x - (root.absolute-position.x - root.x);
+        root.y = at-y + 4px - (root.absolute-position.y - root.y);
         root.term-draft = "";
         root.pronunciation-draft = heard-as;
         popup.show();

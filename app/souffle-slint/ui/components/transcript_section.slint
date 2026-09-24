@@ -206,7 +206,7 @@ export component TranscriptSection inherits VerticalLayout {
 
         // One shared popover rather than one instance per word (there can
         // be hundreds of words on screen at once even virtualized). Opens
-        // at the transcript box's top-left corner.
+        // under the clicked word.
         alias-popup := DictionaryAliasPopover {
             save-requested(term, pronunciation) => { root.alias-save-requested(term, pronunciation); }
         }
@@ -301,7 +301,7 @@ export component TranscriptSection inherits VerticalLayout {
                         TranscriptWordFlow {
                             width: parent.width;
                             words: block.words;
-                            word-clicked(word) => { alias-popup.open(word); }
+                            word-clicked(word, at-x, at-y) => { alias-popup.open(word, at-x, at-y); }
                         }
                     }
 
