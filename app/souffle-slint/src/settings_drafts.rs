@@ -308,12 +308,26 @@ pub(crate) struct SettingsDraftController {
 }
 
 impl SettingsDraftController {
+    /// Test controller whose native quit just exits; the app builds its
+    /// controller with [`Self::new_with_quit`].
+    #[cfg(test)]
     pub(crate) fn new(window: &MainWindow, io: Rc<SettingsIoCoordinator>) -> Rc<Self> {
+        Self::new_with_quit(window, io, Rc::new(|| std::process::exit(0)))
+    }
+
+    /// Like [`Self::new`], with the terminal action of a native quit
+    /// supplied by the caller: `main` finalizes an active recording before
+    /// exiting (SOU-260 AC4).
+    pub(crate) fn new_with_quit(
+        window: &MainWindow,
+        io: Rc<SettingsIoCoordinator>,
+        quit: Rc<dyn Fn()>,
+    ) -> Rc<Self> {
         Rc::new(Self {
             window: window.as_weak(),
             io,
             state: RefCell::new(DraftState::default()),
-            quit: Rc::new(|| std::process::exit(0)),
+            quit,
         })
     }
 

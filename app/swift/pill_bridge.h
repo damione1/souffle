@@ -36,8 +36,10 @@ void pill_panel_set_visible(int visible);
 void pill_panel_set_mode(int mode, const char* title, const char* stop_label, const char* a11y_label);
 
 /// Update the live dictation text shown below the header row.
-/// Pass NULL or empty string to hide the live-text area.
-void pill_panel_set_live_text(const char* text);
+/// Pass NULL or empty string to hide the live-text area. The last
+/// `provisional_utf16` UTF-16 units of `text` are words the engine has not
+/// confirmed yet; they are drawn dimmed.
+void pill_panel_set_live_text(const char* text, int provisional_utf16);
 
 /// Push a new RMS audio level for the waveform bars (0.0–1.0).
 /// May be called from any thread; internally dispatched to the main thread.

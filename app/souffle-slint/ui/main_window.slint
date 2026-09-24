@@ -14,6 +14,7 @@ import { DictionaryRow } from "components/settings/dictionary_section.slint";
 import { SnippetRow } from "components/settings/snippets_section.slint";
 import { TimelineDayGroup, UpcomingEvent } from "components/timeline_section.slint";
 import { TranscriptBlock } from "components/transcript_section.slint";
+import { TranscriptWord } from "components/transcript_words.slint";
 import { StructuredActionItem } from "components/summary_section.slint";
 import { RecordingMode, LiveSystemAudio, SpeakerRole, TimelineFilter, TimelineKind, NotesSaveState, ModelPhase, TranscriptionPhase, UpcomingPhase, SettingsTab, SettingsInteraction, AppTheme, AppLocale, PasteMethod, MeetingLanguage, LogLevel, AudioRetention, AccessState, PermissionKind, ShortcutField, SummaryProvider, AppleIntelligenceUnavailableReason, OnboardingStep, UpdatePhase, InstallBlockReason, MeetingExportFormat } from "types.slint";
 export { SettingsTab, SettingsInteraction, AppTheme, AppLocale, PasteMethod, MeetingLanguage, LogLevel, AudioRetention, AccessState, PermissionKind, ShortcutField, SummaryProvider, AppleIntelligenceUnavailableReason, SpeakerRole }
@@ -83,6 +84,9 @@ export component MainWindow inherits Window {
     in property <bool> recording-stop-pending: false;
     in-out property <string> live-text;
     in-out property <string> live-tentative;
+    // `live-text` + `live-tentative` as words for the dictation view, the
+    // tentative dimmed (see `live_view::push_dictation_words`).
+    in property <[TranscriptWord]> live-dictation-words;
     in-out property <string> dictation-recovery-text;
     in property <[TranscriptBlock]> live-transcript-blocks;
     in property <bool> live-transcript-empty: true;
@@ -653,6 +657,7 @@ export component MainWindow inherits Window {
         stop-pending: root.recording-stop-pending;
         live-text: root.live-text;
         live-tentative: root.live-tentative;
+        live-dictation-words: root.live-dictation-words;
         live-transcript-blocks: root.live-transcript-blocks;
         live-transcript-empty: root.live-transcript-empty;
         live-elapsed-offset-seconds: root.live-elapsed-offset-seconds;

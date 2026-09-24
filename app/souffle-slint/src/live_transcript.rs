@@ -12,7 +12,6 @@
 
 use souffle_lib::engine::{Speaker, TranscriptionSegment};
 use souffle_schema::paragraphs::PAUSE_THRESHOLD_SECONDS;
-use std::time::{Duration, Instant};
 
 use crate::transcript::{build_words, speaker_fields};
 use crate::{SpeakerRole, TranscriptBlock, TranscriptWord, timeline};
@@ -21,30 +20,38 @@ use crate::{SpeakerRole, TranscriptBlock, TranscriptWord, timeline};
 /// text tokenized like the post-meeting transcript, so its words open the
 /// dictionary-alias popover when clicked, followed by the provisional
 /// (tentative) tail with every token non-clickable - that text is still
-/// being rewritten by the engine and is not worth a dictionary entry yet.
-fn live_words(finalized: &str, provisional: Option<&str>) -> slint::ModelRc<TranscriptWord> {
+/// being rewritten by the engine and is not worth a dictionary entry yet -
+/// and marked provisional, so it is drawn dimmed instead of like final text.
+pub(crate) fn provisional_words(finalized: &str, provisional: Option<&str>) -> Vec<TranscriptWord> {
     let mut words = build_words(finalized);
     if let Some(tail) = provisional.filter(|t| !t.is_empty()) {
         if !finalized.is_empty() {
             words.push(TranscriptWord {
                 text: " ".into(),
                 clickable: false,
+                provisional: true,
             });
         }
         words.extend(build_words(tail).into_iter().map(|w| TranscriptWord {
             clickable: false,
+            provisional: true,
             ..w
         }));
     }
-    slint::ModelRc::new(slint::VecModel::from(words))
+    words
+}
+
+fn live_words(finalized: &str, provisional: Option<&str>) -> slint::ModelRc<TranscriptWord> {
+    slint::ModelRc::new(slint::VecModel::from(provisional_words(
+        finalized,
+        provisional,
+    )))
 }
 
 /// Tail window before a paragraph is committed (immutable).
 const TAIL_WINDOW_S: f64 = 8.0;
 /// Committed paragraphs kept in memory for the live view.
 const LIVE_PARAGRAPH_WINDOW: usize = 30;
-/// Tentative expiry: 5s without a matching final drops the pending word.
-const TENTATIVE_EXPIRY: Duration = Duration::from_secs(5);
 
 /// One in-progress or committed paragraph in the live view.
 #[derive(Clone)]
@@ -115,36 +122,28 @@ impl LivePara {
     }
 }
 
+/// The word a lane's engine is still holding. It stays on screen, dimmed,
+/// until the engine confirms it (the final replaces it) or opens the next
+/// word: Damien, 2026-09-24, a pending word that vanished after 5 s and came
+/// back at the end of the meeting read as a lost word. The engine always
+/// emits a final for every pending word (next word, end of word, or flush),
+/// so nothing is left dangling.
 #[derive(Default)]
 pub struct TentativeSlot {
     text: String,
-    updated_at: Option<Instant>,
 }
 
 impl TentativeSlot {
     fn set(&mut self, text: String) {
         self.text = text;
-        self.updated_at = Some(Instant::now());
     }
 
     fn clear(&mut self) {
         self.text.clear();
-        self.updated_at = None;
-    }
-
-    fn is_expired(&self) -> bool {
-        match self.updated_at {
-            Some(t) => t.elapsed() > TENTATIVE_EXPIRY,
-            None => false,
-        }
     }
 
     fn active_text(&self) -> Option<&str> {
-        if self.text.is_empty() || self.is_expired() {
-            None
-        } else {
-            Some(&self.text)
-        }
+        (!self.text.is_empty()).then_some(self.text.as_str())
     }
 }
 
@@ -230,23 +229,6 @@ impl LiveTranscript {
             Some(Speaker::Them) => self.tentative_them.set(text),
             None => self.tentative_none.set(text),
         }
-    }
-
-    /// Expire stale tentative slots. Call this from the tick timer. Returns
-    /// whether anything was dropped, i.e. whether the view needs a refresh.
-    pub fn expire_tentatives(&mut self) -> bool {
-        let mut expired = false;
-        for slot in [
-            &mut self.tentative_me,
-            &mut self.tentative_them,
-            &mut self.tentative_none,
-        ] {
-            if slot.is_expired() {
-                slot.clear();
-                expired = true;
-            }
-        }
-        expired
     }
 
     /// Build the Slint model: committed + tail paragraphs, with the active
@@ -427,15 +409,34 @@ pub mod tests {
         assert_eq!(lt.tentative_me.active_text(), Some("hello"));
     }
 
-    // AC3: tentative expires after TENTATIVE_EXPIRY.
+    // A pending word stays visible, dimmed, until the engine confirms it:
+    // it used to expire after 5 s and come back at the end of the meeting.
     #[test]
-    fn tentative_expires() {
-        let mut slot = TentativeSlot::default();
-        slot.set("test".into());
-        // Fast-forward by tweaking updated_at.
-        slot.updated_at = Some(Instant::now() - (TENTATIVE_EXPIRY + Duration::from_millis(100)));
-        assert!(slot.is_expired());
-        assert_eq!(slot.active_text(), None);
+    fn a_pending_word_stays_until_its_final_and_is_drawn_provisional() {
+        use slint::Model;
+        let mut lt = LiveTranscript::new();
+        lt.push_final(&seg("yellow", 17.0, 17.4, true, Some(Speaker::Them)));
+        lt.push_tentative(&seg("lemons", 17.4, 17.4, false, Some(Speaker::Them)));
+        assert_eq!(lt.tentative_them.active_text(), Some("lemons"));
+
+        let block = &lt.build_blocks()[0];
+        let words: Vec<(String, bool)> = block
+            .words
+            .iter()
+            .map(|w| (w.text.to_string(), w.provisional))
+            .collect();
+        assert_eq!(
+            words,
+            vec![
+                ("yellow".to_string(), false),
+                (" ".to_string(), true),
+                ("lemons".to_string(), true),
+            ]
+        );
+
+        lt.push_final(&seg("lemons.", 17.4, 17.9, true, Some(Speaker::Them)));
+        assert_eq!(lt.tentative_them.active_text(), None);
+        assert!(lt.build_blocks()[0].words.iter().all(|w| !w.provisional));
     }
 
     // AC4: timestamp is fixed at paragraph creation.

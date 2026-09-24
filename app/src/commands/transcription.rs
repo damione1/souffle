@@ -7,6 +7,7 @@ use tracing::{info, warn};
 use uuid::Uuid;
 
 use crate::app_events::SystemAudioReason;
+use crate::audio::start_gate::CaptureStartGate;
 use crate::constants::STOP_REPLY_TIMEOUT_SECS;
 use crate::db::Database;
 use crate::engine::TranscriptionSegment;
@@ -122,7 +123,7 @@ fn build_meeting_on_segment(
 /// Set up and launch a meeting recording (new or resumed). Persists the header
 /// up front, stores the accumulator, then starts the engine session off-thread.
 async fn launch_meeting(
-    state: &AppState,
+    state: &Arc<AppState>,
     accumulator: MeetingAccumulator,
     event_description: Option<String>,
     channel: ProgressChannel<TranscriptionSegment>,
@@ -168,15 +169,15 @@ async fn launch_meeting(
         Arc::clone(&state.db),
     );
 
-    let actor = Arc::clone(&state.engine_actor);
-    let audio = state.audio_cmd_sender.clone();
-    let db = Arc::clone(&state.db);
+    let pipeline_state = Arc::clone(state);
     let acc = Arc::clone(&state.meeting_accumulator);
+    state.capture_start.begin(session_id);
     let res = crate::async_runtime::spawn_blocking(move || {
         start_pipeline_blocking(
-            &actor,
-            &audio,
-            &db,
+            &pipeline_state.engine_actor,
+            &pipeline_state.audio_cmd_sender,
+            &pipeline_state.db,
+            &pipeline_state.capture_start,
             session_id,
             PipelineMode::Meeting,
             session_terms,
@@ -185,22 +186,35 @@ async fn launch_meeting(
         )
     })
     .await
-    .map_err(|e| format!("Join start task: {e}"))?;
+    .map_err(|e| format!("Join start task: {e}"))
+    .and_then(|res| res);
 
-    if let Err(error) = res {
-        if let Ok(mut acc) = acc.lock() {
-            *acc = None;
+    match res {
+        // The session's clock starts with its audio (SOU-260 AC3): the
+        // live chrono anchors on this, and the saved duration runs from it.
+        Ok(capture_started_at) => {
+            if let Ok(mut guard) = acc.lock()
+                && let Some(meeting) = guard.as_mut()
+            {
+                meeting.session_started_at = capture_started_at;
+            }
         }
-        // The header row upserted above is now orphaned (ended_at IS NULL) with
-        // no recording in progress: recovery is safe to run here immediately,
-        // rather than waiting for the next app restart, because clearing the
-        // accumulator above guarantees no meeting is mid-recording. This either
-        // deletes an empty new-meeting shell or finalizes a resumed meeting from
-        // its already-persisted segments.
-        if let Err(e) = state.db.recover_unfinished_meetings() {
-            warn!("Meeting recovery after failed start failed: {e}");
+        Err(error) => {
+            state.capture_start.abandon(session_id);
+            if let Ok(mut acc) = acc.lock() {
+                *acc = None;
+            }
+            // The header row upserted above is now orphaned (ended_at IS NULL) with
+            // no recording in progress: recovery is safe to run here immediately,
+            // rather than waiting for the next app restart, because clearing the
+            // accumulator above guarantees no meeting is mid-recording. This either
+            // deletes an empty new-meeting shell or finalizes a resumed meeting from
+            // its already-persisted segments.
+            if let Err(e) = state.db.recover_unfinished_meetings() {
+                warn!("Meeting recovery after failed start failed: {e}");
+            }
+            return Err(error);
         }
-        return Err(error);
     }
 
     // Any recording successfully starting now (whether the user resumed by hand
@@ -318,17 +332,21 @@ fn capture_and_diarize_after_probe(
 /// the long crossbeam reply wait (engine reset + filter-chain build) never
 /// blocks the Tauri command thread / window event loop. Preconditions and
 /// session-id allocation are done on the command thread before this runs.
+///
+/// Returns when capture started: the origin of the session's audio file and
+/// transcript timestamps, and so of its duration (SOU-260).
 #[allow(clippy::too_many_arguments)]
 fn start_pipeline_blocking(
     engine_actor: &EngineActorHandle,
     audio_cmd_sender: &Sender<AudioCommand>,
     db: &Database,
+    capture_start: &CaptureStartGate,
     session_id: u64,
     mode: PipelineMode,
     session_terms: Vec<String>,
     recording_target: Option<RecordingTarget>,
     on_segment: SegmentCallback,
-) -> Result<(), String> {
+) -> Result<chrono::DateTime<chrono::Utc>, String> {
     // Snapshot settings and dictionary; the actor builds filter chains on its
     // own thread to keep ONNX/Metal work off the command thread.
     let settings = crate::settings::AppSettings::load(db)?;
@@ -358,7 +376,11 @@ fn start_pipeline_blocking(
             crate::audio::system_tap::spawn_tap(tap_prod, std::time::Duration::from_secs(5));
         match report_probe_outcome(probe) {
             Some(tap) => {
-                drop(tap);
+                // Capture opens the mic right after this now (SOU-260), so
+                // the probe's aggregate must really be gone first.
+                if !tap.stop_and_wait(std::time::Duration::from_secs(1)) {
+                    warn!("System audio probe teardown still running after 1 s");
+                }
                 true
             }
             None => false,
@@ -401,8 +423,12 @@ fn start_pipeline_blocking(
         meeting_transcription_language: settings.meeting_transcription_language,
     };
 
-    // The actor replies once the engine is reset and ready for audio.
-    let info = engine_actor.start_session(session_id, config, on_segment)?;
+    // SOU-260: capture starts now, not once the engine is ready, so the
+    // capture rate comes from the engine as it was loaded rather than from
+    // the session reply (it is a property of the engine, not of the mode).
+    let info = engine_actor
+        .loaded_engine_info()
+        .ok_or_else(|| "No model loaded".to_string())?;
 
     // Recording is opt-in and meeting-only; resolve the actual path only
     // once the retention setting is known (a `RecordingTarget` just means
@@ -417,24 +443,81 @@ fn start_pipeline_blocking(
         None
     };
 
-    audio_cmd_sender
-        .send(AudioCommand::Start {
-            session_id,
-            target_sample_rate: info.audio.sample_rate_hz,
-            mic_gain: info.mic_gain,
-            capture_system_audio: actual_capture_system_audio,
-            diarize,
-            record_path,
-            // No pre-spawned tap: start_meeting opens the mic first, then
-            // the tap (see the disposable probe above).
-            #[cfg(target_os = "macos")]
-            tap: None,
-            #[cfg(target_os = "macos")]
-            tap_cons: None,
-        })
-        .map_err(|e| format!("Audio start: {e}"))?;
+    // SOU-260: hand the session to the actor, start capture, and only then
+    // wait for the engine. The reset (seconds for a diarized Kyutai rebuild,
+    // ~200 ms of VAD setup for dictation) runs while the first words are
+    // captured into the capture-to-engine queue; the actor then feeds that
+    // backlog faster than real time until it reaches live audio. The
+    // command goes first so the actor already expects this session's
+    // chunks when they arrive.
+    let pending = engine_actor.begin_session(session_id, config, on_segment)?;
+    let capture_started_at = chrono::Utc::now();
+    let started = capture_start.start_capture(
+        session_id,
+        || {
+            audio_cmd_sender
+                .send(AudioCommand::Start {
+                    session_id,
+                    target_sample_rate: info.audio.sample_rate_hz,
+                    mic_gain: info.mic_gain,
+                    capture_system_audio: actual_capture_system_audio,
+                    diarize,
+                    record_path,
+                    // No pre-spawned tap: start_meeting opens the mic first,
+                    // then the tap (see the disposable probe above).
+                    #[cfg(target_os = "macos")]
+                    tap: None,
+                    #[cfg(target_os = "macos")]
+                    tap_cons: None,
+                })
+                .map_err(|e| format!("Audio start: {e}"))
+        },
+        // Stopped during the start: the actor still gets everything up to
+        // here, then the EndOfStream the replayed stop waits for.
+        || {
+            let _ = audio_cmd_sender.send(AudioCommand::Stop);
+        },
+    );
 
+    let ready = started.and_then(|()| engine_actor_ready(pending, &info));
+    if let Err(error) = ready {
+        discard_capture(audio_cmd_sender);
+        return Err(error);
+    }
+    Ok(capture_started_at)
+}
+
+/// Wait for the engine to be ready for the session capture already feeds.
+fn engine_actor_ready(
+    pending: crate::pipeline::PendingSessionStart,
+    captured: &crate::pipeline::EngineInfo,
+) -> Result<(), String> {
+    let ready = pending.wait(Duration::from_secs(60))?;
+    if ready.audio.sample_rate_hz != captured.audio.sample_rate_hz {
+        // Cannot happen with a single engine per load; if it ever does, the
+        // captured audio is at the wrong rate and must not be transcribed.
+        return Err(format!(
+            "Engine expects {} Hz but capture started at {} Hz",
+            ready.audio.sample_rate_hz, captured.audio.sample_rate_hz
+        ));
+    }
     Ok(())
+}
+
+/// A start that failed after capture began: stop capture and delete the
+/// audio file it started, before the caller cleans up the meeting row
+/// (recovery keeps a meeting that has audio on disk).
+fn discard_capture(audio_cmd_sender: &Sender<AudioCommand>) {
+    let (done, done_rx) = crossbeam_channel::bounded(1);
+    if audio_cmd_sender
+        .send(AudioCommand::Discard { done })
+        .is_err()
+    {
+        return;
+    }
+    if done_rx.recv_timeout(Duration::from_secs(3)).is_err() {
+        warn!("Audio thread did not confirm the discard of a failed start");
+    }
 }
 
 /// Blocking core of stopping a recording session, run via `spawn_blocking`.
@@ -454,7 +537,11 @@ fn stop_pipeline_blocking(
     // The actor drains everything up to EndOfStream and flushes the engine.
     // The timeout is last-resort safety; callers complete state transitions
     // even when this errors.
-    let summary = engine_actor.stop_session(Duration::from_secs(STOP_REPLY_TIMEOUT_SECS))?;
+    // The actor may still be working through audio buffered while the engine
+    // started (SOU-260), up to the queue's cap, before it reaches the end.
+    let summary = engine_actor.stop_session(Duration::from_secs(
+        STOP_REPLY_TIMEOUT_SECS + crate::audio::capture::AUDIO_BACKLOG_CAP_SECONDS,
+    ))?;
     if crate::debug::transcription_debug_enabled() {
         tracing::debug!(
             frames = summary.frames_processed,
@@ -510,7 +597,7 @@ fn build_dictation_on_segment(
             let preview = dictation_live_preview(&state.accumulated, &text);
             let tail = crate::pill::live_text_tail(&preview, crate::pill::LIVE_TEXT_MAX_CHARS);
             drop(state);
-            crate::pill::push_live_text(&tail);
+            crate::pill::push_live_text_with_provisional(&tail, &text);
             return;
         }
         if !state.accumulated.is_empty()
@@ -561,17 +648,17 @@ pub async fn start_transcription(
         return Err("Already recording".into());
     }
     let session_id = next_audio_session_id(&state)?;
+    state.capture_start.begin(session_id);
 
     let on_segment: SegmentCallback = build_dictation_on_segment(channel);
 
-    let actor = Arc::clone(&state.engine_actor);
-    let audio = state.audio_cmd_sender.clone();
-    let db = Arc::clone(&state.db);
-    crate::async_runtime::spawn_blocking(move || {
+    let pipeline_state = Arc::clone(&state);
+    let started = crate::async_runtime::spawn_blocking(move || {
         start_pipeline_blocking(
-            &actor,
-            &audio,
-            &db,
+            &pipeline_state.engine_actor,
+            &pipeline_state.audio_cmd_sender,
+            &pipeline_state.db,
+            &pipeline_state.capture_start,
             session_id,
             PipelineMode::Dictation,
             Vec::new(),
@@ -580,9 +667,15 @@ pub async fn start_transcription(
         )
     })
     .await
-    .map_err(|e| format!("Join start task: {e}"))??;
+    .map_err(|e| format!("Join start task: {e}"))
+    .and_then(|res| res);
+    if let Err(error) = started {
+        state.capture_start.abandon(session_id);
+        return Err(error);
+    }
 
     state.apply_transition(StateAction::StartDictation { session_id })?;
+    state.capture_start.settle(session_id);
     crate::dictation_cancel::set_wanted(cancel_on_escape);
     if let Ok(machine) = state.current_machine_state() {
         crate::dictation_cancel::sync(&state, &machine);
@@ -629,6 +722,9 @@ pub async fn stop_transcription(state: Arc<AppState>) -> Result<(), String> {
 
     // Transition to Stopping
     state.apply_transition(StateAction::StopRecording)?;
+    // A stop during the start already stopped capture (SOU-260); nothing
+    // else to do with it for a dictation.
+    let _ = state.capture_start.take_halted_at();
 
     let actor = Arc::clone(&state.engine_actor);
     let audio = state.audio_cmd_sender.clone();
@@ -724,6 +820,7 @@ pub async fn start_meeting_recording(
         session_id,
         meeting_id,
     })?;
+    state.capture_start.settle(session_id);
 
     info!("Meeting recording started");
     Ok(())
@@ -787,6 +884,7 @@ pub async fn resume_meeting_recording(
         session_id,
         meeting_id: meeting_id.clone(),
     })?;
+    state.capture_start.settle(session_id);
 
     info!(meeting_id = %meeting_id, "Meeting recording resumed");
     Ok(())
@@ -820,6 +918,13 @@ pub async fn stop_meeting_recording(state: Arc<AppState>) -> Result<String, Stri
 
     // Transition to Stopping immediately so the UI can show "Finalizing…".
     state.apply_transition(StateAction::StopRecording)?;
+    // The meeting ends when its capture does: when the user asked, not once
+    // the engine has worked through what was buffered (SOU-260 AC3). A stop
+    // clicked during the start stopped capture back then.
+    let ended_at = state
+        .capture_start
+        .take_halted_at()
+        .unwrap_or_else(chrono::Utc::now);
 
     // Finish off-thread: drain the engine, save the authoritative transcript,
     // then complete the transition. `state` is `Arc<AppState>` (owned,
@@ -856,7 +961,7 @@ pub async fn stop_meeting_recording(state: Arc<AppState>) -> Result<String, Stri
             if let Ok(mut guard) = state.meeting_accumulator.lock()
                 && let Some(meeting) = guard.take()
             {
-                let mut transcript = meeting.into_transcript(chrono::Utc::now());
+                let mut transcript = meeting.into_transcript(ended_at);
                 // A meeting can be resumed, and each session gets its own
                 // verdict: keep the one that explains the most missing
                 // system audio, so a healthy 30s resume does not erase the
@@ -902,6 +1007,100 @@ pub async fn stop_meeting_recording(state: Arc<AppState>) -> Result<String, Stri
     });
 
     Ok(meeting_id)
+}
+
+/// A stop that landed while a recording is still starting (SOU-260): stop
+/// the microphone (and system audio) now, so nothing after the user's stop
+/// is recorded. What was captured until then is kept and transcribed once
+/// the engine is ready; the UI then replays the stop to end the session
+/// (SOU-258). Returns `false` when no start is in flight, in which case the
+/// caller stops the normal way. Quick: one lock and a channel send, fine on
+/// the UI thread.
+pub fn halt_starting_capture(state: &AppState) -> bool {
+    let halted = state.capture_start.halt(|| {
+        let _ = state.audio_cmd_sender.send(AudioCommand::Stop);
+    });
+    if halted {
+        info!("Stop during the recording start: capture stopped, the engine will catch up");
+    }
+    halted
+}
+
+/// SOU-260 AC4: end whatever is recording before the app quits, the way a
+/// stop would: a meeting is drained and saved, a dictation is drained. A
+/// start still in flight has its capture stopped at once, then is waited
+/// for so what was said during it is transcribed too. Everything is
+/// bounded by `budget`; past it, the quit goes on and the next launch
+/// recovers the meeting from its incrementally saved segments, as before.
+///
+/// Blocking. Must not run on the UI thread (the stop path hops to the main
+/// queue for the pill and tray); `main` calls it from a worker, then exits.
+pub fn finalize_recording_before_quit(state: &Arc<AppState>, budget: Duration) {
+    let deadline = std::time::Instant::now() + budget;
+    let wait_while = |busy: &dyn Fn() -> bool| {
+        while busy() && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    };
+
+    halt_starting_capture(state);
+    wait_while(&|| state.capture_start.start_in_flight());
+
+    // Each stop runs on a thread of its own and is waited for below, against
+    // the deadline: a dictation stop blocks for the whole drain (up to its
+    // reply timeout, well past `budget`), and quit must not wait that long.
+    let stop_off_thread = |stop: fn(Arc<AppState>) -> Result<(), String>| {
+        let state = Arc::clone(state);
+        std::thread::Builder::new()
+            .name("quit-stop".into())
+            .spawn(move || {
+                if let Err(e) = stop(state) {
+                    warn!("Stopping the recording before quit failed: {e}");
+                }
+            })
+            .map(|_| ())
+            .map_err(|e| format!("Spawn quit stop: {e}"))
+    };
+    let result = match state.current_machine_state() {
+        Ok(AppStateMachine::RecordingMeeting { .. }) => {
+            info!("Quit during a meeting recording: finalizing it first");
+            stop_off_thread(|state| {
+                crate::async_runtime::block_on(stop_meeting_recording(state)).map(|_| ())
+            })
+        }
+        Ok(AppStateMachine::RecordingDictation { .. }) => {
+            info!("Quit during a dictation: stopping it first");
+            stop_off_thread(|state| crate::async_runtime::block_on(stop_transcription(state)))
+        }
+        Ok(
+            AppStateMachine::Idle
+            | AppStateMachine::Downloading { .. }
+            | AppStateMachine::Downloaded { .. }
+            | AppStateMachine::Loading { .. }
+            | AppStateMachine::Ready { .. }
+            | AppStateMachine::Stopping { .. }
+            | AppStateMachine::Unloading { .. }
+            | AppStateMachine::Error { .. },
+        ) => Ok(()),
+        Err(e) => Err(e),
+    };
+    if let Err(e) = result {
+        warn!("Stopping the recording before quit failed: {e}");
+    }
+
+    // Wait for the stop to be taken, then for its drain and save.
+    let unfinished = || {
+        matches!(
+            state.current_machine_state(),
+            Ok(AppStateMachine::Stopping { .. }
+                | AppStateMachine::RecordingMeeting { .. }
+                | AppStateMachine::RecordingDictation { .. })
+        )
+    };
+    wait_while(&unfinished);
+    if unfinished() {
+        warn!("Quit before the recording finished saving; the next launch recovers it");
+    }
 }
 
 /// Insert dictation text into the active app (clipboard paste or simulated typing).
@@ -1413,5 +1612,78 @@ mod tests {
             system_audio_plan(PipelineMode::Dictation, false, false),
             SystemAudioPlan::Skip(None)
         );
+    }
+
+    /// SOU-260: capture is asked to start while the engine is still being
+    /// reset, not after, and the start returns once the engine is ready.
+    #[test]
+    fn capture_starts_before_the_engine_is_ready() {
+        use crate::audio::start_gate::CaptureStartGate;
+        use crate::engine::mock::MockEngine;
+        use crate::state::AudioCommand;
+        use std::time::{Duration, Instant};
+
+        let _guard = crate::audio::capture::status_test_support::LOCK
+            .lock()
+            .unwrap();
+        let (db, _dir) = test_db();
+        let (_audio_tx, audio_rx) = crossbeam_channel::unbounded();
+        let reset = Duration::from_millis(400);
+        let mock = Mutex::new(Some(MockEngine::new().with_reset_delay(reset)));
+        let actor = crate::pipeline::EngineActorHandle::spawn(
+            audio_rx,
+            Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            Arc::new(Mutex::new(None)),
+            Box::new(move |_| {
+                mock.lock()
+                    .unwrap()
+                    .take()
+                    .map(|m| Box::new(m) as Box<dyn crate::engine::TranscriptionEngine>)
+                    .ok_or_else(|| "taken".to_string())
+            }),
+        )
+        .unwrap();
+        actor
+            .load_model(
+                default_transcription_profile(),
+                std::path::PathBuf::from("/tmp"),
+            )
+            .unwrap();
+        // Make the dictation start pay a real reset.
+        actor.debug_transcribe(Vec::new()).unwrap();
+
+        let (cmd_tx, cmd_rx) = crossbeam_channel::unbounded::<AudioCommand>();
+        let gate = CaptureStartGate::new();
+        gate.begin(7);
+        let clicked = Instant::now();
+        let result = std::thread::scope(|scope| {
+            let start = scope.spawn(|| {
+                super::start_pipeline_blocking(
+                    &actor,
+                    &cmd_tx,
+                    &db,
+                    &gate,
+                    7,
+                    PipelineMode::Dictation,
+                    Vec::new(),
+                    None,
+                    Box::new(|_| {}),
+                )
+            });
+            let first = cmd_rx
+                .recv_timeout(reset)
+                .expect("capture is started before the engine reset ends");
+            let capture_after = clicked.elapsed();
+            assert!(matches!(first, AudioCommand::Start { session_id: 7, .. }));
+            assert!(
+                capture_after < reset,
+                "capture asked after {capture_after:?}, the reset takes {reset:?}"
+            );
+            assert!(!start.is_finished(), "the engine is still resetting");
+            start.join().unwrap()
+        });
+        assert!(result.is_ok(), "{result:?}");
+        assert!(clicked.elapsed() >= reset);
+        let _ = actor.stop_session(Duration::from_secs(1));
     }
 }

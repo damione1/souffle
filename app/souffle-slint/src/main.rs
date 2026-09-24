@@ -45,7 +45,7 @@ use souffle_lib::state::AppState;
 mod live_transcript;
 mod live_view;
 use live_transcript::LiveTranscript;
-use live_view::{LiveTranscriptState, push_live_blocks, start_live_transcript_timer};
+use live_view::{LiveTranscriptState, push_dictation_words, push_live_blocks};
 use souffle_lib::transcript::{MeetingCalendarContext, MeetingParticipant, MeetingTranscript};
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -1774,6 +1774,7 @@ fn clear_live_transcript(window: &MainWindow, live_state: &LiveTranscriptState) 
     window.set_live_text(buffers.live.into());
     window.set_live_tentative(buffers.tentative.into());
     window.set_dictation_recovery_text(buffers.recovery.into());
+    push_dictation_words(window);
 
     {
         let mut live = live_state.lock().unwrap();
@@ -1804,8 +1805,9 @@ fn save_dictionary_alias(handle: &AppHandle, term: &str, pronunciation: &str) {
 /// exists. A meeting's diarized engine reset takes seconds and the start
 /// command only returns once it is done; the view says "Starting…" until
 /// [`settle_recording_start`] runs, instead of the window freezing on the
-/// Home page. Nothing can be captured before then, so clearing the previous
-/// live transcript here loses nothing.
+/// Home page. SOU-260: capture already runs meanwhile, and the transcript of
+/// what is said during "Starting…" arrives once the engine catches up, after
+/// this clear; the clock counts from here, like the audio.
 fn show_recording_starting(
     window: &MainWindow,
     live_state: &LiveTranscriptState,
@@ -3290,13 +3292,6 @@ fn wire_callbacks(
     live_state: LiveTranscriptState,
 ) {
     let lists_models = lists_ui::SettingsListModels::install(window);
-    // Owned here (not by the caller): the keepalive clone below is captured
-    // by the long-lived stop callback, which is what actually keeps the
-    // repeating live-transcript timer alive for the window's lifetime.
-    let live_transcript_timer: Rc<RefCell<Option<slint::Timer>>> = Rc::new(RefCell::new(Some(
-        start_live_transcript_timer(window.as_weak(), live_state.clone()),
-    )));
-    let live_transcript_timer_keepalive = live_transcript_timer.clone();
 
     // Shared with load_meeting_audio/stop_audio_player/open_meeting_detail
     // and the play-pause/seek callbacks below - one loaded player at a
@@ -3439,14 +3434,18 @@ fn wire_callbacks(
     let live_notes_timer_keepalive = live_notes_timer.clone();
     let value_stop = live_state.clone();
     let pending_stop_for_request = Arc::clone(&pending_stop);
+    let handle_for_stop_request = tauri_handle.clone();
     window.on_stop_requested(move || {
         let _ = &live_notes_timer_keepalive;
-        let _ = &live_transcript_timer_keepalive;
         // The session does not exist yet: stopping now would fail and
         // leave the start to complete into a recording nobody asked for.
+        // Capture is already running (SOU-260), so it stops here, at the
+        // user's stop; the session itself is stopped once the engine is
+        // ready and has transcribed what was captured until now.
         if let Some(current) = weak.upgrade()
             && current.get_recording_starting()
         {
+            souffle_lib::commands::halt_starting_capture(&handle_for_stop_request);
             pending_stop_for_request.store(true, Ordering::Release);
             current.set_recording_stop_pending(true);
             return;
@@ -6578,8 +6577,12 @@ fn main() {
     // restart" and `wire_callbacks`'s native quit both flush drafts through
     // this same `SettingsDraftController` instance (SOU-226 - see the
     // ticket's "Zones à risque" against a second, divergent flush path).
-    let settings_drafts =
-        settings_drafts::SettingsDraftController::new(&window, settings_io.clone());
+    let quit_handle = handle.clone();
+    let settings_drafts = settings_drafts::SettingsDraftController::new_with_quit(
+        &window,
+        settings_io.clone(),
+        Rc::new(move || quit_after_finalizing_recording(&quit_handle)),
+    );
     wire_update_dialogs(
         &window,
         handle.clone(),
@@ -6726,6 +6729,30 @@ fn main() {
     // snapshot is projected, and closing it hides rather than destroys it.
     // Keep the native tray/shortcut process alive across both intervals.
     slint::run_event_loop_until_quit().expect("event loop failed");
+}
+
+/// How long a quit waits for an active recording to finish saving. A
+/// meeting's segments are saved as they come, so past this the next launch
+/// recovers it anyway; this only buys the complete, finalized save.
+const QUIT_FINALIZE_BUDGET: Duration = Duration::from_secs(20);
+
+/// Terminal action of the app's Quit (tray menu, Settings), SOU-260 AC4:
+/// stop and save whatever is recording, then exit. Runs on a worker while
+/// the event loop keeps pumping: the stop path hops to the main queue
+/// synchronously (tray, pill), which would hang if the main thread waited
+/// here. The window is already hidden by the settings flush before this.
+fn quit_after_finalizing_recording(handle: &AppHandle) {
+    let handle = handle.clone();
+    let spawned = std::thread::Builder::new()
+        .name("quit-finalize".into())
+        .spawn(move || {
+            souffle_lib::commands::finalize_recording_before_quit(&handle, QUIT_FINALIZE_BUDGET);
+            std::process::exit(0);
+        });
+    if let Err(e) = spawned {
+        eprintln!("Could not finalize the recording before quit: {e}");
+        std::process::exit(0);
+    }
 }
 
 #[cfg(test)]

@@ -36,6 +36,11 @@ pub enum AudioCommand {
         tap_cons: Option<ringbuf::HeapCons<f32>>,
     },
     Stop,
+    /// Stop a session whose start failed after its capture began (SOU-260),
+    /// delete the audio file it started, then answer on `done`.
+    Discard {
+        done: crossbeam_channel::Sender<()>,
+    },
     SelectDevice(String),
     /// Configure (or clear) the preferred microphone to use while the lid is
     /// closed with an external display attached (clamshell mode). Sent at
@@ -182,6 +187,9 @@ pub struct AppState {
     pub modifier_ptt_shortcut: std::sync::Arc<std::sync::RwLock<Option<String>>>,
     /// Native single-key Toggle binding (SOU-115), symmetric to PTT.
     pub modifier_toggle_shortcut: std::sync::Arc<std::sync::RwLock<Option<String>>>,
+    /// Capture of a session that is still starting (SOU-260): lets a stop
+    /// that lands before the engine is ready stop the microphone at once.
+    pub capture_start: crate::audio::start_gate::CaptureStartGate,
 }
 
 impl AppState {
@@ -206,6 +214,7 @@ impl AppState {
             toggle_armed: AtomicBool::new(false),
             modifier_ptt_shortcut: std::sync::Arc::new(std::sync::RwLock::new(None)),
             modifier_toggle_shortcut: std::sync::Arc::new(std::sync::RwLock::new(None)),
+            capture_start: crate::audio::start_gate::CaptureStartGate::new(),
         }
     }
 

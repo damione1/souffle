@@ -1,23 +1,19 @@
 //! Glue between the live transcript state machine (`live_transcript.rs`) and
-//! `MainWindow`'s live-meeting properties: segment routing, model push, and
-//! the tentative-expiry poll.
+//! `MainWindow`'s live-meeting properties: segment routing and model push.
 //!
 //! Kept separate from `main.rs` so `examples/live_transcript_mock.rs` drives
 //! the exact same code path as the app (SOU-256) - a fake segment stream goes
-//! through `apply_live_segment`, and the mock starts the same poll timer.
+//! through `apply_live_segment`.
 
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 
 use souffle_lib::engine::TranscriptionSegment;
 
-use crate::live_transcript::LiveTranscript;
-use crate::{MainWindow, RecordingMode, TranscriptBlock};
+use crate::live_transcript::{LiveTranscript, provisional_words};
+use crate::{MainWindow, TranscriptBlock, TranscriptWord};
 use slint::{Model, ModelRc, VecModel};
 
 pub type LiveTranscriptState = Arc<Mutex<LiveTranscript>>;
-
-const LIVE_TRANSCRIPT_POLL: Duration = Duration::from_millis(250);
 
 /// Routes one streamed segment into the view. Speaker-tagged segments
 /// (meetings) go through the paragraph model; untagged ones (dictation) feed
@@ -58,6 +54,23 @@ pub fn apply_live_segment(
     } else {
         window.set_live_tentative(segment.text.trim().into());
     }
+    push_dictation_words(window);
+}
+
+/// The dictation text as words, the word the engine still holds last and
+/// dimmed (it used to be drawn like confirmed text, then vanish on the next
+/// final). None is clickable: a dictation has no alias popover.
+pub fn push_dictation_words(window: &MainWindow) {
+    let text = window.get_live_text();
+    let tentative = window.get_live_tentative();
+    let words: Vec<TranscriptWord> = provisional_words(&text, Some(&tentative))
+        .into_iter()
+        .map(|word| TranscriptWord {
+            clickable: false,
+            ..word
+        })
+        .collect();
+    window.set_live_dictation_words(ModelRc::new(VecModel::from(words)));
 }
 
 /// Publishes the current paragraphs to `live-transcript-blocks`. The first
@@ -106,37 +119,10 @@ fn sync_blocks(model: &VecModel<TranscriptBlock>, blocks: Vec<TranscriptBlock>) 
     }
 }
 
-/// Repeated poll for the live meeting transcript's time-based behavior:
-/// drops per-speaker tentatives nobody finalized within the expiry window
-/// (AC3). Autoscroll is not driven from here - `recording_view.slint`
-/// follows the bottom on its own (SOU-256).
-pub fn start_live_transcript_timer(
-    weak: slint::Weak<MainWindow>,
-    live_state: LiveTranscriptState,
-) -> slint::Timer {
-    let timer = slint::Timer::default();
-    timer.start(
-        slint::TimerMode::Repeated,
-        LIVE_TRANSCRIPT_POLL,
-        move || {
-            let Some(window) = weak.upgrade() else {
-                return;
-            };
-            if window.get_recording_mode() == RecordingMode::Idle {
-                return;
-            }
-            let expired = live_state.lock().unwrap().expire_tentatives();
-            if expired {
-                push_live_blocks(&window, &live_state);
-            }
-        },
-    );
-    timer
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::RecordingMode;
     use crate::SpeakerRole;
     use i_slint_backend_testing::ElementHandle;
     use slint::ComponentHandle;
@@ -311,8 +297,46 @@ mod tests {
             "dictation surface collapsed to {}px",
             scroll.size().height
         );
-        let text = text_element(&window, "Bonjour, ceci est une dictée.");
+        // Drawn word by word now, so the pending word can be dimmed.
+        let text = text_element(&window, "Bonjour");
         assert!(text.size().height > 0.0);
+        text_element(&window, "dictée");
+    }
+
+    // Damien, 2026-09-24: the word the engine still holds is on screen,
+    // after the confirmed text and marked provisional (drawn dimmed), and a
+    // final for it makes it plain text.
+    #[test]
+    fn a_dictation_shows_its_pending_word_dimmed_until_confirmed() {
+        let window = meeting_window();
+        window.set_recording_mode(RecordingMode::Dictation);
+        let live_state: LiveTranscriptState = Arc::new(Mutex::new(LiveTranscript::new()));
+        let mut confirmed = final_seg("Purple elephants", 0.0, Speaker::Me);
+        confirmed.speaker = None;
+        apply_live_segment(&window, &live_state, &confirmed);
+        let mut pending = final_seg("dance", 1.0, Speaker::Me);
+        pending.speaker = None;
+        pending.is_final = false;
+        apply_live_segment(&window, &live_state, &pending);
+
+        let words: Vec<(String, bool)> = window
+            .get_live_dictation_words()
+            .iter()
+            .map(|w| (w.text.to_string(), w.provisional))
+            .collect();
+        assert_eq!(words.last(), Some(&("dance".to_string(), true)));
+        assert!(words.iter().any(|(t, p)| t == "Purple" && !p));
+        settle();
+        text_element(&window, "dance");
+
+        pending.is_final = true;
+        apply_live_segment(&window, &live_state, &pending);
+        assert!(
+            window
+                .get_live_dictation_words()
+                .iter()
+                .all(|w| !w.provisional && !w.clickable)
+        );
     }
 
     fn visible_rows(window: &MainWindow, prefix: &'static str) -> Vec<(String, f32)> {

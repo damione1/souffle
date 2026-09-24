@@ -22,6 +22,13 @@ private let kDictationWaveformBars: Int = 24
 private let kMeetingWaveformBars: Int = 3
 private let kMaxLiveLines: Int = 5
 private let kLiveFontSize: CGFloat = 13
+private let kLiveTextAlpha: CGFloat = 0.70
+private let kLiveTextColor = NSColor.white.withAlphaComponent(kLiveTextAlpha)
+/// Words the engine heard but has not confirmed yet are drawn at this
+/// fraction of the live text's opacity, like the Slint views
+/// (`Theme.provisional-opacity`): visible, so nothing looks lost, but
+/// distinct from confirmed text.
+private let kProvisionalOpacity: CGFloat = 0.55
 
 /// Soufflé accent (`--color-accent` / #e9ae55).
 private let kAccent = NSColor(red: 233 / 255, green: 174 / 255, blue: 85 / 255, alpha: 1)
@@ -290,7 +297,7 @@ private final class PillContentView: NSView {
         modeLabel.drawsBackground = false
         addSubview(modeLabel)
 
-        liveLabel.textColor = NSColor.white.withAlphaComponent(0.70)
+        liveLabel.textColor = kLiveTextColor
         liveLabel.font = NSFont.systemFont(ofSize: kLiveFontSize)
         liveLabel.maximumNumberOfLines = kMaxLiveLines
         liveLabel.usesSingleLineMode = false
@@ -400,15 +407,39 @@ private final class PillContentView: NSView {
         needsLayout = true
     }
 
-    func setLiveText(_ text: String) {
+    func setLiveText(_ text: String, provisional: Int) {
         let expanded = !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         let font = liveLabel.font ?? NSFont.systemFont(ofSize: kLiveFontSize)
-        liveLabel.stringValue = lastWrappedLines(
+        let shown = lastWrappedLines(
             text,
             width: liveTextColumnWidth(),
             maxLines: kMaxLiveLines,
             font: font
         )
+        // The provisional words are the tail of `text`, and `shown` is a
+        // suffix of it, so they are the tail of `shown` too.
+        let length = (shown as NSString).length
+        let dimmed = min(max(provisional, 0), length)
+        let para = NSMutableParagraphStyle()
+        para.lineBreakMode = .byWordWrapping
+        let attributed = NSMutableAttributedString(
+            string: shown,
+            attributes: [
+                .font: font,
+                .foregroundColor: kLiveTextColor,
+                .paragraphStyle: para,
+            ]
+        )
+        if dimmed > 0 {
+            attributed.addAttribute(
+                .foregroundColor,
+                value: kLiveTextColor.withAlphaComponent(
+                    kLiveTextAlpha * kProvisionalOpacity
+                ),
+                range: NSRange(location: length - dimmed, length: dimmed)
+            )
+        }
+        liveLabel.attributedStringValue = attributed
         applyMode(currentMode, title: modeLabel.stringValue, stopLabel: stopLabel,
                   a11yLabel: a11yLabel, expanded: expanded)
     }
@@ -655,7 +686,7 @@ private final class PillPanel {
         } else {
             sessionMaxHeight = kCompactHeight
             lastAppliedSize = CGSize(width: kCompactWidth, height: kCompactHeight)
-            contentView?.setLiveText("")
+            contentView?.setLiveText("", provisional: 0)
             panel.orderOut(nil)
         }
     }
@@ -745,9 +776,9 @@ private final class PillPanel {
         applyFrame(mode: mode, expanded: expanded)
     }
 
-    func setLiveText(_ text: String) {
+    func setLiveText(_ text: String, provisional: Int) {
         let expanded = !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        contentView?.setLiveText(text)
+        contentView?.setLiveText(text, provisional: provisional)
         applyFrame(mode: currentMode, expanded: expanded)
     }
 
@@ -815,9 +846,10 @@ public func pill_panel_set_mode(
 }
 
 @_cdecl("pill_panel_set_live_text")
-public func pill_panel_set_live_text(_ cStr: UnsafePointer<CChar>?) {
+public func pill_panel_set_live_text(_ cStr: UnsafePointer<CChar>?, _ provisionalUtf16: Int32) {
     let text = cStr.map { String(cString: $0) } ?? ""
-    onMain { PillPanel.shared.setLiveText(text) }
+    let provisional = Int(provisionalUtf16)
+    onMain { PillPanel.shared.setLiveText(text, provisional: provisional) }
 }
 
 @_cdecl("pill_panel_push_rms")

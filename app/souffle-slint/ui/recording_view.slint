@@ -4,7 +4,7 @@ import { Theme } from "theme.slint";
 import { LucideIcon, IconSet } from "components/lucide_icon.slint";
 import { ThemedTextArea } from "components/themed_text_area.slint";
 import { TranscriptBlock, SpeakerLabels } from "components/transcript_section.slint";
-import { TranscriptWordFlow, DictionaryAliasPopover } from "components/transcript_words.slint";
+import { TranscriptWord, TranscriptWordFlow, DictionaryAliasPopover } from "components/transcript_words.slint";
 
 // LiveSessionCard.svelte parity surface. The two modes deliberately share
 // the session toolbar, while their bodies stay distinct: dictation is a
@@ -14,6 +14,9 @@ export component RecordingView inherits Rectangle {
     // Dictation path - mono-lane flat buffer, unchanged (AC7).
     in property <string> live-text;
     in property <string> live-tentative;
+    // The dictation as words (Rust, `push_dictation_words`), the one the
+    // engine still holds dimmed at the end.
+    in property <[TranscriptWord]> live-dictation-words;
     // Meeting path - paragraph model from LiveTranscript (SOU-237).
     in property <[TranscriptBlock]> live-transcript-blocks;
     // True when live-transcript-blocks is empty and live-tentative is empty
@@ -28,10 +31,11 @@ export component RecordingView inherits Rectangle {
     in property <LiveSystemAudio> system-audio: LiveSystemAudio.pending;
     in property <bool> auto-paste: false;
     // SOU-258: the view mounts on the click, before the session exists (a
-    // meeting's engine reset takes seconds). While true, nothing is
-    // captured yet: the clock holds at 0:00 and the body says so. Stop
-    // stays live: main.rs defers a stop clicked now until the session
-    // exists, then stops it like any other.
+    // meeting's engine reset takes seconds). SOU-260: capture already runs
+    // while this is true, so the clock counts from the click like the audio
+    // does; only the transcript waits, and catches up once the engine is
+    // ready. Stop stays live: main.rs stops capture at once and stops the
+    // session itself once it exists.
     in property <bool> starting: false;
     // A stop clicked during the start is queued behind it: the button dims
     // and ignores further clicks until that stop has run.
@@ -60,7 +64,13 @@ export component RecordingView inherits Rectangle {
         : root.live-text == "" ? root.live-tentative
         : root.live-text + @tr(" {}", root.live-tentative);
 
-    property <int> elapsed-seconds: root.live-elapsed-offset-seconds;
+    // Seconds counted by the timer since Rust last anchored the offset.
+    // Kept apart from the offset so a late anchor (the start settling after
+    // the clock already ran from the click) replaces the count instead of
+    // being lost: assigning to a bound property would drop its binding.
+    property <int> ticks-since-anchor: 0;
+    changed live-elapsed-offset-seconds => { root.ticks-since-anchor = 0; }
+    property <int> elapsed-seconds: root.live-elapsed-offset-seconds + root.ticks-since-anchor;
     property <int> elapsed-minutes: root.elapsed-seconds / 60;
     property <int> elapsed-remainder: Math.mod(root.elapsed-seconds, 60);
     property <string> elapsed-label: root.elapsed-minutes + ":" +
@@ -68,8 +78,8 @@ export component RecordingView inherits Rectangle {
 
     Timer {
         interval: 1s;
-        running: root.mode != RecordingMode.idle && !root.starting;
-        triggered => { root.elapsed-seconds += 1; }
+        running: root.mode != RecordingMode.idle;
+        triggered => { root.ticks-since-anchor += 1; }
     }
 
     VerticalLayout {
@@ -301,11 +311,16 @@ export component RecordingView inherits Rectangle {
                         // Gutter for the overlay scrollbar, so it never
                         // sits on the last characters of a line.
                         padding-right: 12px;
-                        Text {
-                            text: root.starting ? @tr("Démarrage…") : root.combined-text == "" ? @tr("À l'écoute…") : root.combined-text;
-                            font-size: root.combined-text == "" ? 14px : 19px;
-                            color: root.combined-text == "" ? Theme.text-muted : Theme.text-secondary;
+                        if root.starting || root.combined-text == "": Text {
+                            text: root.starting ? @tr("Démarrage…") : @tr("À l'écoute…");
+                            font-size: 14px;
+                            color: Theme.text-muted;
                             wrap: word-wrap;
+                        }
+                        if !root.starting && root.combined-text != "": TranscriptWordFlow {
+                            words: root.live-dictation-words;
+                            font-size: 19px;
+                            color: Theme.text-secondary;
                         }
                     }
                 }

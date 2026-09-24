@@ -117,6 +117,30 @@ pub enum EngineCommand {
 pub struct EngineActorHandle {
     cmd_tx: Sender<EngineCommand>,
     handle: Mutex<Option<std::thread::JoinHandle<()>>>,
+    /// Audio/gain requirements of the engine currently loaded on the actor,
+    /// kept by the actor itself (set on load, cleared on unload). SOU-260:
+    /// capture starts before the engine reset that `start_session` replies
+    /// after, so the capture rate has to be known without asking the busy
+    /// actor. The requirements are a property of the loaded engine, not of
+    /// the session mode, so they cannot change between load and start.
+    engine_info: Arc<Mutex<Option<EngineInfo>>>,
+}
+
+/// A `StartSession` that has been handed to the actor but not answered yet.
+/// SOU-260: the command layer starts capture between sending the command
+/// and waiting for its reply, so the reset runs while audio is buffered.
+pub struct PendingSessionStart {
+    reply: Receiver<Result<EngineInfo, String>>,
+}
+
+impl PendingSessionStart {
+    /// Wait until the engine is reset and the session loop is about to read
+    /// audio, or `timeout` runs out.
+    pub fn wait(self, timeout: Duration) -> Result<EngineInfo, String> {
+        self.reply
+            .recv_timeout(timeout)
+            .map_err(|_| "Engine actor reply timeout".to_string())?
+    }
 }
 
 impl EngineActorHandle {
@@ -133,6 +157,8 @@ impl EngineActorHandle {
         factory: EngineFactory,
     ) -> Result<Self, String> {
         let (cmd_tx, cmd_rx) = crossbeam_channel::unbounded::<EngineCommand>();
+        let engine_info = Arc::new(Mutex::new(None));
+        let actor_engine_info = Arc::clone(&engine_info);
 
         let handle = std::thread::Builder::new()
             .name("engine-actor".into())
@@ -151,6 +177,7 @@ impl EngineActorHandle {
                     unload_timeout: None,
                     idle_since: None,
                     state_fresh_for: None,
+                    engine_info: actor_engine_info,
                 }
                 .run();
             })
@@ -159,7 +186,15 @@ impl EngineActorHandle {
         Ok(Self {
             cmd_tx,
             handle: Mutex::new(Some(handle)),
+            engine_info,
         })
+    }
+
+    /// Requirements of the loaded engine, `None` when no model is loaded.
+    /// Answered without a round-trip, so it works while the actor is busy
+    /// resetting the engine for a session (SOU-260).
+    pub fn loaded_engine_info(&self) -> Option<EngineInfo> {
+        self.engine_info.lock().ok().and_then(|info| info.clone())
     }
 
     fn request<T>(
@@ -226,23 +261,42 @@ impl EngineActorHandle {
             .send(EngineCommand::SetUnloadTimeout(Some(duration)));
     }
 
-    /// Start a transcription session. Replies once the engine state is reset
-    /// and filter chains are built, BEFORE audio capture should begin.
+    /// Start a transcription session and wait for the engine to be ready.
+    /// Replies once the engine state is reset and filter chains are built.
     pub fn start_session(
         &self,
         session_id: u64,
         config: SessionConfig,
         on_segment: SegmentCallback,
     ) -> Result<EngineInfo, String> {
-        self.request(
-            |reply| EngineCommand::StartSession {
+        self.begin_session(session_id, config, on_segment)?
+            .wait(Duration::from_secs(60)) // 1 minute timeout for setup
+    }
+
+    /// Hand a session to the actor without waiting for it (SOU-260).
+    ///
+    /// Audio for `session_id` may be captured as soon as this returns: the
+    /// actor keeps every chunk of this session that reaches it before or
+    /// during the engine reset, in order, and feeds that backlog to the
+    /// engine as fast as it runs before it gets to live audio. The command
+    /// must be sent before capture starts so the actor never mistakes the
+    /// first chunks for a previous session's leftovers.
+    pub fn begin_session(
+        &self,
+        session_id: u64,
+        config: SessionConfig,
+        on_segment: SegmentCallback,
+    ) -> Result<PendingSessionStart, String> {
+        let (reply, reply_rx) = crossbeam_channel::bounded(1);
+        self.cmd_tx
+            .send(EngineCommand::StartSession {
                 session_id,
                 config,
                 on_segment,
                 reply,
-            },
-            Some(Duration::from_secs(60)), // 1 minute timeout for setup
-        )
+            })
+            .map_err(|_| "Engine actor disconnected".to_string())?;
+        Ok(PendingSessionStart { reply: reply_rx })
     }
 
     /// Stop the active session: the actor drains buffered audio, flushes the
@@ -323,6 +377,8 @@ struct EngineActor {
     /// session. Set by the idle pre-warm after a session ends and by the
     /// initial load; cleared as soon as a session starts consuming it.
     state_fresh_for: Option<bool>,
+    /// Shared with [`EngineActorHandle::loaded_engine_info`].
+    engine_info: Arc<Mutex<Option<EngineInfo>>>,
 }
 
 /// Mutable filter state for an active session; rebuilt when live corrections arrive.
@@ -546,6 +602,13 @@ impl EngineActor {
         }
         self.idle_since = None;
         self.state_fresh_for = None;
+        self.publish_engine_info(None);
+    }
+
+    fn publish_engine_info(&self, info: Option<EngineInfo>) {
+        if let Ok(mut slot) = self.engine_info.lock() {
+            *slot = info;
+        }
     }
 
     /// Deadline at which the currently loaded, idle model should be
@@ -589,6 +652,7 @@ impl EngineActor {
             mic_gain: engine.mic_gain(),
         };
         self.engine = Some(engine);
+        self.publish_engine_info(Some(info.clone()));
         // No session is active right after a load: start the idle clock.
         self.idle_since = Some(Instant::now());
         // build_loaded_model always constructs single-stream (batch size 1)
@@ -651,8 +715,17 @@ impl EngineActor {
         pending_unload_timeout: &mut Option<Option<Duration>>,
     ) -> SessionEnd {
         let session_start = Instant::now();
-        // Clear stale audio left over from previous sessions before resetting.
-        let drained = self.drain_audio_queue();
+        // Chunks the capture thread drops from here on belong to this
+        // session, including any lost while the reset below runs (SOU-260:
+        // capture is already running by then). Zeroed here rather than when
+        // the health tracker starts, after the reset, so those count.
+        self.dropped_counter
+            .store(0, std::sync::atomic::Ordering::Relaxed);
+        // Clear stale audio left over from previous sessions before
+        // resetting, but keep this session's: capture starts right after
+        // this command was sent (SOU-260), so its first chunks may already
+        // be queued.
+        let (preroll, drained) = take_session_backlog(&self.audio_rx, session_id);
         if drained > 0 && crate::debug::transcription_debug_enabled() {
             debug!(drained, "Cleared stale audio chunks before session start");
         }
@@ -773,9 +846,10 @@ impl EngineActor {
             "start_session setup completed"
         );
 
+        let mut audio = SessionAudio::new(&self.audio_rx, preroll);
         run_session_loop(
             &self.cmd_rx,
-            &self.audio_rx,
+            &mut audio,
             engine.as_mut(),
             &on_segment,
             session_id,
@@ -798,8 +872,120 @@ impl EngineActor {
     }
 }
 
+/// Split what is queued on `audio_rx` into this session's messages (kept, in
+/// order) and anything older (dropped, counted). SOU-260: capture of a new
+/// session starts while the actor is still setting it up, so a blanket
+/// drain here would throw away the first words the user said.
+fn take_session_backlog(
+    audio_rx: &Receiver<AudioMessage>,
+    session_id: u64,
+) -> (VecDeque<AudioMessage>, usize) {
+    let mut kept = VecDeque::new();
+    let mut dropped = 0usize;
+    while let Ok(message) = audio_rx.try_recv() {
+        let own = match &message {
+            AudioMessage::Chunk(chunk) => chunk.session_id == session_id,
+            AudioMessage::EndOfStream { session_id: id } => *id == session_id,
+        };
+        if own {
+            kept.push_back(message);
+        } else {
+            dropped += 1;
+        }
+    }
+    (kept, dropped)
+}
+
+/// A session's audio source: what [`take_session_backlog`] kept at setup,
+/// then the live channel. Everything reaches the session loop in capture
+/// order: the pre-roll was taken off the head of the same FIFO.
+///
+/// SOU-260: capture runs from the click while the engine resets (seconds
+/// for a diarized Kyutai rebuild). The audio captured meanwhile waits in
+/// the channel, and the loop works through it as fast as the engine goes
+/// (much faster than real time), then carries on with live audio: the
+/// handoff is the same queue, so no sample is skipped or repeated at the
+/// boundary. Audio is never sped up, only fed faster; engine timestamps
+/// count samples, so they stay relative to the first captured one.
+struct SessionAudio<'a> {
+    rx: &'a Receiver<AudioMessage>,
+    preroll: VecDeque<AudioMessage>,
+    catch_up: Option<CatchUp>,
+}
+
+/// Measures how long the session took to work through the audio queued
+/// while it was being set up.
+struct CatchUp {
+    started: Instant,
+    backlog_messages: usize,
+    /// Samples fed while catching up, on one lane (the mic lane of a
+    /// diarized session: both lanes carry the same span of time).
+    samples: u64,
+}
+
+/// A backlog this small is ordinary jitter, not a startup backlog.
+const CATCH_UP_MIN_BACKLOG: usize = 8;
+
+impl<'a> SessionAudio<'a> {
+    fn new(rx: &'a Receiver<AudioMessage>, preroll: VecDeque<AudioMessage>) -> Self {
+        let backlog_messages = preroll.len() + rx.len();
+        Self {
+            rx,
+            preroll,
+            catch_up: (backlog_messages >= CATCH_UP_MIN_BACKLOG).then(|| CatchUp {
+                started: Instant::now(),
+                backlog_messages,
+                samples: 0,
+            }),
+        }
+    }
+
+    /// Messages waiting, pre-roll included.
+    fn len(&self) -> usize {
+        self.preroll.len() + self.rx.len()
+    }
+
+    fn recv_timeout(&mut self, timeout: Duration) -> Result<AudioMessage, RecvTimeoutError> {
+        if let Some(message) = self.preroll.pop_front() {
+            return Ok(message);
+        }
+        self.rx.recv_timeout(timeout)
+    }
+
+    fn try_recv(&mut self) -> Option<AudioMessage> {
+        self.preroll.pop_front().or_else(|| self.rx.try_recv().ok())
+    }
+
+    /// Call after a chunk of `samples` went through the engine. Logs once,
+    /// the first time nothing is left waiting: the session is live.
+    fn note_fed(&mut self, samples: usize, session_id: u64, samples_per_second: u32) {
+        let Some(catch_up) = self.catch_up.as_mut() else {
+            return;
+        };
+        catch_up.samples += samples as u64;
+        if !self.preroll.is_empty() || !self.rx.is_empty() {
+            return;
+        }
+        let elapsed = catch_up.started.elapsed();
+        let fed_audio_ms = catch_up.samples * 1000 / u64::from(samples_per_second.max(1));
+        let speed = fed_audio_ms as f64 / (elapsed.as_millis().max(1) as f64);
+        info!(
+            session_id,
+            backlog_chunks = catch_up.backlog_messages,
+            fed_audio_ms,
+            catch_up_ms = elapsed.as_millis() as u64,
+            speed = format!("{speed:.1}x"),
+            "Caught up with live audio after the engine start"
+        );
+        self.catch_up = None;
+    }
+}
+
 /// How long stop waits for the audio thread's EndOfStream marker before
-/// draining anyway. Only reached if the audio thread died mid-session.
+/// draining anyway, counted from the last audio the session received. Only
+/// reached if the audio thread died mid-session: a session still working
+/// through a startup backlog (SOU-260) keeps receiving audio, and its
+/// marker is queued behind it.
 const EOS_WAIT: Duration = Duration::from_secs(5);
 
 /// Abort the session after this many consecutive transcribe failures
@@ -1328,7 +1514,7 @@ impl SessionMode for DiarizedMode {
 #[allow(clippy::too_many_arguments)]
 fn run_session_loop(
     cmd_rx: &Receiver<EngineCommand>,
-    audio_rx: &Receiver<AudioMessage>,
+    audio: &mut SessionAudio<'_>,
     engine: &mut dyn TranscriptionEngine,
     on_segment: &SegmentCallback,
     session_id: u64,
@@ -1363,7 +1549,7 @@ fn run_session_loop(
     loop {
         // Periodic health snapshot to the frontend, and to the stall
         // recovery ladder.
-        if let Some(snapshot) = health.tick(audio_rx.len()) {
+        if let Some(snapshot) = health.tick(audio.len()) {
             let action = stall_recovery.on_snapshot(snapshot.status, Instant::now());
             match action {
                 Some(StallAction::Reset) => attempt_stall_recovery_reset(engine, session_id),
@@ -1393,7 +1579,7 @@ fn run_session_loop(
                 session_id,
                 summary.frames_processed,
                 segments_emitted,
-                audio_rx.len(),
+                audio.len(),
             );
             if let Some(stats) = engine.context_window_stats() {
                 info!(
@@ -1416,7 +1602,7 @@ fn run_session_loop(
                 if eos_received {
                     summary.dropped_chunks = health.dropped_chunks();
                     finish_session(
-                        audio_rx,
+                        audio,
                         engine,
                         on_segment,
                         session_id,
@@ -1469,7 +1655,7 @@ fn run_session_loop(
             let (reply, _) = pending_stop.take().expect("pending_stop checked above");
             summary.dropped_chunks = health.dropped_chunks();
             finish_session(
-                audio_rx,
+                audio,
                 engine,
                 on_segment,
                 session_id,
@@ -1481,7 +1667,7 @@ fn run_session_loop(
         }
 
         // Read audio with short timeout so command checks stay responsive
-        match audio_rx.recv_timeout(Duration::from_millis(50)) {
+        match audio.recv_timeout(Duration::from_millis(50)) {
             Ok(AudioMessage::EndOfStream { session_id: eos_id }) => {
                 if eos_id != session_id {
                     continue; // stale marker from a previous session
@@ -1490,7 +1676,7 @@ fn run_session_loop(
                 if let Some((reply, _)) = pending_stop.take() {
                     summary.dropped_chunks = health.dropped_chunks();
                     finish_session(
-                        audio_rx,
+                        audio,
                         engine,
                         on_segment,
                         session_id,
@@ -1517,6 +1703,16 @@ fn run_session_loop(
                 }
 
                 health.note_chunk(chunk.captured_at);
+                // Audio is still arriving, so the audio thread is alive: the
+                // EndOfStream a stop waits for is queued behind it.
+                if let Some((_, requested_at)) = pending_stop.as_mut() {
+                    *requested_at = Instant::now();
+                }
+                let lane_samples = if chunk.speaker == Some(Speaker::Them) {
+                    0
+                } else {
+                    chunk.samples.len()
+                };
                 mode.ingest(chunk);
 
                 // Process complete engine-sized frames
@@ -1583,6 +1779,11 @@ fn run_session_loop(
                         );
                     }
                 }
+                audio.note_fed(
+                    lane_samples,
+                    session_id,
+                    engine.audio_requirements().sample_rate_hz,
+                );
             }
             Err(crossbeam_channel::RecvTimeoutError::Timeout) => {}
             Err(crossbeam_channel::RecvTimeoutError::Disconnected) => {
@@ -1596,7 +1797,7 @@ fn run_session_loop(
 /// gating: everything already captured must reach the engine), feed the
 /// tail(s), and flush. Every stage's segments go through `emit_filtered`.
 fn finish_session(
-    audio_rx: &Receiver<AudioMessage>,
+    audio: &mut SessionAudio<'_>,
     engine: &mut dyn TranscriptionEngine,
     on_segment: &SegmentCallback,
     session_id: u64,
@@ -1609,7 +1810,7 @@ fn finish_session(
     // Collect anything still queued (normally nothing — EndOfStream is the
     // last message — but the EOS-timeout path can leave chunks behind).
     let mut drained = 0usize;
-    while let Ok(msg) = audio_rx.try_recv() {
+    while let Some(msg) = audio.try_recv() {
         match msg {
             AudioMessage::Chunk(chunk) if chunk.session_id == session_id => {
                 mode.ingest(chunk);
@@ -2964,8 +3165,9 @@ mod tests {
         let text_filters = Rc::new(RefCell::new(TextFilterChain::new(vec![])));
         let mut summary = SessionSummary::default();
 
+        let mut audio = super::SessionAudio::new(&audio_rx, std::collections::VecDeque::new());
         finish_session(
-            &audio_rx,
+            &mut audio,
             &mut engine,
             &cb,
             1,
@@ -3189,5 +3391,224 @@ mod tests {
         assert_eq!(segments[1].text, "live");
         assert_eq!(segments[1].start_time, 10.0);
         assert_eq!(segments[1].end_time, 11.0);
+    }
+
+    // ---- SOU-260: capture from the click, buffered through the engine start ----
+
+    /// A chunk whose samples are the sequence numbers `first+1 ..= first+len`
+    /// (never 0, so zero padding can't pass for audio), signed per lane.
+    fn numbered_chunk(
+        session_id: u64,
+        first: usize,
+        len: usize,
+        speaker: Option<Speaker>,
+    ) -> AudioMessage {
+        let sign = if speaker == Some(Speaker::Them) {
+            -1.0
+        } else {
+            1.0
+        };
+        AudioMessage::Chunk(AudioChunk {
+            session_id,
+            samples: (first..first + len)
+                .map(|i| sign * (i + 1) as f32)
+                .collect(),
+            captured_at: Instant::now(),
+            speaker,
+        })
+    }
+
+    fn numbered(len: usize) -> Vec<f32> {
+        (0..len).map(|i| (i + 1) as f32).collect()
+    }
+
+    /// Chunk size of a 20 ms meeting tick at 24 kHz, not a divisor of the
+    /// engine frame, so frames straddle chunks and the handoff.
+    const TICK: usize = 480;
+    const RESET: Duration = Duration::from_millis(300);
+
+    fn diarized_config() -> SessionConfig {
+        SessionConfig {
+            diarize: true,
+            ..session_config()
+        }
+    }
+
+    #[test]
+    fn audio_captured_during_the_engine_reset_reaches_the_engine_sample_exact() {
+        let mock = MockEngine::new().with_reset_delay(RESET);
+        let fed = mock.fed_audio_handle();
+        let (actor, audio_tx) = spawn_with_mock(mock);
+        // The freshly loaded engine is pre-warmed for dictation; make this
+        // start pay a real reset, like a start right after a meeting does.
+        actor.debug_transcribe(Vec::new()).expect("stale the state");
+        fed.lock().unwrap().clear();
+
+        // Leftovers of an earlier session are still queued: never fed.
+        audio_tx.send(numbered_chunk(1, 0, TICK, None)).unwrap();
+        audio_tx.send(end_of_stream(1)).unwrap();
+
+        let (_collected, cb) = collecting_callback();
+        let pending = actor.begin_session(2, session_config(), cb).expect("begin");
+        // Capture starts right away: these land while the engine resets.
+        let buffered = 25;
+        for n in 0..buffered {
+            audio_tx
+                .send(numbered_chunk(2, n * TICK, TICK, None))
+                .unwrap();
+        }
+        let started = Instant::now();
+        pending.wait(Duration::from_secs(5)).expect("engine ready");
+        assert!(
+            started.elapsed() >= RESET / 2,
+            "the chunks above were queued before the engine was ready"
+        );
+        // Live audio after the handoff, then the stop.
+        let total = 50;
+        for n in buffered..total {
+            audio_tx
+                .send(numbered_chunk(2, n * TICK, TICK, None))
+                .unwrap();
+        }
+        audio_tx.send(end_of_stream(2)).unwrap();
+        actor.stop_session(Duration::from_secs(5)).expect("stop");
+
+        assert_eq!(
+            *fed.lock().unwrap(),
+            numbered(total * TICK),
+            "every sample exactly once, in capture order, across the handoff"
+        );
+    }
+
+    #[test]
+    fn both_lanes_captured_during_the_reset_stay_aligned_from_the_first_sample() {
+        let mock = MockEngine::new().with_reset_delay(RESET);
+        let fed = mock.fed_dual_handle();
+        let (actor, audio_tx) = spawn_with_mock(mock);
+
+        let (_collected, cb) = collecting_callback();
+        let pending = actor
+            .begin_session(1, diarized_config(), cb)
+            .expect("begin");
+        let ticks = 40;
+        for n in 0..ticks {
+            if n == ticks / 2 {
+                pending_wait_once(&pending);
+            }
+            audio_tx
+                .send(numbered_chunk(1, n * TICK, TICK, Some(Speaker::Me)))
+                .unwrap();
+            audio_tx
+                .send(numbered_chunk(1, n * TICK, TICK, Some(Speaker::Them)))
+                .unwrap();
+        }
+        audio_tx.send(end_of_stream(1)).unwrap();
+        drop(pending);
+        actor.stop_session(Duration::from_secs(5)).expect("stop");
+
+        let pairs = fed.lock().unwrap();
+        let me: Vec<f32> = pairs.iter().flat_map(|(me, _)| me.clone()).collect();
+        let them: Vec<f32> = pairs.iter().flat_map(|(_, them)| them.clone()).collect();
+        assert_eq!(me, numbered(ticks * TICK));
+        assert_eq!(
+            them,
+            numbered(ticks * TICK)
+                .iter()
+                .map(|s| -s)
+                .collect::<Vec<_>>()
+        );
+        for (me, them) in pairs.iter() {
+            assert_eq!(me.len(), them.len());
+            assert!(
+                me.iter().zip(them).all(|(m, t)| *m == -*t),
+                "each engine frame pairs the same instant on both lanes, so \
+                 Me and Them timestamps share one origin: the first sample"
+            );
+        }
+    }
+
+    /// Waits on the reply without consuming it: the test only needs to know
+    /// the engine is ready before it sends the second half.
+    fn pending_wait_once(pending: &super::PendingSessionStart) {
+        let reply = pending
+            .reply
+            .recv_timeout(Duration::from_secs(5))
+            .expect("engine ready");
+        assert!(reply.is_ok());
+    }
+
+    #[test]
+    fn a_stop_during_the_start_transcribes_what_was_captured_without_waiting_out_eos() {
+        let mock = MockEngine::new().with_reset_delay(RESET);
+        let fed = mock.fed_dual_handle();
+        let (actor, audio_tx) = spawn_with_mock(mock);
+
+        let (_collected, cb) = collecting_callback();
+        let pending = actor
+            .begin_session(1, diarized_config(), cb)
+            .expect("begin");
+        // The user spoke, then stopped while "Starting…": capture already
+        // ended, its EndOfStream is queued behind the audio.
+        let ticks = 12;
+        for n in 0..ticks {
+            audio_tx
+                .send(numbered_chunk(1, n * TICK, TICK, Some(Speaker::Me)))
+                .unwrap();
+            audio_tx
+                .send(numbered_chunk(1, n * TICK, TICK, Some(Speaker::Them)))
+                .unwrap();
+        }
+        audio_tx.send(end_of_stream(1)).unwrap();
+        pending.wait(Duration::from_secs(5)).expect("engine ready");
+
+        // The replayed stop.
+        let stopping = Instant::now();
+        actor.stop_session(Duration::from_secs(5)).expect("stop");
+        assert!(
+            stopping.elapsed() < Duration::from_secs(2),
+            "the marker was already queued: no EOS_WAIT timeout"
+        );
+        let me: Vec<f32> = fed
+            .lock()
+            .unwrap()
+            .iter()
+            .flat_map(|(me, _)| me.clone())
+            .collect();
+        assert_eq!(&me[..ticks * TICK], numbered(ticks * TICK).as_slice());
+        assert!(
+            me[ticks * TICK..].iter().all(|s| *s == 0.0),
+            "only padding after"
+        );
+    }
+
+    #[test]
+    fn a_session_backlog_keeps_its_own_messages_in_order_and_drops_the_rest() {
+        let (tx, rx) = unbounded();
+        tx.send(numbered_chunk(1, 0, 4, None)).unwrap();
+        tx.send(numbered_chunk(2, 0, 4, None)).unwrap();
+        tx.send(end_of_stream(1)).unwrap();
+        tx.send(numbered_chunk(2, 4, 4, None)).unwrap();
+        tx.send(end_of_stream(2)).unwrap();
+
+        let (kept, dropped) = super::take_session_backlog(&rx, 2);
+
+        assert_eq!(dropped, 2);
+        let kept: Vec<String> = kept
+            .iter()
+            .map(|m| match m {
+                AudioMessage::Chunk(c) => format!("chunk {}", c.samples[0]),
+                AudioMessage::EndOfStream { session_id } => format!("eos {session_id}"),
+            })
+            .collect();
+        assert_eq!(kept, vec!["chunk 1", "chunk 5", "eos 2"]);
+    }
+
+    #[test]
+    fn the_loaded_engine_info_is_known_without_asking_the_busy_actor() {
+        let (actor, _audio_tx) = spawn_with_mock(MockEngine::new());
+        let info = actor.loaded_engine_info().expect("loaded");
+        assert_eq!(info.audio.sample_rate_hz, crate::constants::SAMPLE_RATE);
+        actor.unload_model().expect("unload");
+        assert!(actor.loaded_engine_info().is_none());
     }
 }

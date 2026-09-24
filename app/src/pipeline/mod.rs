@@ -5,7 +5,8 @@ mod health;
 mod idle;
 
 pub use actor::{
-    EngineActorHandle, EngineCommand, EngineFactory, EngineInfo, SessionConfig, SessionSummary,
+    EngineActorHandle, EngineCommand, EngineFactory, EngineInfo, PendingSessionStart,
+    SessionConfig, SessionSummary,
 };
 pub use idle::MeetingIdleConfig;
 
