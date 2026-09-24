@@ -3,7 +3,7 @@ import { RecordingMode, SpeakerRole, LiveSystemAudio } from "types.slint";
 import { Theme } from "theme.slint";
 import { LucideIcon, IconSet } from "components/lucide_icon.slint";
 import { ThemedTextArea } from "components/themed_text_area.slint";
-import { TranscriptBlock } from "components/transcript_section.slint";
+import { TranscriptBlock, SpeakerLabels } from "components/transcript_section.slint";
 
 // LiveSessionCard.svelte parity surface. The two modes deliberately share
 // the session toolbar, while their bodies stay distinct: dictation is a
@@ -415,7 +415,7 @@ export component RecordingView inherits Rectangle {
                                     spacing: 8px;
 
                                     Text {
-                                        text: block.speaker-label;
+                                        text: block.has-speaker ? SpeakerLabels.of(block.speaker) : "";
                                         font-family: "Archivo SemiBold";
                                         font-size: 11.5px;
                                         color: Theme.accent;

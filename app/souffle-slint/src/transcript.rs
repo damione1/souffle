@@ -11,16 +11,18 @@ use souffle_lib::engine::{Speaker, TranscriptionSegment};
 use souffle_lib::transcript::MeetingRecordingSession;
 use souffle_schema::paragraphs::{PAUSE_THRESHOLD_SECONDS, group_into_paragraphs};
 
-use crate::{TranscriptBlock, TranscriptWord};
+use crate::{SpeakerRole, TranscriptBlock, TranscriptWord};
 
-/// Canonical display labels for the Me/Them lanes - the single source of
-/// truth shared by this post-meeting view and the live view
-/// (`live_transcript.rs`).
-pub(crate) fn speaker_label(speaker: Option<Speaker>) -> String {
+/// `TranscriptBlock`'s `(has_speaker, speaker)` pair for a paragraph's lane,
+/// shared by this post-meeting view and the live view (`live_transcript.rs`).
+/// The display name is resolved in Slint (`SpeakerLabels.of`) so it follows
+/// the UI locale; `None` (undiarized) carries no label, and its role is a
+/// placeholder Slint never reads.
+pub(crate) fn speaker_fields(speaker: Option<Speaker>) -> (bool, SpeakerRole) {
     match speaker {
-        Some(Speaker::Me) => "Moi".into(),
-        Some(Speaker::Them) => "Eux".into(),
-        None => String::new(),
+        Some(Speaker::Me) => (true, SpeakerRole::Me),
+        Some(Speaker::Them) => (true, SpeakerRole::Them),
+        None => (false, SpeakerRole::Me),
     }
 }
 
@@ -97,16 +99,20 @@ fn paragraph_blocks(
 ) -> Vec<TranscriptBlock> {
     group_into_paragraphs(segments, PAUSE_THRESHOLD_SECONDS)
         .into_iter()
-        .map(|p| TranscriptBlock {
-            is_session_break: false,
-            speaker_label: speaker_label(p.speaker).into(),
-            timestamp: crate::timeline::format_duration(p.start_time).into(),
-            words: transcript_words(&p.text),
-            text: p.text.into(),
-            recording_session_index: session_index.map(|i| i as i32).unwrap_or(-1),
-            start_time: p.start_time as f32,
-            end_label: "".into(),
-            start_label: "".into(),
+        .map(|p| {
+            let (has_speaker, speaker) = speaker_fields(p.speaker);
+            TranscriptBlock {
+                is_session_break: false,
+                has_speaker,
+                speaker,
+                timestamp: crate::timeline::format_duration(p.start_time).into(),
+                words: transcript_words(&p.text),
+                text: p.text.into(),
+                recording_session_index: session_index.map(|i| i as i32).unwrap_or(-1),
+                start_time: p.start_time as f32,
+                end_label: "".into(),
+                start_label: "".into(),
+            }
         })
         .collect()
 }
@@ -114,7 +120,8 @@ fn paragraph_blocks(
 fn session_break_block() -> TranscriptBlock {
     TranscriptBlock {
         is_session_break: true,
-        speaker_label: "".into(),
+        has_speaker: false,
+        speaker: SpeakerRole::Me,
         timestamp: "".into(),
         text: "".into(),
         words: slint::ModelRc::new(slint::VecModel::from(Vec::<TranscriptWord>::new())),
@@ -341,8 +348,14 @@ mod tests {
         ];
         let blocks = build_transcript_blocks(&segments, &[]);
         assert_eq!(blocks.len(), 3);
-        assert_eq!(blocks[0].speaker_label.as_str(), "Moi");
-        assert_eq!(blocks[2].speaker_label.as_str(), "Eux");
+        assert_eq!(
+            (blocks[0].has_speaker, blocks[0].speaker),
+            (true, SpeakerRole::Me)
+        );
+        assert_eq!(
+            (blocks[2].has_speaker, blocks[2].speaker),
+            (true, SpeakerRole::Them)
+        );
     }
 
     /// The post-meeting view runs the same grouper as the export, proven on
@@ -384,17 +397,17 @@ mod tests {
                 .collect();
 
             let blocks = build_transcript_blocks(&segments, &[]);
-            let actual: Vec<(String, String)> = blocks
+            let actual: Vec<((bool, SpeakerRole), String)> = blocks
                 .iter()
-                .map(|b| (b.speaker_label.to_string(), b.text.to_string()))
+                .map(|b| ((b.has_speaker, b.speaker), b.text.to_string()))
                 .collect();
-            let expected: Vec<(String, String)> = case["expected"]
+            let expected: Vec<((bool, SpeakerRole), String)> = case["expected"]
                 .as_array()
                 .expect("expected array")
                 .iter()
                 .map(|p| {
                     (
-                        speaker_label(speaker_of(p)),
+                        speaker_fields(speaker_of(p)),
                         p["text"].as_str().expect("text").to_string(),
                     )
                 })
@@ -432,7 +445,8 @@ mod tests {
     fn plain_block(text: &str) -> TranscriptBlock {
         TranscriptBlock {
             is_session_break: false,
-            speaker_label: "Moi".into(),
+            has_speaker: true,
+            speaker: SpeakerRole::Me,
             timestamp: "00:00".into(),
             words: transcript_words(text),
             text: text.into(),

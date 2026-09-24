@@ -1,6 +1,7 @@
 import { Theme } from "../theme.slint";
 import { ThemedLineEdit } from "themed_line_edit.slint";
 import { LucideIcon, IconSet } from "lucide_icon.slint";
+import { SpeakerRole } from "../types.slint";
 
 // Port of MeetingTranscriptSection.svelte - paragraph grouping with speaker
 // labels and session-break dividers, click-to-seek on a paragraph's
@@ -17,9 +18,24 @@ export struct TranscriptWord {
     clickable: bool,
 }
 
+// Display names of the Me/Them lanes, shared by this post-meeting view
+// and the live view (recording_view.slint).
+export global SpeakerLabels {
+    pure public function of(role: SpeakerRole) -> string {
+        if role == SpeakerRole.me { return @tr("Moi"); }
+        return @tr("Eux");
+    }
+}
+
 export struct TranscriptBlock {
     is-session-break: bool,
-    speaker-label: string,
+    // Diarized lane of the paragraph. `has-speaker` false means an
+    // undiarized (mono) paragraph: no label at all, `speaker` is then
+    // meaningless. The label text is `SpeakerLabels.of()`, above, so it is
+    // translated with the rest of the UI instead of arriving as a French
+    // string built in Rust (SOU-246).
+    has-speaker: bool,
+    speaker: SpeakerRole,
     timestamp: string,
     text: string,
     // SOU-223: rendered as a `FlexboxLayout` of `Text`/`TouchArea` items
@@ -281,8 +297,8 @@ export component TranscriptSection inherits VerticalLayout {
                             spacing: 8px;
                             alignment: start;
 
-                            if block.speaker-label != "": Text {
-                                text: block.speaker-label;
+                            if block.has-speaker: Text {
+                                text: SpeakerLabels.of(block.speaker);
                                 font-size: 11px;
                                 font-weight: 600;
                                 color: Theme.accent;

@@ -22,11 +22,33 @@ import { Theme } from "theme.slint";
 // + dictionary alias popover, summary generation itself (model/template
 // pickers, streaming), export menu and resume-recording (need the native
 // file dialog from SOU-191, not available to this headless bridge yet).
+// Parts of the header meta line (date, duration, segment and session
+// counts). Zero-padded strings from Rust; the order and wording are @tr()
+// patterns below, so English can read the date month-first (SOU-246).
+export struct MeetingMeta {
+    day: string,
+    month: string,
+    year: string,
+    hour: string,
+    minute: string,
+    duration: string,
+    segments: int,
+    sessions: int,
+}
+
+// One invitee of the meeting's calendar event. The "(organisateur)" /
+// "(vous)" suffixes are added here, behind @tr(), not by Rust (SOU-246).
+export struct MeetingParticipantChip {
+    name: string,
+    is-organizer: bool,
+    is-current-user: bool,
+}
+
 export component MeetingDetail inherits Rectangle {
     in property <string> title;
-    in property <string> meta-line;
+    in property <MeetingMeta> meta;
     in property <string> model-label;
-    in property <[string]> participant-labels;
+    in property <[MeetingParticipantChip]> participants;
     in-out property <string> notes;
     in property <NotesSaveState> notes-save-state;
     in property <bool> has-audio: false;
@@ -257,7 +279,9 @@ export component MeetingDetail inherits Rectangle {
                     alignment: start;
 
                     Text {
-                        text: root.meta-line;
+                        text: root.meta.sessions > 1
+                            ? @tr("{0}/{1}/{2} {3}:{4} · {5} · {6} segments · {7} sessions", root.meta.day, root.meta.month, root.meta.year, root.meta.hour, root.meta.minute, root.meta.duration, root.meta.segments, root.meta.sessions)
+                            : @tr("{0}/{1}/{2} {3}:{4} · {5} · {6} segments", root.meta.day, root.meta.month, root.meta.year, root.meta.hour, root.meta.minute, root.meta.duration, root.meta.segments);
                         color: Theme.text-muted;
                         font-size: 12px;
                         vertical-alignment: center;
@@ -285,7 +309,7 @@ export component MeetingDetail inherits Rectangle {
                 // then one outlined chip per name, same 1px square outline
                 // as the model chip above. Flexbox so a long invite list
                 // wraps instead of overflowing the header.
-                if root.participant-labels.length > 0: HorizontalLayout {
+                if root.participants.length > 0: HorizontalLayout {
                     spacing: 7px;
                     alignment: start;
 
@@ -308,14 +332,17 @@ export component MeetingDetail inherits Rectangle {
                         spacing: 7px;
                         horizontal-stretch: 1;
 
-                        for label in root.participant-labels: Rectangle {
+                        for participant in root.participants: Rectangle {
                             width: chip-text.preferred-width + 18px;
                             height: 22px;
                             border-width: 1px;
                             border-color: Theme.rule;
 
                             chip-text := Text {
-                                text: label;
+                                text: participant.is-organizer && participant.is-current-user ? @tr("{} (organisateur) (vous)", participant.name)
+                                    : participant.is-organizer ? @tr("{} (organisateur)", participant.name)
+                                    : participant.is-current-user ? @tr("{} (vous)", participant.name)
+                                    : participant.name;
                                 color: Theme.text-tertiary;
                                 font-size: 11.5px;
                                 horizontal-alignment: center;

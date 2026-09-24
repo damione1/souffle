@@ -19,6 +19,11 @@ export enum SpeakerRole { me, them }
 // A timeline entry's own kind - always one specific thing, never "all".
 export enum TimelineKind { meeting, dictation }
 
+// Which header a timeline day group gets. `earlier` groups are labelled
+// from their weekday/day/month fields; the wording is @tr() in
+// timeline_section.slint so it follows the UI locale (SOU-246).
+export enum TimelineDay { today, yesterday, earlier }
+
 // The Timeline's kind filter - a superset of TimelineKind with "all" added.
 export enum TimelineFilter { all, meeting, dictation }
 
