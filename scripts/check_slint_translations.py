@@ -16,9 +16,9 @@ UNCHANGED_ENGLISH = {
     # Symbols, acronyms and placeholder-only templates: identical spelling
     # in both languages is correct, not a missed translation.
     "USB", "Bluetooth", "⏸", "▶", "✓", "•",
-    # Export file formats (MeetingDetail's export picker): format names, not
-    # prose - Markdown/JSON/SRT/VTT are the same word in both languages.
-    "Markdown", "JSON", "SRT", "VTT",
+    # Export file formats (MeetingDetail's Export menu): format names, not
+    # prose - the same words in both languages.
+    "Markdown (.md)", "JSON (.json)", "Audio (.ogg)",
     " {}", " / {}", "• {}", "→ {}", "Version {}",
 }
 

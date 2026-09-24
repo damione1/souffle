@@ -440,11 +440,9 @@ fn meeting_meta(meeting: &MeetingTranscript) -> MeetingMeta {
 }
 
 /// Mirrors `souffle_lib::export::ExportFormat` at the UI boundary
-/// (`types.slint`'s `MeetingExportFormat`) - exhaustive both ways per the
-/// contract in `docs/engineering/slint.md`. Only direction ever needed
-/// today is Slint -> Rust (the picker never has to display a format it read
-/// back), but the enum stays plain so a reverse conversion is a compile
-/// error away from correct if one is ever needed.
+/// (`types.slint`'s `MeetingExportFormat`) - exhaustive, no `_ =>` arm, per
+/// the contract in `docs/engineering/slint.md`. Only Slint -> Rust is ever
+/// needed: the Export menu never displays a format read back from Rust.
 fn export_format_from_slint(format: MeetingExportFormat) -> souffle_lib::export::ExportFormat {
     match format {
         MeetingExportFormat::Markdown => souffle_lib::export::ExportFormat::Markdown,
@@ -3810,7 +3808,7 @@ fn wire_callbacks(
         let id = window.get_active_meeting_id().to_string();
         match souffle_lib::commands::get_meeting(handle_copy.clone(), id) {
             Ok(meeting) => {
-                let text = souffle_lib::export::render_transcript_text(&meeting);
+                let text = souffle_lib::export::render_transcript_plain_text(&meeting);
                 if let Err(e) = souffle_lib::commands::copy_text(text) {
                     window.set_meeting_detail_export_error(e.into());
                 }

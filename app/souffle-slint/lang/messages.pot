@@ -2,7 +2,7 @@
 msgid ""
 msgstr ""
 "Project-Id-Version: PACKAGE VERSION\n"
-"POT-Creation-Date: 2026-09-23 04:09+0000\n"
+"POT-Creation-Date: 2026-09-22 21:45+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -12,142 +12,107 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=1; plural=0;\n"
 
-#: app/souffle-slint/ui/meeting_detail.slint:88
-msgctxt "MeetingDetail"
-msgid "Markdown"
-msgstr ""
-
-#: app/souffle-slint/ui/meeting_detail.slint:89
-msgctxt "MeetingDetail"
-msgid "JSON"
-msgstr ""
-
 #: app/souffle-slint/ui/meeting_detail.slint:90
-msgctxt "MeetingDetail"
-msgid "SRT"
-msgstr ""
-
-#: app/souffle-slint/ui/meeting_detail.slint:91
-msgctxt "MeetingDetail"
-msgid "VTT"
-msgstr ""
-
-#: app/souffle-slint/ui/meeting_detail.slint:113
 msgctxt "MeetingDetail"
 msgid "Retour à l'historique"
 msgstr ""
 
-#: app/souffle-slint/ui/meeting_detail.slint:146
+#: app/souffle-slint/ui/meeting_detail.slint:123
 msgctxt "MeetingDetail"
 msgid "Historique"
 msgstr ""
 
-#: app/souffle-slint/ui/meeting_detail.slint:173
+#: app/souffle-slint/ui/meeting_detail.slint:149
 msgctxt "MeetingDetail"
 msgid "Renommer la réunion"
 msgstr ""
 
-#: app/souffle-slint/ui/meeting_detail.slint:214
+#: app/souffle-slint/ui/meeting_detail.slint:190
 msgctxt "MeetingDetail"
 msgid "Titre de la réunion"
 msgstr ""
 
-#: app/souffle-slint/ui/meeting_detail.slint:278
-msgctxt "MeetingDetail"
-msgid "Format d'export"
-msgstr ""
-
-#: app/souffle-slint/ui/meeting_detail.slint:306
-msgctxt "MeetingDetail"
-msgid "Exporter la réunion"
-msgstr ""
-
-#: app/souffle-slint/ui/meeting_detail.slint:340
-msgctxt "MeetingDetail"
-msgid "Exporter"
-msgstr ""
-
-#: app/souffle-slint/ui/meeting_detail.slint:368
+#: app/souffle-slint/ui/meeting_detail.slint:259
 msgctxt "MeetingDetail"
 msgid "Reprendre l'enregistrement"
 msgstr ""
 
-#: app/souffle-slint/ui/meeting_detail.slint:390
+#: app/souffle-slint/ui/meeting_detail.slint:281
 msgctxt "MeetingDetail"
 msgid "Reprendre"
 msgstr ""
 
-#: app/souffle-slint/ui/meeting_detail.slint:441
+#: app/souffle-slint/ui/meeting_detail.slint:332
 msgctxt "MeetingDetail"
 msgid "Notes"
 msgstr ""
 
-#: app/souffle-slint/ui/meeting_detail.slint:451
+#: app/souffle-slint/ui/meeting_detail.slint:342
 msgctxt "MeetingDetail"
 msgid "Enregistré"
 msgstr ""
 
-#: app/souffle-slint/ui/meeting_detail.slint:457
+#: app/souffle-slint/ui/meeting_detail.slint:348
 msgctxt "MeetingDetail"
 msgid "Enregistrement…"
 msgstr ""
 
-#: app/souffle-slint/ui/meeting_detail.slint:467
+#: app/souffle-slint/ui/meeting_detail.slint:358
 msgctxt "MeetingDetail"
 msgid "Ajoutez les décisions, actions et noms importants…"
 msgstr ""
 
-#: app/souffle-slint/ui/meeting_detail.slint:468
+#: app/souffle-slint/ui/meeting_detail.slint:359
 msgctxt "MeetingDetail"
 msgid "Notes de la réunion"
 msgstr ""
 
-#: app/souffle-slint/ui/meeting_detail.slint:473
+#: app/souffle-slint/ui/meeting_detail.slint:364
 msgctxt "MeetingDetail"
 msgid "Les notes sont enregistrées avec la réunion et améliorent le résumé."
 msgstr ""
 
-#: app/souffle-slint/ui/meeting_detail.slint:499
+#: app/souffle-slint/ui/meeting_detail.slint:390
 msgctxt "MeetingDetail"
 msgid "Cette réunion ne contient aucun enregistrement."
 msgstr ""
 
-#: app/souffle-slint/ui/meeting_detail.slint:506
+#: app/souffle-slint/ui/meeting_detail.slint:397
 msgctxt "MeetingDetail"
 msgid "Aucun audio, aucune transcription et aucun résumé."
 msgstr ""
 
-#: app/souffle-slint/ui/settings_view.slint:298
+#: app/souffle-slint/ui/settings_view.slint:295
 msgctxt "SettingsView"
 msgid "Fermer les paramètres"
 msgstr ""
 
-#: app/souffle-slint/ui/settings_view.slint:323
+#: app/souffle-slint/ui/settings_view.slint:320
 msgctxt "SettingsView"
 msgid "Terminé"
 msgstr ""
 
-#: app/souffle-slint/ui/settings_view.slint:336
+#: app/souffle-slint/ui/settings_view.slint:333
 msgctxt "SettingsView"
 msgid "Paramètres"
 msgstr ""
 
-#: app/souffle-slint/ui/settings_view.slint:345
+#: app/souffle-slint/ui/settings_view.slint:342
 msgctxt "SettingsView"
 msgid "État des réglages enregistrés inconnu : {}"
 msgstr ""
 
-#: app/souffle-slint/ui/settings_view.slint:346
+#: app/souffle-slint/ui/settings_view.slint:343
 msgctxt "SettingsView"
 msgid "Enregistrement des réglages : {}"
 msgstr ""
 
-#: app/souffle-slint/ui/settings_view.slint:354
+#: app/souffle-slint/ui/settings_view.slint:351
 msgctxt "SettingsView"
 msgid "Brouillon conservé, état des réglages inconnu : {}"
 msgstr ""
 
-#: app/souffle-slint/ui/settings_view.slint:355
+#: app/souffle-slint/ui/settings_view.slint:352
 msgctxt "SettingsView"
 msgid "Brouillon conservé : {}"
 msgstr ""
@@ -581,52 +546,37 @@ msgctxt "SearchField"
 msgid "Rechercher les transcriptions et réunions"
 msgstr ""
 
-#: app/souffle-slint/ui/components/audio_player_section.slint:27
+#: app/souffle-slint/ui/components/audio_player_section.slint:21
 msgctxt "AudioPlayerSection"
 msgid "Aucun enregistrement audio pour cette réunion."
 msgstr ""
 
-#: app/souffle-slint/ui/components/audio_player_section.slint:37
-msgctxt "AudioPlayerSection"
-msgid "Audio"
-msgstr ""
-
-#: app/souffle-slint/ui/components/audio_player_section.slint:54
-msgctxt "AudioPlayerSection"
-msgid "Télécharger l'audio"
-msgstr ""
-
-#: app/souffle-slint/ui/components/audio_player_section.slint:88
-msgctxt "AudioPlayerSection"
-msgid "Télécharger"
-msgstr ""
-
-#: app/souffle-slint/ui/components/audio_player_section.slint:116
+#: app/souffle-slint/ui/components/audio_player_section.slint:38
 msgctxt "AudioPlayerSection"
 msgid "Pause"
 msgstr ""
 
-#: app/souffle-slint/ui/components/audio_player_section.slint:116
+#: app/souffle-slint/ui/components/audio_player_section.slint:38
 msgctxt "AudioPlayerSection"
 msgid "Lecture"
 msgstr ""
 
-#: app/souffle-slint/ui/components/audio_player_section.slint:138
+#: app/souffle-slint/ui/components/audio_player_section.slint:60
 msgctxt "AudioPlayerSection"
 msgid "⏸"
 msgstr ""
 
-#: app/souffle-slint/ui/components/audio_player_section.slint:138
+#: app/souffle-slint/ui/components/audio_player_section.slint:60
 msgctxt "AudioPlayerSection"
 msgid "▶"
 msgstr ""
 
-#: app/souffle-slint/ui/components/audio_player_section.slint:145
+#: app/souffle-slint/ui/components/audio_player_section.slint:67
 msgctxt "AudioPlayerSection"
 msgid " / {}"
 msgstr ""
 
-#: app/souffle-slint/ui/components/audio_player_section.slint:159
+#: app/souffle-slint/ui/components/audio_player_section.slint:81
 msgctxt "AudioPlayerSection"
 msgid "Position de lecture"
 msgstr ""
@@ -870,72 +820,62 @@ msgctxt "ThemedCheckbox"
 msgid "✓"
 msgstr ""
 
-#: app/souffle-slint/ui/components/transcript_section.slint:125
+#: app/souffle-slint/ui/components/transcript_section.slint:118
 msgctxt "TranscriptSection"
 msgid "Alias de dictionnaire"
 msgstr ""
 
-#: app/souffle-slint/ui/components/transcript_section.slint:137
+#: app/souffle-slint/ui/components/transcript_section.slint:130
 msgctxt "TranscriptSection"
 msgid "Fermer"
 msgstr ""
 
-#: app/souffle-slint/ui/components/transcript_section.slint:145
+#: app/souffle-slint/ui/components/transcript_section.slint:138
 msgctxt "TranscriptSection"
 msgid "✕"
 msgstr ""
 
-#: app/souffle-slint/ui/components/transcript_section.slint:153
+#: app/souffle-slint/ui/components/transcript_section.slint:146
 msgctxt "TranscriptSection"
 msgid "Terme correct"
 msgstr ""
 
-#: app/souffle-slint/ui/components/transcript_section.slint:159
+#: app/souffle-slint/ui/components/transcript_section.slint:152
 msgctxt "TranscriptSection"
 msgid "Prononciation entendue"
 msgstr ""
 
-#: app/souffle-slint/ui/components/transcript_section.slint:169
+#: app/souffle-slint/ui/components/transcript_section.slint:162
 msgctxt "TranscriptSection"
 msgid "Enregistrer l'alias"
 msgstr ""
 
-#: app/souffle-slint/ui/components/transcript_section.slint:178
+#: app/souffle-slint/ui/components/transcript_section.slint:171
 msgctxt "TranscriptSection"
 msgid "Enregistrer"
 msgstr ""
 
-#: app/souffle-slint/ui/components/transcript_section.slint:207
+#: app/souffle-slint/ui/components/transcript_section.slint:196
 msgctxt "TranscriptSection"
 msgid "Transcription"
 msgstr ""
 
-#: app/souffle-slint/ui/components/transcript_section.slint:224
-msgctxt "TranscriptSection"
-msgid "Copier la transcription"
-msgstr ""
-
-#: app/souffle-slint/ui/components/transcript_section.slint:258
-msgctxt "TranscriptSection"
-msgid "Copier"
-msgstr ""
-
-#: app/souffle-slint/ui/components/transcript_section.slint:268
+#: app/souffle-slint/ui/components/transcript_section.slint:203
 msgctxt "TranscriptSection"
 msgid "Aucun texte transcrit pour cette réunion."
 msgstr ""
 
-#: app/souffle-slint/ui/components/transcript_section.slint:318
+#: app/souffle-slint/ui/components/transcript_section.slint:253
 msgctxt "TranscriptSection"
 msgid "Aller à {}"
 msgstr ""
 
-#: app/souffle-slint/ui/components/transcript_section.slint:375
+#: app/souffle-slint/ui/components/transcript_section.slint:310
 msgctxt "TranscriptSection"
 msgid "Fin de l'enregistrement précédent"
 msgstr ""
 
-#: app/souffle-slint/ui/components/transcript_section.slint:375
+#: app/souffle-slint/ui/components/transcript_section.slint:310
 msgctxt "TranscriptSection"
 msgid "Nouvelle session d'enregistrement"
 msgstr ""
@@ -1736,45 +1676,6 @@ msgctxt "MicrophoneSection"
 msgid ""
 "Sinon, un casque Bluetooth n'est jamais sélectionné automatiquement (évite "
 "le mode mono basse qualité)."
-msgstr ""
-
-#: app/souffle-slint/ui/components/settings/model_delete_section.slint:34
-msgctxt "ModelDeleteSection"
-msgid "ZONE DE DANGER"
-msgstr ""
-
-#: app/souffle-slint/ui/components/settings/model_delete_section.slint:38
-msgctxt "ModelDeleteSection"
-msgid "Supprimer le modèle téléchargé"
-msgstr ""
-
-#: app/souffle-slint/ui/components/settings/model_delete_section.slint:40
-msgctxt "ModelDeleteSection"
-msgid ""
-"Supprime les fichiers de {} du disque. Il faudra le télécharger à nouveau "
-"pour l'utiliser."
-msgstr ""
-
-#: app/souffle-slint/ui/components/settings/model_delete_section.slint:41
-msgctxt "ModelDeleteSection"
-msgid ""
-"Le modèle doit être téléchargé et déchargé (pas en cours "
-"d'utilisation) pour être supprimé."
-msgstr ""
-
-#: app/souffle-slint/ui/components/settings/model_delete_section.slint:48
-msgctxt "ModelDeleteSection"
-msgid "Supprimer"
-msgstr ""
-
-#: app/souffle-slint/ui/components/settings/model_delete_section.slint:55
-msgctxt "ModelDeleteSection"
-msgid "Confirmer"
-msgstr ""
-
-#: app/souffle-slint/ui/components/settings/model_delete_section.slint:64
-msgctxt "ModelDeleteSection"
-msgid "Annuler"
 msgstr ""
 
 #: app/souffle-slint/ui/components/settings/calendar_section.slint:38

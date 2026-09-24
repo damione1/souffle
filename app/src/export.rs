@@ -241,10 +241,22 @@ fn render_markdown(meeting: &MeetingTranscript) -> String {
 /// Just the transcript, as Markdown paragraphs with speaker/timestamp
 /// prefixes - the edited transcript verbatim when there is one, otherwise
 /// the same paragraph grouping `render_markdown`'s Transcript section uses.
-/// Factored out of `render_markdown` so the meeting detail's "Copy" action
-/// (souffle-slint) can copy just this text to the clipboard without also
-/// carrying the notes/summary sections around it.
-pub fn render_transcript_text(meeting: &MeetingTranscript) -> String {
+fn render_transcript_text(meeting: &MeetingTranscript) -> String {
+    render_transcript_with(meeting, render_paragraph_markdown)
+}
+
+/// The transcript as plain text for the meeting detail's "Copy" action
+/// (souffle-slint): same content as [`render_transcript_text`] but with
+/// `Me [0:01] text` lines instead of Markdown bold, matching what the Tauri
+/// app's transcript CopyButton put on the pasteboard.
+pub fn render_transcript_plain_text(meeting: &MeetingTranscript) -> String {
+    render_transcript_with(meeting, render_paragraph_plain)
+}
+
+fn render_transcript_with(
+    meeting: &MeetingTranscript,
+    render: fn(&paragraphs::Paragraph) -> String,
+) -> String {
     match non_empty(meeting.edited_transcript.as_deref()) {
         Some(edited) => edited.to_string(),
         None => {
@@ -252,11 +264,7 @@ pub fn render_transcript_text(meeting: &MeetingTranscript) -> String {
                 &meeting.segments,
                 paragraphs::PAUSE_THRESHOLD_SECONDS,
             );
-            grouped
-                .iter()
-                .map(render_paragraph_markdown)
-                .collect::<Vec<_>>()
-                .join("\n\n")
+            grouped.iter().map(render).collect::<Vec<_>>().join("\n\n")
         }
     }
 }
@@ -319,6 +327,13 @@ fn render_paragraph_markdown(p: &paragraphs::Paragraph) -> String {
             p.timestamp,
             p.text
         ),
+        None => format!("[{}] {}", p.timestamp, p.text),
+    }
+}
+
+fn render_paragraph_plain(p: &paragraphs::Paragraph) -> String {
+    match p.speaker {
+        Some(speaker) => format!("{} [{}] {}", speaker.display_name(), p.timestamp, p.text),
         None => format!("[{}] {}", p.timestamp, p.text),
     }
 }
@@ -719,6 +734,15 @@ mod tests {
         let meeting = sample_meeting("m1");
         let text = render_transcript_text(&meeting);
         assert!(text.contains("[0:00] Hello world"));
+        assert!(!text.contains("## "));
+    }
+
+    #[test]
+    fn plain_transcript_text_has_no_markdown_markup() {
+        let meeting = sample_meeting("m1");
+        let text = render_transcript_plain_text(&meeting);
+        assert!(text.contains("[0:00] Hello world"));
+        assert!(!text.contains("**"));
         assert!(!text.contains("## "));
     }
 

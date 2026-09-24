@@ -100,6 +100,19 @@ export component TranscriptSection inherits VerticalLayout {
     // copy.
     callback copy-requested();
 
+    // "Copié" feedback for 1.5s after a copy, like the Tauri CopyButton
+    // (and the summary's Copy, summary_section.slint).
+    property <bool> just-copied: false;
+    function copy-transcript() {
+        root.copy-requested();
+        root.just-copied = true;
+    }
+    Timer {
+        interval: 1.5s;
+        running: root.just-copied;
+        triggered => { root.just-copied = false; }
+    }
+
     // Draft state for the alias popup below, kept on `root` rather than on
     // the `PopupWindow` itself: Slint rejects *any* access (read, write, or
     // function call) to something declared inside a `PopupWindow` from its
@@ -271,22 +284,22 @@ export component TranscriptSection inherits VerticalLayout {
 
         if root.segment-count > 0: copy-btn := Rectangle {
             width: copy-content.preferred-width + 16px;
-            height: 24px;
+            height: 22px;
             horizontal-stretch: 0;
             border-radius: 4px;
             border-width: copy-focus.has-focus ? 2px : 0px;
             border-color: Theme.accent;
-            background: copy-area.pressed ? Theme.surface-4 : copy-area.has-hover ? Theme.surface-3 : Theme.surface-2;
+            background: copy-area.pressed ? Theme.surface-4 : copy-area.has-hover ? Theme.surface-3 : transparent;
 
             accessible-role: button;
             accessible-label: @tr("Copier la transcription");
-            accessible-action-default => { root.copy-requested(); }
+            accessible-action-default => { root.copy-transcript(); }
 
             forward-focus: copy-focus;
             copy-focus := FocusScope {
                 key-pressed(event) => {
                     if event.text == Key.Return || event.text == Key.Space {
-                        root.copy-requested();
+                        root.copy-transcript();
                         return accept;
                     }
                     return reject;
@@ -294,9 +307,10 @@ export component TranscriptSection inherits VerticalLayout {
             }
 
             copy-area := TouchArea {
+                mouse-cursor: pointer;
                 clicked => {
                     copy-focus.focus();
-                    root.copy-requested();
+                    root.copy-transcript();
                 }
             }
 
@@ -306,15 +320,20 @@ export component TranscriptSection inherits VerticalLayout {
                 spacing: 5px;
                 alignment: center;
 
-                LucideIcon {
+                Rectangle {
                     width: 13px;
-                    height: 13px;
-                    icon: IconSet.Copy;
-                    icon-color: Theme.text-secondary;
+                    horizontal-stretch: 0;
+
+                    LucideIcon {
+                        size: 13px;
+                        y: (parent.height - self.height) / 2;
+                        icon: root.just-copied ? IconSet.Check : IconSet.Copy;
+                        icon-color: root.just-copied ? Theme.accent : Theme.text-secondary;
+                    }
                 }
                 Text {
-                    text: @tr("Copier");
-                    font-size: 11px;
+                    text: root.just-copied ? @tr("Copié") : @tr("Copier");
+                    font-size: 11.5px;
                     color: Theme.text-secondary;
                     vertical-alignment: center;
                 }

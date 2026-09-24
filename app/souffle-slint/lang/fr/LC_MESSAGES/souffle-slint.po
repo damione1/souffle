@@ -2777,20 +2777,24 @@ msgstr "Eux"
 
 
 msgctxt "MeetingDetail"
-msgid "Markdown"
-msgstr "Markdown"
+msgid "Markdown (.md)"
+msgstr "Markdown (.md)"
 
 msgctxt "MeetingDetail"
-msgid "JSON"
-msgstr "JSON"
+msgid "JSON (.json)"
+msgstr "JSON (.json)"
 
 msgctxt "MeetingDetail"
-msgid "SRT"
-msgstr "SRT"
+msgid "Sous-titres (.srt)"
+msgstr "Sous-titres (.srt)"
 
 msgctxt "MeetingDetail"
-msgid "VTT"
-msgstr "VTT"
+msgid "Sous-titres (.vtt)"
+msgstr "Sous-titres (.vtt)"
+
+msgctxt "MeetingDetail"
+msgid "Audio (.ogg)"
+msgstr "Audio (.ogg)"
 
 msgctxt "MeetingDetail"
 msgid "Format d'export"
@@ -2804,18 +2808,6 @@ msgctxt "MeetingDetail"
 msgid "Exporter"
 msgstr "Exporter"
 
-msgctxt "AudioPlayerSection"
-msgid "Audio"
-msgstr "Audio"
-
-msgctxt "AudioPlayerSection"
-msgid "Télécharger l'audio"
-msgstr "Télécharger l'audio"
-
-msgctxt "AudioPlayerSection"
-msgid "Télécharger"
-msgstr "Télécharger"
-
 msgctxt "TranscriptSection"
 msgid "Copier la transcription"
 msgstr "Copier la transcription"
@@ -2823,6 +2815,10 @@ msgstr "Copier la transcription"
 msgctxt "TranscriptSection"
 msgid "Copier"
 msgstr "Copier"
+
+msgctxt "TranscriptSection"
+msgid "Copié"
+msgstr "Copié"
 
 msgctxt "ModelDeleteSection"
 msgid "ZONE DE DANGER"
