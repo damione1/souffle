@@ -2816,8 +2816,8 @@ msgid "Copié"
 msgstr "Copied"
 
 msgctxt "ModelDeleteSection"
-msgid "ZONE DE DANGER"
-msgstr "DANGER ZONE"
+msgid "STOCKAGE DU MODÈLE"
+msgstr "MODEL STORAGE"
 
 msgctxt "ModelDeleteSection"
 msgid "Supprimer le modèle téléchargé"
