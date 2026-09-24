@@ -72,6 +72,10 @@ impl CaptureStartGate {
                 session.capture_running = true;
                 if session.halted_at.is_some() {
                     stop();
+                    // Capture ran until now, not until the earlier stop:
+                    // the session's end must not precede its start, which
+                    // the caller took just before this call.
+                    session.halted_at = Some(Utc::now());
                 }
             }
             Ok(())
@@ -173,9 +177,13 @@ mod tests {
 
         assert!(gate.halt(|| log.borrow_mut().push(Sent::Stop)));
         assert!(log.borrow().is_empty(), "nothing to stop yet");
+        let capture_started_at = chrono::Utc::now();
         start_capture(&gate, 1, &log);
 
         assert_eq!(*log.borrow(), vec![Sent::Start, Sent::Stop]);
+        // The session ends when its capture did, never before it began.
+        let ended = gate.take_halted_at().expect("halted");
+        assert!(ended >= capture_started_at);
     }
 
     #[test]

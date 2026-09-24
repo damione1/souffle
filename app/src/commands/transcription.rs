@@ -1046,14 +1046,31 @@ pub fn finalize_recording_before_quit(state: &Arc<AppState>, budget: Duration) {
     halt_starting_capture(state);
     wait_while(&|| state.capture_start.start_in_flight());
 
+    // Each stop runs on a thread of its own and is waited for below, against
+    // the deadline: a dictation stop blocks for the whole drain (up to its
+    // reply timeout, well past `budget`), and quit must not wait that long.
+    let stop_off_thread = |stop: fn(Arc<AppState>) -> Result<(), String>| {
+        let state = Arc::clone(state);
+        std::thread::Builder::new()
+            .name("quit-stop".into())
+            .spawn(move || {
+                if let Err(e) = stop(state) {
+                    warn!("Stopping the recording before quit failed: {e}");
+                }
+            })
+            .map(|_| ())
+            .map_err(|e| format!("Spawn quit stop: {e}"))
+    };
     let result = match state.current_machine_state() {
         Ok(AppStateMachine::RecordingMeeting { .. }) => {
             info!("Quit during a meeting recording: finalizing it first");
-            crate::async_runtime::block_on(stop_meeting_recording(Arc::clone(state))).map(|_| ())
+            stop_off_thread(|state| {
+                crate::async_runtime::block_on(stop_meeting_recording(state)).map(|_| ())
+            })
         }
         Ok(AppStateMachine::RecordingDictation { .. }) => {
             info!("Quit during a dictation: stopping it first");
-            crate::async_runtime::block_on(stop_transcription(Arc::clone(state)))
+            stop_off_thread(|state| crate::async_runtime::block_on(stop_transcription(state)))
         }
         Ok(
             AppStateMachine::Idle
@@ -1071,17 +1088,17 @@ pub fn finalize_recording_before_quit(state: &Arc<AppState>, budget: Duration) {
         warn!("Stopping the recording before quit failed: {e}");
     }
 
-    // A meeting stop returns before its drain and save: wait for them.
-    wait_while(&|| {
+    // Wait for the stop to be taken, then for its drain and save.
+    let unfinished = || {
         matches!(
             state.current_machine_state(),
-            Ok(AppStateMachine::Stopping { .. })
+            Ok(AppStateMachine::Stopping { .. }
+                | AppStateMachine::RecordingMeeting { .. }
+                | AppStateMachine::RecordingDictation { .. })
         )
-    });
-    if matches!(
-        state.current_machine_state(),
-        Ok(AppStateMachine::Stopping { .. })
-    ) {
+    };
+    wait_while(&unfinished);
+    if unfinished() {
         warn!("Quit before the recording finished saving; the next launch recovers it");
     }
 }
