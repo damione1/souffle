@@ -302,154 +302,154 @@ export component MeetingDetail inherits Rectangle {
             background: Theme.surface-4;
         }
 
-        Rectangle {
+        // Single scroll region (SOU-243 AC1): everything from Notes down is
+        // one Flickable, so the page scrolls as a whole instead of Notes/
+        // Summary each negotiating their own capped-height inner scroll.
+        // The header above (back-btn, title row, divider) lives outside this
+        // Flickable and stays on screen (sticky) while this area scrolls.
+        // Transcript is the one exception (AC2, see transcript_section.slint):
+        // it keeps its own internal virtualized Flickable rather than being
+        // flattened into this flow, so long meetings never mount thousands
+        // of paragraphs at once.
+        page-scroll := Flickable {
             vertical-stretch: 1;
+            viewport-width: self.width;
+            viewport-height: page-inner.preferred-height;
 
-            VerticalLayout {
+            page-inner := VerticalLayout {
                 width: parent.width - 12px;
                 padding-right: 14px;
                 spacing: 22px;
 
-                    Flickable {
+                VerticalLayout {
+                    spacing: 10px;
+
+                    HorizontalLayout {
+                        height: 24px;
                         vertical-stretch: 0;
-                        viewport-height: notes-inner.preferred-height;
-                        max-height: 250px;
-                        notes-inner := VerticalLayout {
-                            spacing: 10px;
+                        spacing: 8px;
 
-                            HorizontalLayout {
-                                height: 24px;
-                                vertical-stretch: 0;
-                                spacing: 8px;
+                        LucideIcon {
+                            width: 18px;
+                            height: 18px;
+                            icon: IconSet.PenLine;
+                            icon-color: Theme.accent;
+                        }
 
-                                LucideIcon {
-                                    width: 18px;
-                                    height: 18px;
-                                    icon: IconSet.PenLine;
-                                    icon-color: Theme.accent;
-                                }
+                        Text {
+                            text: @tr("Notes");
+                            font-size: 13px;
+                            font-family: "Archivo SemiBold";
+                            font-weight: 600;
+                            vertical-alignment: center;
+                        }
 
-                                Text {
-                                    text: @tr("Notes");
-                                    font-size: 13px;
-                                    font-family: "Archivo SemiBold";
-                                    font-weight: 600;
-                                    vertical-alignment: center;
-                                }
+                        Rectangle { horizontal-stretch: 1; }
 
-                                Rectangle { horizontal-stretch: 1; }
-
-                                if root.notes-save-state == NotesSaveState.saved: Text {
-                                    text: @tr("Enregistr\u{e9}");
-                                    font-size: 11px;
-                                    color: Theme.text-muted;
-                                    vertical-alignment: center;
-                                }
-                                if root.notes-save-state == NotesSaveState.pending: Text {
-                                    text: @tr("Enregistrement\u{2026}");
-                                    font-size: 11px;
-                                    color: Theme.text-muted;
-                                    vertical-alignment: center;
-                                }
-                            }
-
-                            notes-edit := ThemedTextArea {
-                                text <=> root.notes;
-                                area-height: 96px;
-                                placeholder: @tr("Ajoutez les décisions, actions et noms importants…");
-                                control-label: @tr("Notes de la réunion");
-                                edited(value) => { root.notes-changed(value); }
-                            }
-
-                            Text {
-                                text: @tr("Les notes sont enregistr\u{e9}es avec la r\u{e9}union et am\u{e9}liorent le r\u{e9}sum\u{e9}.");
-                                color: Theme.text-muted;
-                                font-size: 11px;
-                            }
+                        if root.notes-save-state == NotesSaveState.saved: Text {
+                            text: @tr("Enregistr\u{e9}");
+                            font-size: 11px;
+                            color: Theme.text-muted;
+                            vertical-alignment: center;
+                        }
+                        if root.notes-save-state == NotesSaveState.pending: Text {
+                            text: @tr("Enregistrement\u{2026}");
+                            font-size: 11px;
+                            color: Theme.text-muted;
+                            vertical-alignment: center;
                         }
                     }
 
-                    Rectangle {
-                        height: 1px;
-                        vertical-stretch: 0;
-                        background: Theme.surface-4;
+                    notes-edit := ThemedTextArea {
+                        text <=> root.notes;
+                        area-height: 96px;
+                        placeholder: @tr("Ajoutez les décisions, actions et noms importants…");
+                        control-label: @tr("Notes de la réunion");
+                        edited(value) => { root.notes-changed(value); }
                     }
 
-                    if root.is-empty-meeting: Rectangle {
-                        height: 84px;
-                        vertical-stretch: 0;
-                        border-radius: 4px;
-                        border-width: 1px;
-                        border-color: Theme.border-soft;
+                    Text {
+                        text: @tr("Les notes sont enregistr\u{e9}es avec la r\u{e9}union et am\u{e9}liorent le r\u{e9}sum\u{e9}.");
+                        color: Theme.text-muted;
+                        font-size: 11px;
+                    }
+                }
 
-                        VerticalLayout {
-                            padding: 16px;
-                            spacing: 5px;
-                            alignment: center;
+                Rectangle {
+                    height: 1px;
+                    vertical-stretch: 0;
+                    background: Theme.surface-4;
+                }
 
-                            Text {
-                                text: @tr("Cette réunion ne contient aucun enregistrement.");
-                                font-family: "Archivo SemiBold";
-                                font-size: 13px;
-                                color: Theme.text-secondary;
-                                horizontal-alignment: center;
-                            }
-                            Text {
-                                text: @tr("Aucun audio, aucune transcription et aucun résumé.");
-                                font-size: 11.5px;
-                                color: Theme.text-muted;
-                                horizontal-alignment: center;
-                            }
+                if root.is-empty-meeting: Rectangle {
+                    height: 84px;
+                    vertical-stretch: 0;
+                    border-radius: 4px;
+                    border-width: 1px;
+                    border-color: Theme.border-soft;
+
+                    VerticalLayout {
+                        padding: 16px;
+                        spacing: 5px;
+                        alignment: center;
+
+                        Text {
+                            text: @tr("Cette réunion ne contient aucun enregistrement.");
+                            font-family: "Archivo SemiBold";
+                            font-size: 13px;
+                            color: Theme.text-secondary;
+                            horizontal-alignment: center;
                         }
-                    }
-
-                    if !root.is-empty-meeting: AudioPlayerSection {
-                        vertical-stretch: 0;
-                        has-audio: root.has-audio;
-                        is-playing: root.audio-is-playing;
-                        peaks: root.audio-peaks;
-                        progress: root.audio-progress;
-                        position-label: root.audio-position-label;
-                        duration-label: root.audio-duration-label;
-                        play-pause-requested => { root.audio-play-pause-requested(); }
-                        seek-requested(fraction) => { root.audio-seek-requested(fraction); }
-                    }
-
-                    if !root.is-empty-meeting: TranscriptSection {
-                        vertical-stretch: 1;
-                        blocks: root.transcript-blocks;
-                        segment-count: root.transcript-segment-count;
-                        has-audio: root.has-audio;
-                        spacer-before: root.transcript-spacer-before;
-                        spacer-after: root.transcript-spacer-after;
-                        scroll-top <=> root.transcript-scroll-top;
-                        paragraph-clicked(session, time) => { root.transcript-paragraph-clicked(session, time); }
-                        alias-save-requested(term, pronunciation) => { root.transcript-alias-save-requested(term, pronunciation); }
-                    }
-
-                    if !root.is-empty-meeting: Flickable {
-                        vertical-stretch: 0;
-                        viewport-height: summary-inner.preferred-height;
-                        max-height: 250px;
-                        summary-inner := SummarySection {
-                            vertical-stretch: 0;
-                            summary: root.summary;
-                            summary-is-stale: root.summary-is-stale;
-                            summary-model-label: root.summary-model-label;
-                            available-models: root.summary-available-models;
-                            available-model-ids: root.summary-available-model-ids;
-                            selected-model-id <=> root.summary-selected-model-id;
-                            selected-model-label <=> root.summary-selected-model-label;
-                            key-points: root.summary-key-points;
-                            decisions: root.summary-decisions;
-                            action-items: root.summary-action-items;
-                            open-questions: root.summary-open-questions;
-                            is-generating: root.summary-is-generating;
-                            generation-progress: root.summary-generation-progress;
-                            generate-requested => { root.summarize-requested(); }
+                        Text {
+                            text: @tr("Aucun audio, aucune transcription et aucun résumé.");
+                            font-size: 11.5px;
+                            color: Theme.text-muted;
+                            horizontal-alignment: center;
                         }
                     }
                 }
+
+                if !root.is-empty-meeting: AudioPlayerSection {
+                    vertical-stretch: 0;
+                    has-audio: root.has-audio;
+                    is-playing: root.audio-is-playing;
+                    peaks: root.audio-peaks;
+                    progress: root.audio-progress;
+                    position-label: root.audio-position-label;
+                    duration-label: root.audio-duration-label;
+                    play-pause-requested => { root.audio-play-pause-requested(); }
+                    seek-requested(fraction) => { root.audio-seek-requested(fraction); }
+                }
+
+                if !root.is-empty-meeting: TranscriptSection {
+                    blocks: root.transcript-blocks;
+                    segment-count: root.transcript-segment-count;
+                    has-audio: root.has-audio;
+                    spacer-before: root.transcript-spacer-before;
+                    spacer-after: root.transcript-spacer-after;
+                    scroll-top <=> root.transcript-scroll-top;
+                    paragraph-clicked(session, time) => { root.transcript-paragraph-clicked(session, time); }
+                    alias-save-requested(term, pronunciation) => { root.transcript-alias-save-requested(term, pronunciation); }
+                }
+
+                if !root.is-empty-meeting: SummarySection {
+                    vertical-stretch: 0;
+                    summary: root.summary;
+                    summary-is-stale: root.summary-is-stale;
+                    summary-model-label: root.summary-model-label;
+                    available-models: root.summary-available-models;
+                    available-model-ids: root.summary-available-model-ids;
+                    selected-model-id <=> root.summary-selected-model-id;
+                    selected-model-label <=> root.summary-selected-model-label;
+                    key-points: root.summary-key-points;
+                    decisions: root.summary-decisions;
+                    action-items: root.summary-action-items;
+                    open-questions: root.summary-open-questions;
+                    is-generating: root.summary-is-generating;
+                    generation-progress: root.summary-generation-progress;
+                    generate-requested => { root.summarize-requested(); }
+                }
             }
         }
+    }
 }
