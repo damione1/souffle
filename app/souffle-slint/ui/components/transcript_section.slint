@@ -298,45 +298,15 @@ export component TranscriptSection inherits VerticalLayout {
                         // Clickable words are plain `Text` in a `TouchArea`;
                         // literal runs (whitespace/punctuation/short/numeric
                         // tokens) are plain `Text` with no touch handling.
-                        //
-                        // SOU-258: a word flow is two items per token, ~1000
-                        // items for the mounted slice of a long meeting, and
-                        // was most of the cost of opening one. A paragraph
-                        // renders as one wrapped `Text`; only the paragraph
-                        // under the pointer mounts its word flow, which is
-                        // all a click ever needs. The flow lives inside the
-                        // hover area, so moving onto a word keeps the hover.
-                        Rectangle {
-                            height: plain.preferred-height;
-
-                            plain := Text {
-                                x: 0px;
-                                y: 0px;
-                                width: parent.width;
-                                text: block.text;
-                                wrap: word-wrap;
-                                font-size: 13px;
-                                color: Theme.text-primary;
-                                visible: !words-hover.has-hover;
-                            }
-
-                            words-hover := TouchArea {
-                                x: 0px;
-                                y: 0px;
-                                width: parent.width;
-                                height: parent.height;
-                                // Between words it stands in for the
-                                // background area it now covers.
-                                clicked => { root.background-clicked(); }
-
-                                if words-hover.has-hover: TranscriptWordFlow {
-                                    x: 0px;
-                                    y: 0px;
-                                    width: parent.width;
-                                    words: block.words;
-                                    word-clicked(word, at-x, at-y) => { alias-popup.open(word, at-x, at-y); }
-                                }
-                            }
+                        // Always the word flow, never swapped for a cheaper
+                        // wrapped `Text` on hover: the two break lines
+                        // differently, so the text would jump under the
+                        // pointer. Virtualized, it costs ~12 ms on open in a
+                        // release build (SOU-258).
+                        TranscriptWordFlow {
+                            width: parent.width;
+                            words: block.words;
+                            word-clicked(word, at-x, at-y) => { alias-popup.open(word, at-x, at-y); }
                         }
                     }
 

@@ -366,7 +366,7 @@ Slint is retained-mode. The item tree, font cache, image cache, and GPU textures
 - `Rc<RefCell<T>>` is the UI-thread cell. It is not `Send`. Cross-thread work goes through `souffle_lib::async_runtime` (or a channel) and comes back with `slint::invoke_from_event_loop`. `slint::spawn_local` is the UI-thread async executor; use it for `.slint`-adjacent futures, not for engine work.
 - Never `borrow_mut()` a `RefCell` across an `.await`.
 - A click must repaint first. Anything that can take more than a frame (engine start, audio decode, device open) runs on a worker; the view switches on the click and shows an explicit "starting"/"loading" state until the worker's result lands (SOU-258: a meeting start used to `block_on` the whole engine reset on the main thread, 6 s frozen; opening a meeting decoded its audio on the main thread, 3–24 s).
-- Per-item cost multiplies: two items per word for a mounted transcript slice was most of MeetingDetail's open cost. Render the cheap form (one `Text` per paragraph) and mount the expensive interactive form only where the pointer is.
+- Measure item cost in a release build before trading correctness for it. SOU-258 first swapped each transcript paragraph between one wrapped `Text` and the per-word flow on hover: the two break lines differently, so text jumped under the pointer. With the transcript already virtualized (~16 paragraphs mounted), the always-mounted word flow blocks the UI thread ~12 ms on open in release (~90 ms debug) against ~7 ms for the swap, so the flow stays.
 
 ### Models and images
 
