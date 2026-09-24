@@ -14,8 +14,8 @@ use souffle_lib::engine::{Speaker, TranscriptionSegment};
 use souffle_schema::paragraphs::PAUSE_THRESHOLD_SECONDS;
 use std::time::{Duration, Instant};
 
-use crate::transcript::speaker_label;
-use crate::{TranscriptBlock, TranscriptWord, timeline};
+use crate::transcript::speaker_fields;
+use crate::{SpeakerRole, TranscriptBlock, TranscriptWord, timeline};
 
 /// The live view renders `TranscriptBlock.text` directly
 /// (`recording_view.slint`), never `.words` - no per-word dictionary-alias
@@ -89,9 +89,11 @@ impl LivePara {
             }
             _ => self.text.clone(),
         };
+        let (has_speaker, speaker) = speaker_fields(self.speaker);
         TranscriptBlock {
             is_session_break: false,
-            speaker_label: speaker_label(self.speaker).into(),
+            has_speaker,
+            speaker,
             timestamp: self.timestamp.clone().into(),
             text: text.clone().into(),
             words: plain_words(&text),
@@ -280,7 +282,8 @@ impl LiveTranscript {
             let text = tentative_me.unwrap_or("");
             blocks.push(TranscriptBlock {
                 is_session_break: false,
-                speaker_label: speaker_label(Some(Speaker::Me)).into(),
+                has_speaker: true,
+                speaker: SpeakerRole::Me,
                 timestamp: "".into(),
                 text: text.into(),
                 words: plain_words(text),
@@ -294,7 +297,8 @@ impl LiveTranscript {
             let text = tentative_them.unwrap_or("");
             blocks.push(TranscriptBlock {
                 is_session_break: false,
-                speaker_label: speaker_label(Some(Speaker::Them)).into(),
+                has_speaker: true,
+                speaker: SpeakerRole::Them,
                 timestamp: "".into(),
                 text: text.into(),
                 words: plain_words(text),
@@ -359,9 +363,15 @@ pub mod tests {
         let blocks = lt.build_blocks();
         // Me paragraph, Them paragraph
         assert_eq!(blocks.len(), 2);
-        assert_eq!(blocks[0].speaker_label.as_str(), "Moi");
+        assert_eq!(
+            (blocks[0].has_speaker, blocks[0].speaker),
+            (true, SpeakerRole::Me)
+        );
         assert_eq!(blocks[0].text.as_str(), "Bonjour monde");
-        assert_eq!(blocks[1].speaker_label.as_str(), "Eux");
+        assert_eq!(
+            (blocks[1].has_speaker, blocks[1].speaker),
+            (true, SpeakerRole::Them)
+        );
         assert_eq!(blocks[1].text.as_str(), "Salut");
     }
 

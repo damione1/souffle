@@ -9,26 +9,9 @@ use souffle_lib::db::dictation::DictationEntry;
 use souffle_lib::transcript::MeetingListItem;
 
 use crate::{
-    TimelineDayGroup, TimelineEntry, TimelineFilter, TimelineKind, UpcomingEvent, UpcomingPhase,
+    TimelineDay, TimelineDayGroup, TimelineEntry, TimelineFilter, TimelineKind, UpcomingEvent,
+    UpcomingPhase,
 };
-
-const WEEKDAYS: [&str; 7] = [
-    "lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche",
-];
-const MONTHS: [&str; 12] = [
-    "janvier",
-    "février",
-    "mars",
-    "avril",
-    "mai",
-    "juin",
-    "juillet",
-    "août",
-    "septembre",
-    "octobre",
-    "novembre",
-    "décembre",
-];
 
 pub fn format_duration(seconds: f64) -> String {
     let total = seconds.round().max(0.0) as i64;
@@ -50,17 +33,24 @@ fn day_key(at: DateTime<Utc>) -> NaiveDate {
     at.with_timezone(&Local).date_naive()
 }
 
-fn day_label(day: NaiveDate) -> String {
-    let today = Local::now().date_naive();
-    if day == today {
-        return "Aujourd'hui".to_string();
+/// Header of a day group relative to `today`. The wording lives in
+/// timeline_section.slint behind @tr(), so Rust only ships which kind of
+/// day it is plus the date parts (SOU-246).
+fn day_group(day: NaiveDate, today: NaiveDate, entries: Vec<TimelineEntry>) -> TimelineDayGroup {
+    let kind = if day == today {
+        TimelineDay::Today
+    } else if Some(day) == today.pred_opt() {
+        TimelineDay::Yesterday
+    } else {
+        TimelineDay::Earlier
+    };
+    TimelineDayGroup {
+        day: kind,
+        weekday: day.weekday().num_days_from_monday() as i32,
+        day_of_month: day.day() as i32,
+        month: day.month0() as i32,
+        entries: std::rc::Rc::new(slint::VecModel::from(entries)).into(),
     }
-    if day == today.pred_opt().unwrap_or(today) {
-        return "Hier".to_string();
-    }
-    let weekday = WEEKDAYS[day.weekday().num_days_from_monday() as usize];
-    let month = MONTHS[(day.month0()) as usize];
-    format!("{weekday} {} {month}", day.day())
 }
 
 /// One merged, sorted (newest first) entry per dictation/meeting - mirrors
@@ -145,12 +135,10 @@ pub fn build_groups(
         }
     }
 
+    let today = Local::now().date_naive();
     groups
         .into_iter()
-        .map(|(day, entries)| TimelineDayGroup {
-            day_label: day_label(day).into(),
-            entries: std::rc::Rc::new(slint::VecModel::from(entries)).into(),
-        })
+        .map(|(day, entries)| day_group(day, today, entries))
         .collect()
 }
 
@@ -188,4 +176,39 @@ pub fn upcoming_rows(events: &[CalendarEvent], now: DateTime<Utc>) -> Vec<Upcomi
             }
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn date(y: i32, m: u32, d: u32) -> NaiveDate {
+        NaiveDate::from_ymd_opt(y, m, d).expect("valid date")
+    }
+
+    #[test]
+    fn day_group_marks_today_and_yesterday_relative_to_today() {
+        let today = date(2026, 9, 23);
+        assert_eq!(day_group(today, today, vec![]).day, TimelineDay::Today);
+        assert_eq!(
+            day_group(date(2026, 9, 22), today, vec![]).day,
+            TimelineDay::Yesterday
+        );
+        // Across a month boundary too.
+        assert_eq!(
+            day_group(date(2026, 9, 30), date(2026, 10, 1), vec![]).day,
+            TimelineDay::Yesterday
+        );
+    }
+
+    #[test]
+    fn earlier_day_ships_date_parts_for_the_slint_label() {
+        // Monday 21 September 2026: Slint indexes weekday 0 = Monday and
+        // month 0 = January into its @tr() name lists.
+        let group = day_group(date(2026, 9, 21), date(2026, 9, 23), vec![]);
+        assert_eq!(group.day, TimelineDay::Earlier);
+        assert_eq!(group.weekday, 0);
+        assert_eq!(group.day_of_month, 21);
+        assert_eq!(group.month, 8);
+    }
 }

@@ -2644,3 +2644,119 @@ msgctxt "SummarySection"
 msgid "Copier"
 msgstr "Copy"
 
+msgctxt "MeetingDetail"
+msgid "{0}/{1}/{2} {3}:{4} · {5} · {6} segments · {7} sessions"
+msgstr "{1}/{0}/{2} {3}:{4} · {5} · {6} segments · {7} sessions"
+
+msgctxt "MeetingDetail"
+msgid "{0}/{1}/{2} {3}:{4} · {5} · {6} segments"
+msgstr "{1}/{0}/{2} {3}:{4} · {5} · {6} segments"
+
+msgctxt "MeetingDetail"
+msgid "{} (organisateur) (vous)"
+msgstr "{} (organizer) (you)"
+
+msgctxt "MeetingDetail"
+msgid "{} (organisateur)"
+msgstr "{} (organizer)"
+
+msgctxt "MeetingDetail"
+msgid "{} (vous)"
+msgstr "{} (you)"
+
+msgctxt "TimelineSection"
+msgid "Aujourd'hui"
+msgstr "Today"
+
+msgctxt "TimelineSection"
+msgid "Hier"
+msgstr "Yesterday"
+
+msgctxt "TimelineSection"
+msgid "{0} {1} {2}"
+msgstr "{0}, {2} {1}"
+
+msgctxt "TimelineSection"
+msgid "lundi"
+msgstr "Monday"
+
+msgctxt "TimelineSection"
+msgid "mardi"
+msgstr "Tuesday"
+
+msgctxt "TimelineSection"
+msgid "mercredi"
+msgstr "Wednesday"
+
+msgctxt "TimelineSection"
+msgid "jeudi"
+msgstr "Thursday"
+
+msgctxt "TimelineSection"
+msgid "vendredi"
+msgstr "Friday"
+
+msgctxt "TimelineSection"
+msgid "samedi"
+msgstr "Saturday"
+
+msgctxt "TimelineSection"
+msgid "dimanche"
+msgstr "Sunday"
+
+msgctxt "TimelineSection"
+msgid "janvier"
+msgstr "January"
+
+msgctxt "TimelineSection"
+msgid "février"
+msgstr "February"
+
+msgctxt "TimelineSection"
+msgid "mars"
+msgstr "March"
+
+msgctxt "TimelineSection"
+msgid "avril"
+msgstr "April"
+
+msgctxt "TimelineSection"
+msgid "mai"
+msgstr "May"
+
+msgctxt "TimelineSection"
+msgid "juin"
+msgstr "June"
+
+msgctxt "TimelineSection"
+msgid "juillet"
+msgstr "July"
+
+msgctxt "TimelineSection"
+msgid "août"
+msgstr "August"
+
+msgctxt "TimelineSection"
+msgid "septembre"
+msgstr "September"
+
+msgctxt "TimelineSection"
+msgid "octobre"
+msgstr "October"
+
+msgctxt "TimelineSection"
+msgid "novembre"
+msgstr "November"
+
+msgctxt "TimelineSection"
+msgid "décembre"
+msgstr "December"
+
+msgctxt "SpeakerLabels"
+msgid "Moi"
+msgstr "Me"
+
+msgctxt "SpeakerLabels"
+msgid "Eux"
+msgstr "Them"
+

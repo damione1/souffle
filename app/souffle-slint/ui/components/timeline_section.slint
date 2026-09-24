@@ -1,11 +1,15 @@
 import { TimelineEntry, TimelineItemRow } from "timeline_item.slint";
 import { EmptyState } from "empty_state.slint";
-import { TimelineKind, UpcomingPhase, AccessState } from "../types.slint";
+import { TimelineKind, TimelineDay, UpcomingPhase, AccessState } from "../types.slint";
 import { Theme } from "../theme.slint";
 import { LucideIcon, IconSet } from "lucide_icon.slint";
 
 export struct TimelineDayGroup {
-    day-label: string,
+    day: TimelineDay,
+    // Only read when `day` is `earlier`. 0 = Monday, 0 = January.
+    weekday: int,
+    day-of-month: int,
+    month: int,
     entries: [TimelineEntry],
 }
 
@@ -25,6 +29,21 @@ export struct UpcomingEvent {
 // has nothing to show, then the day-grouped timeline.
 export component TimelineSection inherits VerticalLayout {
     in property <[TimelineDayGroup]> groups;
+
+    // Port of controller.svelte.ts's day label ("Aujourd'hui", "Hier",
+    // "lundi 21 septembre"). The date order is part of the translated
+    // pattern so English can read "Monday, September 21".
+    pure function day-label(group: TimelineDayGroup) -> string {
+        if group.day == TimelineDay.today { return @tr("Aujourd'hui"); }
+        if group.day == TimelineDay.yesterday { return @tr("Hier"); }
+        return @tr("{0} {1} {2}", root.weekday-name(group.weekday), group.day-of-month, root.month-name(group.month));
+    }
+    pure function weekday-name(index: int) -> string {
+        return [@tr("lundi"), @tr("mardi"), @tr("mercredi"), @tr("jeudi"), @tr("vendredi"), @tr("samedi"), @tr("dimanche")][index];
+    }
+    pure function month-name(index: int) -> string {
+        return [@tr("janvier"), @tr("février"), @tr("mars"), @tr("avril"), @tr("mai"), @tr("juin"), @tr("juillet"), @tr("août"), @tr("septembre"), @tr("octobre"), @tr("novembre"), @tr("décembre")][index];
+    }
     in property <bool> is-empty;
     in property <bool> has-matches: true;
     in property <string> live-meeting-id;
@@ -288,7 +307,7 @@ export component TimelineSection inherits VerticalLayout {
             spacing: 6px;
 
             Text {
-                text: group.day-label.to-uppercase();
+                text: root.day-label(group).to-uppercase();
                 font-family: "Archivo SemiBold";
                 font-size: 11px;
                 letter-spacing: 1.1px;

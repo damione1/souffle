@@ -410,39 +410,33 @@ fn summary_model_label(window: &MainWindow, id: &str) -> slint::SharedString {
         .unwrap_or_else(|| id.into())
 }
 
-/// Port of the inline template in MeetingHeaderSection.svelte:
-/// `{name}{is_organizer ? " (organisateur)" : ""}{is_current_user ? " (vous)" : ""}`.
-fn participant_label(p: &MeetingParticipant) -> String {
-    let mut label = p.name.clone();
-    if p.is_organizer {
-        label.push_str(" (organisateur)");
+/// MeetingHeaderSection.svelte's participant chip. The "(organisateur)" /
+/// "(vous)" suffixes are worded in `meeting_detail.slint` behind @tr(), so
+/// they follow the UI locale (SOU-246).
+fn participant_chip(p: &MeetingParticipant) -> MeetingParticipantChip {
+    MeetingParticipantChip {
+        name: p.name.clone().into(),
+        is_organizer: p.is_organizer,
+        is_current_user: p.is_current_user,
     }
-    if p.is_current_user {
-        label.push_str(" (vous)");
-    }
-    label
 }
 
-/// Port of the meta line in MeetingHeaderSection.svelte (date, duration,
-/// segment count, session count) for the completed-meeting case only - the
-/// live-recording case is out of scope here, see meeting_detail.slint.
-/// `formatDate`'s `new Date(iso).toLocaleString()` is locale/OS-dependent;
-/// this uses a fixed French `dd/mm/yyyy hh:mm` instead of trying to
-/// replicate that, consistent with the rest of this port (day_label etc.
-/// already hardcode French).
-fn meta_line(meeting: &MeetingTranscript) -> String {
-    let date = meeting
-        .started_at
-        .with_timezone(&chrono::Local)
-        .format("%d/%m/%Y %H:%M");
-    let duration = timeline::format_duration(meeting.duration_seconds);
-    let segments = meeting.segments.len();
-    let mut line = format!("{date} \u{b7} {duration} \u{b7} {segments} segments");
-    let sessions = meeting.recording_sessions.len();
-    if sessions > 1 {
-        line.push_str(&format!(" \u{b7} {sessions} sessions"));
+/// Parts of the meta line in MeetingHeaderSection.svelte (date, duration,
+/// segment count, session count) for the completed-meeting case. Only the
+/// values: the wording and date order are @tr() patterns in
+/// meeting_detail.slint, so they follow the UI locale (SOU-246).
+fn meeting_meta(meeting: &MeetingTranscript) -> MeetingMeta {
+    let at = meeting.started_at.with_timezone(&chrono::Local);
+    MeetingMeta {
+        day: at.format("%d").to_string().into(),
+        month: at.format("%m").to_string().into(),
+        year: at.format("%Y").to_string().into(),
+        hour: at.format("%H").to_string().into(),
+        minute: at.format("%M").to_string().into(),
+        duration: timeline::format_duration(meeting.duration_seconds).into(),
+        segments: meeting.segments.len() as i32,
+        sessions: meeting.recording_sessions.len() as i32,
     }
-    line
 }
 
 /// Loads a meeting and pushes it into MeetingDetail's properties - mirrors
@@ -450,17 +444,14 @@ fn meta_line(meeting: &MeetingTranscript) -> String {
 fn populate_meeting_detail(window: &MainWindow, meeting: &MeetingTranscript) {
     window.set_active_meeting_id(meeting.id.clone().into());
     window.set_meeting_detail_title(meeting.title.clone().into());
-    window.set_meeting_detail_meta(meta_line(meeting).into());
+    window.set_meeting_detail_meta(meeting_meta(meeting));
     window.set_meeting_detail_model_label(meeting.transcription_profile.model_label.clone().into());
     window.set_meeting_detail_can_resume(meeting.ended_at.is_none());
     window.set_meeting_detail_resume_error("".into());
     window.set_meeting_detail_delete_error("".into());
     window.set_meeting_detail_summary_generation_error("".into());
-    let participants: Vec<slint::SharedString> = meeting
-        .participants
-        .iter()
-        .map(|p| participant_label(p).into())
-        .collect();
+    let participants: Vec<MeetingParticipantChip> =
+        meeting.participants.iter().map(participant_chip).collect();
     window.set_meeting_detail_participants(
         std::rc::Rc::new(slint::VecModel::from(participants)).into(),
     );
