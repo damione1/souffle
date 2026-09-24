@@ -108,36 +108,41 @@ export component RecordingView inherits Rectangle {
                 }
             }
 
+            // Waveform.svelte (variant "pill") parity: 48 bars of 3px with a
+            // 2px gap, centred in the space between the badge and the clock,
+            // always moving (two travelling sines) and pushed up by the live
+            // audio level. `animation-tick()` redraws every frame, which is
+            // fine here: this view only exists while recording.
             waveform := Rectangle {
                 horizontal-stretch: 1;
                 height: 38px;
+                clip: true;
 
-                wave-strip := Rectangle {
-                    x: parent.width - self.width;
+                property <int> bar-count: 48;
+                property <length> bar-width: 3px;
+                property <length> bar-gap: 2px;
+                property <length> bars-height: 32px;
+                property <float> t: animation-tick() / 1ms;
+                // The level arrives at ~15 Hz; ease between samples like the
+                // canvas did (bars += (target - bars) * 0.3 per frame).
+                property <float> level: root.audio-level;
+                animate level { duration: 120ms; easing: ease-out; }
+
+                for i in self.bar-count: Rectangle {
+                    // Same curve as the Svelte canvas: level + per-bar ripple,
+                    // clamped to [0.05, 1] of the strip height.
+                    property <float> level: max(0.05, min(1.0,
+                        waveform.level
+                        + Math.sin((waveform.t / 200 + i * 0.5) * 1rad) * 0.15
+                        + Math.sin((i * 0.3 + waveform.t / 300) * 1rad) * 0.1));
+                    x: (parent.width - (waveform.bar-count * (waveform.bar-width + waveform.bar-gap) - waveform.bar-gap)) / 2
+                        + i * (waveform.bar-width + waveform.bar-gap);
+                    width: waveform.bar-width;
+                    height: self.level * (waveform.bars-height - 4px);
                     y: (parent.height - self.height) / 2;
-                    width: min(120px, parent.width);
-                    height: 22px;
-
-                    Rectangle {
-                        y: parent.height / 2;
-                        height: 1px;
-                        width: parent.width;
-                        background: Theme.accent.with-alpha(0.24);
-                    }
-                    HorizontalLayout {
-                        spacing: 2px;
-                        alignment: center;
-                        for peak in [0.28, 0.42, 0.58, 0.76, 0.94, 0.72, 0.88, 0.62, 0.48, 0.34, 0.52, 0.30]: VerticalLayout {
-                            horizontal-stretch: 1;
-                            alignment: center;
-                            Rectangle {
-                                width: 3px;
-                                height: max(2px, peak * max(3px, root.audio-level * waveform.height));
-                                border-radius: 1px;
-                                background: Theme.accent.with-alpha(0.55);
-                            }
-                        }
-                    }
+                    border-radius: 1.5px;
+                    background: Theme.accent;
+                    opacity: 0.4 + self.level * 0.6;
                 }
             }
 
