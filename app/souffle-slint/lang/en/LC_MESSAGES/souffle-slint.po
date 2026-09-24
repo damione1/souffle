@@ -1420,7 +1420,7 @@ msgstr "Play a sound when recording starts and stops."
 #: app/souffle-slint/ui/components/settings/feedback_sounds_section.slint:36
 msgctxt "FeedbackSoundsSection"
 msgid "Volume"
-msgstr "Vol"
+msgstr "Sound volume"
 
 #: app/souffle-slint/ui/components/settings/feedback_sounds_section.slint:44
 msgctxt "FeedbackSoundsSection"

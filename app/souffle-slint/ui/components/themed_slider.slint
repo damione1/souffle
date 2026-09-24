@@ -69,13 +69,18 @@ export component ThemedSlider inherits Rectangle {
         : max(0, min(1, (root.value - root.minimum) / (root.maximum - root.minimum)));
 
     Rectangle {
+        x: 0px;
         y: 7px;
         height: 4px;
         width: parent.width;
         border-radius: 2px;
         background: Theme.surface-3;
     }
+    // SOU-217: pin the fill to the track's left edge. Without an explicit
+    // `x`, Slint centres a child Rectangle in its parent, so the accent fill
+    // grew outward from the middle of the track and never met the thumb.
     Rectangle {
+        x: 0px;
         y: 7px;
         height: 4px;
         width: parent.width * root.fraction;
@@ -95,24 +100,9 @@ export component ThemedSlider inherits Rectangle {
 
     track := TouchArea {
         enabled: root.enabled;
-        // SOU-217: drive the fraction from this TouchArea's own geometry
-        // (`self.mouse-x` / `self.width`) instead of the parent `root`'s.
-        // Both happen to match today (TouchArea has no explicit geometry,
-        // so it expands to fill `root`), but computing the ratio from two
-        // different elements' properties was a latent trap: any future
-        // padding/margin added around the track (or a change to how this
-        // TouchArea is sized) would silently desync `mouse-x`'s origin from
-        // the denominator, producing a fraction that no longer lines up
-        // with the pointer - i.e. exactly the "erratic" drag this ticket
-        // reports. Keeping both halves of the ratio on `self` makes the
-        // mapping correct by construction.
-        //
-        // `pointer-event` (Down) additionally snaps the thumb to the
-        // initial press position immediately, matching native slider
-        // behaviour: previously a press-and-hold with no movement left the
-        // thumb untouched until either a `moved` (drag) or the matching
-        // `clicked` (release) fired, which made a click that started a
-        // (later aborted) drag look like it had been silently ignored.
+        // Both halves of the drag ratio come from this TouchArea (`self.mouse-x`
+        // / `self.width`) so they share one origin. Pointer-down snaps the
+        // thumb to the press position immediately, like a native slider.
         pointer-event(event) => {
             if event.button == PointerEventButton.left && event.kind == PointerEventKind.down {
                 key-focus.focus();
