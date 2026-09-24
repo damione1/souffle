@@ -1,4 +1,4 @@
-import { NotesSaveState } from "types.slint";
+import { NotesSaveState, MeetingExportFormat } from "types.slint";
 import { ThemedLineEdit } from "components/themed_line_edit.slint";
 import { AudioPlayerSection } from "components/audio_player_section.slint";
 import { TranscriptSection, TranscriptBlock } from "components/transcript_section.slint";
@@ -17,11 +17,14 @@ import { Theme } from "theme.slint";
 // Milestones 6-9 scope, said here rather than hidden: header (title,
 // rename, date/duration/segment count, participants) + notes (load, edit,
 // debounced autosave) + native audio playback/waveform + read-only
-// transcript with speaker labels, virtualized for long meetings + read-only
-// summary (raw + structured). Not yet ported: transcript bulk/per-word edit
-// + dictionary alias popover, summary generation itself (model/template
-// pickers, streaming), export menu and resume-recording (need the native
-// file dialog from SOU-191, not available to this headless bridge yet).
+// transcript with speaker labels, virtualized for long meetings +
+// summary (raw + structured, generation included, Copy) + whole-meeting
+// export (Markdown/JSON/SRT/VTT through the native save panel), audio
+// download and a transcript "Copy" (SOU-195-slice) + resume + delete. Not
+// yet ported: transcript bulk/per-word edit (the "Edit" affordance next to
+// the Transcription title - a materially bigger feature than copy/export,
+// left for its own ticket).
+//
 // Parts of the header meta line (date, duration, segment and session
 // counts). Zero-padded strings from Rust; the order and wording are @tr()
 // patterns below, so English can read the date month-first (SOU-246).
@@ -42,6 +45,37 @@ export struct MeetingParticipantChip {
     name: string,
     is-organizer: bool,
     is-current-user: bool,
+}
+
+// One entry of the header's Export menu (MeetingHeaderSection.svelte's
+// dropdown rows). `highlighted` is the keyboard cursor, hover is local.
+component ExportMenuRow inherits Rectangle {
+    in property <string> label;
+    in property <bool> highlighted: false;
+    callback chosen();
+
+    height: 30px;
+    vertical-stretch: 0;
+    border-radius: 3px;
+    background: root.highlighted || row-area.has-hover ? Theme.surface-2 : transparent;
+    accessible-role: list-item;
+    accessible-label: root.label;
+    accessible-action-default => { root.chosen(); }
+
+    row-area := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.chosen(); }
+    }
+
+    Text {
+        x: 10px;
+        width: parent.width - 20px;
+        text: root.label;
+        font-size: 12.5px;
+        color: Theme.text-primary;
+        vertical-alignment: center;
+        overflow: elide;
+    }
 }
 
 export component MeetingDetail inherits Rectangle {
@@ -90,6 +124,8 @@ export component MeetingDetail inherits Rectangle {
     // Why the last delete failed; empty otherwise. On success Rust closes
     // the view, so there is no success state to show here.
     in property <string> delete-error;
+    in property <string> export-error;
+    in property <string> audio-export-error;
 
     callback back-requested();
     callback resume-requested();
@@ -103,6 +139,15 @@ export component MeetingDetail inherits Rectangle {
     callback audio-seek-requested(float);
     callback transcript-paragraph-clicked(int, float);
     callback transcript-alias-save-requested(string, string);
+    // Whole-meeting export (notes + summary + transcript) to a file the
+    // user picks via the native save panel (SOU-195-slice, SOU-191's
+    // dialog). `format` is the export's file format, not the confirmed
+    // path - Rust owns the save panel end to end.
+    callback export-requested(MeetingExportFormat);
+    // Copy recorded audio session(s) to a file via the same native panel.
+    callback export-audio-requested();
+    // Copy just the transcript text to the pasteboard.
+    callback copy-transcript-requested();
 
     property <bool> editing-title: false;
     property <string> title-draft;
@@ -113,6 +158,13 @@ export component MeetingDetail inherits Rectangle {
         root.delete-requested();
     }
     property <bool> is-empty-meeting: !root.has-audio && root.transcript-segment-count == 0 && root.summary == "";
+    // Export menu (MeetingHeaderSection.svelte's EXPORT_FORMATS + the
+    // audio entry): rows 0-3 are the file formats, row 4 the recorded audio,
+    // only listed when there is audio. `export-highlighted` is the keyboard
+    // cursor while the menu is open.
+    property <int> export-item-count: root.has-audio ? 5 : 4;
+    property <int> export-highlighted: 0;
+
 
     function commit-title(value: string) {
         // `accepted` (Enter) removes the field, which then also reports a
@@ -353,51 +405,234 @@ export component MeetingDetail inherits Rectangle {
                 }
             }
 
-            if root.can-resume || root.resume-error != "": VerticalLayout {
+            if !root.is-empty-meeting || root.can-resume || root.resume-error != "" || root.export-error != "" || root.audio-export-error != "": VerticalLayout {
                 spacing: 8px;
                 alignment: start;
                 horizontal-stretch: 0;
 
-                if root.can-resume: resume-btn := Rectangle {
-                    width: resume-txt.preferred-width + 24px;
-                    height: 32px;
-                    horizontal-stretch: 0;
+                // MeetingHeaderSection.svelte: Resume then a ghost
+                // "Export" button opening a format menu, on one row.
+                HorizontalLayout {
+                    spacing: 8px;
+                    alignment: end;
                     vertical-stretch: 0;
-                    border-radius: 4px;
-                    border-width: resume-focus.has-focus ? 2px : 0px;
-                    border-color: Theme.text-primary;
-                    background: resume-area.pressed ? Theme.accent.darker(0.2) : resume-area.has-hover ? Theme.accent.darker(0.1) : Theme.accent;
 
-                    accessible-role: button;
-                    accessible-label: @tr("Reprendre l'enregistrement");
-                    accessible-action-default => { root.resume-requested(); }
+                    if root.can-resume: resume-btn := Rectangle {
+                        width: resume-txt.preferred-width + 24px;
+                        height: 32px;
+                        horizontal-stretch: 0;
+                        vertical-stretch: 0;
+                        border-radius: 4px;
+                        border-width: resume-focus.has-focus ? 2px : 0px;
+                        border-color: Theme.text-primary;
+                        background: resume-area.pressed ? Theme.accent.darker(0.2) : resume-area.has-hover ? Theme.accent.darker(0.1) : Theme.accent;
 
-                    forward-focus: resume-focus;
-                    resume-focus := FocusScope {
-                        key-pressed(event) => {
-                            if event.text == Key.Return || event.text == Key.Space {
-                                root.resume-requested();
-                                return accept;
+                        accessible-role: button;
+                        accessible-label: @tr("Reprendre l'enregistrement");
+                        accessible-action-default => { root.resume-requested(); }
+
+                        forward-focus: resume-focus;
+                        resume-focus := FocusScope {
+                            key-pressed(event) => {
+                                if event.text == Key.Return || event.text == Key.Space {
+                                    root.resume-requested();
+                                    return accept;
+                                }
+                                return reject;
                             }
-                            return reject;
+                        }
+
+                        resume-area := TouchArea {
+                            clicked => {
+                                resume-focus.focus();
+                                root.resume-requested();
+                            }
+                        }
+
+                        resume-txt := Text {
+                            text: @tr("Reprendre");
+                            font-family: "Archivo SemiBold";
+                            font-size: 13px;
+                            color: Theme.text-primary;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
                         }
                     }
 
-                    resume-area := TouchArea {
-                        clicked => {
-                            resume-focus.focus();
-                            root.resume-requested();
+                    if !root.is-empty-meeting: export-btn := Rectangle {
+                        width: export-content.preferred-width;
+                        height: 32px;
+                        horizontal-stretch: 0;
+                        vertical-stretch: 0;
+                        border-radius: 4px;
+                        border-width: export-focus.has-focus ? 2px : 0px;
+                        border-color: Theme.accent;
+                        background: export-area.pressed ? Theme.surface-3 : export-area.has-hover ? Theme.surface-2 : transparent;
+
+                        function choose-export(index: int) {
+                            export-menu.close();
+                            if index == 0 { root.export-requested(MeetingExportFormat.markdown); }
+                            if index == 1 { root.export-requested(MeetingExportFormat.json); }
+                            if index == 2 { root.export-requested(MeetingExportFormat.srt); }
+                            if index == 3 { root.export-requested(MeetingExportFormat.vtt); }
+                            if index == 4 && root.has-audio { root.export-audio-requested(); }
+                        }
+
+                        function open-export-menu() {
+                            root.export-highlighted = 0;
+                            export-menu.show();
+                        }
+
+                        accessible-role: button;
+                        accessible-label: @tr("Exporter la r\u{e9}union");
+                        accessible-expandable: true;
+                        accessible-expanded: export-menu.is-open;
+                        accessible-action-default => { export-btn.open-export-menu(); }
+                        accessible-action-expand => { export-btn.open-export-menu(); }
+
+                        forward-focus: export-focus;
+                        export-focus := FocusScope {
+                            key-pressed(event) => {
+                                if event.text == Key.Return || event.text == Key.Space || event.text == Key.DownArrow {
+                                    export-btn.open-export-menu();
+                                    return accept;
+                                }
+                                return reject;
+                            }
+                        }
+
+                        export-area := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => {
+                                export-focus.focus();
+                                export-btn.open-export-menu();
+                            }
+                        }
+
+                        export-content := HorizontalLayout {
+                            padding-left: 10px;
+                            padding-right: 10px;
+                            spacing: 6px;
+                            alignment: center;
+
+                            Rectangle {
+                                width: 14px;
+                                horizontal-stretch: 0;
+                                LucideIcon {
+                                    size: 14px;
+                                    y: (parent.height - self.height) / 2;
+                                    icon: IconSet.Download;
+                                    icon-color: Theme.text-secondary;
+                                }
+                            }
+                            Text {
+                                text: @tr("Exporter");
+                                font-size: 12.5px;
+                                color: Theme.text-secondary;
+                                vertical-alignment: center;
+                            }
+                            Rectangle {
+                                width: 13px;
+                                horizontal-stretch: 0;
+                                LucideIcon {
+                                    size: 13px;
+                                    y: (parent.height - self.height) / 2;
+                                    icon: IconSet.ChevronDown;
+                                    icon-color: Theme.text-secondary;
+                                }
+                            }
+                        }
+
+                        export-menu := PopupWindow {
+                            close-policy: PopupClosePolicy.close-on-click-outside;
+                            width: 176px;
+                            x: parent.width - self.width;
+                            y: parent.height + 6px;
+                            forward-focus: export-menu-focus;
+
+                            export-menu-focus := FocusScope {
+                                key-pressed(event) => {
+                                    if event.text == Key.DownArrow {
+                                        root.export-highlighted = min(root.export-item-count - 1, root.export-highlighted + 1);
+                                        return accept;
+                                    }
+                                    if event.text == Key.UpArrow {
+                                        root.export-highlighted = max(0, root.export-highlighted - 1);
+                                        return accept;
+                                    }
+                                    if event.text == Key.Return || event.text == Key.Space {
+                                        export-btn.choose-export(root.export-highlighted);
+                                        export-focus.focus();
+                                        return accept;
+                                    }
+                                    if event.text == Key.Escape {
+                                        export-menu.close();
+                                        export-focus.focus();
+                                        return accept;
+                                    }
+                                    return reject;
+                                }
+
+                                Rectangle {
+                                    border-width: 1px;
+                                    border-color: Theme.ghost-border;
+                                    border-radius: 4px;
+                                    background: Theme.surface-1;
+                                    accessible-role: list;
+                                    accessible-label: @tr("Format d'export");
+                                    accessible-item-count: root.export-item-count;
+
+                                    VerticalLayout {
+                                        padding: 6px;
+                                        spacing: 0px;
+                                        alignment: start;
+
+                                        ExportMenuRow {
+                                            label: @tr("Markdown (.md)");
+                                            highlighted: root.export-highlighted == 0;
+                                            chosen => { export-btn.choose-export(0); }
+                                        }
+                                        ExportMenuRow {
+                                            label: @tr("JSON (.json)");
+                                            highlighted: root.export-highlighted == 1;
+                                            chosen => { export-btn.choose-export(1); }
+                                        }
+                                        ExportMenuRow {
+                                            label: @tr("Sous-titres (.srt)");
+                                            highlighted: root.export-highlighted == 2;
+                                            chosen => { export-btn.choose-export(2); }
+                                        }
+                                        ExportMenuRow {
+                                            label: @tr("Sous-titres (.vtt)");
+                                            highlighted: root.export-highlighted == 3;
+                                            chosen => { export-btn.choose-export(3); }
+                                        }
+                                        if root.has-audio: ExportMenuRow {
+                                            label: @tr("Audio (.ogg)");
+                                            highlighted: root.export-highlighted == 4;
+                                            chosen => { export-btn.choose-export(4); }
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
+                }
 
-                    resume-txt := Text {
-                        text: @tr("Reprendre");
-                        font-family: "Archivo SemiBold";
-                        font-size: 13px;
-                        color: Theme.text-primary;
-                        horizontal-alignment: center;
-                        vertical-alignment: center;
-                    }
+                if root.export-error != "": Text {
+                    text: root.export-error;
+                    color: Theme.danger;
+                    font-size: 11px;
+                    horizontal-alignment: right;
+                    wrap: word-wrap;
+                }
+
+                if root.audio-export-error != "": Text {
+                    text: root.audio-export-error;
+                    color: Theme.danger;
+                    font-size: 11px;
+                    horizontal-alignment: right;
+                    wrap: word-wrap;
                 }
 
                 if root.resume-error != "": Text {
@@ -553,6 +788,7 @@ export component MeetingDetail inherits Rectangle {
                     paragraph-clicked(session, time) => { root.transcript-paragraph-clicked(session, time); }
                     background-clicked => { focus-sink.focus(); }
                     alias-save-requested(term, pronunciation) => { root.transcript-alias-save-requested(term, pronunciation); }
+                    copy-requested => { root.copy-transcript-requested(); }
                 }
 
                 if !root.is-empty-meeting: SummarySection {

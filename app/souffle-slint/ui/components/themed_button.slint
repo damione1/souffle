@@ -5,7 +5,11 @@ import { Theme } from "../theme.slint";
 // can't be recolored to match: its Fluent-style skin ignores `Theme`
 // entirely, which is why every onboarding screen looked like generic
 // system-gray buttons instead of the app's actual amber design.
-export enum ThemedButtonKind { default, primary, ghost, active }
+// `danger` mirrors `recording_view.slint`'s Stop button recipe (the only
+// other destructive-action button in the app): `Theme.danger` fill,
+// `Theme.danger-strong` on press, `Theme.on-danger` text - never the
+// default gray or the accent gold for a destructive action.
+export enum ThemedButtonKind { default, primary, ghost, active, danger }
 
 export component ThemedButton inherits Rectangle {
     in property <string> text;
@@ -24,11 +28,12 @@ export component ThemedButton inherits Rectangle {
     border-width: key-focus.has-focus ? 2px : 1px;
     border-color: key-focus.has-focus ? Theme.accent
         : root.kind == ThemedButtonKind.primary ? Theme.accent.with-alpha(0.25)
-        : root.kind == ThemedButtonKind.ghost || root.kind == ThemedButtonKind.active ? transparent
+        : root.kind == ThemedButtonKind.ghost || root.kind == ThemedButtonKind.active || root.kind == ThemedButtonKind.danger ? transparent
         : Theme.ghost-border;
     background: root.kind == ThemedButtonKind.primary ? Theme.accent.with-alpha(area.pressed ? 0.28 : area.has-hover ? 0.20 : 0.12)
         : root.kind == ThemedButtonKind.active ? (area.pressed || area.has-hover ? Theme.accent-hover : Theme.accent)
         : root.kind == ThemedButtonKind.ghost ? (area.has-hover ? Theme.surface-2 : transparent)
+        : root.kind == ThemedButtonKind.danger ? (area.pressed ? Theme.danger-strong : area.has-hover ? Theme.danger.with-alpha(0.9) : Theme.danger)
         : (area.pressed ? Theme.surface-2 : area.has-hover ? Theme.surface-4 : Theme.surface-3);
     opacity: root.enabled ? 1.0 : 0.5;
 
@@ -73,6 +78,7 @@ export component ThemedButton inherits Rectangle {
             color: root.kind == ThemedButtonKind.primary ? Theme.accent
                 : root.kind == ThemedButtonKind.active ? Theme.canvas
                 : root.kind == ThemedButtonKind.ghost ? (area.has-hover ? Theme.text-primary : Theme.text-muted)
+                : root.kind == ThemedButtonKind.danger ? Theme.on-danger
                 : Theme.text-primary;
             vertical-alignment: center;
         }

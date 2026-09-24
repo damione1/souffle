@@ -15,7 +15,7 @@ import { SnippetRow } from "components/settings/snippets_section.slint";
 import { TimelineDayGroup, UpcomingEvent } from "components/timeline_section.slint";
 import { TranscriptBlock } from "components/transcript_section.slint";
 import { StructuredActionItem } from "components/summary_section.slint";
-import { RecordingMode, LiveSystemAudio, SpeakerRole, TimelineFilter, TimelineKind, NotesSaveState, ModelPhase, TranscriptionPhase, UpcomingPhase, SettingsTab, SettingsInteraction, AppTheme, AppLocale, PasteMethod, MeetingLanguage, LogLevel, AudioRetention, AccessState, PermissionKind, ShortcutField, SummaryProvider, AppleIntelligenceUnavailableReason, OnboardingStep, UpdatePhase, InstallBlockReason } from "types.slint";
+import { RecordingMode, LiveSystemAudio, SpeakerRole, TimelineFilter, TimelineKind, NotesSaveState, ModelPhase, TranscriptionPhase, UpcomingPhase, SettingsTab, SettingsInteraction, AppTheme, AppLocale, PasteMethod, MeetingLanguage, LogLevel, AudioRetention, AccessState, PermissionKind, ShortcutField, SummaryProvider, AppleIntelligenceUnavailableReason, OnboardingStep, UpdatePhase, InstallBlockReason, MeetingExportFormat } from "types.slint";
 export { SettingsTab, SettingsInteraction, AppTheme, AppLocale, PasteMethod, MeetingLanguage, LogLevel, AudioRetention, AccessState, PermissionKind, ShortcutField, SummaryProvider, AppleIntelligenceUnavailableReason, SpeakerRole }
 import { Theme } from "theme.slint";
 // Re-exported (not just imported) so Slint's codegen generates a Rust
@@ -143,6 +143,8 @@ export component MainWindow inherits Window {
     in property <bool> meeting-detail-can-resume: false;
     in property <string> meeting-detail-resume-error: "";
     in property <string> meeting-detail-delete-error: "";
+    in property <string> meeting-detail-export-error: "";
+    in property <string> meeting-detail-audio-export-error: "";
 
     // SOU-188: Settings overlay. Toggled from IdleView's gear button;
     // `settings-requested` (not a plain property flip) because opening it
@@ -287,6 +289,7 @@ export component MainWindow inherits Window {
     in property <[string]> settings-unload-timeout-labels;
     in property <string> settings-unload-timeout-label;
     in property <string> settings-model-error-message;
+    in property <string> settings-model-delete-error;
     in property <bool> settings-dictation-learn-from-edit;
     // Windowed slice of the dictionary, not the full list (SOU-229) - same
     // spacer/scroll-mirror plumbing as `meeting-detail-transcript-*` above:
@@ -393,6 +396,7 @@ export component MainWindow inherits Window {
     callback settings-summary-template-add-requested(string);
     callback settings-model-changed(string);
     callback settings-unload-timeout-changed(string);
+    callback settings-delete-model-requested();
     callback settings-dictation-learn-from-edit-changed(bool);
     callback settings-dictionary-add-requested(string, string, string);
     callback settings-dictionary-delete-requested(int);
@@ -427,6 +431,9 @@ export component MainWindow inherits Window {
     callback meeting-detail-audio-seek-requested(float);
     callback meeting-detail-transcript-paragraph-clicked(int, float);
     callback meeting-detail-transcript-alias-save-requested(string, string);
+    callback meeting-detail-export-requested(MeetingExportFormat);
+    callback meeting-detail-export-audio-requested();
+    callback meeting-detail-copy-transcript-requested();
 
     // Invoked by `main.rs` (as `invoke_reset_meeting_detail_transcript_scroll`)
     // when a different meeting's transcript loads, so scrolling meeting A
@@ -613,6 +620,8 @@ export component MainWindow inherits Window {
         can-resume: root.meeting-detail-can-resume;
         resume-error: root.meeting-detail-resume-error;
         delete-error: root.meeting-detail-delete-error;
+        export-error: root.meeting-detail-export-error;
+        audio-export-error: root.meeting-detail-audio-export-error;
         back-requested => { root.meeting-detail-back(); }
         resume-requested => { root.meeting-detail-resume(); }
         summarize-requested => { root.meeting-detail-summarize(); }
@@ -624,6 +633,9 @@ export component MainWindow inherits Window {
         audio-seek-requested(fraction) => { root.meeting-detail-audio-seek-requested(fraction); }
         transcript-paragraph-clicked(session, time) => { root.meeting-detail-transcript-paragraph-clicked(session, time); }
         transcript-alias-save-requested(term, pronunciation) => { root.meeting-detail-transcript-alias-save-requested(term, pronunciation); }
+        export-requested(format) => { root.meeting-detail-export-requested(format); }
+        export-audio-requested => { root.meeting-detail-export-audio-requested(); }
+        copy-transcript-requested => { root.meeting-detail-copy-transcript-requested(); }
     }
 
     if root.recording-mode != RecordingMode.idle: rv := RecordingView {
@@ -782,6 +794,7 @@ export component MainWindow inherits Window {
         unload-timeout-labels: root.settings-unload-timeout-labels;
         unload-timeout-label: root.settings-unload-timeout-label;
         model-error-message: root.settings-model-error-message;
+        model-delete-error: root.settings-model-delete-error;
         dictation-learn-from-edit: root.settings-dictation-learn-from-edit;
         dictionary-entries: root.settings-dictionary-entries;
         dictionary-entry-count: root.settings-dictionary-count;
@@ -883,6 +896,7 @@ export component MainWindow inherits Window {
         summary-template-add-requested(name) => { root.settings-summary-template-add-requested(name); }
         model-changed(value) => { root.settings-model-changed(value); }
         unload-timeout-changed(value) => { root.settings-unload-timeout-changed(value); }
+        delete-model-requested => { root.settings-delete-model-requested(); }
         dictation-learn-from-edit-changed(value) => { root.settings-dictation-learn-from-edit-changed(value); }
         dictionary-add-requested(term, pronunciation, category) => { root.settings-dictionary-add-requested(term, pronunciation, category); }
         dictionary-delete-requested(id) => { root.settings-dictionary-delete-requested(id); }

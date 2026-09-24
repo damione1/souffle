@@ -7,7 +7,9 @@ import { SpeakerRole } from "../types.slint";
 // labels and session-break dividers, click-to-seek on a paragraph's
 // timestamp, virtualized scrolling (AC15), and per-word dictionary-alias
 // popover (TranscriptWordLine.svelte, milestone 8d). Not yet ported: bulk
-// edit mode.
+// edit mode (the "Edit" affordance next to this title) - copying and
+// exporting the transcript (SOU-195-slice) don't need it.
+
 // One token of a paragraph's text (see `TranscriptBlock.words`): either a
 // clickable word (dictionary-alias candidate) or a literal run of
 // whitespace/punctuation/short/numeric text rendered as-is. Built in Rust
@@ -92,6 +94,24 @@ export component TranscriptSection inherits VerticalLayout {
     // the page drop keyboard focus from the title/notes fields (a Flickable
     // keeps unhandled presses, so the page could never see them).
     callback background-clicked();
+    // Copy the transcript text to the pasteboard (SOU-195-slice). Rust
+    // renders it fresh from the full, un-windowed meeting - `blocks` above
+    // is only the on-screen slice (AC15), never a safe source for a full
+    // copy.
+    callback copy-requested();
+
+    // "Copié" feedback for 1.5s after a copy, like the Tauri CopyButton
+    // (and the summary's Copy, summary_section.slint).
+    property <bool> just-copied: false;
+    function copy-transcript() {
+        root.copy-requested();
+        root.just-copied = true;
+    }
+    Timer {
+        interval: 1.5s;
+        running: root.just-copied;
+        triggered => { root.just-copied = false; }
+    }
 
     // Draft state for the alias popup below, kept on `root` rather than on
     // the `PopupWindow` itself: Slint rejects *any* access (read, write, or
@@ -250,11 +270,75 @@ export component TranscriptSection inherits VerticalLayout {
         }
     }
 
-    Text {
-        text: @tr("Transcription");
-        font-family: "Archivo SemiBold";
-        font-size: 13px;
-        color: Theme.text-primary;
+    HorizontalLayout {
+        vertical-stretch: 0;
+        alignment: space-between;
+
+        Text {
+            text: @tr("Transcription");
+            font-family: "Archivo SemiBold";
+            font-size: 13px;
+            color: Theme.text-primary;
+            vertical-alignment: center;
+        }
+
+        if root.segment-count > 0: copy-btn := Rectangle {
+            width: copy-content.preferred-width + 16px;
+            height: 22px;
+            horizontal-stretch: 0;
+            border-radius: 4px;
+            border-width: copy-focus.has-focus ? 2px : 0px;
+            border-color: Theme.accent;
+            background: copy-area.pressed ? Theme.surface-4 : copy-area.has-hover ? Theme.surface-3 : transparent;
+
+            accessible-role: button;
+            accessible-label: @tr("Copier la transcription");
+            accessible-action-default => { root.copy-transcript(); }
+
+            forward-focus: copy-focus;
+            copy-focus := FocusScope {
+                key-pressed(event) => {
+                    if event.text == Key.Return || event.text == Key.Space {
+                        root.copy-transcript();
+                        return accept;
+                    }
+                    return reject;
+                }
+            }
+
+            copy-area := TouchArea {
+                mouse-cursor: pointer;
+                clicked => {
+                    copy-focus.focus();
+                    root.copy-transcript();
+                }
+            }
+
+            copy-content := HorizontalLayout {
+                padding-left: 8px;
+                padding-right: 8px;
+                spacing: 5px;
+                alignment: center;
+
+                Rectangle {
+                    width: 13px;
+                    horizontal-stretch: 0;
+
+                    LucideIcon {
+                        size: 13px;
+                        y: (parent.height - self.height) / 2;
+                        icon: root.just-copied ? IconSet.Check : IconSet.Copy;
+                        icon-color: root.just-copied ? Theme.accent : Theme.text-secondary;
+                    }
+                }
+                Text {
+                    text: root.just-copied ? @tr("Copié") : @tr("Copier");
+                    font-size: 11.5px;
+                    color: Theme.text-secondary;
+                    vertical-alignment: center;
+                }
+            }
+        }
     }
 
     if root.segment-count == 0: Text {

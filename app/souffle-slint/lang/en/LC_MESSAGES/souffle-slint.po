@@ -2770,3 +2770,75 @@ msgctxt "SpeakerLabels"
 msgid "Eux"
 msgstr "Them"
 
+
+msgctxt "MeetingDetail"
+msgid "Markdown (.md)"
+msgstr "Markdown (.md)"
+
+msgctxt "MeetingDetail"
+msgid "JSON (.json)"
+msgstr "JSON (.json)"
+
+msgctxt "MeetingDetail"
+msgid "Sous-titres (.srt)"
+msgstr "Subtitles (.srt)"
+
+msgctxt "MeetingDetail"
+msgid "Sous-titres (.vtt)"
+msgstr "Subtitles (.vtt)"
+
+msgctxt "MeetingDetail"
+msgid "Audio (.ogg)"
+msgstr "Audio (.ogg)"
+
+msgctxt "MeetingDetail"
+msgid "Format d'export"
+msgstr "Export format"
+
+msgctxt "MeetingDetail"
+msgid "Exporter la réunion"
+msgstr "Export meeting"
+
+msgctxt "MeetingDetail"
+msgid "Exporter"
+msgstr "Export"
+
+msgctxt "TranscriptSection"
+msgid "Copier la transcription"
+msgstr "Copy transcript"
+
+msgctxt "TranscriptSection"
+msgid "Copier"
+msgstr "Copy"
+
+msgctxt "TranscriptSection"
+msgid "Copié"
+msgstr "Copied"
+
+msgctxt "ModelDeleteSection"
+msgid "STOCKAGE DU MODÈLE"
+msgstr "MODEL STORAGE"
+
+msgctxt "ModelDeleteSection"
+msgid "Supprimer le modèle téléchargé"
+msgstr "Delete the downloaded model"
+
+msgctxt "ModelDeleteSection"
+msgid "Supprime les fichiers de {} du disque. Il faudra le télécharger à nouveau pour l'utiliser."
+msgstr "Deletes {}'s files from disk. You will need to download it again to use it."
+
+msgctxt "ModelDeleteSection"
+msgid "Le modèle doit être téléchargé et déchargé (pas en cours d'utilisation) pour être supprimé."
+msgstr "The model must be downloaded and unloaded (not currently in use) to be deleted."
+
+msgctxt "ModelDeleteSection"
+msgid "Supprimer"
+msgstr "Delete"
+
+msgctxt "ModelDeleteSection"
+msgid "Confirmer"
+msgstr "Confirm"
+
+msgctxt "ModelDeleteSection"
+msgid "Annuler"
+msgstr "Cancel"

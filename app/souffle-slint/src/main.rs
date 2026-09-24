@@ -439,6 +439,19 @@ fn meeting_meta(meeting: &MeetingTranscript) -> MeetingMeta {
     }
 }
 
+/// Mirrors `souffle_lib::export::ExportFormat` at the UI boundary
+/// (`types.slint`'s `MeetingExportFormat`) - exhaustive, no `_ =>` arm, per
+/// the contract in `docs/engineering/slint.md`. Only Slint -> Rust is ever
+/// needed: the Export menu never displays a format read back from Rust.
+fn export_format_from_slint(format: MeetingExportFormat) -> souffle_lib::export::ExportFormat {
+    match format {
+        MeetingExportFormat::Markdown => souffle_lib::export::ExportFormat::Markdown,
+        MeetingExportFormat::Json => souffle_lib::export::ExportFormat::Json,
+        MeetingExportFormat::Srt => souffle_lib::export::ExportFormat::Srt,
+        MeetingExportFormat::Vtt => souffle_lib::export::ExportFormat::Vtt,
+    }
+}
+
 /// Loads a meeting and pushes it into MeetingDetail's properties - mirrors
 /// `controller.svelte.ts`'s `openMeeting`/`loadMeeting` effect.
 fn populate_meeting_detail(window: &MainWindow, meeting: &MeetingTranscript) {
@@ -450,6 +463,8 @@ fn populate_meeting_detail(window: &MainWindow, meeting: &MeetingTranscript) {
     window.set_meeting_detail_resume_error("".into());
     window.set_meeting_detail_delete_error("".into());
     window.set_meeting_detail_summary_generation_error("".into());
+    window.set_meeting_detail_export_error("".into());
+    window.set_meeting_detail_audio_export_error("".into());
     let participants: Vec<MeetingParticipantChip> =
         meeting.participants.iter().map(participant_chip).collect();
     window.set_meeting_detail_participants(
@@ -3725,6 +3740,83 @@ fn wire_callbacks(
         });
     });
 
+    // Whole-meeting export (SOU-195-slice): the native save panel needs the
+    // main thread's run loop (`native::dialog::pick_save_path`'s own
+    // precondition), so the whole command runs through `run_on_main_thread`
+    // per its doc comment - same recipe `start_dictation`/`start_meeting`
+    // already use for a main-thread-only command. Cancel is a no-op on the
+    // Rust side already; nothing to distinguish here from a real save.
+    let weak_export = window.as_weak();
+    let handle_export = tauri_handle.clone();
+    window.on_meeting_detail_export_requested(move |format| {
+        let Some(window) = weak_export.upgrade() else {
+            return;
+        };
+        window.set_meeting_detail_export_error("".into());
+        let id = window.get_active_meeting_id().to_string();
+        let handle = handle_export.clone();
+        let weak_for_done = weak_export.clone();
+        slint::spawn_local(async move {
+            let result = run_on_main_thread(move || {
+                souffle_lib::async_runtime::block_on(async move {
+                    souffle_lib::commands::save_meeting_export(
+                        handle,
+                        id,
+                        export_format_from_slint(format),
+                    )
+                    .await
+                })
+            })
+            .await;
+            if let (Some(window), Err(e)) = (weak_for_done.upgrade(), result) {
+                window.set_meeting_detail_export_error(e.into());
+            }
+        })
+        .expect("slint event loop not running");
+    });
+
+    let weak_export_audio = window.as_weak();
+    let handle_export_audio = tauri_handle.clone();
+    window.on_meeting_detail_export_audio_requested(move || {
+        let Some(window) = weak_export_audio.upgrade() else {
+            return;
+        };
+        window.set_meeting_detail_audio_export_error("".into());
+        let id = window.get_active_meeting_id().to_string();
+        let handle = handle_export_audio.clone();
+        let weak_for_done = weak_export_audio.clone();
+        slint::spawn_local(async move {
+            let result = run_on_main_thread(move || {
+                souffle_lib::async_runtime::block_on(async move {
+                    souffle_lib::commands::save_meeting_audio_export(handle, id).await
+                })
+            })
+            .await;
+            if let (Some(window), Err(e)) = (weak_for_done.upgrade(), result) {
+                window.set_meeting_detail_audio_export_error(e.into());
+            }
+        })
+        .expect("slint event loop not running");
+    });
+
+    let weak_copy = window.as_weak();
+    let handle_copy = tauri_handle.clone();
+    window.on_meeting_detail_copy_transcript_requested(move || {
+        let Some(window) = weak_copy.upgrade() else {
+            return;
+        };
+        let id = window.get_active_meeting_id().to_string();
+        match souffle_lib::commands::get_meeting(handle_copy.clone(), id) {
+            Ok(meeting) => {
+                let text = souffle_lib::export::render_transcript_plain_text(&meeting);
+                if let Err(e) = souffle_lib::commands::copy_text(text) {
+                    window.set_meeting_detail_export_error(e.into());
+                }
+            }
+            Err(e) => window.set_meeting_detail_export_error(e.into()),
+        }
+    });
+
     let weak = window.as_weak();
     let player_for_play = player.clone();
     window.on_meeting_detail_audio_play_pause_requested(move || {
@@ -4017,6 +4109,7 @@ fn wire_callbacks(
             );
         }
         window.set_settings_open(true);
+        window.set_settings_model_delete_error("".into());
         permissions_for_open.sync_activity();
         // Only starts the live-log timers if the sheet opened straight onto
         // the Système tab (AC5) - the usual Transcription/Meetings entry
@@ -5683,6 +5776,36 @@ fn wire_callbacks(
                 }
             },
         );
+    });
+
+    // Delete-model "danger zone" (SOU-195-slice, Système tab). Synchronous
+    // and main-thread-only like `rename_meeting` - a filesystem removal, no
+    // save panel involved, so no `run_on_main_thread` needed here.
+    // `commands::model::delete_model` is the sole guard against deleting a
+    // loaded or mid-transition model; a refusal surfaces its error text
+    // verbatim rather than re-deciding the state machine in the UI.
+    let weak_delete_model = window.as_weak();
+    let handle_delete_model = tauri_handle.clone();
+    window.on_settings_delete_model_requested(move || {
+        let Some(window) = weak_delete_model.upgrade() else {
+            return;
+        };
+        let handle = handle_delete_model.clone();
+        let catalog = match souffle_lib::commands::get_transcription_catalog(handle.clone()) {
+            Ok(catalog) => catalog,
+            Err(e) => {
+                window.set_settings_model_delete_error(e.into());
+                return;
+            }
+        };
+        let selection = model_ui::selected_profile(&catalog);
+        match souffle_lib::commands::delete_model(handle.clone(), selection) {
+            Ok(()) => {
+                window.set_settings_model_delete_error("".into());
+                refresh_model_runtime(weak_delete_model.clone(), handle);
+            }
+            Err(e) => window.set_settings_model_delete_error(e.into()),
+        }
     });
 
     let weak = window.as_weak();
