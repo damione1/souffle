@@ -191,6 +191,45 @@ pub(crate) mod status_test_support {
 /// would otherwise let the CPU idle.
 const MEETING_TICK: Duration = Duration::from_millis(20);
 
+/// SOU-260: capture starts on the click, while the engine is still being
+/// reset for the session (seconds for a diarized Kyutai rebuild), and the
+/// audio captured meanwhile waits in the capture-to-engine queue until the
+/// engine reads it, faster than real time. This bounds that wait: past it,
+/// chunks are dropped (and logged) instead of piling up behind an engine
+/// that never comes back.
+pub const AUDIO_BACKLOG_CAP_SECONDS: u64 = 30;
+
+/// The busiest producer is a diarized meeting: one Me and one Them chunk
+/// per mixer tick. Dictation sends one ~21 ms resampler block at a time,
+/// about half as many, so the same queue holds about a minute of it.
+const PEAK_CHUNKS_PER_SECOND: usize = 2 * (1000 / MEETING_TICK.as_millis() as usize);
+
+/// Capacity of the capture-to-engine queue, in chunks: at least
+/// [`AUDIO_BACKLOG_CAP_SECONDS`] of meeting audio. About 6 MB when full.
+pub const AUDIO_QUEUE_CAPACITY: usize = AUDIO_BACKLOG_CAP_SECONDS as usize * PEAK_CHUNKS_PER_SECOND;
+
+/// Hand one chunk to the engine without blocking (this runs on the
+/// real-time mic callback for dictation). A full queue means the engine has
+/// not read anything for [`AUDIO_BACKLOG_CAP_SECONDS`]: the chunk is dropped
+/// and counted, which is what bounds the startup buffer.
+fn offer_chunk(
+    sender: &Sender<AudioMessage>,
+    chunk: AudioChunk,
+    dropped_counter: &AtomicU64,
+) -> bool {
+    if sender.try_send(AudioMessage::Chunk(chunk)).is_ok() {
+        return true;
+    }
+    let dropped = dropped_counter.fetch_add(1, Ordering::Relaxed) + 1;
+    if dropped == 1 || dropped.is_multiple_of(100) {
+        warn!(
+            "Audio queue full (about {AUDIO_BACKLOG_CAP_SECONDS} s waiting for the engine), \
+             dropping samples ({dropped} chunks dropped this session)"
+        );
+    }
+    false
+}
+
 /// How often the meeting tick re-checks the default output route. Property
 /// reads are a handful of cheap HAL calls; polling keeps everything on this
 /// thread instead of a listener callback.
@@ -1887,7 +1926,7 @@ impl AudioCapture {
         // Bounded channel: many small chunks per second from cpal; inference (Kyutai/Metal)
         // can lag real-time. If this fills, try_send drops audio while RMS/waveform still
         // updates — use a generous bound so the inference thread can catch up.
-        let (audio_tx, audio_rx) = crossbeam_channel::bounded::<AudioMessage>(512);
+        let (audio_tx, audio_rx) = crossbeam_channel::bounded::<AudioMessage>(AUDIO_QUEUE_CAPACITY);
 
         std::thread::Builder::new()
             .name("audio-capture".into())
@@ -2019,6 +2058,10 @@ impl AudioCapture {
                         }
                         AudioCommand::Stop => {
                             capture.stop();
+                        }
+                        AudioCommand::Discard { done } => {
+                            capture.discard();
+                            let _ = done.send(());
                         }
                         AudioCommand::SelectDevice(uid) => {
                             if uid.is_empty() {
@@ -2367,45 +2410,43 @@ impl AudioCapture {
                         last_mic_callback_ms.store(unix_now_ms(), Ordering::Relaxed);
 
                         let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        let resampled = match resampler.lock() {
-                            Ok(mut r) => r.process(data),
-                            Err(_) => return,
-                        };
-                        if !resampled.is_empty() {
-                            // Compute RMS for waveform visualization
-                            let sum_sq: f32 = resampled.iter().map(|s| s * s).sum();
-                            let rms = (sum_sq / resampled.len() as f32).sqrt();
-                            // Clamp to 0.0-1.0 (typical speech RMS is 0.01-0.15)
-                            let normalized = (rms * 8.0).min(1.0);
-                            rms_ref.store(normalized.to_bits(), Ordering::Relaxed);
+                            let resampled = match resampler.lock() {
+                                Ok(mut r) => r.process(data),
+                                Err(_) => return,
+                            };
+                            if !resampled.is_empty() {
+                                // Compute RMS for waveform visualization
+                                let sum_sq: f32 = resampled.iter().map(|s| s * s).sum();
+                                let rms = (sum_sq / resampled.len() as f32).sqrt();
+                                // Clamp to 0.0-1.0 (typical speech RMS is 0.01-0.15)
+                                let normalized = (rms * 8.0).min(1.0);
+                                rms_ref.store(normalized.to_bits(), Ordering::Relaxed);
 
-                            // Log first chunk to confirm audio is flowing
-                            if crate::debug::transcription_debug_enabled()
-                                && !LOGGED.swap(true, std::sync::atomic::Ordering::Relaxed)
-                            {
-                                let max_amp = resampled.iter().map(|s| s.abs()).fold(0.0f32, f32::max);
-                                debug!(
-                                    "First audio chunk: {} samples, max_amp={max_amp:.4}",
-                                    resampled.len(),
+                                // Log first chunk to confirm audio is flowing
+                                if crate::debug::transcription_debug_enabled()
+                                    && !LOGGED.swap(true, std::sync::atomic::Ordering::Relaxed)
+                                {
+                                    let max_amp =
+                                        resampled.iter().map(|s| s.abs()).fold(0.0f32, f32::max);
+                                    debug!(
+                                        "First audio chunk: {} samples, max_amp={max_amp:.4}",
+                                        resampled.len(),
+                                    );
+                                }
+                                if let Some(feed) = &recorder_feed {
+                                    feed.push(&resampled);
+                                }
+                                offer_chunk(
+                                    &sender,
+                                    AudioChunk {
+                                        session_id,
+                                        samples: resampled,
+                                        captured_at: Instant::now(),
+                                        speaker: None,
+                                    },
+                                    &dropped_counter,
                                 );
                             }
-                            if let Some(feed) = &recorder_feed {
-                                feed.push(&resampled);
-                            }
-                            if sender
-                                .try_send(AudioMessage::Chunk(AudioChunk {
-                                    session_id,
-                                    samples: resampled,
-                                    captured_at: Instant::now(),
-                                    speaker: None,                            }))
-                                .is_err()
-                            {
-                                let dropped = dropped_counter.fetch_add(1, Ordering::Relaxed) + 1;
-                                if dropped == 1 || dropped.is_multiple_of(100) {
-                                    warn!("Audio buffer full, dropping samples ({dropped} chunks dropped this session)");
-                                }
-                            }
-                        }
                         }));
                         if caught.is_err() {
                             stream_failed_cb.store(true, Ordering::Relaxed);
@@ -3115,23 +3156,16 @@ impl AudioCapture {
         if samples.is_empty() {
             return;
         }
-        if self
-            .audio_sender
-            .try_send(AudioMessage::Chunk(AudioChunk {
+        offer_chunk(
+            &self.audio_sender,
+            AudioChunk {
                 session_id,
                 samples,
                 captured_at: Instant::now(),
                 speaker,
-            }))
-            .is_err()
-        {
-            let dropped = self.dropped_counter.fetch_add(1, Ordering::Relaxed) + 1;
-            if dropped == 1 || dropped.is_multiple_of(100) {
-                warn!(
-                    "Audio buffer full, dropping samples ({dropped} chunks dropped this session)"
-                );
-            }
-        }
+            },
+            &self.dropped_counter,
+        );
     }
 
     /// Tear down all session state after a fatal, unrecoverable capture
@@ -3497,6 +3531,25 @@ impl AudioCapture {
         }
     }
 
+    /// End a session whose start failed after capture was already running
+    /// (SOU-260), and delete the audio file it began: nothing will ever
+    /// point at it. The stop still sends its EndOfStream; the actor drops it
+    /// as a stale marker.
+    fn discard(&mut self) {
+        let record_path = self
+            .active_params
+            .as_ref()
+            .and_then(|params| params.record_path.clone());
+        self.stop();
+        if let Some(path) = record_path {
+            match std::fs::remove_file(&path) {
+                Ok(()) => info!("Discarded the recording of a session that failed to start"),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => warn!("Could not discard the recording of a failed start: {e}"),
+            }
+        }
+    }
+
     /// EndOfStream is the signal the actor's stop waits on. The actor is
     /// normally draining, so this sends immediately; the timeout only
     /// matters if no one is consuming (e.g. session aborted) — then we give
@@ -3538,5 +3591,58 @@ impl AudioCapture {
         }
 
         Ok(config.with_sample_rate(rate).into())
+    }
+}
+
+#[cfg(test)]
+mod backlog_cap_tests {
+    use super::{
+        AUDIO_BACKLOG_CAP_SECONDS, AUDIO_QUEUE_CAPACITY, AudioChunk, AudioMessage, MEETING_TICK,
+        offer_chunk,
+    };
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::Instant;
+
+    fn chunk(n: f32) -> AudioChunk {
+        AudioChunk {
+            session_id: 1,
+            samples: vec![n; 480],
+            captured_at: Instant::now(),
+            speaker: None,
+        }
+    }
+
+    /// SOU-260: the queue is what holds the audio captured while the
+    /// engine starts; it must fit the whole cap of a diarized meeting (two
+    /// chunks per mixer tick) before anything is dropped.
+    #[test]
+    fn the_queue_holds_the_whole_startup_cap_of_a_diarized_meeting() {
+        let ticks_per_second = 1000 / MEETING_TICK.as_millis() as usize;
+        assert!(AUDIO_QUEUE_CAPACITY >= AUDIO_BACKLOG_CAP_SECONDS as usize * 2 * ticks_per_second);
+    }
+
+    #[test]
+    fn past_the_cap_chunks_are_dropped_and_counted_and_the_queue_keeps_its_order() {
+        let (tx, rx) = crossbeam_channel::bounded(3);
+        let dropped = AtomicU64::new(0);
+
+        let offered: Vec<bool> = (0..5)
+            .map(|n| offer_chunk(&tx, chunk(n as f32), &dropped))
+            .collect();
+
+        assert_eq!(offered, vec![true, true, true, false, false]);
+        assert_eq!(dropped.load(Ordering::Relaxed), 2);
+        // What was kept is the oldest audio, in order: the start of what
+        // the user said is never the part given up.
+        let kept: Vec<f32> = rx
+            .try_iter()
+            .map(|m| match m {
+                AudioMessage::Chunk(c) => c.samples[0],
+                AudioMessage::EndOfStream { .. } => f32::NAN,
+            })
+            .collect();
+        assert_eq!(kept, vec![0.0, 1.0, 2.0]);
+        // Once the engine reads again, audio flows again.
+        assert!(offer_chunk(&tx, chunk(9.0), &dropped));
     }
 }

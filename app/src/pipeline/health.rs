@@ -47,9 +47,11 @@ pub struct SessionHealth {
 }
 
 impl SessionHealth {
-    /// Starts tracking and resets the shared drop counter for the new session.
+    /// Starts tracking. The shared drop counter is not reset here: the actor
+    /// zeroes it when the session is handed over, before the engine reset,
+    /// so chunks lost while audio was buffered during that reset (SOU-260)
+    /// are still counted against this session.
     pub fn start(session_id: u64, dropped: Arc<AtomicU64>) -> Self {
-        dropped.store(0, Ordering::Relaxed);
         let now = Instant::now();
         Self {
             session_id,
@@ -217,10 +219,11 @@ mod tests {
     }
 
     #[test]
-    fn start_resets_drop_counter() {
+    fn start_keeps_drops_counted_while_the_engine_started() {
+        // SOU-260: drops during the pre-roll happened in this session.
         let counter = Arc::new(AtomicU64::new(42));
         let h = SessionHealth::start(1, Arc::clone(&counter));
-        assert_eq!(h.dropped_chunks(), 0);
+        assert_eq!(h.dropped_chunks(), 42);
     }
 
     #[test]

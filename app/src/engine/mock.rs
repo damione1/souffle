@@ -6,8 +6,12 @@ use super::{
 };
 use std::collections::VecDeque;
 use std::path::Path;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
+/// Every `transcribe_dual()` frame pair a mock received, as (me, them).
+pub type DualFrameLog = Arc<Mutex<Vec<(Vec<f32>, Vec<f32>)>>>;
 
 /// A configurable mock engine for testing.
 /// Push responses into `transcribe_responses` and `flush_responses` queues;
@@ -40,6 +44,15 @@ pub struct MockEngine {
     tail_drained_schedule: VecDeque<bool>,
     tail_drained_value: bool,
     pub dual_calls: Vec<(Vec<f32>, Vec<f32>)>,
+    /// How long `reset_state()` blocks, to stand in for Kyutai's
+    /// seconds-long diarized rebuild (SOU-260).
+    reset_delay: Duration,
+    /// Every sample handed to `transcribe()`, in order. Shared with tests
+    /// via `fed_audio_handle()`.
+    fed_audio: Arc<Mutex<Vec<f32>>>,
+    /// Every `transcribe_dual()` frame pair, in order. Shared with tests via
+    /// `fed_dual_handle()` (the mock itself moves into the actor).
+    fed_dual: DualFrameLog,
 }
 
 impl Default for MockEngine {
@@ -61,7 +74,28 @@ impl MockEngine {
             tail_drained_schedule: VecDeque::new(),
             tail_drained_value: false,
             dual_calls: Vec::new(),
+            reset_delay: Duration::ZERO,
+            fed_audio: Arc::new(Mutex::new(Vec::new())),
+            fed_dual: Arc::new(Mutex::new(Vec::new())),
         }
+    }
+
+    /// Make `reset_state()` block for `delay`, like a real engine rebuild.
+    pub fn with_reset_delay(mut self, delay: Duration) -> Self {
+        self.reset_delay = delay;
+        self
+    }
+
+    /// Clone of the log of every sample `transcribe()` received; call
+    /// before the mock is moved into the actor's factory closure.
+    pub fn fed_audio_handle(&self) -> Arc<Mutex<Vec<f32>>> {
+        Arc::clone(&self.fed_audio)
+    }
+
+    /// Clone of the log of every `transcribe_dual()` frame pair; call
+    /// before the mock is moved into the actor's factory closure.
+    pub fn fed_dual_handle(&self) -> DualFrameLog {
+        Arc::clone(&self.fed_dual)
     }
 
     /// Clone of the unload counter; call before the mock is moved into the
@@ -143,9 +177,12 @@ impl TranscriptionEngine for MockEngine {
 
     fn transcribe(
         &mut self,
-        _audio: &[f32],
+        audio: &[f32],
         _language: Option<&str>,
     ) -> Result<Vec<TranscriptionSegment>, EngineError> {
+        if let Ok(mut fed) = self.fed_audio.lock() {
+            fed.extend_from_slice(audio);
+        }
         if let Some(drained) = self.tail_drained_schedule.pop_front() {
             self.tail_drained_value = drained;
         }
@@ -157,6 +194,9 @@ impl TranscriptionEngine for MockEngine {
     }
 
     fn reset_state(&mut self) -> Result<(), EngineError> {
+        if !self.reset_delay.is_zero() {
+            std::thread::sleep(self.reset_delay);
+        }
         self.reset_state_count.fetch_add(1, Ordering::SeqCst);
         Ok(())
     }
@@ -195,6 +235,9 @@ impl TranscriptionEngine for MockEngine {
         them: &[f32],
     ) -> Result<Vec<TranscriptionSegment>, EngineError> {
         self.dual_calls.push((me.to_vec(), them.to_vec()));
+        if let Ok(mut fed) = self.fed_dual.lock() {
+            fed.push((me.to_vec(), them.to_vec()));
+        }
 
         let tagged = |speaker: Speaker, text: &str| TranscriptionSegment {
             text: text.to_string(),
