@@ -122,6 +122,10 @@ export component MainWindow inherits Window {
     // slice (AC15): the same value as above, converted to a plain float so
     // Rust doesn't need Slint's internal `length`-wrapping type.
     out property <float> meeting-detail-transcript-scroll-top-px: root.meeting-detail-transcript-scroll-top / 1px;
+    // MeetingDetail's own single-page scroll (SOU-243) - no Rust polling
+    // needed (unlike the transcript above, it isn't virtualized), just
+    // reset on navigation like meeting-detail-transcript-scroll-top below.
+    in-out property <length> meeting-detail-page-scroll-top: 0px;
     in property <string> meeting-detail-summary;
     in property <bool> meeting-detail-summary-is-stale;
     in property <string> meeting-detail-summary-model-label;
@@ -426,9 +430,14 @@ export component MainWindow inherits Window {
     // down doesn't leave meeting B's transcript scrolled down too - a
     // `public function` rather than a Rust-side property write, since the
     // property below needs `length`, which isn't part of Slint's stable
-    // Rust API (see the doc comment on it).
+    // Rust API (see the doc comment on it). Also resets the page's own
+    // single-scroll region (SOU-243) for the same reason: MeetingDetail is
+    // a keep-alive component, so without this, opening meeting B lands
+    // scrolled to wherever meeting A's page was left (past the header,
+    // Notes hidden) instead of at the top.
     public function reset-meeting-detail-transcript-scroll() {
         root.meeting-detail-transcript-scroll-top = 0px;
+        root.meeting-detail-page-scroll-top = 0px;
     }
 
     // SOU-190: first-run wizard, drawn above everything else while visible -
@@ -583,6 +592,7 @@ export component MainWindow inherits Window {
         transcript-spacer-before: root.meeting-detail-transcript-spacer-before;
         transcript-spacer-after: root.meeting-detail-transcript-spacer-after;
         transcript-scroll-top <=> root.meeting-detail-transcript-scroll-top;
+        page-scroll-top <=> root.meeting-detail-page-scroll-top;
         summary: root.meeting-detail-summary;
         summary-is-stale: root.meeting-detail-summary-is-stale;
         summary-model-label: root.meeting-detail-summary-model-label;

@@ -39,6 +39,15 @@ export component MeetingDetail inherits Rectangle {
     in property <float> transcript-spacer-before: 0.0;
     in property <float> transcript-spacer-after: 0.0;
     in-out property <length> transcript-scroll-top: 0px;
+    // The page's own single-scroll region (SOU-243) - unlike
+    // transcript-scroll-top above, this has no reason to persist any
+    // particular position across meetings, but MeetingDetail is a
+    // keep-alive component (reused, not recreated, per meeting), so
+    // page-scroll's Flickable would otherwise keep whatever scroll
+    // offset was last left on it. Exposed so main_window.slint can reset
+    // it to 0px on navigation, the same way it already resets
+    // meeting-detail-transcript-scroll-top.
+    in-out property <length> page-scroll-top: 0px;
     in property <string> summary;
     in property <bool> summary-is-stale: false;
     in property <string> summary-model-label;
@@ -378,6 +387,7 @@ export component MeetingDetail inherits Rectangle {
             vertical-stretch: 1;
             viewport-width: self.width;
             viewport-height: page-inner.preferred-height;
+            viewport-y <=> root.page-scroll-top;
 
             // Same click-away sink as the root one, inside the scroller: a
             // Flickable keeps any press its content does not handle, so the
