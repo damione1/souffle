@@ -38,6 +38,20 @@ export component SummarySection inherits VerticalLayout {
     in property <string> generation-error: "";
 
     callback generate-requested();
+    // Copy `summary` to the pasteboard (Rust owns the pasteboard write).
+    callback copy-requested();
+
+    // "Copié" feedback for 1.5s after a copy, like the Tauri CopyButton.
+    property <bool> just-copied: false;
+    function copy-summary() {
+        root.copy-requested();
+        root.just-copied = true;
+    }
+    Timer {
+        interval: 1.5s;
+        running: root.just-copied;
+        triggered => { root.just-copied = false; }
+    }
 
     spacing: 8px;
 
@@ -252,6 +266,66 @@ export component SummarySection inherits VerticalLayout {
                 color: Theme.text-muted;
                 vertical-alignment: center;
                 horizontal-stretch: 0;
+            }
+
+            // MeetingSummarySection.svelte's CopyButton next to the model
+            // badge: copies the summary text as stored (`meeting.summary`).
+            copy-btn := Rectangle {
+                width: copy-content.preferred-width + 16px;
+                height: 22px;
+                horizontal-stretch: 0;
+                border-radius: 4px;
+                border-width: copy-focus.has-focus ? 2px : 0px;
+                border-color: Theme.accent;
+                background: copy-area.pressed ? Theme.surface-4 : copy-area.has-hover ? Theme.surface-3 : transparent;
+
+                accessible-role: button;
+                accessible-label: @tr("Copier le résumé");
+                accessible-action-default => { root.copy-summary(); }
+
+                forward-focus: copy-focus;
+                copy-focus := FocusScope {
+                    key-pressed(event) => {
+                        if event.text == Key.Return || event.text == Key.Space {
+                            root.copy-summary();
+                            return accept;
+                        }
+                        return reject;
+                    }
+                }
+
+                copy-area := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => {
+                        copy-focus.focus();
+                        root.copy-summary();
+                    }
+                }
+
+                copy-content := HorizontalLayout {
+                    padding-left: 8px;
+                    padding-right: 8px;
+                    spacing: 5px;
+                    alignment: center;
+
+                    Rectangle {
+                        width: 13px;
+                        horizontal-stretch: 0;
+
+                        LucideIcon {
+                            size: 13px;
+                            y: (parent.height - self.height) / 2;
+                            icon: root.just-copied ? IconSet.Check : IconSet.Copy;
+                            icon-color: root.just-copied ? Theme.accent : Theme.text-secondary;
+                        }
+                    }
+                    Text {
+                        text: root.just-copied ? @tr("Copié") : @tr("Copier");
+                        font-size: 11.5px;
+                        color: Theme.text-secondary;
+                        vertical-alignment: center;
+                    }
+                }
             }
         }
 

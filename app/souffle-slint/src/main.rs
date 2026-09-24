@@ -454,6 +454,7 @@ fn populate_meeting_detail(window: &MainWindow, meeting: &MeetingTranscript) {
     window.set_meeting_detail_model_label(meeting.transcription_profile.model_label.clone().into());
     window.set_meeting_detail_can_resume(meeting.ended_at.is_none());
     window.set_meeting_detail_resume_error("".into());
+    window.set_meeting_detail_delete_error("".into());
     window.set_meeting_detail_summary_generation_error("".into());
     let participants: Vec<slint::SharedString> = meeting
         .participants
@@ -3587,6 +3588,47 @@ fn wire_callbacks(
         }
         stop_audio_player(&player_for_back, &progress_timer_for_back);
         stop_transcript_window(&transcript_state_for_back, &transcript_timer_for_back);
+    });
+
+    // MeetingDetail.svelte's "Delete meeting" (controller `deleteMeeting`):
+    // delete, then leave the view exactly like Back does. The detail view
+    // is only mounted while idle, so no recording can own this meeting.
+    let weak = window.as_weak();
+    let handle = tauri_handle.clone();
+    let player_for_delete = player.clone();
+    let progress_timer_for_delete = progress_timer.clone();
+    let transcript_state_for_delete = transcript_state.clone();
+    let transcript_timer_for_delete = transcript_timer.clone();
+    window.on_meeting_detail_delete(move || {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        let id = window.get_active_meeting_id().to_string();
+        if id.is_empty() {
+            return;
+        }
+        // Release the decoded audio before the files go away.
+        stop_audio_player(&player_for_delete, &progress_timer_for_delete);
+        match souffle_lib::commands::delete_meeting(Arc::clone(&handle), id) {
+            Ok(()) => {
+                stop_transcript_window(&transcript_state_for_delete, &transcript_timer_for_delete);
+                window.set_meeting_detail_delete_error("".into());
+                window.set_active_meeting_id("".into());
+                refresh_timeline(&window, &handle);
+            }
+            Err(e) => window.set_meeting_detail_delete_error(e.into()),
+        }
+    });
+
+    let weak = window.as_weak();
+    window.on_meeting_detail_copy_summary(move || {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        let summary = window.get_meeting_detail_summary().to_string();
+        if let Err(e) = souffle_lib::commands::copy_text(summary) {
+            eprintln!("Failed to copy meeting summary: {e}");
+        }
     });
 
     let weak_resume = window.as_weak();
