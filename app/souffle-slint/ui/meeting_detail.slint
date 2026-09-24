@@ -187,6 +187,14 @@ export component MeetingDetail inherits Rectangle {
     }
     TouchArea {
         clicked => { focus-sink.focus(); }
+        // Wheel/trackpad anywhere on the page scrolls it, like a web page:
+        // page-scroll only spans the centred column, so the side gutters
+        // (and the sticky header) used to swallow the scroll. Scrolls over
+        // the transcript box never get here - its own Flickable takes them.
+        scroll-event(event) => {
+            root.page-scroll-top = clamp(root.page-scroll-top + event.delta-y, min(0px, page-scroll.height - page-scroll.viewport-height), 0px);
+            accept
+        }
     }
 
     content := VerticalLayout {

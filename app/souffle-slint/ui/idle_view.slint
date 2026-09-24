@@ -58,6 +58,18 @@ export component IdleView inherits Rectangle {
         return error;
     }
 
+    // Wheel/trackpad anywhere on the page scrolls the history, like a web
+    // page: history-scroll only spans the centred column, so the side
+    // gutters (and the cards/search above it) used to swallow the scroll.
+    // Declared first so it sits under everything and only gets the scrolls
+    // nothing else took.
+    TouchArea {
+        scroll-event(event) => {
+            history-scroll.viewport-y = clamp(history-scroll.viewport-y + event.delta-y, min(0px, history-scroll.height - history-scroll.viewport-height), 0px);
+            accept
+        }
+    }
+
     // No settings button here: `AppHeader` (mounted once in
     // `main_window.slint`, above every view) owns that control now.
     VerticalLayout {
@@ -125,7 +137,7 @@ export component IdleView inherits Rectangle {
 
         // Stretch pool leftover. Do not bind `viewport-height` to the
         // child's `.height` (binding loop, see transcript_section.slint).
-        Flickable {
+        history-scroll := Flickable {
             vertical-stretch: 1;
             viewport-width: self.width;
 
