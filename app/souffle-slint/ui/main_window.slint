@@ -73,9 +73,12 @@ export component MainWindow inherits Window {
     in property <string> live-meeting-id;
     in-out property <string> expanded-dictation-id;
     in property <[UpcomingEvent]> upcoming-events;
-    // Rust-driven, set after a real start/stop command succeeds, never
-    // optimistically from the UI alone.
+    // Rust-driven, never set from the UI alone. SOU-258: a start switches
+    // it on the click with `recording-starting` true, so the view appears
+    // at once; `recording-starting` drops when the command succeeds, and a
+    // failed start puts the mode back to idle.
     in-out property <RecordingMode> recording-mode: RecordingMode.idle;
+    in property <bool> recording-starting: false;
     in-out property <string> live-text;
     in-out property <string> live-tentative;
     in-out property <string> dictation-recovery-text;
@@ -102,7 +105,9 @@ export component MainWindow inherits Window {
     in property <NotesSaveState> meeting-detail-notes-save-state;
     in property <bool> meeting-detail-has-audio;
     in property <bool> meeting-detail-audio-is-playing;
-    in property <[float]> meeting-detail-audio-peaks;
+    in property <bool> meeting-detail-audio-loading;
+    in property <string> meeting-detail-audio-waveform-commands;
+    in property <int> meeting-detail-audio-waveform-bars;
     in property <float> meeting-detail-audio-progress;
     in property <string> meeting-detail-audio-position-label;
     in property <string> meeting-detail-audio-duration-label;
@@ -591,7 +596,9 @@ export component MainWindow inherits Window {
         notes-save-state: root.meeting-detail-notes-save-state;
         has-audio: root.meeting-detail-has-audio;
         audio-is-playing: root.meeting-detail-audio-is-playing;
-        audio-peaks: root.meeting-detail-audio-peaks;
+        audio-loading: root.meeting-detail-audio-loading;
+        audio-waveform-commands: root.meeting-detail-audio-waveform-commands;
+        audio-waveform-bars: root.meeting-detail-audio-waveform-bars;
         audio-progress: root.meeting-detail-audio-progress;
         audio-position-label: root.meeting-detail-audio-position-label;
         audio-duration-label: root.meeting-detail-audio-duration-label;
@@ -640,6 +647,7 @@ export component MainWindow inherits Window {
         width: 100%;
         height: 100%;
         mode: root.recording-mode;
+        starting: root.recording-starting;
         live-text: root.live-text;
         live-tentative: root.live-tentative;
         live-transcript-blocks: root.live-transcript-blocks;

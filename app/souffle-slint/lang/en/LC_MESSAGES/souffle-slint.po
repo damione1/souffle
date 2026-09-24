@@ -2842,3 +2842,13 @@ msgstr "Confirm"
 msgctxt "ModelDeleteSection"
 msgid "Annuler"
 msgstr "Cancel"
+
+#: app/souffle-slint/ui/recording_view.slint
+msgctxt "RecordingView"
+msgid "Démarrage…"
+msgstr "Starting…"
+
+#: app/souffle-slint/ui/components/audio_player_section.slint
+msgctxt "AudioPlayerSection"
+msgid "Chargement de l'audio…"
+msgstr "Loading audio…"

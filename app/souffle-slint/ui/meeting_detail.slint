@@ -87,7 +87,9 @@ export component MeetingDetail inherits Rectangle {
     in property <NotesSaveState> notes-save-state;
     in property <bool> has-audio: false;
     in property <bool> audio-is-playing: false;
-    in property <[float]> audio-peaks;
+    in property <bool> audio-loading;
+    in property <string> audio-waveform-commands;
+    in property <int> audio-waveform-bars;
     in property <float> audio-progress;
     in property <string> audio-position-label;
     in property <string> audio-duration-label;
@@ -782,7 +784,9 @@ export component MeetingDetail inherits Rectangle {
                     vertical-stretch: 0;
                     has-audio: root.has-audio;
                     is-playing: root.audio-is-playing;
-                    peaks: root.audio-peaks;
+                    loading: root.audio-loading;
+                    waveform-commands: root.audio-waveform-commands;
+                    waveform-bars: root.audio-waveform-bars;
                     progress: root.audio-progress;
                     position-label: root.audio-position-label;
                     duration-label: root.audio-duration-label;

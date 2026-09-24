@@ -51,7 +51,7 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::{
     Arc, Mutex,
-    atomic::{AtomicBool, Ordering},
+    atomic::{AtomicBool, AtomicU64, Ordering},
 };
 use std::time::Duration;
 
@@ -678,6 +678,7 @@ fn stop_audio_player(
     player: &Rc<RefCell<Option<audio_player::AudioPlayer>>>,
     progress_timer: &Rc<RefCell<Option<slint::Timer>>>,
 ) {
+    AUDIO_LOAD_GENERATION.fetch_add(1, Ordering::Relaxed);
     *progress_timer.borrow_mut() = None;
     *player.borrow_mut() = None;
 }
@@ -1006,18 +1007,13 @@ async fn start_meeting_from_event(
         participants: event.participants.clone(),
         description: event.description.clone(),
     };
-    run_on_main_thread(move || {
-        souffle_lib::async_runtime::block_on(async move {
-            let state = Arc::clone(&handle);
-            souffle_lib::commands::start_meeting_recording(
-                state,
-                title,
-                Some(context),
-                live_segment_channel(weak, live_state),
-            )
-            .await
-        })
-    })
+    // Off the UI thread, like `start_meeting` (SOU-258).
+    souffle_lib::commands::start_meeting_recording(
+        handle,
+        title,
+        Some(context),
+        live_segment_channel(weak, live_state),
+    )
     .await
 }
 
@@ -1552,12 +1548,38 @@ fn load_audio_devices(
     .expect("slint event loop not running");
 }
 
+/// Bumped by every [`stop_audio_player`] (UI thread only). A background
+/// audio load (SOU-258) installs its player only if the generation it
+/// started under is still current - i.e. the user has not left the detail
+/// or opened another meeting in the meantime.
+static AUDIO_LOAD_GENERATION: AtomicU64 = AtomicU64::new(0);
+
+fn apply_waveform_summary(
+    window: &MainWindow,
+    summary: &souffle_lib::audio::recorder::WaveformSummary,
+) {
+    window.set_meeting_detail_audio_waveform_commands(
+        audio_player::waveform_commands(&summary.peaks).into(),
+    );
+    window.set_meeting_detail_audio_waveform_bars(summary.peaks.len() as i32);
+    window.set_meeting_detail_audio_duration_label(
+        timeline::format_duration(summary.duration_seconds).into(),
+    );
+}
+
 /// Loads (decodes + opens a paused output stream for) the first recorded
 /// session of `meeting_id`, if any - mirrors `getMeetingAudio` populating
 /// `MeetingAudioPlayerSection`. Multiple recording sessions (a meeting
 /// resumed after being stopped) are real but out of scope here: only the
 /// first session plays, same honest v1 boundary as the rest of this
 /// milestone, not silently wrong for the common single-session case.
+///
+/// SOU-258: only the file listing and the cached waveform summary run here,
+/// on the UI thread. Decoding, resampling and opening the output stream
+/// took 3 s for a 12 s meeting on a Bluetooth output and 24 s for a 6 min
+/// one (debug build), all while the window was frozen; they now run on a
+/// blocking worker and the player is installed when ready, the section
+/// showing a loading state until then.
 fn load_meeting_audio(
     window: &MainWindow,
     meeting_id: &str,
@@ -1568,34 +1590,64 @@ fn load_meeting_audio(
     let sessions = souffle_lib::commands::get_meeting_audio(meeting_id.to_string())
         .inspect_err(|e| eprintln!("Failed to list meeting audio: {e}"))
         .unwrap_or_default();
+    window.set_meeting_detail_audio_waveform_commands("".into());
+    window.set_meeting_detail_audio_waveform_bars(0);
+    window.set_meeting_detail_audio_duration_label("".into());
+    window.set_meeting_detail_audio_position_label(timeline::format_duration(0.0).into());
+    window.set_meeting_detail_audio_progress(0.0);
+    window.set_meeting_detail_audio_is_playing(false);
     let Some(session) = sessions.first() else {
         window.set_meeting_detail_has_audio(false);
-        window.set_meeting_detail_audio_peaks(
-            std::rc::Rc::new(slint::VecModel::from(Vec::<f32>::new())).into(),
-        );
+        window.set_meeting_detail_audio_loading(false);
         return;
     };
     let path = std::path::PathBuf::from(&session.path);
-    match audio_player::load(&path) {
-        Ok((loaded, peaks)) => {
-            window.set_meeting_detail_has_audio(true);
-            window.set_meeting_detail_audio_peaks(
-                std::rc::Rc::new(slint::VecModel::from(peaks)).into(),
-            );
-            window.set_meeting_detail_audio_duration_label(
-                timeline::format_duration(loaded.duration_seconds()).into(),
-            );
-            window.set_meeting_detail_audio_position_label(timeline::format_duration(0.0).into());
-            window.set_meeting_detail_audio_progress(0.0);
-            window.set_meeting_detail_audio_is_playing(false);
-            *player.borrow_mut() = Some(loaded);
-            *progress_timer.borrow_mut() = Some(start_audio_progress_timer(weak, player.clone()));
-        }
-        Err(e) => {
-            eprintln!("Failed to load meeting audio: {e}");
-            window.set_meeting_detail_has_audio(false);
-        }
+    window.set_meeting_detail_has_audio(true);
+    window.set_meeting_detail_audio_loading(true);
+    if let Some(summary) = audio_player::cached_summary(&path) {
+        apply_waveform_summary(window, &summary);
     }
+
+    let generation = AUDIO_LOAD_GENERATION.load(Ordering::Relaxed);
+    let player = player.clone();
+    let progress_timer = progress_timer.clone();
+    slint::spawn_local(async move {
+        let result = souffle_lib::async_runtime::spawn_blocking(move || {
+            audio_player::load(&path, || {
+                AUDIO_LOAD_GENERATION.load(Ordering::Relaxed) == generation
+            })
+        })
+        .await;
+        if AUDIO_LOAD_GENERATION.load(Ordering::Relaxed) != generation {
+            // Left the detail or opened another meeting while decoding:
+            // dropping the stale player here closes its stream.
+            return;
+        }
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        window.set_meeting_detail_audio_loading(false);
+        match result {
+            Ok(Ok((loaded, summary))) => {
+                apply_waveform_summary(&window, &summary);
+                window.set_meeting_detail_audio_duration_label(
+                    timeline::format_duration(loaded.duration_seconds()).into(),
+                );
+                *player.borrow_mut() = Some(loaded);
+                *progress_timer.borrow_mut() =
+                    Some(start_audio_progress_timer(weak.clone(), player.clone()));
+            }
+            Ok(Err(e)) => {
+                eprintln!("Failed to load meeting audio: {e}");
+                window.set_meeting_detail_has_audio(false);
+            }
+            Err(e) => {
+                eprintln!("Meeting audio load task failed: {e}");
+                window.set_meeting_detail_has_audio(false);
+            }
+        }
+    })
+    .expect("slint event loop not running");
 }
 
 /// Opens a meeting in MeetingDetail: stops whatever audio was previously
@@ -1745,6 +1797,47 @@ fn save_dictionary_alias(handle: &AppHandle, term: &str, pronunciation: &str) {
         souffle_lib::commands::add_dictionary_entry(Arc::clone(handle), term, pronunciation, None)
     {
         eprintln!("Failed to add dictionary alias: {e}");
+    }
+}
+
+/// SOU-258: shows the recording view on the click, before the session
+/// exists. A meeting's diarized engine reset takes seconds and the start
+/// command only returns once it is done; the view says "Starting…" until
+/// [`settle_recording_start`] runs, instead of the window freezing on the
+/// Home page. Nothing can be captured before then, so clearing the previous
+/// live transcript here loses nothing.
+fn show_recording_starting(
+    window: &MainWindow,
+    live_state: &LiveTranscriptState,
+    mode: RecordingMode,
+    pending_stop: &AtomicBool,
+) {
+    pending_stop.store(false, Ordering::Release);
+    clear_live_transcript(window, live_state);
+    window.set_live_elapsed_offset_seconds(0);
+    if mode == RecordingMode::Meeting {
+        window.set_live_notes("".into());
+    }
+    window.set_recording_starting(true);
+    window.set_recording_mode(mode);
+}
+
+/// Ends the "Starting…" state: a failed start goes back to where the user
+/// clicked (the error is shown there, as before), a successful one leaves
+/// the recording view live.
+fn settle_recording_start(window: &MainWindow, result: Result<(), String>) -> Result<(), String> {
+    window.set_recording_starting(false);
+    if result.is_err() {
+        window.set_recording_mode(RecordingMode::Idle);
+    }
+    result
+}
+
+/// A stop that arrived during the start (e.g. a push-to-talk key released
+/// before the engine was ready) is honoured now that there is a session.
+fn replay_pending_stop(window: &MainWindow, pending_stop: &AtomicBool) {
+    if pending_stop.swap(false, Ordering::AcqRel) {
+        window.invoke_stop_requested();
     }
 }
 
@@ -1945,17 +2038,18 @@ fn model_download_channel(
 
 /// Runs `f` on the real Slint/OS main thread and returns its result.
 ///
-/// Found the hard way (milestone 4): `start_transcription` internally calls
-/// `dictation_cancel::sync`, which touches `app.global_shortcut()` to arm the
-/// Escape-cancels-dictation binding. That registration needs a thread with a
-/// live run loop; a background tokio worker thread (where a plain
-/// `souffle_lib::async_runtime::spawn`ed task runs) has none, and the call hangs
-/// forever - confirmed by bisecting with temporary eprintln!s, not guessed.
-/// The real OS main thread (Slint's own, via `window.run()`) does have one.
-/// Model loading (the slow part, seconds) stays off-thread via
-/// `ensure_model_ready`'s `spawn_blocking`; only the fast (tens to hundreds
-/// of ms once the model is loaded) plugin-touching command call itself needs
-/// this - a brief, acceptable main-thread pause, not a multi-second freeze.
+/// Found the hard way (milestone 4): arming the Escape-cancels-dictation
+/// binding (`dictation_cancel::sync`) registers a global hot key, which
+/// needs a thread with a live run loop; a background tokio worker thread
+/// (where a plain `souffle_lib::async_runtime::spawn`ed task runs) has none,
+/// and the call hangs forever - confirmed by bisecting with temporary
+/// eprintln!s, not guessed. The real OS main thread (Slint's own, via
+/// `window.run()`) does have one.
+///
+/// Keep `f` short: the UI is frozen while it runs. SOU-258 measured the
+/// old use - the whole recording start in `block_on` here - at 6.1 s for a
+/// meeting and 0.27 s for a dictation (debug build); only the hot-key arm
+/// is left.
 async fn run_on_main_thread<F, T>(f: F) -> T
 where
     F: FnOnce() -> T + Send + 'static,
@@ -1975,18 +2069,25 @@ async fn start_dictation(
     live_state: LiveTranscriptState,
 ) -> Result<(), String> {
     ensure_model_ready(&handle).await?;
+    // Off the UI thread (SOU-258): the engine start (~250 ms of VAD setup,
+    // more on a cold engine) used to run inside `block_on` on the main
+    // thread. Only the Escape-cancel binding needs the main thread - the
+    // global hot-key registration is AppKit/Carbon work - so it is armed
+    // there right after, as `start_transcription(.., true)` did inline.
+    souffle_lib::commands::start_transcription(
+        Arc::clone(&handle),
+        live_segment_channel(weak, live_state),
+        false,
+    )
+    .await?;
     run_on_main_thread(move || {
-        souffle_lib::async_runtime::block_on(async move {
-            let state = Arc::clone(&handle);
-            souffle_lib::commands::start_transcription(
-                state,
-                live_segment_channel(weak, live_state),
-                true,
-            )
-            .await
-        })
+        souffle_lib::dictation_cancel::set_wanted(true);
+        if let Ok(machine) = handle.current_machine_state() {
+            souffle_lib::dictation_cancel::sync(&handle, &machine);
+        }
     })
-    .await
+    .await;
+    Ok(())
 }
 
 async fn start_meeting(
@@ -1996,18 +2097,17 @@ async fn start_meeting(
 ) -> Result<(), String> {
     ensure_model_ready(&handle).await?;
     let title = format!("Meeting {}", default_meeting_date());
-    run_on_main_thread(move || {
-        souffle_lib::async_runtime::block_on(async move {
-            let state = Arc::clone(&handle);
-            souffle_lib::commands::start_meeting_recording(
-                state,
-                title,
-                None,
-                live_segment_channel(weak, live_state),
-            )
-            .await
-        })
-    })
+    // Off the UI thread (SOU-258): the diarized engine reset alone takes
+    // seconds, and it used to run in `block_on` on the main thread. A
+    // meeting start touches no main-thread-only API (no Escape binding;
+    // pill/tray hop to the main queue themselves), which
+    // `resume_meeting_recording` has always relied on from a worker too.
+    souffle_lib::commands::start_meeting_recording(
+        handle,
+        title,
+        None,
+        live_segment_channel(weak, live_state),
+    )
     .await
 }
 
@@ -3254,22 +3354,38 @@ fn wire_callbacks(
     });
     *live_notes_timer.borrow_mut() = Some(timer);
 
+    // SOU-258: a stop (PTT release, tray, shortcut) that lands while a start
+    // is still in flight is replayed once the start settles, not dropped.
+    let pending_stop = Arc::new(AtomicBool::new(false));
+
     let weak = window.as_weak();
     let handle = tauri_handle.clone();
     let live_state_dict = live_state.clone();
+    let pending_stop_dict = Arc::clone(&pending_stop);
     window.on_dictate_requested(move || {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        if window.get_recording_mode() != RecordingMode::Idle {
+            return;
+        }
+        show_recording_starting(
+            &window,
+            &live_state_dict,
+            RecordingMode::Dictation,
+            &pending_stop_dict,
+        );
         let weak = weak.clone();
         let handle = handle.clone();
         let live_state = live_state_dict.clone();
+        let pending_stop = Arc::clone(&pending_stop_dict);
         souffle_lib::async_runtime::spawn(async move {
-            let result = start_dictation(handle, weak.clone(), live_state.clone()).await;
-            if let Err(e) = weak.upgrade_in_event_loop(move |window| match result {
-                Ok(()) => {
-                    clear_live_transcript(&window, &live_state);
-                    window.set_recording_mode(RecordingMode::Dictation);
-                    window.set_live_elapsed_offset_seconds(0);
+            let result = start_dictation(handle, weak.clone(), live_state).await;
+            if let Err(e) = weak.upgrade_in_event_loop(move |window| {
+                match settle_recording_start(&window, result) {
+                    Ok(()) => replay_pending_stop(&window, &pending_stop),
+                    Err(e) => window.set_transcription_status_message(e.into()),
                 }
-                Err(e) => window.set_transcription_status_message(e.into()),
             }) {
                 eprintln!("upgrade_in_event_loop failed (dictate): {e}");
             }
@@ -3279,21 +3395,35 @@ fn wire_callbacks(
     let weak = window.as_weak();
     let handle = tauri_handle.clone();
     let live_state_req = live_state.clone();
+    let pending_stop_meeting = Arc::clone(&pending_stop);
     window.on_meeting_requested(move || {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        if window.get_recording_mode() != RecordingMode::Idle {
+            return;
+        }
+        show_recording_starting(
+            &window,
+            &live_state_req,
+            RecordingMode::Meeting,
+            &pending_stop_meeting,
+        );
         let weak = weak.clone();
         let handle = handle.clone();
         let live_state = live_state_req.clone();
+        let pending_stop = Arc::clone(&pending_stop_meeting);
         souffle_lib::async_runtime::spawn(async move {
             let handle_for_accumulator = handle.clone();
-            let result = start_meeting(handle, weak.clone(), live_state.clone()).await;
-            if let Err(e) = weak.upgrade_in_event_loop(move |window| match result {
-                Ok(()) => {
-                    clear_live_transcript(&window, &live_state);
-                    window.set_live_notes("".into());
-                    window.set_recording_mode(RecordingMode::Meeting);
-                    anchor_live_elapsed_offset(&window, &handle_for_accumulator);
+            let result = start_meeting(handle, weak.clone(), live_state).await;
+            if let Err(e) = weak.upgrade_in_event_loop(move |window| {
+                match settle_recording_start(&window, result) {
+                    Ok(()) => {
+                        anchor_live_elapsed_offset(&window, &handle_for_accumulator);
+                        replay_pending_stop(&window, &pending_stop);
+                    }
+                    Err(e) => window.set_meeting_status_message(e.into()),
                 }
-                Err(e) => window.set_meeting_status_message(e.into()),
             }) {
                 eprintln!("upgrade_in_event_loop failed (meeting): {e}");
             }
@@ -3306,9 +3436,19 @@ fn wire_callbacks(
     let stop_in_flight_for_request = Arc::clone(&stop_in_flight);
     let live_notes_timer_keepalive = live_notes_timer.clone();
     let value_stop = live_state.clone();
+    let pending_stop_for_request = Arc::clone(&pending_stop);
     window.on_stop_requested(move || {
         let _ = &live_notes_timer_keepalive;
         let _ = &live_transcript_timer_keepalive;
+        // The session does not exist yet: stopping now would fail and
+        // leave the start to complete into a recording nobody asked for.
+        if weak
+            .upgrade()
+            .is_some_and(|current| current.get_recording_starting())
+        {
+            pending_stop_for_request.store(true, Ordering::Release);
+            return;
+        }
         if stop_in_flight_for_request.swap(true, Ordering::AcqRel) {
             return;
         }
@@ -3878,6 +4018,7 @@ fn wire_callbacks(
     let handle = tauri_handle.clone();
     let upcoming_for_start = upcoming_cache.clone();
     let live_state_cal = live_state.clone();
+    let pending_stop_cal = Arc::clone(&pending_stop);
     window.on_calendar_event_start_requested(move |occurrence_id| {
         let event = upcoming_for_start
             .borrow()
@@ -3888,21 +4029,33 @@ fn wire_callbacks(
             eprintln!("calendar start: no cached event for {occurrence_id}");
             return;
         };
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        if window.get_recording_mode() != RecordingMode::Idle {
+            return;
+        }
+        show_recording_starting(
+            &window,
+            &live_state_cal,
+            RecordingMode::Meeting,
+            &pending_stop_cal,
+        );
         let weak = weak.clone();
         let handle = handle.clone();
         let live_state = live_state_cal.clone();
+        let pending_stop = Arc::clone(&pending_stop_cal);
         souffle_lib::async_runtime::spawn(async move {
             let handle_for_accumulator = handle.clone();
-            let result =
-                start_meeting_from_event(handle, weak.clone(), event, live_state.clone()).await;
-            if let Err(e) = weak.upgrade_in_event_loop(move |window| match result {
-                Ok(()) => {
-                    clear_live_transcript(&window, &live_state);
-                    window.set_live_notes("".into());
-                    window.set_recording_mode(RecordingMode::Meeting);
-                    anchor_live_elapsed_offset(&window, &handle_for_accumulator);
+            let result = start_meeting_from_event(handle, weak.clone(), event, live_state).await;
+            if let Err(e) = weak.upgrade_in_event_loop(move |window| {
+                match settle_recording_start(&window, result) {
+                    Ok(()) => {
+                        anchor_live_elapsed_offset(&window, &handle_for_accumulator);
+                        replay_pending_stop(&window, &pending_stop);
+                    }
+                    Err(e) => window.set_meeting_status_message(e.into()),
                 }
-                Err(e) => window.set_meeting_status_message(e.into()),
             }) {
                 eprintln!("upgrade_in_event_loop failed (calendar start): {e}");
             }
@@ -6555,6 +6708,9 @@ fn main() {
                 return;
             };
             let live = match window.get_recording_mode() {
+                RecordingMode::Meeting if window.get_recording_starting() => {
+                    LiveSystemAudio::Pending
+                }
                 RecordingMode::Meeting => {
                     live_system_audio(souffle_lib::commands::get_system_audio_status().as_ref())
                 }
@@ -6584,6 +6740,10 @@ mod tests {
         settle_model_selection_save, settle_onboarding_completion,
         should_clear_committed_summary_add_draft, wire_summary_template_edit_callbacks,
     };
+    use super::{
+        LiveTranscript, LiveTranscriptState, RecordingMode, replay_pending_stop,
+        settle_recording_start, show_recording_starting,
+    };
     use crate::model_ui;
     use crate::settings_drafts::SettingsDraftController;
     use crate::settings_io::SettingsIoCoordinator;
@@ -6607,6 +6767,75 @@ mod tests {
     fn test_window() -> MainWindow {
         let _ = slint::platform::set_platform(Box::new(TestPlatform));
         MainWindow::new().unwrap()
+    }
+
+    // SOU-258 AC1/AC3: the recording view is up on the click, in its
+    // "starting" state, before the start command has returned.
+    #[test]
+    fn a_start_shows_the_recording_view_at_once_in_its_starting_state() {
+        let window = test_window();
+        let live_state: LiveTranscriptState = Arc::new(Mutex::new(LiveTranscript::new()));
+        let pending_stop = std::sync::atomic::AtomicBool::new(true);
+        window.set_live_notes("previous meeting".into());
+        window.set_live_elapsed_offset_seconds(42);
+
+        show_recording_starting(&window, &live_state, RecordingMode::Meeting, &pending_stop);
+
+        assert_eq!(window.get_recording_mode(), RecordingMode::Meeting);
+        assert!(window.get_recording_starting());
+        assert_eq!(window.get_live_notes(), "");
+        assert_eq!(window.get_live_elapsed_offset_seconds(), 0);
+        // A stale deferred stop from an earlier start never leaks into this one.
+        assert!(!pending_stop.load(std::sync::atomic::Ordering::Acquire));
+    }
+
+    #[test]
+    fn a_failed_start_returns_to_idle_and_a_successful_one_stays_live() {
+        let window = test_window();
+        let live_state: LiveTranscriptState = Arc::new(Mutex::new(LiveTranscript::new()));
+        let pending_stop = std::sync::atomic::AtomicBool::new(false);
+
+        show_recording_starting(
+            &window,
+            &live_state,
+            RecordingMode::Dictation,
+            &pending_stop,
+        );
+        assert_eq!(
+            settle_recording_start(&window, Err("Model not loaded".into())),
+            Err("Model not loaded".to_string())
+        );
+        assert_eq!(window.get_recording_mode(), RecordingMode::Idle);
+        assert!(!window.get_recording_starting());
+
+        show_recording_starting(
+            &window,
+            &live_state,
+            RecordingMode::Dictation,
+            &pending_stop,
+        );
+        assert_eq!(settle_recording_start(&window, Ok(())), Ok(()));
+        assert_eq!(window.get_recording_mode(), RecordingMode::Dictation);
+        assert!(!window.get_recording_starting());
+    }
+
+    // A push-to-talk release (or tray Stop) during the start is replayed
+    // once, after the session exists - not lost, and not replayed twice.
+    #[test]
+    fn a_stop_during_the_start_is_replayed_once_the_start_settles() {
+        let window = test_window();
+        let stops = Rc::new(Cell::new(0));
+        let counter = stops.clone();
+        window.on_stop_requested(move || counter.set(counter.get() + 1));
+        let pending_stop = std::sync::atomic::AtomicBool::new(false);
+
+        replay_pending_stop(&window, &pending_stop);
+        assert_eq!(stops.get(), 0);
+
+        pending_stop.store(true, std::sync::atomic::Ordering::Release);
+        replay_pending_stop(&window, &pending_stop);
+        replay_pending_stop(&window, &pending_stop);
+        assert_eq!(stops.get(), 1);
     }
 
     // SOU-226 AC2: a save-error banner from a closed Settings session must
