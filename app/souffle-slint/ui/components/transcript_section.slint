@@ -72,6 +72,10 @@ export component TranscriptSection inherits VerticalLayout {
     callback paragraph-clicked(int, float);
     // (term, pronunciation) once the user saves the alias popover.
     callback alias-save-requested(string, string);
+    // A click on the transcript that no word or timestamp handled - lets
+    // the page drop keyboard focus from the title/notes fields (a Flickable
+    // keeps unhandled presses, so the page could never see them).
+    callback background-clicked();
 
     // Draft state for the alias popup below, kept on `root` rather than on
     // the `PopupWindow` itself: Slint rejects *any* access (read, write, or
@@ -254,6 +258,12 @@ export component TranscriptSection inherits VerticalLayout {
             height: 100%;
             viewport-width: self.width;
             viewport-y <=> root.scroll-top;
+
+            TouchArea {
+                width: parent.viewport-width;
+                height: parent.viewport-height;
+                clicked => { root.background-clicked(); }
+            }
 
             flick-inner := VerticalLayout {
                 width: flick.width;

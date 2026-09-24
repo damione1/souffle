@@ -6,11 +6,15 @@ export component ThemedLineEdit inherits Rectangle {
     in property <string> placeholder: "";
     in property <bool> enabled: true;
     in property <string> control-label: root.placeholder;
+    // 14px everywhere in Settings; the meeting title edits at its own size.
+    in property <length> text-size: 14px;
 
     callback edited(string);
     callback accepted(string);
+    // The input just lost keyboard focus (an HTML `blur`), with its text.
+    callback focus-lost(string);
 
-    height: Theme.settings-control-height;
+    height: max(Theme.settings-control-height, root.text-size * 1.7);
     vertical-stretch: 0;
     min-width: 80px;
     border-radius: 4px;
@@ -28,7 +32,7 @@ export component ThemedLineEdit inherits Rectangle {
         width: parent.width - 24px;
         height: parent.height;
         text <=> root.text;
-        font-size: 14px;
+        font-size: root.text-size;
         font-family: "Archivo";
         color: Theme.text-secondary;
         vertical-alignment: center;
@@ -37,6 +41,9 @@ export component ThemedLineEdit inherits Rectangle {
         accessible-label: root.control-label;
         edited => { root.edited(self.text); }
         accepted => { root.accepted(self.text); }
+        changed has-focus => {
+            if !self.has-focus { root.focus-lost(self.text); }
+        }
     }
 
     if root.text == "" && !input.has-focus: Text {
@@ -44,7 +51,7 @@ export component ThemedLineEdit inherits Rectangle {
         width: input.width;
         height: parent.height;
         text: root.placeholder;
-        font-size: 14px;
+        font-size: root.text-size;
         color: Theme.text-muted;
         vertical-alignment: center;
     }

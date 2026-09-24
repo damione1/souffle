@@ -70,6 +70,29 @@ export component MeetingDetail inherits Rectangle {
     property <string> title-draft;
     property <bool> is-empty-meeting: !root.has-audio && root.transcript-segment-count == 0 && root.summary == "";
 
+    function commit-title(value: string) {
+        // `accepted` (Enter) removes the field, which then also reports a
+        // focus loss: only the first of the two may commit.
+        if !root.editing-title { return; }
+        root.editing-title = false;
+        if (value != "" && value != root.title) {
+            root.rename-requested(value);
+        }
+    }
+
+    // Click-away focus sink. A plain `TouchArea` click does not move
+    // keyboard focus in Slint, so without this the title field or the notes
+    // editor kept focus (and its highlighted border) after the user clicked
+    // somewhere else on the page. Declared before `content` so it sits
+    // underneath it: it only receives clicks nothing in the page handled.
+    focus-sink := FocusScope {
+        width: 0px;
+        height: 0px;
+    }
+    TouchArea {
+        clicked => { focus-sink.focus(); }
+    }
+
     content := VerticalLayout {
         width: min(root.width - 52px, 720px);
         height: root.height;
@@ -196,13 +219,13 @@ export component MeetingDetail inherits Rectangle {
                 if root.editing-title: ThemedLineEdit {
                     text <=> root.title-draft;
                     control-label: @tr("Titre de la réunion");
+                    text-size: 22px;
                     init => { self.focus(); }
-                    accepted(value) => {
-                        root.editing-title = false;
-                        if (value != "" && value != root.title) {
-                            root.rename-requested(value);
-                        }
-                    }
+                    accepted(value) => { root.commit-title(value); }
+                    // MeetingHeaderSection.svelte commits on blur too, so
+                    // clicking anywhere else ends the edit instead of leaving
+                    // a focused field stranded in the header.
+                    focus-lost(value) => { root.commit-title(value); }
                 }
 
                 HorizontalLayout {
@@ -356,6 +379,15 @@ export component MeetingDetail inherits Rectangle {
             viewport-width: self.width;
             viewport-height: page-inner.preferred-height;
 
+            // Same click-away sink as the root one, inside the scroller: a
+            // Flickable keeps any press its content does not handle, so the
+            // root sink never sees clicks made on the page body.
+            TouchArea {
+                width: parent.viewport-width;
+                height: parent.viewport-height;
+                clicked => { focus-sink.focus(); }
+            }
+
             page-inner := VerticalLayout {
                 width: parent.width - 12px;
                 padding-right: 14px;
@@ -469,6 +501,7 @@ export component MeetingDetail inherits Rectangle {
                     spacer-after: root.transcript-spacer-after;
                     scroll-top <=> root.transcript-scroll-top;
                     paragraph-clicked(session, time) => { root.transcript-paragraph-clicked(session, time); }
+                    background-clicked => { focus-sink.focus(); }
                     alias-save-requested(term, pronunciation) => { root.transcript-alias-save-requested(term, pronunciation); }
                 }
 
