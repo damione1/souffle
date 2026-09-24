@@ -376,7 +376,11 @@ fn start_pipeline_blocking(
             crate::audio::system_tap::spawn_tap(tap_prod, std::time::Duration::from_secs(5));
         match report_probe_outcome(probe) {
             Some(tap) => {
-                drop(tap);
+                // Capture opens the mic right after this now (SOU-260), so
+                // the probe's aggregate must really be gone first.
+                if !tap.stop_and_wait(std::time::Duration::from_secs(1)) {
+                    warn!("System audio probe teardown still running after 1 s");
+                }
                 true
             }
             None => false,

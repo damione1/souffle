@@ -105,6 +105,8 @@ pub fn failure_reason(error: &str) -> crate::app_events::SystemAudioReason {
 pub struct TapHandle {
     /// Closing this channel (on drop) unparks the tap thread.
     _stop_tx: std::sync::mpsc::Sender<()>,
+    /// Closed by the tap thread once the tap and its aggregate are gone.
+    torn_down: std::sync::mpsc::Receiver<()>,
     pub sample_rate: u32,
     /// IO callbacks observed by the tap thread. Shared so a permission probe
     /// can tell "mounted but silent / denied" (0) from a live tap (>0)
@@ -116,6 +118,26 @@ impl TapHandle {
     /// Number of IO callback invocations so far on this tap.
     pub fn callback_count(&self) -> u64 {
         self.callbacks.load(Ordering::Relaxed)
+    }
+
+    /// Tear the tap down and wait, up to `timeout`, until its aggregate is
+    /// actually destroyed. Plain `drop` returns at once and the teardown
+    /// finishes ~25 ms later on the tap thread; the start-up probe must not
+    /// overlap the microphone open that now follows it immediately (SOU-082:
+    /// a live tap aggregate while the AUHAL input stream is built can wedge
+    /// the mic; SOU-260 removed the engine reset that used to sit between).
+    /// Returns whether the teardown finished in time.
+    pub fn stop_and_wait(self, timeout: std::time::Duration) -> bool {
+        let Self {
+            _stop_tx,
+            torn_down,
+            ..
+        } = self;
+        drop(_stop_tx);
+        matches!(
+            torn_down.recv_timeout(timeout),
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected)
+        )
     }
 }
 
@@ -130,10 +152,13 @@ pub fn spawn_tap(
 ) -> Result<TapHandle, String> {
     let (event_tx, event_rx) = std::sync::mpsc::channel();
     let (stop_tx, stop_rx) = std::sync::mpsc::channel::<()>();
+    let (torn_down_tx, torn_down) = std::sync::mpsc::channel::<()>();
 
     std::thread::Builder::new()
         .name("system-tap".into())
         .spawn(move || {
+            // Dropped last, after the tap: tells `stop_and_wait` it is gone.
+            let _torn_down = torn_down_tx;
             // A teardown that failed may have left an aggregate, and its IO
             // context, behind. Sweep before adding another one, but only with
             // no tap alive: the sweep cannot tell a leak from a working
@@ -167,6 +192,7 @@ pub fn spawn_tap(
     match event_rx.recv_timeout(timeout) {
         Ok(Ok((sample_rate, callbacks))) => Ok(TapHandle {
             _stop_tx: stop_tx,
+            torn_down,
             sample_rate,
             callbacks,
         }),
