@@ -8,7 +8,14 @@ import { LucideIcon, IconSet } from "lucide_icon.slint";
 export component AudioPlayerSection inherits VerticalLayout {
     in property <bool> has-audio: false;
     in property <bool> is-playing: false;
-    in property <[float]> peaks;
+    // SOU-258: decoding + opening the output stream runs on a worker, so
+    // the section shows (from the cached summary) before playback is ready.
+    in property <bool> loading: false;
+    // One SVG path for the whole overview (`audio_player::waveform_commands`)
+    // in a `waveform-bars` x 1 viewbox: two `Path` items instead of a layout
+    // and a `Rectangle` per bar. Empty until a summary is known.
+    in property <string> waveform-commands;
+    in property <int> waveform-bars: 0;
     in property <float> progress; // 0.0..1.0
     in property <string> position-label;
     in property <string> duration-label;
@@ -33,10 +40,12 @@ export component AudioPlayerSection inherits VerticalLayout {
             border-radius: 18px;
             border-width: play-focus.has-focus ? 2px : 0px;
             border-color: Theme.accent;
-            background: play-area.pressed ? Theme.surface-2 : play-area.has-hover ? Theme.surface-3 : Theme.surface-4;
+            background: root.loading ? Theme.surface-3 : play-area.pressed ? Theme.surface-2 : play-area.has-hover ? Theme.surface-3 : Theme.surface-4;
+            opacity: root.loading ? 0.55 : 1.0;
 
             accessible-role: button;
-            accessible-label: root.is-playing ? @tr("Pause") : @tr("Lecture");
+            accessible-label: root.loading ? @tr("Chargement de l'audio…") : root.is-playing ? @tr("Pause") : @tr("Lecture");
+            accessible-enabled: !root.loading;
             accessible-action-default => { root.play-pause-requested(); }
 
             forward-focus: play-focus;
@@ -51,6 +60,8 @@ export component AudioPlayerSection inherits VerticalLayout {
             }
 
             play-area := TouchArea {
+                enabled: !root.loading;
+                mouse-cursor: root.loading ? default : pointer;
                 clicked => {
                     play-focus.focus();
                     root.play-pause-requested();
@@ -71,7 +82,7 @@ export component AudioPlayerSection inherits VerticalLayout {
         }
 
         Text {
-            text: root.position-label + @tr(" / {}", root.duration-label);
+            text: root.duration-label == "" ? @tr("Chargement de l'audio…") : root.position-label + @tr(" / {}", root.duration-label);
             color: Theme.text-muted;
             font-size: 11px;
             font-family: "monospace";
@@ -113,22 +124,43 @@ export component AudioPlayerSection inherits VerticalLayout {
             }
         }
 
-        HorizontalLayout {
-            spacing: 1px;
+        // Bars centred on the middle line (the usual mirrored waveform
+        // look). The played part is the same path in the accent colour,
+        // clipped to `progress`.
+        if root.waveform-bars > 0: Path {
+            x: 0px;
+            y: 0px;
+            width: waveform-area.width;
+            height: waveform-area.height;
+            commands: root.waveform-commands;
+            viewbox-width: root.waveform-bars;
+            viewbox-height: 1;
+            fit: fill;
+            fill: Theme.surface-4;
+        }
+        if root.waveform-bars > 0: Rectangle {
+            x: 0px;
+            y: 0px;
+            width: waveform-area.width * clamp(root.progress, 0, 1);
+            height: waveform-area.height;
+            clip: true;
 
-            // Each bar is centered in its column (not top-anchored), so it
-            // extends both up and down from the row's vertical middle - the
-            // usual mirrored waveform look, not a bar chart hanging from
-            // the top.
-            for peak[i] in root.peaks: VerticalLayout {
-                horizontal-stretch: 1;
-                alignment: center;
-
-                Rectangle {
-                    height: max(2px, peak * waveform-area.height);
-                    background: (i * 1.0 / root.peaks.length) < root.progress ? Theme.accent : Theme.surface-4;
-                }
+            Path {
+                x: 0px;
+                y: 0px;
+                width: waveform-area.width;
+                height: waveform-area.height;
+                commands: root.waveform-commands;
+                viewbox-width: root.waveform-bars;
+                viewbox-height: 1;
+                fit: fill;
+                fill: Theme.accent;
             }
+        }
+        if root.waveform-bars == 0: Rectangle {
+            y: (waveform-area.height - self.height) / 2;
+            height: 2px;
+            background: Theme.surface-4;
         }
     }
 }

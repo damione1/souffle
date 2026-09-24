@@ -5,6 +5,15 @@
 //! `souffle_lib::audio::recorder::decode_ogg_opus` and plays it back through
 //! a `cpal` output stream driven by a shared sample position.
 //!
+//! SOU-258: [`load`] is slow (decode, resample to the output device rate,
+//! open the output stream: seconds for a long meeting or a Bluetooth
+//! output) and therefore never runs on the UI thread - `main.rs` calls it
+//! on a worker and hands the finished [`AudioPlayer`] (cpal's macOS stream
+//! is `Send`) back through `invoke_from_event_loop`. What the page needs at
+//! once, the waveform and the duration, comes from
+//! [`cached_summary`], a small sidecar written the first time a recording
+//! is decoded.
+//!
 //! The decoded buffer is always a 48kHz **mono downmix** of whatever channel
 //! layout the file has: a legacy mono recording as-is, a diarized stereo
 //! recording (left = you, right = the other participants) folded into one
@@ -18,7 +27,10 @@
 //! deferred rather than half-built.
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use souffle_lib::audio::recorder::{decode_ogg_opus, waveform_peaks};
+use souffle_lib::audio::recorder::{
+    WaveformSummary, cached_waveform_summary, decode_ogg_opus, store_waveform_summary,
+    waveform_peaks, waveform_source,
+};
 use souffle_lib::audio::resampler::Resampler;
 use std::path::Path;
 use std::sync::Arc;
@@ -99,13 +111,54 @@ fn progress_from_index(index: usize, len: usize) -> f32 {
     index as f32 / len as f32
 }
 
+/// `load`'s error when `still_wanted` said no: not a failure to report.
+pub const LOAD_ABANDONED: &str = "audio load abandoned";
+
+/// Sample rate `decode_ogg_opus` always returns.
+const DECODE_RATE: u32 = 48_000;
+
+/// The waveform + duration cached for `path` by an earlier [`load`], if the
+/// file has not changed since. One `stat` and a small read: UI-thread safe.
+pub fn cached_summary(path: &Path) -> Option<WaveformSummary> {
+    cached_waveform_summary(path, WAVEFORM_BUCKETS)
+}
+
 /// Decodes `path` and opens a ready-to-play output stream (paused) plus its
-/// waveform peaks. The stream is created and started immediately so the
-/// first `play()` has no extra latency, but playback only advances once
-/// `play()` is called - the callback outputs silence until then.
-pub fn load(path: &Path) -> Result<(AudioPlayer, Vec<f32>), String> {
+/// waveform summary, which it also caches next to the recording for the
+/// next open. Slow (see the module doc): call it off the UI thread.
+/// `still_wanted` is asked between the expensive stages, so a load the user
+/// has already navigated away from stops early instead of burning a core.
+/// The stream is created and started immediately so the first `play()` has
+/// no extra latency, but playback only advances once `play()` is called -
+/// the callback outputs silence until then.
+pub fn load(
+    path: &Path,
+    still_wanted: impl Fn() -> bool,
+) -> Result<(AudioPlayer, WaveformSummary), String> {
+    // Stamped before decoding: if the file changes meanwhile, the cache is
+    // not written under the new stamp with the old content's peaks.
+    let decoded_from = waveform_source(path);
     let decoded = decode_ogg_opus(path)?;
-    let peaks = waveform_peaks(&decoded, WAVEFORM_BUCKETS);
+    let summary = match cached_summary(path) {
+        Some(summary) => summary,
+        None => {
+            let summary = WaveformSummary {
+                peaks: waveform_peaks(&decoded, WAVEFORM_BUCKETS),
+                duration_seconds: seconds_from_index(decoded.len(), DECODE_RATE),
+            };
+            if let Some(decoded_from) = &decoded_from
+                && let Err(e) =
+                    store_waveform_summary(path, WAVEFORM_BUCKETS, &summary, decoded_from)
+            {
+                eprintln!("Waveform cache not written: {e}");
+            }
+            summary
+        }
+    };
+
+    if !still_wanted() {
+        return Err(LOAD_ABANDONED.into());
+    }
 
     let host = cpal::default_host();
     let device = host
@@ -117,14 +170,17 @@ pub fn load(path: &Path) -> Result<(AudioPlayer, Vec<f32>), String> {
     let device_rate = config.sample_rate();
     let channels = config.channels() as usize;
 
-    let samples = if device_rate == 48_000 {
+    let samples = if device_rate == DECODE_RATE {
         decoded
     } else {
-        let mut resampler = Resampler::new(48_000, 1, device_rate, 1.0);
+        let mut resampler = Resampler::new(DECODE_RATE, 1, device_rate, 1.0);
         let mut out = resampler.process(&decoded);
         out.extend(resampler.flush());
         out
     };
+    if !still_wanted() {
+        return Err(LOAD_ABANDONED.into());
+    }
     let samples = Arc::new(samples);
     let position = Arc::new(AtomicUsize::new(0));
     let playing = Arc::new(AtomicBool::new(false));
@@ -190,8 +246,29 @@ pub fn load(path: &Path) -> Result<(AudioPlayer, Vec<f32>), String> {
             playing,
             _stream: stream,
         },
-        peaks,
+        summary,
     ))
+}
+
+/// SVG path commands drawing one bar per peak, centred on the middle line,
+/// in a `peaks.len()` x 1 viewbox (`AudioPlayerSection` stretches it to the
+/// strip). One `Path` item for the whole overview instead of a layout plus a
+/// `Rectangle` per bar (SOU-258).
+pub fn waveform_commands(peaks: &[f32]) -> String {
+    use std::fmt::Write as _;
+    const BAR_WIDTH: f32 = 0.7;
+    // ~2px of the 56px strip: silence still reads as a flat line.
+    const MIN_HEIGHT: f32 = 0.04;
+    let mut commands = String::with_capacity(peaks.len() * 32);
+    for (i, peak) in peaks.iter().enumerate() {
+        let height = peak.clamp(MIN_HEIGHT, 1.0);
+        let top = (1.0 - height) / 2.0;
+        let _ = write!(
+            commands,
+            "M{i} {top:.3}h{BAR_WIDTH}v{height:.3}h-{BAR_WIDTH}z"
+        );
+    }
+    commands
 }
 
 /// Writes one output callback's worth of interleaved audio: the current
@@ -249,6 +326,17 @@ mod tests {
         assert_eq!(seconds_from_index(48_000, 48_000), 1.0);
         assert_eq!(seconds_from_index(24_000, 48_000), 0.5);
         assert_eq!(seconds_from_index(0, 48_000), 0.0);
+    }
+
+    #[test]
+    fn waveform_commands_draws_one_closed_bar_per_peak() {
+        let commands = waveform_commands(&[1.0, 0.0]);
+        assert_eq!(commands.matches('M').count(), 2);
+        assert_eq!(commands.matches('z').count(), 2);
+        // A full peak spans the whole height, silence keeps a thin line.
+        assert!(commands.starts_with("M0 0.000h0.7v1.000h-0.7z"));
+        assert!(commands.contains("M1 0.480h0.7v0.040h-0.7z"));
+        assert!(waveform_commands(&[]).is_empty());
     }
 
     #[test]

@@ -298,6 +298,11 @@ export component TranscriptSection inherits VerticalLayout {
                         // Clickable words are plain `Text` in a `TouchArea`;
                         // literal runs (whitespace/punctuation/short/numeric
                         // tokens) are plain `Text` with no touch handling.
+                        // Always the word flow, never swapped for a cheaper
+                        // wrapped `Text` on hover: the two break lines
+                        // differently, so the text would jump under the
+                        // pointer. Virtualized, it costs ~12 ms on open in a
+                        // release build (SOU-258).
                         TranscriptWordFlow {
                             width: parent.width;
                             words: block.words;

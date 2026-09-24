@@ -69,19 +69,30 @@ impl Resampler {
             // Accumulate samples in the input buffer
             self.input_buffer.extend_from_slice(&mono);
 
-            let frames_needed = resampler.input_frames_next();
             let mut output = Vec::new();
 
-            // Only process complete chunks — no zero-padding
-            while self.input_buffer.len() >= frames_needed {
-                let chunk: Vec<f32> = self.input_buffer.drain(..frames_needed).collect();
+            // Only process complete chunks — no zero-padding. Walk the
+            // buffer with a cursor and drop the consumed prefix once: a
+            // `drain(..chunk)` per chunk shifts the whole remaining buffer
+            // every time, which is quadratic in the input length - harmless
+            // for the live capture path's small blocks, but 22 s to resample
+            // a 6-minute recording for playback (SOU-258).
+            let mut consumed = 0;
+            loop {
+                let frames_needed = resampler.input_frames_next();
+                if self.input_buffer.len() - consumed < frames_needed {
+                    break;
+                }
+                let chunk = &self.input_buffer[consumed..consumed + frames_needed];
                 if let Ok(result) = resampler.process(&[chunk], None)
                     && let Some(channel) = result.first()
                 {
                     output.extend_from_slice(channel);
                 }
+                consumed += frames_needed;
             }
             // Remaining samples stay in input_buffer for the next call
+            self.input_buffer.drain(..consumed);
 
             output
         } else {
@@ -127,5 +138,113 @@ impl Resampler {
             }
         }
         output
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ramp(len: usize) -> Vec<f32> {
+        (0..len).map(|i| ((i % 480) as f32 / 480.0) - 0.5).collect()
+    }
+
+    #[test]
+    fn one_large_block_matches_many_small_ones() {
+        // The playback path hands a whole recording in one call; the live
+        // capture path hands small blocks. Both must produce the same audio.
+        let input = ramp(48_000 * 3 + 123);
+        let mut whole = Resampler::new(48_000, 1, 44_100, 1.0);
+        let mut out_whole = whole.process(&input);
+        out_whole.extend(whole.flush());
+
+        let mut blocks = Resampler::new(48_000, 1, 44_100, 1.0);
+        let mut out_blocks = Vec::new();
+        for block in input.chunks(512) {
+            out_blocks.extend(blocks.process(block));
+        }
+        out_blocks.extend(blocks.flush());
+
+        assert_eq!(out_whole, out_blocks);
+        // 3 s at 44.1 kHz, give or take the zero-padded final FFT frame.
+        assert!(out_whole.len() >= 44_100 * 3);
+        assert!(out_whole.len() < 44_100 * 3 + 2048);
+    }
+
+    /// The pre-SOU-258 chunking (`drain(..chunk)` per FFT frame), kept here
+    /// only as the reference the cursor walk must reproduce sample for
+    /// sample.
+    fn reference_resample(source_rate: usize, target_rate: usize, blocks: &[&[f32]]) -> Vec<f32> {
+        let mut resampler = FftFixedInOut::<f32>::new(source_rate, target_rate, 1024, 1).unwrap();
+        let mut buffer: Vec<f32> = Vec::new();
+        let mut out = Vec::new();
+        for block in blocks {
+            buffer.extend_from_slice(block);
+            let frames_needed = resampler.input_frames_next();
+            while buffer.len() >= frames_needed {
+                let chunk: Vec<f32> = buffer.drain(..frames_needed).collect();
+                out.extend_from_slice(&resampler.process(&[chunk], None).unwrap()[0]);
+            }
+        }
+        let frames_needed = resampler.input_frames_next();
+        if !buffer.is_empty() {
+            buffer.resize(frames_needed, 0.0);
+            out.extend_from_slice(&resampler.process(&[buffer], None).unwrap()[0]);
+        }
+        out
+    }
+
+    #[test]
+    fn matches_the_previous_chunking_sample_for_sample() {
+        // Deterministic pseudo-random signal and ragged block sizes (the
+        // live capture path's blocks are whatever the device delivers).
+        let mut seed: u32 = 0x9e37_79b9;
+        let mut next = move || {
+            seed ^= seed << 13;
+            seed ^= seed >> 17;
+            seed ^= seed << 5;
+            seed
+        };
+        let input: Vec<f32> = (0..48_000 * 2 + 777)
+            .map(|_| (next() as f32 / u32::MAX as f32) * 2.0 - 1.0)
+            .collect();
+        let mut blocks: Vec<&[f32]> = Vec::new();
+        let mut rest = input.as_slice();
+        while !rest.is_empty() {
+            let len = (1 + next() as usize % 3000).min(rest.len());
+            let (head, tail) = rest.split_at(len);
+            blocks.push(head);
+            rest = tail;
+        }
+
+        for (from, to) in [(48_000, 44_100), (48_000, 16_000), (44_100, 24_000)] {
+            let expected = reference_resample(from, to, &blocks);
+            let mut resampler = Resampler::new(from as u32, 1, to as u32, 1.0);
+            let mut actual = Vec::new();
+            for block in &blocks {
+                actual.extend(resampler.process(block));
+            }
+            actual.extend(resampler.flush());
+            assert_eq!(actual, expected, "{from} -> {to}");
+            // One whole-buffer call (the playback path) is the same audio.
+            let mut whole = Resampler::new(from as u32, 1, to as u32, 1.0);
+            let mut out_whole = whole.process(&input);
+            out_whole.extend(whole.flush());
+            assert_eq!(out_whole, expected, "{from} -> {to} (one block)");
+        }
+    }
+
+    #[test]
+    fn keeps_the_incomplete_tail_for_the_next_call() {
+        let mut resampler = Resampler::new(48_000, 1, 24_000, 1.0);
+        let chunk = resampler
+            .resampler
+            .as_ref()
+            .map(|r| r.input_frames_next())
+            .unwrap();
+        assert!(resampler.process(&ramp(chunk - 1)).is_empty());
+        assert_eq!(resampler.input_buffer.len(), chunk - 1);
+        assert!(!resampler.process(&ramp(1)).is_empty());
+        assert!(resampler.input_buffer.is_empty());
     }
 }

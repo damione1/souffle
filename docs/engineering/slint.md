@@ -221,6 +221,8 @@ slint::BackendSelector::new()
 
 `make nightly` is a **debug** bundle. `/Applications/Soufflé.app` is **release -O**. Comparing the two is not a renderer bug.
 
+Since Slint 1.18, Skia on macOS draws through **wgpu → Metal** (`i-slint-renderer-skia` feature `wgpu-30`); there is no separate Skia-Metal surface any more, and a failed wgpu surface silently falls back to Skia's CPU (softbuffer) surface. Verified live on Nightly for SOU-258: `sample <pid>` while scrolling shows `wgpu_hal::metal::surface` / `wgpu_core::present` frames and no `software_surface`. Re-check this way after a Slint upgrade.
+
 ### `if` vs keep-alive
 
 `if condition: SomeComponent { }` **destroys and recreates** the whole subtree when `condition` flips. That is the right tool for mutually exclusive screens that are expensive to keep (Idle vs MeetingDetail vs Recording, Onboarding vs the main shell). It is the wrong tool for a tab bar.
@@ -363,6 +365,8 @@ Slint is retained-mode. The item tree, font cache, image cache, and GPU textures
 - Callbacks and `spawn_local` closures that need the Window take `window.as_weak()`, then `upgrade()` on the UI thread. A strong `MainWindow` inside an async task keeps the tree alive after the user closed it, and is an easy reference cycle with `Rc<RefCell<...>>` state.
 - `Rc<RefCell<T>>` is the UI-thread cell. It is not `Send`. Cross-thread work goes through `souffle_lib::async_runtime` (or a channel) and comes back with `slint::invoke_from_event_loop`. `slint::spawn_local` is the UI-thread async executor; use it for `.slint`-adjacent futures, not for engine work.
 - Never `borrow_mut()` a `RefCell` across an `.await`.
+- A click must repaint first. Anything that can take more than a frame (engine start, audio decode, device open) runs on a worker; the view switches on the click and shows an explicit "starting"/"loading" state until the worker's result lands (SOU-258: a meeting start used to `block_on` the whole engine reset on the main thread, 6 s frozen; opening a meeting decoded its audio on the main thread, 3–24 s).
+- Measure item cost in a release build before trading correctness for it. SOU-258 first swapped each transcript paragraph between one wrapped `Text` and the per-word flow on hover: the two break lines differently, so text jumped under the pointer. With the transcript already virtualized (~16 paragraphs mounted), the always-mounted word flow blocks the UI thread ~12 ms on open in release (~90 ms debug) against ~7 ms for the swap, so the flow stays.
 
 ### Models and images
 

@@ -27,6 +27,15 @@ export component RecordingView inherits Rectangle {
     // Live verdict on the meeting's system-audio leg (see LiveSystemAudio).
     in property <LiveSystemAudio> system-audio: LiveSystemAudio.pending;
     in property <bool> auto-paste: false;
+    // SOU-258: the view mounts on the click, before the session exists (a
+    // meeting's engine reset takes seconds). While true, nothing is
+    // captured yet: the clock holds at 0:00 and the body says so. Stop
+    // stays live: main.rs defers a stop clicked now until the session
+    // exists, then stops it like any other.
+    in property <bool> starting: false;
+    // A stop clicked during the start is queued behind it: the button dims
+    // and ignores further clicks until that stop has run.
+    in property <bool> stop-pending: false;
 
     callback stop-requested();
     callback notes-changed(string);
@@ -59,7 +68,7 @@ export component RecordingView inherits Rectangle {
 
     Timer {
         interval: 1s;
-        running: root.mode != RecordingMode.idle;
+        running: root.mode != RecordingMode.idle && !root.starting;
         triggered => { root.elapsed-seconds += 1; }
     }
 
@@ -163,11 +172,11 @@ export component RecordingView inherits Rectangle {
                 horizontal-stretch: 0;
                 accessible-role: button;
                 accessible-label: @tr("Arrêter l'enregistrement");
-                accessible-enabled: true;
+                accessible-enabled: !root.stop-pending;
                 accessible-action-default => { root.stop-requested(); }
 
                 key-pressed(event) => {
-                    if event.text == Key.Return || event.text == Key.Space {
+                    if !root.stop-pending && (event.text == Key.Return || event.text == Key.Space) {
                         root.stop-requested();
                         return accept;
                     }
@@ -178,9 +187,10 @@ export component RecordingView inherits Rectangle {
                     border-radius: 4px;
                     border-width: stop-control.has-focus ? 2px : 0px;
                     border-color: Theme.text-primary;
-                    background: stop-area.pressed ? Theme.danger-strong : stop-area.has-hover ? Theme.danger.with-alpha(0.9) : Theme.danger;
+                    background: root.stop-pending ? Theme.danger.with-alpha(0.5) : stop-area.pressed ? Theme.danger-strong : stop-area.has-hover ? Theme.danger.with-alpha(0.9) : Theme.danger;
 
                     stop-area := TouchArea {
+                        enabled: !root.stop-pending;
                         clicked => {
                             stop-control.focus();
                             root.stop-requested();
@@ -292,7 +302,7 @@ export component RecordingView inherits Rectangle {
                         // sits on the last characters of a line.
                         padding-right: 12px;
                         Text {
-                            text: root.combined-text == "" ? @tr("À l'écoute…") : root.combined-text;
+                            text: root.starting ? @tr("Démarrage…") : root.combined-text == "" ? @tr("À l'écoute…") : root.combined-text;
                             font-size: root.combined-text == "" ? 14px : 19px;
                             color: root.combined-text == "" ? Theme.text-muted : Theme.text-secondary;
                             wrap: word-wrap;
@@ -443,7 +453,7 @@ export component RecordingView inherits Rectangle {
                         padding-right: 12px;
 
                         if root.live-transcript-empty: Text {
-                            text: @tr("À l'écoute…");
+                            text: root.starting ? @tr("Démarrage…") : @tr("À l'écoute…");
                             font-size: 14px;
                             color: Theme.text-muted;
                         }
