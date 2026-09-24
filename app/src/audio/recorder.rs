@@ -336,9 +336,11 @@ pub struct WaveformSummary {
 
 /// What the cache is keyed on: a recording that grows (the writer is still
 /// flushing right after a stop) or is rewritten gets a new length or mtime,
-/// so a stale summary is never served for it.
+/// so a stale summary is never served for it. Taken with [`waveform_source`]
+/// *before* decoding, so a file that changed mid-decode is not cached under
+/// its new stamp with the old content's peaks.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-struct WaveformSource {
+pub struct WaveformSource {
     len: u64,
     modified_ns: u128,
 }
@@ -361,7 +363,8 @@ pub fn waveform_cache_path(audio_path: &std::path::Path) -> PathBuf {
     audio_path.with_extension("peaks.json")
 }
 
-fn waveform_source(audio_path: &std::path::Path) -> Option<WaveformSource> {
+/// The current length + mtime of `audio_path`, the cache key.
+pub fn waveform_source(audio_path: &std::path::Path) -> Option<WaveformSource> {
     let meta = std::fs::metadata(audio_path).ok()?;
     let modified_ns = meta
         .modified()
@@ -389,14 +392,22 @@ pub fn cached_waveform_summary(
         .then_some(file.summary)
 }
 
-/// Writes the summary for `audio_path` (best effort: a failed write only
-/// means the next open decodes again).
+/// Writes the summary computed from the version of `audio_path` stamped
+/// `decoded_from` (best effort: a failed write only means the next open
+/// decodes again). Refuses when the file has changed since that stamp.
+/// The temp file is unique per write, so two loads of the same recording
+/// racing each other each commit a whole file.
 pub fn store_waveform_summary(
     audio_path: &std::path::Path,
     buckets: usize,
     summary: &WaveformSummary,
+    decoded_from: &WaveformSource,
 ) -> Result<(), String> {
+    static TMP_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let source = waveform_source(audio_path).ok_or("Recording metadata unavailable")?;
+    if &source != decoded_from {
+        return Err("Recording changed while it was decoded".into());
+    }
     let file = WaveformCacheFile {
         version: WAVEFORM_CACHE_VERSION,
         source,
@@ -405,9 +416,16 @@ pub fn store_waveform_summary(
     };
     let json = serde_json::to_vec(&file).map_err(|e| format!("Encode waveform cache: {e}"))?;
     let target = waveform_cache_path(audio_path);
-    let tmp = target.with_extension("json.tmp");
-    std::fs::write(&tmp, json).map_err(|e| format!("Write waveform cache: {e}"))?;
-    std::fs::rename(&tmp, &target).map_err(|e| format!("Commit waveform cache: {e}"))
+    let n = TMP_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let tmp = target.with_extension(format!("json.{}.{n}.tmp", std::process::id()));
+    if let Err(e) = std::fs::write(&tmp, json) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(format!("Write waveform cache: {e}"));
+    }
+    std::fs::rename(&tmp, &target).map_err(|e| {
+        let _ = std::fs::remove_file(&tmp);
+        format!("Commit waveform cache: {e}")
+    })
 }
 
 fn opus_head(pre_skip: u16, input_rate: u32, channel_count: u8) -> Vec<u8> {
@@ -952,7 +970,8 @@ mod tests {
             peaks: vec![0.0, 0.5, 1.0, 0.25],
             duration_seconds: 12.5,
         };
-        store_waveform_summary(&audio, 4, &summary).unwrap();
+        let stamp = waveform_source(&audio).unwrap();
+        store_waveform_summary(&audio, 4, &summary, &stamp).unwrap();
         assert_eq!(waveform_cache_path(&audio), dir.path().join("0.peaks.json"));
         assert_eq!(cached_waveform_summary(&audio, 4), Some(summary));
         // Another resolution is a miss, not a wrongly-sized overview.
@@ -970,10 +989,31 @@ mod tests {
             peaks: vec![1.0],
             duration_seconds: 1.0,
         };
-        store_waveform_summary(&audio, 1, &summary).unwrap();
+        let stamp = waveform_source(&audio).unwrap();
+        store_waveform_summary(&audio, 1, &summary, &stamp).unwrap();
         // The writer was still flushing: the file grew after the summary.
         std::fs::write(&audio, b"a longer recording").unwrap();
         assert_eq!(cached_waveform_summary(&audio, 1), None);
+    }
+
+    #[test]
+    fn waveform_cache_is_not_written_when_the_recording_changed_mid_decode() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let audio = dir.path().join("0.ogg");
+        std::fs::write(&audio, b"short").unwrap();
+        let stamp_before_decode = waveform_source(&audio).unwrap();
+        // The file grew while it was being decoded: the peaks describe the
+        // short version and must not be cached under the longer one's stamp.
+        std::fs::write(&audio, b"a longer recording").unwrap();
+        let summary = WaveformSummary {
+            peaks: vec![1.0],
+            duration_seconds: 1.0,
+        };
+        assert!(store_waveform_summary(&audio, 1, &summary, &stamp_before_decode).is_err());
+        assert_eq!(cached_waveform_summary(&audio, 1), None);
+        assert!(!waveform_cache_path(&audio).exists());
+        // No temp file left behind either.
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
     }
 
     #[test]

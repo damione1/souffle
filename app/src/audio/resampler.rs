@@ -171,6 +171,69 @@ mod tests {
         assert!(out_whole.len() < 44_100 * 3 + 2048);
     }
 
+    /// The pre-SOU-258 chunking (`drain(..chunk)` per FFT frame), kept here
+    /// only as the reference the cursor walk must reproduce sample for
+    /// sample.
+    fn reference_resample(source_rate: usize, target_rate: usize, blocks: &[&[f32]]) -> Vec<f32> {
+        let mut resampler = FftFixedInOut::<f32>::new(source_rate, target_rate, 1024, 1).unwrap();
+        let mut buffer: Vec<f32> = Vec::new();
+        let mut out = Vec::new();
+        for block in blocks {
+            buffer.extend_from_slice(block);
+            let frames_needed = resampler.input_frames_next();
+            while buffer.len() >= frames_needed {
+                let chunk: Vec<f32> = buffer.drain(..frames_needed).collect();
+                out.extend_from_slice(&resampler.process(&[chunk], None).unwrap()[0]);
+            }
+        }
+        let frames_needed = resampler.input_frames_next();
+        if !buffer.is_empty() {
+            buffer.resize(frames_needed, 0.0);
+            out.extend_from_slice(&resampler.process(&[buffer], None).unwrap()[0]);
+        }
+        out
+    }
+
+    #[test]
+    fn matches_the_previous_chunking_sample_for_sample() {
+        // Deterministic pseudo-random signal and ragged block sizes (the
+        // live capture path's blocks are whatever the device delivers).
+        let mut seed: u32 = 0x9e37_79b9;
+        let mut next = move || {
+            seed ^= seed << 13;
+            seed ^= seed >> 17;
+            seed ^= seed << 5;
+            seed
+        };
+        let input: Vec<f32> = (0..48_000 * 2 + 777)
+            .map(|_| (next() as f32 / u32::MAX as f32) * 2.0 - 1.0)
+            .collect();
+        let mut blocks: Vec<&[f32]> = Vec::new();
+        let mut rest = input.as_slice();
+        while !rest.is_empty() {
+            let len = (1 + next() as usize % 3000).min(rest.len());
+            let (head, tail) = rest.split_at(len);
+            blocks.push(head);
+            rest = tail;
+        }
+
+        for (from, to) in [(48_000, 44_100), (48_000, 16_000), (44_100, 24_000)] {
+            let expected = reference_resample(from, to, &blocks);
+            let mut resampler = Resampler::new(from as u32, 1, to as u32, 1.0);
+            let mut actual = Vec::new();
+            for block in &blocks {
+                actual.extend(resampler.process(block));
+            }
+            actual.extend(resampler.flush());
+            assert_eq!(actual, expected, "{from} -> {to}");
+            // One whole-buffer call (the playback path) is the same audio.
+            let mut whole = Resampler::new(from as u32, 1, to as u32, 1.0);
+            let mut out_whole = whole.process(&input);
+            out_whole.extend(whole.flush());
+            assert_eq!(out_whole, expected, "{from} -> {to} (one block)");
+        }
+    }
+
     #[test]
     fn keeps_the_incomplete_tail_for_the_next_call() {
         let mut resampler = Resampler::new(48_000, 1, 24_000, 1.0);

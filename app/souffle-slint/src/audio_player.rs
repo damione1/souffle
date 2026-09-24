@@ -29,7 +29,7 @@
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use souffle_lib::audio::recorder::{
     WaveformSummary, cached_waveform_summary, decode_ogg_opus, store_waveform_summary,
-    waveform_peaks,
+    waveform_peaks, waveform_source,
 };
 use souffle_lib::audio::resampler::Resampler;
 use std::path::Path;
@@ -135,6 +135,9 @@ pub fn load(
     path: &Path,
     still_wanted: impl Fn() -> bool,
 ) -> Result<(AudioPlayer, WaveformSummary), String> {
+    // Stamped before decoding: if the file changes meanwhile, the cache is
+    // not written under the new stamp with the old content's peaks.
+    let decoded_from = waveform_source(path);
     let decoded = decode_ogg_opus(path)?;
     let summary = match cached_summary(path) {
         Some(summary) => summary,
@@ -143,7 +146,10 @@ pub fn load(
                 peaks: waveform_peaks(&decoded, WAVEFORM_BUCKETS),
                 duration_seconds: seconds_from_index(decoded.len(), DECODE_RATE),
             };
-            if let Err(e) = store_waveform_summary(path, WAVEFORM_BUCKETS, &summary) {
+            if let Some(decoded_from) = &decoded_from
+                && let Err(e) =
+                    store_waveform_summary(path, WAVEFORM_BUCKETS, &summary, decoded_from)
+            {
                 eprintln!("Waveform cache not written: {e}");
             }
             summary
