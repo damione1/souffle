@@ -2617,3 +2617,35 @@ msgstr "Ouvrir la page de release"
 #~ msgctxt "SummarySection"
 #~ msgid "Aucun résumé pour cette réunion."
 #~ msgstr "Aucun résumé pour cette réunion."
+msgctxt "MeetingDetail"
+msgid "Supprimer la réunion"
+msgstr "Supprimer la réunion"
+
+msgctxt "MeetingDetail"
+msgid "Supprimer cette réunion définitivement ?"
+msgstr "Supprimer cette réunion définitivement ?"
+
+msgctxt "MeetingDetail"
+msgid "Oui, supprimer"
+msgstr "Oui, supprimer"
+
+msgctxt "MeetingDetail"
+msgid "Annuler"
+msgstr "Annuler"
+
+msgctxt "MeetingDetail"
+msgid "Impossible de supprimer la réunion : {}"
+msgstr "Impossible de supprimer la réunion : {}"
+
+msgctxt "SummarySection"
+msgid "Copier le résumé"
+msgstr "Copier le résumé"
+
+msgctxt "SummarySection"
+msgid "Copié"
+msgstr "Copié"
+
+msgctxt "SummarySection"
+msgid "Copier"
+msgstr "Copier"
+

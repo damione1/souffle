@@ -138,6 +138,7 @@ export component MainWindow inherits Window {
     in-out property <string> meeting-detail-summary-selected-model-label;
     in property <bool> meeting-detail-can-resume: false;
     in property <string> meeting-detail-resume-error: "";
+    in property <string> meeting-detail-delete-error: "";
 
     // SOU-188: Settings overlay. Toggled from IdleView's gear button;
     // `settings-requested` (not a plain property flip) because opening it
@@ -414,6 +415,8 @@ export component MainWindow inherits Window {
     callback meeting-detail-back();
     callback meeting-detail-resume();
     callback meeting-detail-summarize();
+    callback meeting-detail-copy-summary();
+    callback meeting-detail-delete();
     callback meeting-detail-rename(string);
     callback meeting-detail-notes-changed(string);
     callback meeting-detail-audio-play-pause-requested();
@@ -599,9 +602,12 @@ export component MainWindow inherits Window {
         summary-selected-model-label <=> root.meeting-detail-summary-selected-model-label;
         can-resume: root.meeting-detail-can-resume;
         resume-error: root.meeting-detail-resume-error;
+        delete-error: root.meeting-detail-delete-error;
         back-requested => { root.meeting-detail-back(); }
         resume-requested => { root.meeting-detail-resume(); }
         summarize-requested => { root.meeting-detail-summarize(); }
+        copy-summary-requested => { root.meeting-detail-copy-summary(); }
+        delete-requested => { root.meeting-detail-delete(); }
         rename-requested(title) => { root.meeting-detail-rename(title); }
         notes-changed(value) => { root.meeting-detail-notes-changed(value); }
         audio-play-pause-requested => { root.meeting-detail-audio-play-pause-requested(); }

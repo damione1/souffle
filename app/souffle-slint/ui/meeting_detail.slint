@@ -5,6 +5,7 @@ import { TranscriptSection, TranscriptBlock } from "components/transcript_sectio
 import { SummarySection, StructuredActionItem } from "components/summary_section.slint";
 import { LucideIcon, IconSet } from "components/lucide_icon.slint";
 import { ThemedTextArea } from "components/themed_text_area.slint";
+import { ThemedButton, ThemedButtonKind } from "components/themed_button.slint";
 import { Theme } from "theme.slint";
 
 // Port of MeetingHeaderSection.svelte + MeetingNotesSection.svelte -
@@ -55,10 +56,16 @@ export component MeetingDetail inherits Rectangle {
     in-out property <string> summary-selected-model-label;
     in property <bool> can-resume: true;
     in property <string> resume-error;
+    // Why the last delete failed; empty otherwise. On success Rust closes
+    // the view, so there is no success state to show here.
+    in property <string> delete-error;
 
     callback back-requested();
     callback resume-requested();
     callback summarize-requested();
+    callback copy-summary-requested();
+    // Confirmed by the user through the inline two-step row below.
+    callback delete-requested();
     callback rename-requested(string);
     callback notes-changed(string);
     callback audio-play-pause-requested();
@@ -68,6 +75,12 @@ export component MeetingDetail inherits Rectangle {
 
     property <bool> editing-title: false;
     property <string> title-draft;
+    property <bool> confirming-delete: false;
+
+    function confirm-delete() {
+        root.confirming-delete = false;
+        root.delete-requested();
+    }
     property <bool> is-empty-meeting: !root.has-audio && root.transcript-segment-count == 0 && root.summary == "";
 
     function commit-title(value: string) {
@@ -522,6 +535,146 @@ export component MeetingDetail inherits Rectangle {
                     generation-progress: root.summary-generation-progress;
                     generation-error: root.summary-generation-error;
                     generate-requested => { root.summarize-requested(); }
+                    copy-requested => { root.copy-summary-requested(); }
+                }
+
+                // MeetingDetail.svelte's ConfirmAction at the bottom of the
+                // page: a danger ghost link, then an inline "are you sure"
+                // row (same two-step convention as the timeline's
+                // hover-delete, no modal). "Annuler" or Escape drops it.
+                // Wrapped in a start-aligned row: a fixed-width child placed
+                // straight in this VerticalLayout caps the layout's max width
+                // and shrank the whole page column to the link's width.
+                HorizontalLayout {
+                alignment: start;
+                vertical-stretch: 0;
+
+                if !root.confirming-delete: delete-link := Rectangle {
+                    width: delete-content.preferred-width + 20px;
+                    height: 30px;
+                    horizontal-stretch: 0;
+                    vertical-stretch: 0;
+                    border-radius: 4px;
+                    border-width: delete-focus.has-focus ? 2px : 0px;
+                    border-color: Theme.danger;
+                    background: delete-area.pressed ? Theme.danger.with-alpha(0.16) : delete-area.has-hover ? Theme.danger.with-alpha(0.10) : transparent;
+
+                    accessible-role: button;
+                    accessible-label: @tr("Supprimer la réunion");
+                    accessible-action-default => { root.confirming-delete = true; }
+
+                    forward-focus: delete-focus;
+                    delete-focus := FocusScope {
+                        key-pressed(event) => {
+                            if event.text == Key.Return || event.text == Key.Space {
+                                root.confirming-delete = true;
+                                return accept;
+                            }
+                            return reject;
+                        }
+                    }
+
+                    delete-area := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => { root.confirming-delete = true; }
+                    }
+
+                    delete-content := HorizontalLayout {
+                        padding-left: 10px;
+                        padding-right: 10px;
+                        spacing: 7px;
+                        alignment: center;
+
+                        Rectangle {
+                            width: 14px;
+                            horizontal-stretch: 0;
+
+                            LucideIcon {
+                                size: 14px;
+                                y: (parent.height - self.height) / 2;
+                                icon: IconSet.Trash2;
+                                icon-color: Theme.danger-strong;
+                            }
+                        }
+                        Text {
+                            text: @tr("Supprimer la réunion");
+                            font-size: 12.5px;
+                            color: Theme.danger-strong;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+
+                if root.confirming-delete: HorizontalLayout {
+                    spacing: 8px;
+                    alignment: start;
+                    vertical-stretch: 0;
+                    horizontal-stretch: 1;
+
+                    Text {
+                        text: @tr("Supprimer cette réunion définitivement ?");
+                        font-size: 13px;
+                        color: Theme.text-muted;
+                        vertical-alignment: center;
+                    }
+
+                    confirm-btn := Rectangle {
+                        width: confirm-txt.preferred-width + 24px;
+                        height: Theme.settings-control-height;
+                        horizontal-stretch: 0;
+                        border-radius: 4px;
+                        border-width: confirm-focus.has-focus ? 2px : 0px;
+                        border-color: Theme.text-primary;
+                        background: confirm-area.pressed ? Theme.danger-strong : confirm-area.has-hover ? Theme.danger.with-alpha(0.9) : Theme.danger;
+
+                        accessible-role: button;
+                        accessible-label: @tr("Oui, supprimer");
+                        accessible-action-default => { root.confirm-delete(); }
+
+                        forward-focus: confirm-focus;
+                        confirm-focus := FocusScope {
+                            init => { self.focus(); }
+                            key-pressed(event) => {
+                                if event.text == Key.Return || event.text == Key.Space {
+                                    root.confirm-delete();
+                                    return accept;
+                                }
+                                if event.text == Key.Escape {
+                                    root.confirming-delete = false;
+                                    return accept;
+                                }
+                                return reject;
+                            }
+                        }
+
+                        confirm-area := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => { root.confirm-delete(); }
+                        }
+
+                        confirm-txt := Text {
+                            text: @tr("Oui, supprimer");
+                            font-family: "Archivo SemiBold";
+                            font-size: 13px;
+                            color: Theme.on-danger;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+
+                    ThemedButton {
+                        text: @tr("Annuler");
+                        kind: ThemedButtonKind.ghost;
+                        clicked => { root.confirming-delete = false; }
+                    }
+                }
+                }
+
+                if root.delete-error != "": Text {
+                    text: @tr("Impossible de supprimer la réunion : {}", root.delete-error);
+                    font-size: 12px;
+                    color: Theme.danger;
+                    wrap: word-wrap;
                 }
             }
         }
