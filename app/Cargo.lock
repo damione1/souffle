@@ -7368,6 +7368,7 @@ dependencies = [
  "chrono",
  "cpal",
  "crossbeam-channel",
+ "i-slint-backend-testing",
  "lucide-slint",
  "serde_json",
  "slint",

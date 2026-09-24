@@ -826,12 +826,12 @@ msgid "✓"
 msgstr "✓"
 
 #: app/souffle-slint/ui/components/transcript_section.slint:118
-msgctxt "TranscriptSection"
+msgctxt "DictionaryAliasPopover"
 msgid "Alias de dictionnaire"
 msgstr "Alias de dictionnaire"
 
 #: app/souffle-slint/ui/components/transcript_section.slint:130
-msgctxt "TranscriptSection"
+msgctxt "DictionaryAliasPopover"
 msgid "Fermer"
 msgstr "Fermer"
 
@@ -841,22 +841,22 @@ msgid "✕"
 msgstr "✕"
 
 #: app/souffle-slint/ui/components/transcript_section.slint:146
-msgctxt "TranscriptSection"
+msgctxt "DictionaryAliasPopover"
 msgid "Terme correct"
 msgstr "Terme correct"
 
 #: app/souffle-slint/ui/components/transcript_section.slint:152
-msgctxt "TranscriptSection"
+msgctxt "DictionaryAliasPopover"
 msgid "Prononciation entendue"
 msgstr "Prononciation entendue"
 
 #: app/souffle-slint/ui/components/transcript_section.slint:162
-msgctxt "TranscriptSection"
+msgctxt "DictionaryAliasPopover"
 msgid "Enregistrer l'alias"
 msgstr "Enregistrer l'alias"
 
 #: app/souffle-slint/ui/components/transcript_section.slint:171
-msgctxt "TranscriptSection"
+msgctxt "DictionaryAliasPopover"
 msgid "Enregistrer"
 msgstr "Enregistrer"
 

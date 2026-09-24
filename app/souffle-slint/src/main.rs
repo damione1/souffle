@@ -43,7 +43,9 @@ use souffle_lib::progress::ProgressChannel;
 use souffle_lib::settings::{AppSettings, ShortcutSettings};
 use souffle_lib::state::AppState;
 mod live_transcript;
+mod live_view;
 use live_transcript::LiveTranscript;
+use live_view::{LiveTranscriptState, push_live_blocks, start_live_transcript_timer};
 use souffle_lib::transcript::{MeetingCalendarContext, MeetingParticipant, MeetingTranscript};
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -59,8 +61,6 @@ use std::time::Duration;
 /// parameter below unchanged, while removing the Tauri dependency itself.
 type AppHandle = Arc<AppState>;
 
-type LiveTranscriptState = Arc<Mutex<LiveTranscript>>;
-
 /// Notes autosave debounce, matching `NOTES_DEBOUNCE_MS` in
 /// features/meeting/controller.svelte.ts.
 const NOTES_DEBOUNCE: Duration = Duration::from_millis(800);
@@ -75,8 +75,6 @@ const TRANSCRIPT_SCROLL_MARGIN: f32 = 3.0 * TRANSCRIPT_VIEWPORT_HEIGHT;
 /// `start_audio_progress_timer`'s 150ms poll below, just faster since
 /// scrolling is more time-sensitive than a playback position label.
 const TRANSCRIPT_SCROLL_POLL: Duration = Duration::from_millis(80);
-const LIVE_TRANSCRIPT_SCROLL_POLL: Duration = Duration::from_millis(80);
-const LIVE_NEAR_BOTTOM_PX: f32 = 40.0;
 
 /// Matches `DiagnosticsSettingsSection.svelte`'s `TAIL_LINES`/`POLL_MS`.
 const SETTINGS_LOG_TAIL_LINES: u32 = 80;
@@ -655,47 +653,6 @@ fn start_transcript_scroll_timer(
             // from the top".
             let scroll_top = -window.get_meeting_detail_transcript_scroll_top_px();
             update_transcript_window(&window, &transcript_state, scroll_top);
-        },
-    );
-    timer
-}
-
-/// Repeated poll driving the live meeting transcript's time-based behavior:
-/// expires stale per-speaker tentatives (AC3) and keeps the view pinned to
-/// the bottom while the user is within `LIVE_NEAR_BOTTOM_PX` of it (AC5) -
-/// the Slint port of `LiveSessionCard.svelte`'s tentative expiry and
-/// `scheduleAutoscroll`. A user who scrolled up is left alone.
-fn start_live_transcript_timer(
-    weak: slint::Weak<MainWindow>,
-    live_state: LiveTranscriptState,
-) -> slint::Timer {
-    let timer = slint::Timer::default();
-    timer.start(
-        slint::TimerMode::Repeated,
-        LIVE_TRANSCRIPT_SCROLL_POLL,
-        move || {
-            let Some(window) = weak.upgrade() else {
-                return;
-            };
-            if window.get_recording_mode() == RecordingMode::Idle {
-                return;
-            }
-            {
-                let mut live = live_state.lock().unwrap();
-                live.expire_tentatives();
-            }
-            push_live_blocks(&window, &live_state);
-            let scroll_y = window.get_live_transcript_scroll_top_px();
-            let content_h = window.get_live_transcript_content_height();
-            let viewport_h = window.get_live_transcript_viewport_height();
-            if content_h <= viewport_h {
-                return;
-            }
-            let bottom = -(content_h - viewport_h);
-            let at_bottom_threshold = bottom + LIVE_NEAR_BOTTOM_PX;
-            if scroll_y == 0.0 || scroll_y <= at_bottom_threshold {
-                window.set_live_transcript_scroll_top(bottom);
-            }
         },
     );
     timer
@@ -1730,48 +1687,9 @@ fn live_segment_channel(
             let Some(window) = weak.upgrade() else {
                 return;
             };
-            if segment.speaker.is_some() {
-                {
-                    let mut live = live_state.lock().unwrap();
-                    if segment.is_final {
-                        live.push_final(&segment);
-                    } else {
-                        live.push_tentative(&segment);
-                    }
-                }
-                push_live_blocks(&window, &live_state);
-                return;
-            }
-            if segment.is_final {
-                let mut text = window.get_live_text().to_string();
-                let trimmed = segment.text.trim();
-                if !trimmed.is_empty() {
-                    if !text.is_empty() {
-                        text.push(' ');
-                    }
-                    text.push_str(trimmed);
-                }
-                window.set_live_text(text.into());
-                {
-                    let mut live = live_state.lock().unwrap();
-                    live.push_final(&segment);
-                }
-                window.set_live_tentative("".into());
-            } else {
-                window.set_live_tentative(segment.text.trim().into());
-            }
+            live_view::apply_live_segment(&window, &live_state, &segment);
         });
     })
-}
-
-fn push_live_blocks(window: &MainWindow, live_state: &LiveTranscriptState) {
-    let live = live_state.lock().unwrap();
-    let is_empty = live.is_empty();
-    let blocks = live.build_blocks();
-    drop(live);
-    let model = std::rc::Rc::new(slint::VecModel::from(blocks));
-    window.set_live_transcript_blocks(model.into());
-    window.set_live_transcript_empty(is_empty);
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -1810,6 +1728,24 @@ fn clear_live_transcript(window: &MainWindow, live_state: &LiveTranscriptState) 
         live.clear();
     }
     push_live_blocks(window, live_state);
+}
+
+/// Saves a dictionary alias from a transcript word's popover - the
+/// post-meeting transcript and the live meeting view share it (SOU-223,
+/// SOU-256 AC5). A blank term is ignored, a blank pronunciation stored as
+/// none.
+fn save_dictionary_alias(handle: &AppHandle, term: &str, pronunciation: &str) {
+    let term = term.trim().to_string();
+    if term.is_empty() {
+        return;
+    }
+    let pronunciation = pronunciation.trim();
+    let pronunciation = (!pronunciation.is_empty()).then(|| pronunciation.to_string());
+    if let Err(e) =
+        souffle_lib::commands::add_dictionary_entry(Arc::clone(handle), term, pronunciation, None)
+    {
+        eprintln!("Failed to add dictionary alias: {e}");
+    }
 }
 
 /// Anchors the live elapsed clock to the real recording start time (AC6,
@@ -3851,18 +3787,12 @@ fn wire_callbacks(
 
     let handle = tauri_handle.clone();
     window.on_meeting_detail_transcript_alias_save_requested(move |term, pronunciation| {
-        let term = term.trim().to_string();
-        if term.is_empty() {
-            return;
-        }
-        let pronunciation = pronunciation.trim();
-        let pronunciation = (!pronunciation.is_empty()).then(|| pronunciation.to_string());
-        let state = Arc::clone(&handle);
-        if let Err(e) =
-            souffle_lib::commands::add_dictionary_entry(state, term, pronunciation, None)
-        {
-            eprintln!("Failed to add dictionary alias: {e}");
-        }
+        save_dictionary_alias(&handle, &term, &pronunciation);
+    });
+    // SOU-256 AC5: the live meeting view's word click saves the same way.
+    let handle = tauri_handle.clone();
+    window.on_live_transcript_alias_save_requested(move |term, pronunciation| {
+        save_dictionary_alias(&handle, &term, &pronunciation);
     });
 
     let weak = window.as_weak();

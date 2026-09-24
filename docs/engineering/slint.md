@@ -395,6 +395,8 @@ A `Rectangle` plus `TouchArea` with no role is invisible to VoiceOver and to the
 | Debug vs release? | `make nightly` is debug. Fair snap vs `/Applications/Soufflé.app` needs a release Nightly. |
 | Apple-to-apple screenshots | One `souffle` process at a time. Skill: `souffle-ui-screenshot`. |
 | Layout stretch bugs | `HorizontalLayout { alignment: center; }` on the **main** axis inflates children. Settings fields use `alignment: start`. |
+| A child that should fill the rest collapses or vanishes | Any `alignment` other than the default `stretch` gives every child its *preferred* size and ignores `*-stretch`. A `ScrollView` then shrinks to a few lines, and a plain `Rectangle` wrapper (no layout of its own, preferred size 0) hides everything inside it (SOU-256). Drop the alignment on the parent and put the `ScrollView` directly in the layout; don't patch it with `height: 100%` or a wrapper. `live_view.rs` tests show how to assert element geometry. |
+| Iterate on the live meeting view | `cargo run --manifest-path app/Cargo.toml -p souffle-slint --example live_transcript_mock` streams a fake Me/Them meeting through the app's own live code path (`MOCK_MODE=dictation` for dictation). |
 
 ## 8. PR checklist
 

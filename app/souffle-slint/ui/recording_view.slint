@@ -4,6 +4,7 @@ import { Theme } from "theme.slint";
 import { LucideIcon, IconSet } from "components/lucide_icon.slint";
 import { ThemedTextArea } from "components/themed_text_area.slint";
 import { TranscriptBlock, SpeakerLabels } from "components/transcript_section.slint";
+import { TranscriptWordFlow, DictionaryAliasPopover } from "components/transcript_words.slint";
 
 // LiveSessionCard.svelte parity surface. The two modes deliberately share
 // the session toolbar, while their bodies stay distinct: dictation is a
@@ -29,15 +30,22 @@ export component RecordingView inherits Rectangle {
 
     callback stop-requested();
     callback notes-changed(string);
-    // Autoscroll: expose viewport-y for Rust to update.
-    in-out property <length> live-transcript-scroll-top: 0px;
-    // Notify Rust that content height changed so it can pin-to-bottom if needed.
-    callback live-content-height-changed(float);
-    
-    // Exposed for Rust autoscroll (AC5): the real pixel height of the
-    // live-content VerticalLayout and the ScrollView viewport.
-    in-out property <float> live-transcript-content-height: live-scroll.viewport-height / 1px;
-    in-out property <float> live-transcript-viewport-height: live-scroll.height / 1px;
+    // (term, pronunciation) saved from a live word's alias popover - the
+    // same handler as the post-meeting transcript's.
+    callback alias-save-requested(string, string);
+
+    // Live meeting autoscroll (LiveSessionCard.svelte's scheduleAutoscroll),
+    // done here rather than from Rust: follow the bottom while the reader
+    // is within `live-follow-slack` of it, and leave them alone once they
+    // scroll further up. It used to be a Rust poll reading the content and
+    // viewport heights through `in-out` properties bound `<=>` to
+    // MainWindow; the outer, binding-less side of that two-way binding won,
+    // so Rust always read 0 and never scrolled (SOU-256).
+    property <bool> live-follow: true;
+    property <length> live-follow-slack: 40px;
+    function live-pin-to-bottom() {
+        live-scroll.content-y = min(0px, live-scroll.visible-height - live-scroll.content-height);
+    }
 
     property <string> combined-text: root.live-tentative == "" ? root.live-text
         : root.live-text == "" ? root.live-tentative
@@ -100,36 +108,41 @@ export component RecordingView inherits Rectangle {
                 }
             }
 
+            // Waveform.svelte (variant "pill") parity: 48 bars of 3px with a
+            // 2px gap, centred in the space between the badge and the clock,
+            // always moving (two travelling sines) and pushed up by the live
+            // audio level. `animation-tick()` redraws every frame, which is
+            // fine here: this view only exists while recording.
             waveform := Rectangle {
                 horizontal-stretch: 1;
                 height: 38px;
+                clip: true;
 
-                wave-strip := Rectangle {
-                    x: parent.width - self.width;
+                property <int> bar-count: 48;
+                property <length> bar-width: 3px;
+                property <length> bar-gap: 2px;
+                property <length> bars-height: 32px;
+                property <float> t: animation-tick() / 1ms;
+                // The level arrives at ~15 Hz; ease between samples like the
+                // canvas did (bars += (target - bars) * 0.3 per frame).
+                property <float> level: root.audio-level;
+                animate level { duration: 120ms; easing: ease-out; }
+
+                for i in self.bar-count: Rectangle {
+                    // Same curve as the Svelte canvas: level + per-bar ripple,
+                    // clamped to [0.05, 1] of the strip height.
+                    property <float> level: max(0.05, min(1.0,
+                        waveform.level
+                        + Math.sin((waveform.t / 200 + i * 0.5) * 1rad) * 0.15
+                        + Math.sin((i * 0.3 + waveform.t / 300) * 1rad) * 0.1));
+                    x: (parent.width - (waveform.bar-count * (waveform.bar-width + waveform.bar-gap) - waveform.bar-gap)) / 2
+                        + i * (waveform.bar-width + waveform.bar-gap);
+                    width: waveform.bar-width;
+                    height: self.level * (waveform.bars-height - 4px);
                     y: (parent.height - self.height) / 2;
-                    width: min(120px, parent.width);
-                    height: 22px;
-
-                    Rectangle {
-                        y: parent.height / 2;
-                        height: 1px;
-                        width: parent.width;
-                        background: Theme.accent.with-alpha(0.24);
-                    }
-                    HorizontalLayout {
-                        spacing: 2px;
-                        alignment: center;
-                        for peak in [0.28, 0.42, 0.58, 0.76, 0.94, 0.72, 0.88, 0.62, 0.48, 0.34, 0.52, 0.30]: VerticalLayout {
-                            horizontal-stretch: 1;
-                            alignment: center;
-                            Rectangle {
-                                width: 3px;
-                                height: max(2px, peak * max(3px, root.audio-level * waveform.height));
-                                border-radius: 1px;
-                                background: Theme.accent.with-alpha(0.55);
-                            }
-                        }
-                    }
+                    border-radius: 1.5px;
+                    background: Theme.accent;
+                    opacity: 0.4 + self.level * 0.6;
                 }
             }
 
@@ -266,30 +279,23 @@ export component RecordingView inherits Rectangle {
                 padding-bottom: 18px;
                 spacing: 14px;
 
-                // Wrapper Rectangle owns vertical-stretch:1 and gives the
-                // ScrollView an unambiguous height:100% target - the
-                // ScrollView itself doesn't grow its preferred height from
-                // stretch alone (std-widgets quirk, unlike a plain
-                // Flickable), but height:100% directly on it here would
-                // measure against a layout that also holds the auto-paste
-                // row below, overflowing past the card (see live-scroll's
-                // doc comment further down for the same bug/fix pair).
-                Rectangle {
+                // Stretched by this (default-alignment) layout over what the
+                // auto-paste row leaves - see live-scroll below for why there
+                // is no wrapper Rectangle or `height: 100%` (SOU-256).
+                dictation-scroll := ScrollView {
                     vertical-stretch: 1;
 
-                    ScrollView {
-                        height: 100%;
-
-                        VerticalLayout {
-                            width: parent.width;
-                            alignment: start;
-                            Text {
-                                width: parent.width;
-                                text: root.combined-text == "" ? @tr("À l'écoute…") : root.combined-text;
-                                font-size: root.combined-text == "" ? 14px : 19px;
-                                color: root.combined-text == "" ? Theme.text-muted : Theme.text-secondary;
-                                wrap: word-wrap;
-                            }
+                    VerticalLayout {
+                        width: parent.width;
+                        alignment: start;
+                        // Gutter for the overlay scrollbar, so it never
+                        // sits on the last characters of a line.
+                        padding-right: 12px;
+                        Text {
+                            text: root.combined-text == "" ? @tr("À l'écoute…") : root.combined-text;
+                            font-size: root.combined-text == "" ? 14px : 19px;
+                            color: root.combined-text == "" ? Theme.text-muted : Theme.text-secondary;
+                            wrap: word-wrap;
                         }
                     }
                 }
@@ -324,13 +330,30 @@ export component RecordingView inherits Rectangle {
             border-width: 1px;
             border-color: Theme.border-soft;
 
+            // Click a finalized word -> add it to the dictionary, same popover
+            // as the post-meeting transcript (SOU-223). Shared by all rows,
+            // so rows updating or scrolling underneath never touch it.
+            live-alias := DictionaryAliasPopover {
+                save-requested(term, pronunciation) => { root.alias-save-requested(term, pronunciation); }
+            }
+
             VerticalLayout {
                 padding-left: 18px;
                 padding-right: 18px;
                 padding-top: 16px;
-                padding-bottom: 16px;
+                // Bottom padding is inside live-content, not here: text that
+                // overflows scrolls to the card's border instead of stopping
+                // on a blank 16px strip that reads as a clipped UI.
                 spacing: 16px;
-                alignment: start;
+                // SOU-256: no `alignment` here, on purpose. Any alignment
+                // other than the default `stretch` makes a layout give each
+                // child its *preferred* height and ignore vertical-stretch.
+                // That is what collapsed live-scroll to ~3 lines (its
+                // preferred height), and once live-scroll was wrapped in a
+                // Rectangle with `height: 100%` (#312) the wrapper's
+                // preferred height was 0, so the whole transcript vanished
+                // while recording. The header is fixed-height and
+                // vertical-stretch:0, so the ScrollView takes all the rest.
 
                 HorizontalLayout {
                     height: 17px;
@@ -379,61 +402,82 @@ export component RecordingView inherits Rectangle {
                     }
                 }
 
-                // See the dictation ScrollView's doc comment above: this
-                // wrapper Rectangle takes vertical-stretch:1 from the
-                // header+scroll VerticalLayout so live-scroll's height:100%
-                // measures against just this wrapper, not the header too -
-                // `height: 100%` directly on live-scroll previously
-                // overflowed past the header's height (CodeRabbit caught
-                // that, 709afdd), but dropping height entirely brought back
-                // the ~3-line collapse (2da5043) since ScrollView doesn't
-                // grow from vertical-stretch alone.
-                Rectangle {
+                // A plain layout child: the parent VerticalLayout stretches
+                // it over everything the header leaves. No `height: 100%`
+                // (it would measure against the whole layout, header
+                // included - 709afdd) and no wrapper Rectangle (a Rectangle
+                // has no layout of its own, so it reports no preferred
+                // height and hides whatever it holds under a non-stretch
+                // alignment - SOU-256).
+                live-scroll := ScrollView {
                     vertical-stretch: 1;
 
-                    live-scroll := ScrollView {
-                        height: 100%;
-                        viewport-y <=> root.live-transcript-scroll-top;
+                    changed content-height => {
+                        if root.live-follow {
+                            root.live-pin-to-bottom();
+                        }
+                    }
+                    changed visible-height => {
+                        if root.live-follow {
+                            root.live-pin-to-bottom();
+                        }
+                    }
+                    // Only a scroll the reader made (wheel, trackpad or
+                    // scrollbar drag) decides whether new text keeps
+                    // following. Not `changed content-y`: that also fires
+                    // for the pin above, and when the content grows again
+                    // before it runs (a long final wrapping onto more
+                    // lines) it would read the fresh pin as "scrolled up"
+                    // and stop following for good.
+                    scrolled => {
+                        root.live-follow = self.content-y <= self.visible-height - self.content-height + root.live-follow-slack;
+                    }
 
-                        live-content := VerticalLayout {
-                            width: parent.width;
+                    live-content := VerticalLayout {
+                        width: parent.width;
+                        alignment: start;
+                        spacing: 10px;
+                        padding-bottom: 16px;
+                        // Gutter for the overlay scrollbar, so it never
+                        // sits on the last characters of a line.
+                        padding-right: 12px;
+
+                        if root.live-transcript-empty: Text {
+                            text: @tr("À l'écoute…");
+                            font-size: 14px;
+                            color: Theme.text-muted;
+                        }
+
+                        for block[i] in root.live-transcript-blocks: VerticalLayout {
                             alignment: start;
-                            spacing: 10px;
+                            spacing: 2px;
 
-                            if root.live-transcript-empty: Text {
-                                text: @tr("À l'écoute…");
-                                font-size: 14px;
-                                color: Theme.text-muted;
-                            }
-
-                            for block[i] in root.live-transcript-blocks: VerticalLayout {
+                            HorizontalLayout {
                                 alignment: start;
-                                spacing: 2px;
+                                spacing: 8px;
 
-                                HorizontalLayout {
-                                    alignment: start;
-                                    spacing: 8px;
-
-                                    Text {
-                                        text: block.has-speaker ? SpeakerLabels.of(block.speaker) : "";
-                                        font-family: "Archivo SemiBold";
-                                        font-size: 11.5px;
-                                        color: Theme.accent;
-                                    }
-                                    Text {
-                                        text: block.timestamp;
-                                        font-family: "JetBrains Mono";
-                                        font-size: 10.5px;
-                                        color: Theme.text-faint;
-                                    }
+                                Text {
+                                    text: block.has-speaker ? SpeakerLabels.of(block.speaker) : "";
+                                    font-family: "Archivo SemiBold";
+                                    font-size: 11.5px;
+                                    color: Theme.accent;
                                 }
                                 Text {
-                                    width: parent.width;
-                                    text: block.text;
-                                    font-size: 15px;
-                                    color: Theme.text-secondary;
-                                    wrap: word-wrap;
+                                    text: block.timestamp;
+                                    font-family: "JetBrains Mono";
+                                    font-size: 10.5px;
+                                    color: Theme.text-faint;
                                 }
+                            }
+                            // Words of finalized text are clickable; the
+                            // provisional tail (tentative) never is, see
+                            // `LivePara::to_slint_block`.
+                            TranscriptWordFlow {
+                                width: parent.width;
+                                words: block.words;
+                                font-size: 15px;
+                                color: Theme.text-secondary;
+                                word-clicked(word, at-x, at-y) => { live-alias.open(word, at-x, at-y); }
                             }
                         }
                     }
@@ -445,9 +489,12 @@ export component RecordingView inherits Rectangle {
             height: 132px;
             vertical-stretch: 0;
 
+            // Same width as the transcript card above, like the Svelte
+            // MeetingNotesSection sibling: no side padding, and the text
+            // area sized by this layout (a `width: parent.width` here
+            // counted the padding too and pushed the box 12px past the
+            // card's right edge).
             VerticalLayout {
-                padding-left: 12px;
-                padding-right: 12px;
                 spacing: 0px;
 
                 Rectangle {
@@ -487,7 +534,6 @@ export component RecordingView inherits Rectangle {
                 }
 
                 notes-input := ThemedTextArea {
-                    width: parent.width;
                     area-height: 76px;
                     text <=> root.notes;
                     placeholder: @tr("Notez décisions, actions, noms…");

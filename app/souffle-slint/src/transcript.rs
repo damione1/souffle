@@ -71,7 +71,7 @@ fn tokenize_words(text: &str) -> Vec<&str> {
 /// `TouchArea`-wrapped word or a plain literal run in the `FlexboxLayout`.
 /// The token text itself is never modified - a click hands the exact
 /// original word back to Rust, same as the old Markdown-link target did.
-fn build_words(text: &str) -> Vec<TranscriptWord> {
+pub(crate) fn build_words(text: &str) -> Vec<TranscriptWord> {
     tokenize_words(text)
         .into_iter()
         .map(|token| TranscriptWord {

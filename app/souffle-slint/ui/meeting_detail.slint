@@ -187,6 +187,14 @@ export component MeetingDetail inherits Rectangle {
     }
     TouchArea {
         clicked => { focus-sink.focus(); }
+        // Wheel/trackpad anywhere on the page scrolls it, like a web page:
+        // page-scroll only spans the centred column, so the side gutters
+        // (and the sticky header) used to swallow the scroll. Scrolls over
+        // the transcript box never get here - its own Flickable takes them.
+        scroll-event(event) => {
+            root.page-scroll-top = clamp(root.page-scroll-top + event.delta-y, min(0px, page-scroll.height - page-scroll.viewport-height), 0px);
+            accept
+        }
     }
 
     content := VerticalLayout {
@@ -194,7 +202,10 @@ export component MeetingDetail inherits Rectangle {
         height: root.height;
         x: (root.width - self.width) / 2;
         padding-top: 26px;
-        padding-bottom: 34px;
+        // No bottom padding here: it would sit under page-scroll as a dead
+        // strip that overflowing content stops short of, like a cut-off UI.
+        // The breathing room lives at the end of page-inner instead, so
+        // scrolled content runs to the window's last pixel.
         spacing: 14px;
 
         back-btn := Rectangle {
@@ -676,6 +687,7 @@ export component MeetingDetail inherits Rectangle {
             page-inner := VerticalLayout {
                 width: parent.width - 12px;
                 padding-right: 14px;
+                padding-bottom: 34px;
                 spacing: 22px;
 
                 VerticalLayout {
