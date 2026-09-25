@@ -12,7 +12,7 @@ use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::Mutex;
-use std::sync::atomic::AtomicU64;
+use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use crossbeam_channel::{Receiver, RecvTimeoutError, Sender};
@@ -93,6 +93,7 @@ pub enum EngineCommand {
         config: SessionConfig,
         on_segment: SegmentCallback,
         reply: Sender<Result<EngineInfo, String>>,
+        handoff: Arc<AtomicU8>,
     },
     StopSession {
         reply: Sender<Result<SessionSummary, String>>,
@@ -131,15 +132,51 @@ pub struct EngineActorHandle {
 /// and waiting for its reply, so the reset runs while audio is buffered.
 pub struct PendingSessionStart {
     reply: Receiver<Result<EngineInfo, String>>,
+    handoff: Arc<AtomicU8>,
 }
+
+const START_WAITING: u8 = 0;
+const START_CLAIMED: u8 = 1;
+const START_ABANDONED: u8 = 2;
 
 impl PendingSessionStart {
     /// Wait until the engine is reset and the session loop is about to read
     /// audio, or `timeout` runs out.
     pub fn wait(self, timeout: Duration) -> Result<EngineInfo, String> {
-        self.reply
-            .recv_timeout(timeout)
-            .map_err(|_| "Engine actor reply timeout".to_string())?
+        match self.reply.recv_timeout(timeout) {
+            Ok(result) => result,
+            Err(RecvTimeoutError::Timeout) => {
+                match self.handoff.compare_exchange(
+                    START_WAITING,
+                    START_ABANDONED,
+                    Ordering::AcqRel,
+                    Ordering::Acquire,
+                ) {
+                    Ok(_) => Err("Engine actor reply timeout".to_string()),
+                    // The actor won the ownership race immediately before the
+                    // timeout. Its buffered send cannot block, so receive the
+                    // committed result instead of reporting a false timeout.
+                    Err(START_CLAIMED) => self
+                        .reply
+                        .recv()
+                        .map_err(|_| "Engine actor disconnected".to_string())?,
+                    Err(START_ABANDONED) => Err("Engine actor reply timeout".to_string()),
+                    Err(state) => unreachable!("invalid session-start handoff state {state}"),
+                }
+            }
+            Err(RecvTimeoutError::Disconnected) => Err("Engine actor disconnected".to_string()),
+        }
+    }
+}
+
+impl Drop for PendingSessionStart {
+    fn drop(&mut self) {
+        let _ = self.handoff.compare_exchange(
+            START_WAITING,
+            START_ABANDONED,
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        );
     }
 }
 
@@ -288,15 +325,20 @@ impl EngineActorHandle {
         on_segment: SegmentCallback,
     ) -> Result<PendingSessionStart, String> {
         let (reply, reply_rx) = crossbeam_channel::bounded(1);
+        let handoff = Arc::new(AtomicU8::new(START_WAITING));
         self.cmd_tx
             .send(EngineCommand::StartSession {
                 session_id,
                 config,
                 on_segment,
                 reply,
+                handoff: Arc::clone(&handoff),
             })
             .map_err(|_| "Engine actor disconnected".to_string())?;
-        Ok(PendingSessionStart { reply: reply_rx })
+        Ok(PendingSessionStart {
+            reply: reply_rx,
+            handoff,
+        })
     }
 
     /// Stop the active session: the actor drains buffered audio, flushes the
@@ -480,6 +522,7 @@ impl EngineActor {
                     config,
                     on_segment,
                     reply,
+                    handoff,
                 } => {
                     session_count += 1;
                     info!(
@@ -493,6 +536,7 @@ impl EngineActor {
                             config,
                             on_segment,
                             reply,
+                            handoff,
                             &mut pending_unload_timeout,
                         )
                     });
@@ -712,6 +756,7 @@ impl EngineActor {
         config: SessionConfig,
         on_segment: SegmentCallback,
         reply: Sender<Result<EngineInfo, String>>,
+        handoff: Arc<AtomicU8>,
         pending_unload_timeout: &mut Option<Option<Duration>>,
     ) -> SessionEnd {
         let session_start = Instant::now();
@@ -838,8 +883,32 @@ impl EngineActor {
             ))
         };
 
-        // Caller may now start audio capture.
-        let _ = reply.send(Ok(info));
+        // Capture already started while setup ran (SOU-260). Claiming this
+        // handoff transfers ownership of the prepared session to the caller.
+        // Timeout/drop races this compare-and-swap, while the buffered reply
+        // keeps the actor free to process an early stop or shutdown.
+        if handoff
+            .compare_exchange(
+                START_WAITING,
+                START_CLAIMED,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            )
+            .is_err()
+        {
+            warn!(
+                session_id,
+                "Session start caller disappeared before setup completed; abandoning session"
+            );
+            return SessionEnd::SetupFailed;
+        }
+        if reply.send(Ok(info)).is_err() {
+            warn!(
+                session_id,
+                "Session start caller disappeared before setup completed; abandoning session"
+            );
+            return SessionEnd::SetupFailed;
+        }
         info!(
             session_id,
             duration_ms = session_start.elapsed().as_millis(),
@@ -3478,6 +3547,67 @@ mod tests {
             numbered(total * TICK),
             "every sample exactly once, in capture order, across the handoff"
         );
+    }
+
+    #[test]
+    fn a_timed_out_start_never_becomes_an_orphaned_active_session() {
+        let mock = MockEngine::new().with_reset_delay(RESET);
+        let (actor, audio_tx) = spawn_with_mock(mock);
+        let (_first_collected, first_callback) = collecting_callback();
+
+        let first = actor
+            .begin_session(1, diarized_config(), first_callback)
+            .expect("begin first session");
+        assert_eq!(
+            first
+                .wait(Duration::from_millis(25))
+                .expect_err("the deliberately slow reset must outlive the caller"),
+            "Engine actor reply timeout"
+        );
+
+        // Queue the next start while the actor is still finishing the reset.
+        // It must return to the command loop and accept this command instead
+        // of entering an ownerless session loop first.
+        let (_second_collected, second_callback) = collecting_callback();
+        let second = actor
+            .begin_session(2, diarized_config(), second_callback)
+            .expect("begin second session")
+            .wait(Duration::from_secs(2));
+
+        // Keep both the pre-fix failure and the fixed path bounded so a
+        // failing assertion cannot leave the actor thread parked in-session.
+        let active_session_id = if second.is_ok() { 2 } else { 1 };
+        audio_tx.send(end_of_stream(active_session_id)).unwrap();
+        actor
+            .stop_session(Duration::from_secs(2))
+            .expect("stop whichever session became active");
+
+        assert!(
+            second.is_ok(),
+            "the timed-out start became an orphan and rejected the next start: {second:?}"
+        );
+    }
+
+    #[test]
+    fn a_retained_start_reply_does_not_block_an_early_stop() {
+        let mock = MockEngine::new().with_reset_delay(RESET);
+        let (actor, audio_tx) = spawn_with_mock(mock);
+        let (_collected, callback) = collecting_callback();
+
+        let pending = actor
+            .begin_session(1, diarized_config(), callback)
+            .expect("begin session");
+        audio_tx.send(end_of_stream(1)).unwrap();
+
+        // Deliberately retain `pending` without receiving its reply. Once the
+        // reset finishes, the actor must still enter its command loop and
+        // process this stop instead of blocking on reply delivery.
+        actor
+            .stop_session(Duration::from_secs(2))
+            .expect("stop while start reply remains buffered");
+        pending
+            .wait(Duration::from_secs(1))
+            .expect("the retained start result remains available");
     }
 
     #[test]
