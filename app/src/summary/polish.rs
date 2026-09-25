@@ -481,21 +481,29 @@ fn is_self_correction_sentence(words: &[String]) -> bool {
     words.len() == 2 && starts_with_self_correction(words)
 }
 
-/// Splits source text into non-empty normalized sentences.
-fn normalized_sentences(input: &str) -> Vec<Vec<String>> {
+struct NormalizedSentence<'a> {
+    raw: &'a str,
+    words: Vec<String>,
+}
+
+/// Splits source text into non-empty normalized sentences while retaining the
+/// raw slice needed to recognize apostrophe-based French negation.
+fn normalized_sentences(input: &str) -> Vec<NormalizedSentence<'_>> {
     input
         .split(['.', '!', '?', '\n', '\r'])
-        .map(normalized_words)
-        .filter(|words| !words.is_empty())
+        .filter_map(|raw| {
+            let words = normalized_words(raw);
+            (!words.is_empty()).then_some(NormalizedSentence { raw, words })
+        })
         .collect()
 }
 
 /// Returns whether a sentence is a retraction command or the content it retracts.
-fn is_retraction_or_retracted(sentences: &[Vec<String>], index: usize) -> bool {
-    is_self_correction_sentence(&sentences[index])
+fn is_retraction_or_retracted(sentences: &[NormalizedSentence<'_>], index: usize) -> bool {
+    is_self_correction_sentence(&sentences[index].words)
         || sentences
             .get(index + 1)
-            .is_some_and(|next| starts_with_self_correction(next))
+            .is_some_and(|next| starts_with_self_correction(&next.words))
 }
 
 /// Removes an inline correction command while retaining its replacement text.
@@ -520,7 +528,7 @@ fn dropped_substantive_sentence(
             return false;
         }
 
-        let words: Vec<&str> = required_sentence_words(sentence)
+        let words: Vec<&str> = required_sentence_words(&sentence.words)
             .iter()
             .map(String::as_str)
             .filter(|word| !allow_filler_removal || !is_filler_word(word))
@@ -544,7 +552,7 @@ fn dropped_substantive_sentence(
                 !sentences.iter().enumerate().any(|(other_index, other)| {
                     other_index != index
                         && !is_retraction_or_retracted(&sentences, other_index)
-                        && required_sentence_words(other)
+                        && required_sentence_words(&other.words)
                             .iter()
                             .any(|candidate| candidate == word)
                 })
@@ -567,7 +575,7 @@ fn retained_input_words(input: &str, allow_filler_removal: bool) -> Vec<String> 
             continue;
         }
         retained.extend(
-            required_sentence_words(sentence)
+            required_sentence_words(&sentence.words)
                 .iter()
                 .filter(|word| !allow_filler_removal || !is_filler_word(word))
                 .cloned(),
@@ -576,47 +584,212 @@ fn retained_input_words(input: &str, allow_filler_removal: bool) -> Vec<String> 
     retained
 }
 
-/// Returns whether normalized required content contains explicit negation.
-fn contains_negation(words: &[String]) -> bool {
-    words.iter().any(|word| {
-        matches!(
-            word.as_str(),
-            "not"
-                | "no"
-                | "never"
-                | "without"
-                | "non"
-                | "ne"
-                | "pas"
-                | "jamais"
-                | "aucun"
-                | "aucune"
-                | "sans"
-                | "rien"
-                | "ni"
+fn is_explicit_negation_word(word: &str) -> bool {
+    matches!(
+        word,
+        "not"
+            | "no"
+            | "cannot"
+            | "nothing"
+            | "nobody"
+            | "none"
+            | "nor"
+            | "neither"
+            | "never"
+            | "without"
+            | "non"
+            | "ne"
+            | "pas"
+            | "jamais"
+            | "aucun"
+            | "aucune"
+            | "sans"
+            | "rien"
+            | "ni"
+    )
+}
+
+fn is_english_contraction(pair: &[String]) -> bool {
+    pair[1] == "t"
+        && matches!(
+            pair[0].as_str(),
+            "aren"
+                | "can"
+                | "couldn"
+                | "didn"
+                | "doesn"
+                | "don"
+                | "hadn"
+                | "hasn"
+                | "haven"
+                | "isn"
+                | "mustn"
+                | "shouldn"
+                | "wasn"
+                | "weren"
+                | "won"
+                | "wouldn"
         )
-    }) || words.windows(2).any(|pair| {
-        pair[1] == "t"
-            && matches!(
-                pair[0].as_str(),
-                "aren"
-                    | "can"
-                    | "couldn"
-                    | "didn"
-                    | "doesn"
-                    | "don"
-                    | "hadn"
-                    | "hasn"
-                    | "haven"
-                    | "isn"
-                    | "mustn"
-                    | "shouldn"
-                    | "wasn"
-                    | "weren"
-                    | "won"
-                    | "wouldn"
+}
+
+fn contains_french_n_apostrophe(text: &str) -> bool {
+    text.to_lowercase()
+        .split(|ch: char| !ch.is_alphabetic() && !matches!(ch, '\'' | '’'))
+        .any(|token| token.starts_with("n'") || token.starts_with("n’"))
+}
+
+/// Returns whether required content contains explicit negation.
+fn contains_negation(text: &str, words: &[String]) -> bool {
+    words.iter().any(|word| is_explicit_negation_word(word))
+        || words.windows(2).any(is_english_contraction)
+        || (contains_french_n_apostrophe(text) && words.iter().any(|word| word == "n"))
+}
+
+fn is_negation_component(word: &str) -> bool {
+    is_explicit_negation_word(word)
+        || word == "n"
+        || word == "t"
+        || matches!(
+            word,
+            "aren"
+                | "can"
+                | "couldn"
+                | "didn"
+                | "doesn"
+                | "don"
+                | "hadn"
+                | "hasn"
+                | "haven"
+                | "isn"
+                | "mustn"
+                | "shouldn"
+                | "wasn"
+                | "weren"
+                | "won"
+                | "wouldn"
+        )
+}
+
+/// Counts semantic negation markers without double-counting French `ne … pas`.
+fn negation_count(text: &str, words: &[String]) -> usize {
+    let english = words
+        .iter()
+        .filter(|word| {
+            matches!(
+                word.as_str(),
+                "not"
+                    | "no"
+                    | "cannot"
+                    | "nothing"
+                    | "nobody"
+                    | "none"
+                    | "nor"
+                    | "neither"
+                    | "never"
+                    | "without"
             )
-    })
+        })
+        .count()
+        + words
+            .windows(2)
+            .filter(|pair| is_english_contraction(pair))
+            .count();
+    let french_strong = words
+        .iter()
+        .filter(|word| {
+            matches!(
+                word.as_str(),
+                "non" | "pas" | "jamais" | "aucun" | "aucune" | "sans" | "rien" | "ni"
+            )
+        })
+        .count();
+    let french_lead = usize::from(
+        french_strong == 0
+            && (words.iter().any(|word| word == "ne")
+                || (contains_french_n_apostrophe(text) && words.iter().any(|word| word == "n"))),
+    );
+
+    english + french_strong + french_lead
+}
+
+/// Splits provider output into clauses so a negation retained for one
+/// instruction cannot mask a negation dropped from another one.
+fn normalized_clauses(output: &str) -> Vec<Vec<String>> {
+    let mut clauses = Vec::new();
+    for sentence in normalized_sentences(output) {
+        let mut current = Vec::new();
+        for word in sentence.words {
+            if matches!(
+                word.as_str(),
+                "and" | "but" | "then" | "et" | "mais" | "puis"
+            ) {
+                if !current.is_empty() {
+                    clauses.push(std::mem::take(&mut current));
+                }
+            } else {
+                current.push(word);
+            }
+        }
+        if !current.is_empty() {
+            clauses.push(current);
+        }
+    }
+    clauses
+}
+
+fn negation_lost_by_instruction(input: &str, output: &str, allow_filler_removal: bool) -> bool {
+    let input_sentences = normalized_sentences(input);
+    let output_clauses = normalized_clauses(output);
+    let output_negations: usize = output_clauses
+        .iter()
+        .map(|clause| negation_count(output, clause))
+        .sum();
+    let mut required_negations = 0;
+
+    for (index, sentence) in input_sentences.iter().enumerate() {
+        if is_retraction_or_retracted(&input_sentences, index) {
+            continue;
+        }
+        let words: Vec<String> = required_sentence_words(&sentence.words)
+            .iter()
+            .filter(|word| !allow_filler_removal || !is_filler_word(word))
+            .cloned()
+            .collect();
+        if !contains_negation(sentence.raw, &words) {
+            continue;
+        }
+        required_negations += 1;
+
+        let anchors: HashSet<&str> = words
+            .iter()
+            .map(String::as_str)
+            .filter(|word| !is_negation_component(word))
+            .collect();
+        let best_overlap = output_clauses
+            .iter()
+            .map(|clause| {
+                clause
+                    .iter()
+                    .filter(|word| anchors.contains(word.as_str()))
+                    .count()
+            })
+            .max()
+            .unwrap_or(0);
+        if best_overlap == 0
+            || !output_clauses.iter().any(|clause| {
+                clause
+                    .iter()
+                    .filter(|word| anchors.contains(word.as_str()))
+                    .count()
+                    == best_overlap
+                    && contains_negation(output, clause)
+            })
+        {
+            return true;
+        }
+    }
+
+    required_negations > output_negations
 }
 
 /// The clean templates may repair individual words, but they must not silently
@@ -631,7 +804,7 @@ fn clean_polish_lost_content(input: &str, output: &str, allow_filler_removal: bo
         return !input_words.is_empty();
     }
 
-    if contains_negation(&input_words) && !contains_negation(&output_word_list) {
+    if negation_lost_by_instruction(input, output, allow_filler_removal) {
         return true;
     }
 
@@ -649,11 +822,15 @@ fn clean_polish_lost_content(input: &str, output: &str, allow_filler_removal: bo
 /// Applies the template-specific expansion and content-preservation checks.
 fn guard_polish_content(
     template_id: &str,
+    template_prompt: &str,
     input: &str,
     output: &str,
 ) -> Result<String, &'static str> {
     let output = clamp_polish_expansion(template_id, input, output);
     if matches!(template_id, TEMPLATE_CLEAN | TEMPLATE_NO_FILLERS)
+        && default_polish_templates().into_iter().any(|template| {
+            template.id == template_id && template.prompt.trim() == template_prompt.trim()
+        })
         && clean_polish_lost_content(input, &output, template_id == TEMPLATE_NO_FILLERS)
     {
         Err("Dictation polish dropped source content; using raw text")
@@ -800,7 +977,12 @@ pub async fn polish_dictation_text(
         Ok(text) => {
             let text = super::formatters::apply_post_polish_formatters(&text);
             let text = strip_prompt_leakage(&text, &stripped);
-            let text = match guard_polish_content(template.id.as_str(), &stripped, &text) {
+            let text = match guard_polish_content(
+                template.id.as_str(),
+                &template_prompt,
+                &stripped,
+                &text,
+            ) {
                 Ok(text) => text,
                 Err(warning) => {
                     tracing::warn!(model = %model, warning, "Dictation polish rejected");
@@ -854,6 +1036,19 @@ mod tests {
             category: None,
             created_at: String::new(),
         }
+    }
+
+    fn guard_builtin_polish_content(
+        template_id: &str,
+        input: &str,
+        output: &str,
+    ) -> Result<String, &'static str> {
+        let prompt = default_polish_templates()
+            .into_iter()
+            .find(|template| template.id == template_id)
+            .expect("built-in polish template")
+            .prompt;
+        guard_polish_content(template_id, &prompt, input, output)
     }
 
     #[test]
@@ -1114,7 +1309,7 @@ mod tests {
         let input = "Dictation test. This opening sentence must stay in the pasted text.";
         let output = "This opening sentence must stay in the pasted text.";
 
-        assert!(guard_polish_content(TEMPLATE_CLEAN, input, output).is_err());
+        assert!(guard_builtin_polish_content(TEMPLATE_CLEAN, input, output).is_err());
     }
 
     #[test]
@@ -1123,7 +1318,7 @@ mod tests {
             "Keep this opening. Confidential launch details. Send the memo tomorrow morning.";
         let output = "Keep this opening. Send the memo tomorrow morning.";
 
-        assert!(guard_polish_content(TEMPLATE_CLEAN, input, output).is_err());
+        assert!(guard_builtin_polish_content(TEMPLATE_CLEAN, input, output).is_err());
     }
 
     #[test]
@@ -1131,19 +1326,19 @@ mod tests {
         let input = "Bonjour, ceci est un test de dictée entièrement en français.";
         let output = "Hello, this is a dictation written entirely in English.";
 
-        assert!(guard_polish_content(TEMPLATE_CLEAN, input, output).is_err());
+        assert!(guard_builtin_polish_content(TEMPLATE_CLEAN, input, output).is_err());
     }
 
     #[test]
     fn clean_polish_allows_repairs_and_an_intentional_filler_opening_removal() {
-        let repaired = guard_polish_content(
+        let repaired = guard_builtin_polish_content(
             TEMPLATE_CLEAN,
             "petit maitre a jour également les document Confluence s'il te plait",
             "Peux-tu mettre à jour également les documents Confluence s'il te plaît ?",
         );
         assert!(repaired.is_ok());
 
-        let without_filler = guard_polish_content(
+        let without_filler = guard_builtin_polish_content(
             TEMPLATE_NO_FILLERS,
             "Euh. Envoie le document à Camille demain.",
             "Envoie le document à Camille demain.",
@@ -1153,7 +1348,7 @@ mod tests {
 
     #[test]
     fn clean_polish_allows_an_explicit_self_correction() {
-        let result = guard_polish_content(
+        let result = guard_builtin_polish_content(
             TEMPLATE_CLEAN,
             "Approve the detailed budget proposal and send every attachment to Alice and Bob by Friday. Scratch that. Reject the proposal tomorrow.",
             "Reject the proposal tomorrow.",
@@ -1164,14 +1359,14 @@ mod tests {
 
     #[test]
     fn clean_polish_allows_an_inline_self_correction_and_guards_its_replacement() {
-        let result = guard_polish_content(
+        let result = guard_builtin_polish_content(
             TEMPLATE_CLEAN,
             "Approve the detailed budget proposal. No wait, reject it.",
             "Reject it.",
         );
         assert!(result.is_ok());
 
-        let missing_replacement = guard_polish_content(
+        let missing_replacement = guard_builtin_polish_content(
             TEMPLATE_CLEAN,
             "Approve the detailed budget proposal. No wait, reject it tomorrow.",
             "Tomorrow.",
@@ -1184,19 +1379,19 @@ mod tests {
         let input = "Please send the invoice today. Please cancel the invoice tomorrow.";
         let output = "Please send the invoice today.";
 
-        assert!(guard_polish_content(TEMPLATE_CLEAN, input, output).is_err());
+        assert!(guard_builtin_polish_content(TEMPLATE_CLEAN, input, output).is_err());
     }
 
     #[test]
     fn clean_polish_rejects_a_removed_negation() {
-        let result = guard_polish_content(
+        let result = guard_builtin_polish_content(
             TEMPLATE_CLEAN,
             "Do not send the invoice today.",
             "Do send the invoice today.",
         );
         assert!(result.is_err());
 
-        let contracted = guard_polish_content(
+        let contracted = guard_builtin_polish_content(
             TEMPLATE_CLEAN,
             "Don't send the invoice.",
             "Send the invoice.",
@@ -1205,9 +1400,59 @@ mod tests {
     }
 
     #[test]
+    fn clean_polish_rejects_extended_and_french_apostrophe_negation_loss() {
+        let cannot = guard_builtin_polish_content(
+            TEMPLATE_CLEAN,
+            "You cannot send the invoice today.",
+            "You can send the invoice today.",
+        );
+        assert!(cannot.is_err());
+
+        let french = guard_builtin_polish_content(
+            TEMPLATE_CLEAN,
+            "N'envoyez le rapport demain.",
+            "Envoyez le rapport demain.",
+        );
+        assert!(french.is_err());
+
+        let non_negations = guard_builtin_polish_content(
+            TEMPLATE_CLEAN,
+            "La version N accueille une personne de plus.",
+            "La version accueille une personne.",
+        );
+        assert!(non_negations.is_ok());
+    }
+
+    #[test]
+    fn clean_polish_matches_negation_to_each_retained_instruction() {
+        let result = guard_builtin_polish_content(
+            TEMPLATE_CLEAN,
+            "Do not send the invoice today. Do not cancel the meeting tomorrow.",
+            "Do send the invoice today. Do not cancel the meeting tomorrow.",
+        );
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn edited_builtin_prompt_skips_the_builtin_preservation_guard() {
+        let result = guard_polish_content(
+            TEMPLATE_CLEAN,
+            "Rewrite this concisely.",
+            "The first detailed instruction must remain. The second detailed instruction must remain.",
+            "Keep both instructions.",
+        );
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
     fn no_fillers_ignores_removed_fillers_in_the_retention_threshold() {
-        let result =
-            guard_polish_content(TEMPLATE_NO_FILLERS, "um um um hello there", "hello there");
+        let result = guard_builtin_polish_content(
+            TEMPLATE_NO_FILLERS,
+            "um um um hello there",
+            "hello there",
+        );
 
         assert!(result.is_ok());
     }
