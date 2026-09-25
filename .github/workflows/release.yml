@@ -102,6 +102,10 @@ jobs:
   desktop:
     needs: create-release
     runs-on: macos-26
+    # `secrets` is not available in a step-level `if:`, and using it there makes
+    # GitHub reject the whole workflow file. Expose the check as a job env var.
+    env:
+      HAS_APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE != '' }}
     steps:
       - uses: actions/checkout@v5
 
@@ -140,7 +144,7 @@ jobs:
         # for the release. The build reads this via env!("CARGO_PKG_VERSION").
 
       - name: Import signing certificate
-        if: ${{ secrets.APPLE_CERTIFICATE != '' }}
+        if: env.HAS_APPLE_CERTIFICATE == 'true'
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
