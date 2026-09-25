@@ -183,8 +183,12 @@ pub fn populate_shortcuts(
     native_shortcuts: &[String],
     tap_installed: Option<bool>,
 ) {
-    window
-        .set_settings_toggle_shortcut_label(crate::format_shortcut_label(&shortcuts.toggle).into());
+    let toggle_label = crate::format_shortcut_label(&shortcuts.toggle);
+    window.set_settings_toggle_shortcut_label(toggle_label.as_str().into());
+    // ActionHero reads the root property, not the Settings label. Keep both
+    // projections in one successful-load/save path so returning home never
+    // shows the startup shortcut after it has changed.
+    window.set_dictation_shortcut(toggle_label.into());
     window.set_settings_ptt_shortcut_label(
         crate::format_shortcut_label(&shortcuts.push_to_talk).into(),
     );
@@ -302,6 +306,16 @@ pub fn audio_retention_from_slint(value: SlintAudioRetention) -> MeetingAudioRet
 #[cfg(test)]
 mod tests {
     use super::*;
+    use slint::platform::{Platform, WindowAdapter, software_renderer::MinimalSoftwareWindow};
+    use std::rc::Rc;
+
+    struct TestPlatform;
+
+    impl Platform for TestPlatform {
+        fn create_window_adapter(&self) -> Result<Rc<dyn WindowAdapter>, slint::PlatformError> {
+            Ok(MinimalSoftwareWindow::new(Default::default()))
+        }
+    }
 
     #[test]
     fn permission_kind_conversions_cover_every_variant() {
@@ -318,5 +332,21 @@ mod tests {
                 variant
             );
         }
+    }
+
+    #[test]
+    fn shortcut_projection_updates_settings_and_the_home_hint_together() {
+        let _ = slint::platform::set_platform(Box::new(TestPlatform));
+        let window = MainWindow::new().unwrap();
+        let shortcuts = ShortcutSettings {
+            toggle: "CommandOrControl+Shift+Space".into(),
+            push_to_talk: "Alt+Space".into(),
+        };
+
+        populate_shortcuts(&window, &shortcuts, &[], Some(true));
+
+        assert_eq!(window.get_settings_toggle_shortcut_label(), "⌘ ⇧ Space");
+        assert_eq!(window.get_dictation_shortcut(), "⌘ ⇧ Space");
+        assert_eq!(window.get_settings_ptt_shortcut_label(), "⌥ Space");
     }
 }

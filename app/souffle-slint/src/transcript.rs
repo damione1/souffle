@@ -66,21 +66,35 @@ fn tokenize_words(text: &str) -> Vec<&str> {
     tokens
 }
 
-/// Builds `TranscriptBlock.words` (see its doc comment): one entry per
-/// token from `tokenize_words`, `clickable` deciding whether it renders as a
-/// `TouchArea`-wrapped word or a plain literal run in the `FlexboxLayout`.
-/// The token text itself is never modified - a click hands the exact
-/// original word back to Rust, same as the old Markdown-link target did.
+/// Builds `TranscriptBlock.words` (see its doc comment). Each word-character
+/// run owns the punctuation/whitespace after it so the separator cannot wrap
+/// onto a new line by itself. The clickable `text` remains the exact source
+/// word; only source-leading whitespace is omitted from display.
 pub(crate) fn build_words(text: &str) -> Vec<TranscriptWord> {
-    tokenize_words(text)
-        .into_iter()
-        .map(|token| TranscriptWord {
-            clickable: is_word_char(token.chars().next().unwrap_or(' '))
-                && is_clickable_word(token),
-            text: token.into(),
-            provisional: false,
-        })
-        .collect()
+    let mut words: Vec<TranscriptWord> = Vec::new();
+    for token in tokenize_words(text) {
+        if is_word_char(token.chars().next().unwrap_or(' ')) {
+            words.push(TranscriptWord {
+                clickable: is_clickable_word(token),
+                text: token.into(),
+                trailing_text: "".into(),
+                provisional: false,
+            });
+        } else if let Some(previous) = words.last_mut() {
+            previous.trailing_text = token.into();
+        } else {
+            let visible = token.trim_start_matches(char::is_whitespace);
+            if !visible.is_empty() {
+                words.push(TranscriptWord {
+                    clickable: false,
+                    text: visible.into(),
+                    trailing_text: "".into(),
+                    provisional: false,
+                });
+            }
+        }
+    }
+    words
 }
 
 /// Wraps `build_words` in the `ModelRc` the generated `TranscriptBlock.words`
@@ -545,9 +559,10 @@ mod tests {
         assert!(!is_clickable_word(""));
     }
 
-    fn word(text: &str, clickable: bool) -> TranscriptWord {
+    fn word(text: &str, trailing_text: &str, clickable: bool) -> TranscriptWord {
         TranscriptWord {
             text: text.into(),
+            trailing_text: trailing_text.into(),
             clickable,
             provisional: false,
         }
@@ -560,12 +575,9 @@ mod tests {
         assert_eq!(
             words,
             vec![
-                word("Bonjour", true),
-                word(", ", false),
-                word("42", false),
-                word(" ", false),
-                word("ans", true),
-                word(".", false),
+                word("Bonjour", ", ", true),
+                word("42", " ", false),
+                word("ans", ".", true),
             ]
         );
     }
@@ -579,15 +591,11 @@ mod tests {
         assert_eq!(
             words,
             vec![
-                word("valeur", true),
+                word("valeur", " * ", true),
                 // "2" is its own word-char run (digits count as word chars
-                // for tokenization, just not for clickability), so it does
-                // not merge with the surrounding punctuation/whitespace.
-                word(" * ", false),
-                word("2", false),
-                word(" <", false),
-                word("ok", true),
-                word(">", false),
+                // for tokenization, just not for clickability).
+                word("2", " <", false),
+                word("ok", ">", true),
             ]
         );
     }
@@ -597,7 +605,7 @@ mod tests {
         // What `TouchArea.clicked` hands back to Rust (`word.text`) must
         // match the original word exactly, apostrophe included.
         let words = build_words("aujourd'hui");
-        assert_eq!(words, vec![word("aujourd'hui", true)]);
+        assert_eq!(words, vec![word("aujourd'hui", "", true)]);
     }
 
     /// SOU-223 "Couvrir les occurrences répétées": `build_words` decides per
@@ -611,23 +619,40 @@ mod tests {
         assert_eq!(
             words,
             vec![
-                word("3", false),
-                word(" ", false),
-                word("3", false),
-                word(" ", false),
-                word("bien", true),
-                word(" ", false),
-                word("bien", true),
-                word(".", false),
+                word("3", " ", false),
+                word("3", " ", false),
+                word("bien", " ", true),
+                word("bien", ".", true),
             ]
         );
     }
 
     #[test]
-    fn build_words_concatenation_never_loses_characters() {
+    fn build_words_concatenation_never_loses_non_leading_characters() {
         let text = "Bonjour, comment \u{e7}a va - super bien !";
         let words = build_words(text);
-        let rebuilt: String = words.iter().map(|w| w.text.as_str()).collect();
+        let rebuilt: String = words
+            .iter()
+            .flat_map(|word| [word.text.as_str(), word.trailing_text.as_str()])
+            .collect();
         assert_eq!(rebuilt, text);
+    }
+
+    #[test]
+    fn build_words_never_creates_a_leading_whitespace_item() {
+        let words = build_words("  Bonjour, données utiles");
+        assert!(
+            words
+                .iter()
+                .all(|word| !word.text.starts_with(char::is_whitespace)),
+            "a flex item still starts with whitespace: {words:?}"
+        );
+        assert_eq!(
+            words
+                .iter()
+                .flat_map(|word| [word.text.as_str(), word.trailing_text.as_str()])
+                .collect::<String>(),
+            "Bonjour, données utiles"
+        );
     }
 }

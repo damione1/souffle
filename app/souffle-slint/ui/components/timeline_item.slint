@@ -105,7 +105,9 @@ export component TimelineItemRow inherits Rectangle {
                         wrap: root.is-dictation && root.expanded ? word-wrap : no-wrap;
                         overflow: root.is-dictation && root.expanded ? clip : elide;
                         horizontal-stretch: 1;
-                        vertical-alignment: top;
+                        // A collapsed title shares the action row's visual
+                        // axis. Expanded dictations still grow downward.
+                        vertical-alignment: root.is-dictation && root.expanded ? top : center;
                         font-size: 13.5px;
                         color: Theme.text-secondary;
                     }
@@ -147,7 +149,7 @@ export component TimelineItemRow inherits Rectangle {
 
                             Text {
                                 text: root.entry.time-label;
-                                width: Theme.row-time-width;
+                                width: Theme.row-timeline-time-width;
                                 horizontal-alignment: right;
                                 color: Theme.text-muted;
                                 font-family: "JetBrains Mono";

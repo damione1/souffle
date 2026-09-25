@@ -12,7 +12,13 @@ import { LucideIcon, IconSet } from "lucide_icon.slint";
 // (`transcript::build_words`) from the same `tokenize_words`/
 // `is_clickable_word` logic `build_markdown_text` used to feed `StyledText`.
 export struct TranscriptWord {
+    // The word/non-whitespace run. This is also the exact dictionary target
+    // for clickable entries.
     text: string,
+    // Punctuation and whitespace that follow `text`. Keeping both in one
+    // Flexbox item prevents a standalone space from wrapping onto the next
+    // line while leaving the clickable area limited to `text`.
+    trailing-text: string,
     clickable: bool,
     // A word the engine is still holding (tentative): shown dimmed rather
     // than hidden, so a word that was heard is visibly on screen even
@@ -35,17 +41,33 @@ export component TranscriptWordFlow inherits FlexboxLayout {
     flex-wrap: wrap;
     spacing: 0px;
 
-    for word in root.words: TouchArea {
-        enabled: word.clickable;
-        mouse-cursor: word.clickable ? pointer : default;
-        clicked => {
-            if word.clickable {
-                root.word-clicked(word.text, self.absolute-position.x, self.absolute-position.y + self.height);
+    for word in root.words: Rectangle {
+        width: word-label.preferred-width + trailing-label.preferred-width;
+        height: max(word-label.preferred-height, trailing-label.preferred-height);
+
+        word-area := TouchArea {
+            width: word-label.preferred-width;
+            enabled: word.clickable;
+            mouse-cursor: word.clickable ? pointer : default;
+            clicked => {
+                if word.clickable {
+                    root.word-clicked(word.text, self.absolute-position.x, self.absolute-position.y + self.height);
+                }
+            }
+
+            word-label := Text {
+                text: word.text;
+                width: self.preferred-width;
+                color: root.color;
+                font-size: root.font-size;
+                opacity: word.provisional ? Theme.provisional-opacity : 1.0;
             }
         }
 
-        Text {
-            text: word.text;
+        trailing-label := Text {
+            x: word-area.width;
+            text: word.trailing-text;
+            width: self.preferred-width;
             color: root.color;
             font-size: root.font-size;
             opacity: word.provisional ? Theme.provisional-opacity : 1.0;
@@ -111,8 +133,11 @@ export component DictionaryAliasPopover inherits Rectangle {
         // the old property maps to closing on every pressed event, while
         // `close-on-click-outside` specifically checks `!mouse_inside_popup()`).
         close-policy: PopupClosePolicy.close-on-click-outside;
+        // PopupWindow transfers focus to this scope when shown. Without
+        // forward-focus, a mouse-opened popup never receives Escape.
+        forward-focus: popup-focus;
 
-        FocusScope {
+        popup-focus := FocusScope {
             key-pressed(event) => {
                 if event.text == Key.Escape {
                     popup.close();

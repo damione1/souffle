@@ -25,12 +25,10 @@ use crate::{SpeakerRole, TranscriptBlock, TranscriptWord, timeline};
 pub(crate) fn provisional_words(finalized: &str, provisional: Option<&str>) -> Vec<TranscriptWord> {
     let mut words = build_words(finalized);
     if let Some(tail) = provisional.filter(|t| !t.is_empty()) {
-        if !finalized.is_empty() {
-            words.push(TranscriptWord {
-                text: " ".into(),
-                clickable: false,
-                provisional: true,
-            });
+        if let Some(previous) = words.last_mut() {
+            let mut trailing = previous.trailing_text.to_string();
+            trailing.push(' ');
+            previous.trailing_text = trailing.into();
         }
         words.extend(build_words(tail).into_iter().map(|w| TranscriptWord {
             clickable: false,
@@ -420,17 +418,22 @@ pub mod tests {
         assert_eq!(lt.tentative_them.active_text(), Some("lemons"));
 
         let block = &lt.build_blocks()[0];
-        let words: Vec<(String, bool)> = block
+        let words: Vec<(String, String, bool)> = block
             .words
             .iter()
-            .map(|w| (w.text.to_string(), w.provisional))
+            .map(|w| {
+                (
+                    w.text.to_string(),
+                    w.trailing_text.to_string(),
+                    w.provisional,
+                )
+            })
             .collect();
         assert_eq!(
             words,
             vec![
-                ("yellow".to_string(), false),
-                (" ".to_string(), true),
-                ("lemons".to_string(), true),
+                ("yellow".to_string(), " ".to_string(), false),
+                ("lemons".to_string(), "".to_string(), true),
             ]
         );
 
@@ -526,14 +529,17 @@ pub mod tests {
         lt.push_tentative(&seg("provisoire", 1.1, 1.3, false, Some(Speaker::Me)));
         let blocks = lt.build_blocks();
         assert_eq!(blocks.len(), 1);
-        let words: Vec<(String, bool)> = blocks[0]
+        let words: Vec<(String, String, bool)> = blocks[0]
             .words
             .iter()
-            .map(|w| (w.text.to_string(), w.clickable))
+            .map(|w| (w.text.to_string(), w.trailing_text.to_string(), w.clickable))
             .collect();
-        assert!(words.contains(&("Kubernetes".into(), true)));
-        assert!(words.contains(&("provisoire".into(), false)));
-        let rebuilt: String = words.iter().map(|(t, _)| t.as_str()).collect();
+        assert!(words.contains(&("Kubernetes".into(), " ".into(), true)));
+        assert!(words.contains(&("provisoire".into(), "".into(), false)));
+        let rebuilt: String = words
+            .iter()
+            .flat_map(|(text, trailing, _)| [text.as_str(), trailing.as_str()])
+            .collect();
         assert_eq!(rebuilt, blocks[0].text.as_str());
     }
 
