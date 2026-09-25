@@ -2,7 +2,9 @@
 
 Senior checklist for the shipped Soufflé UI. The binary crate is `souffle-slint` (`app/souffle-slint/`). Rust owns the truth. Slint renders it. Nothing in the shipped app reads the retired Svelte tree under `src/`.
 
-Read this before adding a `.slint` file, a Slint enum, a house widget, or a `VecModel` push. Official Slint docs this guide compresses: [best practices](https://docs.slint.dev/latest/docs/slint/guide/development/best-practices/), [reactivity](https://docs.slint.dev/latest/docs/slint/guide/language/concepts/reactivity/), [properties](https://docs.slint.dev/latest/docs/slint/guide/language/coding/properties/), [globals](https://docs.slint.dev/latest/docs/slint/guide/language/coding/globals/), [functions and callbacks](https://docs.slint.dev/latest/docs/slint/guide/language/coding/functions-and-callbacks/), [repetition and models](https://docs.slint.dev/latest/docs/slint/guide/language/coding/repetition-and-data-models/), [backends and renderers](https://docs.slint.dev/latest/docs/slint/guide/backends-and-renderers/backends_and_renderers/), [debugging](https://docs.slint.dev/latest/docs/slint/guide/development/debugging_techniques/), [ListView](https://docs.slint.dev/latest/docs/slint/reference/std-widgets/views/listview/).
+Read this before adding a `.slint` file, a Slint enum, a house widget, or a `VecModel` push. The
+[SOU-259 component audit](slint-components.md) records the current build-vs-reuse decisions.
+Official Slint docs this guide compresses: [best practices](https://docs.slint.dev/latest/docs/slint/guide/development/best-practices/), [reactivity](https://docs.slint.dev/latest/docs/slint/guide/language/concepts/reactivity/), [properties](https://docs.slint.dev/latest/docs/slint/guide/language/coding/properties/), [globals](https://docs.slint.dev/latest/docs/slint/guide/language/coding/globals/), [functions and callbacks](https://docs.slint.dev/latest/docs/slint/guide/language/coding/functions-and-callbacks/), [repetition and models](https://docs.slint.dev/latest/docs/slint/guide/language/coding/repetition-and-data-models/), [backends and renderers](https://docs.slint.dev/latest/docs/slint/guide/backends-and-renderers/backends_and_renderers/), [debugging](https://docs.slint.dev/latest/docs/slint/guide/development/debugging_techniques/), [ListView](https://docs.slint.dev/latest/docs/slint/reference/std-widgets/views/listview/).
 
 Type-design rules (enums, traits, abstractions) are adapted from Microsoft's [Framework Design Guidelines](https://learn.microsoft.com/en-us/dotnet/standard/design-guidelines/type) and checked against the [Rust API Guidelines](https://rust-lang.github.io/api-guidelines/). The CLR words are class, struct, interface. Here they are enum, struct, trait, Slint `export enum`. The obsession is the same: the type is the contract. FDG is not a line-by-line port; the deltas below are the parts that would go wrong if you copied C# into Rust.
 
@@ -163,6 +165,12 @@ app/souffle-slint/
 - One concern per file. A settings section is a component. A reusable control (`ThemedSwitch`, `SettingsField`) is a component. The Window is an assembler, not a dumping ground.
 - Import what you use. Do not re-export types from random files; `types.slint` and `theme.slint` are the two globals every file may import.
 - `std-widgets.slint` Fluent skins ignore `Theme`. For anything the user sees as chrome (buttons, tabs, switches, combos, fields), use the house widgets under `ui/components/`. Stock `TextEdit` / `ListView` / `ScrollView` stay acceptable when they are not the visual identity.
+- Before writing a house component, check the widget APIs in the **pinned** Slint version, native
+  elements (`Path`, `Image`, `PopupWindow`, layouts), official examples, and maintained crates.
+  State the alternatives evaluated and the rejected contract (theme, typed data, interaction,
+  accessibility, or measured performance) in the PR. Prefer a thin wrapper over an existing
+  primitive. “The standard widget exists” is not enough when its style cannot consume `Theme`, and
+  “this file is custom” is not enough to call a feature-level composition a reimplemented widget.
 
 ## 3. Component API: DRY and typed
 
@@ -248,7 +256,13 @@ Rule of thumb:
 
 ### Lists
 
-- `ListView` instantiates only visible rows. Use it for unbounded lists (timeline, dictionary, transcript). `ScrollView` plus `for` builds every child. Fine for a handful of settings groups, not for history.
+- `ListView` instantiates only visible or partially visible rows when the model `for` is its direct
+  child. This is a compiler/runtime optimization; reading the declarative `ListView` wrapper alone
+  does not reveal it. Letting the widget own `content-height` also enables automatic content-extent
+  calculation; an explicit value does not disable virtualization, but it must remain correct. Use
+  `ListView` for unbounded lists (timeline, dictionary, transcript). `ScrollView`/`Flickable` plus
+  `for`, or a repeater nested below another layout, builds every child. Fine for a handful of
+  settings groups, not for history.
 - Prefer mutating a `VecModel` (`set_row_data`, `push`, `remove`, `row_changed`) over `set_foo(Rc::new(VecModel::from(everything)))` on every keystroke. Replacing the model rebuilds every row.
 - Fixed row height is easier on the virtualizer. Variable-height rows in a hand-rolled `for` will jank.
 
