@@ -1,4 +1,7 @@
+use std::collections::HashSet;
+
 use serde::{Deserialize, Serialize};
+use unicode_normalization::{UnicodeNormalization, char::is_combining_mark};
 
 use crate::filter::{DictionaryEntry, pronunciation_aliases};
 use crate::settings::{AppSettings, DictationPolishTemplate};
@@ -40,8 +43,10 @@ pub fn default_polish_templates() -> Vec<DictationPolishTemplate> {
                       self-corrections (\"non attends\", \"no wait\", \"scratch that\" and \
                       similar: drop the old bit, keep what follows). Honor spoken commands \
                       (new line, period, comma). Restore conventional spelling of technical \
-                      terms, proper nouns, and anglicisms. Preserve the original language \
-                      (French or English). Never add content that was not dictated."
+                      terms, proper nouns, and anglicisms. Preserve every other complete \
+                      sentence and fact, including a short opening sentence. Preserve the \
+                      original language (French or English). Never summarize, omit, translate, \
+                      or add content."
                 .to_string(),
         },
         DictationPolishTemplate {
@@ -80,6 +85,13 @@ const SUPERSEDED_CLEAN_PROMPTS: &[&str] = &[
      what follows). Honor spoken commands (new line, period, comma). Restore \
      conventional spelling of technical terms, proper nouns, and anglicisms. Preserve \
      the original language (French or English). Never add content that was not dictated.",
+    "Clean this dictation. Repair words the recognizer misheard, using \
+     the surrounding sentence to tell what was meant. Discard \
+     self-corrections (\"non attends\", \"no wait\", \"scratch that\" and \
+     similar: drop the old bit, keep what follows). Honor spoken commands \
+     (new line, period, comma). Restore conventional spelling of technical \
+     terms, proper nouns, and anglicisms. Preserve the original language \
+     (French or English). Never add content that was not dictated.",
 ];
 
 fn superseded_default_prompts(id: &str) -> &'static [&'static str] {
@@ -428,6 +440,81 @@ fn expanded_too_much(input: &str, output: &str) -> bool {
     out > inn.saturating_add(inn / 2).saturating_add(8)
 }
 
+fn normalized_words(text: &str) -> Vec<String> {
+    let mut words = Vec::new();
+    let mut word = String::new();
+    for ch in text.nfd().filter(|ch| !is_combining_mark(*ch)) {
+        for lower in ch.to_lowercase() {
+            if lower.is_alphanumeric() {
+                word.push(lower);
+            } else if !word.is_empty() {
+                words.push(std::mem::take(&mut word));
+            }
+        }
+    }
+    if !word.is_empty() {
+        words.push(word);
+    }
+    words
+}
+
+fn is_filler_sentence(words: &[String]) -> bool {
+    !words.is_empty()
+        && words.iter().all(|word| {
+            matches!(
+                word.as_str(),
+                "um" | "uh" | "erm" | "euh" | "hum" | "hmm" | "like"
+            )
+        })
+}
+
+fn dropped_substantive_sentence(input: &str, output_words: &HashSet<String>) -> bool {
+    input
+        .split(['.', '!', '?', '\n', '\r'])
+        .map(normalized_words)
+        .any(|words| {
+            words.len() >= 2
+                && !is_filler_sentence(&words)
+                && !words.iter().any(|word| output_words.contains(word))
+        })
+}
+
+/// The clean templates may repair individual words, but they must not silently
+/// lose a substantive sentence or produce an obvious low-overlap rewrite such
+/// as a whole-language translation. A rejected answer falls back to raw text.
+fn clean_polish_lost_content(input: &str, output: &str) -> bool {
+    let input_words = normalized_words(input);
+    let output_words: HashSet<String> = normalized_words(output).into_iter().collect();
+    if input_words.is_empty() || output_words.is_empty() {
+        return !input_words.is_empty();
+    }
+
+    let retained = input_words
+        .iter()
+        .filter(|word| output_words.contains(*word))
+        .count();
+    if retained.saturating_mul(100) < input_words.len().saturating_mul(30) {
+        return true;
+    }
+
+    dropped_substantive_sentence(input, &output_words)
+}
+
+fn guard_polish_content(
+    template_id: &str,
+    input: &str,
+    output: &str,
+) -> Result<String, &'static str> {
+    let output = clamp_polish_expansion(template_id, input, output);
+    if matches!(template_id, TEMPLATE_CLEAN | TEMPLATE_NO_FILLERS)
+        && clean_polish_lost_content(input, &output)
+    {
+        Err("Dictation polish dropped source content; using raw text")
+    } else {
+        Ok(output)
+    }
+}
+
 /// Clean / no-fillers must not invent a closing. If the model added a new
 /// paragraph, keep the first one when it still matches the dictation length.
 fn clamp_polish_expansion(template_id: &str, input: &str, output: &str) -> String {
@@ -566,7 +653,17 @@ pub async fn polish_dictation_text(
         Ok(text) => {
             let text = super::formatters::apply_post_polish_formatters(&text);
             let text = strip_prompt_leakage(&text, &stripped);
-            let text = clamp_polish_expansion(template.id.as_str(), &stripped, &text);
+            let text = match guard_polish_content(template.id.as_str(), &stripped, &text) {
+                Ok(text) => text,
+                Err(warning) => {
+                    tracing::warn!(model = %model, warning, "Dictation polish rejected");
+                    return DictationPolishResult {
+                        text: stripped.trim().to_string(),
+                        skipped: false,
+                        warning: Some(warning.to_string()),
+                    };
+                }
+            };
             if text.trim().is_empty() {
                 DictationPolishResult {
                     text: stripped.trim().to_string(),
@@ -595,8 +692,9 @@ mod tests {
         SUPERSEDED_CLEAN_PROMPTS, TEMPLATE_BULLETS, TEMPLATE_CLEAN, TEMPLATE_EMAIL,
         TEMPLATE_NO_FILLERS, build_polish_user_prompt, clamp_polish_expansion,
         default_polish_templates, early_polish_dictation_result, effective_template_prompt,
-        is_blank_for_polish, is_own_app_name, merge_polish_templates, parse_polish_response,
-        strip_invisible_chars, strip_prompt_leakage, superseded_default_prompts,
+        guard_polish_content, is_blank_for_polish, is_own_app_name, merge_polish_templates,
+        parse_polish_response, strip_invisible_chars, strip_prompt_leakage,
+        superseded_default_prompts,
     };
     use crate::filter::DictionaryEntry;
     use crate::settings::{AppSettings, DictationPolishTemplate};
@@ -692,18 +790,20 @@ mod tests {
 
     #[test]
     fn merge_polish_templates_upgrades_an_unedited_superseded_builtin() {
-        let stored = vec![DictationPolishTemplate {
-            id: TEMPLATE_CLEAN.to_string(),
-            label: "Clean up".to_string(),
-            prompt: SUPERSEDED_CLEAN_PROMPTS[0].to_string(),
-        }];
-        let merged = merge_polish_templates(stored);
         let current = default_polish_templates();
-        assert_eq!(merged[0].prompt, current[0].prompt);
-        assert!(
-            merged[0].prompt.contains("misheard"),
-            "the upgraded prompt must carry the repair instruction"
-        );
+        for superseded in SUPERSEDED_CLEAN_PROMPTS {
+            let stored = vec![DictationPolishTemplate {
+                id: TEMPLATE_CLEAN.to_string(),
+                label: "Clean up".to_string(),
+                prompt: superseded.to_string(),
+            }];
+            let merged = merge_polish_templates(stored);
+            assert_eq!(merged[0].prompt, current[0].prompt);
+            assert!(
+                merged[0].prompt.contains("misheard"),
+                "the upgraded prompt must carry the repair instruction"
+            );
+        }
     }
 
     #[test]
@@ -860,6 +960,48 @@ mod tests {
             clamp_polish_expansion(TEMPLATE_CLEAN, input, output),
             "Bonjour, mesdames et messieurs, chers enfants,"
         );
+    }
+
+    #[test]
+    fn clean_polish_rejects_a_dropped_short_opening_sentence() {
+        let input = "Dictation test. This opening sentence must stay in the pasted text.";
+        let output = "This opening sentence must stay in the pasted text.";
+
+        assert!(guard_polish_content(TEMPLATE_CLEAN, input, output).is_err());
+    }
+
+    #[test]
+    fn clean_polish_rejects_a_dropped_interior_sentence() {
+        let input =
+            "Keep this opening. Confidential launch details. Send the memo tomorrow morning.";
+        let output = "Keep this opening. Send the memo tomorrow morning.";
+
+        assert!(guard_polish_content(TEMPLATE_CLEAN, input, output).is_err());
+    }
+
+    #[test]
+    fn clean_polish_rejects_a_translation() {
+        let input = "Bonjour, ceci est un test de dictée entièrement en français.";
+        let output = "Hello, this is a dictation written entirely in English.";
+
+        assert!(guard_polish_content(TEMPLATE_CLEAN, input, output).is_err());
+    }
+
+    #[test]
+    fn clean_polish_allows_repairs_and_an_intentional_filler_opening_removal() {
+        let repaired = guard_polish_content(
+            TEMPLATE_CLEAN,
+            "petit maitre a jour également les document Confluence s'il te plait",
+            "Peux-tu mettre à jour également les documents Confluence s'il te plaît ?",
+        );
+        assert!(repaired.is_ok());
+
+        let without_filler = guard_polish_content(
+            TEMPLATE_NO_FILLERS,
+            "Euh. Envoie le document à Camille demain.",
+            "Envoie le document à Camille demain.",
+        );
+        assert!(without_filler.is_ok());
     }
 
     #[test]
