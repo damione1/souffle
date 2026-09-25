@@ -185,6 +185,7 @@ Rules:
 - Fix punctuation and capitalization.
 - Convert spoken numbers to digits.
 - Apply self-corrections: phrases such as \"non attends\", \"no wait\", or \"scratch that\" mean discard the preceding bit and keep what follows.
+- Preserve every other complete sentence and fact, including a short opening sentence. Never summarize or omit part of the dictation.
 - Preserve the speaker's intent and original language. Do not translate.
 - Restore the conventional spelling of technical terms, proper nouns, and anglicisms when it is obvious.
 - Do not add content. Do not rewrite for style. Do not greet or comment.

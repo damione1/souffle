@@ -1,4 +1,7 @@
+use std::collections::HashSet;
+
 use serde::{Deserialize, Serialize};
+use unicode_normalization::{UnicodeNormalization, char::is_combining_mark};
 
 use crate::filter::{DictionaryEntry, pronunciation_aliases};
 use crate::settings::{AppSettings, DictationPolishTemplate};
@@ -40,8 +43,10 @@ pub fn default_polish_templates() -> Vec<DictationPolishTemplate> {
                       self-corrections (\"non attends\", \"no wait\", \"scratch that\" and \
                       similar: drop the old bit, keep what follows). Honor spoken commands \
                       (new line, period, comma). Restore conventional spelling of technical \
-                      terms, proper nouns, and anglicisms. Preserve the original language \
-                      (French or English). Never add content that was not dictated."
+                      terms, proper nouns, and anglicisms. Preserve every other complete \
+                      sentence and fact, including a short opening sentence. Preserve the \
+                      original language (French or English). Never summarize, omit, translate, \
+                      or add content."
                 .to_string(),
         },
         DictationPolishTemplate {
@@ -80,6 +85,13 @@ const SUPERSEDED_CLEAN_PROMPTS: &[&str] = &[
      what follows). Honor spoken commands (new line, period, comma). Restore \
      conventional spelling of technical terms, proper nouns, and anglicisms. Preserve \
      the original language (French or English). Never add content that was not dictated.",
+    "Clean this dictation. Repair words the recognizer misheard, using \
+     the surrounding sentence to tell what was meant. Discard \
+     self-corrections (\"non attends\", \"no wait\", \"scratch that\" and \
+     similar: drop the old bit, keep what follows). Honor spoken commands \
+     (new line, period, comma). Restore conventional spelling of technical \
+     terms, proper nouns, and anglicisms. Preserve the original language \
+     (French or English). Never add content that was not dictated.",
 ];
 
 fn superseded_default_prompts(id: &str) -> &'static [&'static str] {
@@ -428,6 +440,405 @@ fn expanded_too_much(input: &str, output: &str) -> bool {
     out > inn.saturating_add(inn / 2).saturating_add(8)
 }
 
+/// Splits text into lowercase, accent-insensitive lexical tokens.
+fn normalized_words(text: &str) -> Vec<String> {
+    let mut words = Vec::new();
+    let mut word = String::new();
+    for ch in text.nfd().filter(|ch| !is_combining_mark(*ch)) {
+        for lower in ch.to_lowercase() {
+            if lower.is_alphanumeric() {
+                word.push(lower);
+            } else if !word.is_empty() {
+                words.push(std::mem::take(&mut word));
+            }
+        }
+    }
+    if !word.is_empty() {
+        words.push(word);
+    }
+    words
+}
+
+/// Returns whether a normalized token is removable speech filler.
+fn is_filler_word(word: &str) -> bool {
+    matches!(word, "um" | "uh" | "erm" | "euh" | "hum" | "hmm" | "like")
+}
+
+/// Recognizes a sentence that opens with a command retracting prior content.
+fn starts_with_self_correction(words: &[String]) -> bool {
+    matches!(
+        words,
+        [first, second, ..]
+            if matches!(
+                (first.as_str(), second.as_str()),
+                ("scratch", "that") | ("no", "wait") | ("non", "attends") | ("never", "mind")
+            )
+    )
+}
+
+/// Recognizes a standalone correction command with no replacement content.
+fn is_self_correction_sentence(words: &[String]) -> bool {
+    words.len() == 2 && starts_with_self_correction(words)
+}
+
+struct NormalizedSentence<'a> {
+    raw: &'a str,
+    words: Vec<String>,
+}
+
+/// Splits source text into non-empty normalized sentences while retaining the
+/// raw slice needed to recognize apostrophe-based French negation.
+fn normalized_sentences(input: &str) -> Vec<NormalizedSentence<'_>> {
+    input
+        .split(['.', '!', '?', '\n', '\r'])
+        .filter_map(|raw| {
+            let words = normalized_words(raw);
+            (!words.is_empty()).then_some(NormalizedSentence { raw, words })
+        })
+        .collect()
+}
+
+/// Returns whether a sentence is a retraction command or the content it retracts.
+fn is_retraction_or_retracted(sentences: &[NormalizedSentence<'_>], index: usize) -> bool {
+    is_self_correction_sentence(&sentences[index].words)
+        || sentences
+            .get(index + 1)
+            .is_some_and(|next| starts_with_self_correction(&next.words))
+}
+
+/// Removes an inline correction command while retaining its replacement text.
+fn required_sentence_words(words: &[String]) -> &[String] {
+    if words.len() > 2 && starts_with_self_correction(words) {
+        &words[2..]
+    } else {
+        words
+    }
+}
+
+/// Detects a source sentence whose substantive or distinctive content vanished.
+fn dropped_substantive_sentence(
+    input: &str,
+    output_words: &HashSet<String>,
+    allow_filler_removal: bool,
+) -> bool {
+    let sentences = normalized_sentences(input);
+
+    sentences.iter().enumerate().any(|(index, sentence)| {
+        if is_retraction_or_retracted(&sentences, index) {
+            return false;
+        }
+
+        let words: Vec<&str> = required_sentence_words(&sentence.words)
+            .iter()
+            .map(String::as_str)
+            .filter(|word| !allow_filler_removal || !is_filler_word(word))
+            .collect();
+        if words.len() < 2 {
+            return false;
+        }
+
+        let retained = words
+            .iter()
+            .filter(|word| output_words.contains(**word))
+            .count();
+        if retained.saturating_mul(100) < words.len().saturating_mul(30) {
+            return true;
+        }
+
+        let distinctive: HashSet<&str> = words
+            .iter()
+            .copied()
+            .filter(|word| {
+                !sentences.iter().enumerate().any(|(other_index, other)| {
+                    other_index != index
+                        && !is_retraction_or_retracted(&sentences, other_index)
+                        && required_sentence_words(&other.words)
+                            .iter()
+                            .any(|candidate| candidate == word)
+                })
+            })
+            .collect();
+        let retained_distinctive = distinctive
+            .iter()
+            .filter(|word| output_words.contains(**word))
+            .count();
+        distinctive.len() >= 2 && retained_distinctive < 2
+    })
+}
+
+/// Returns source words that the selected template is required to retain.
+fn retained_input_words(input: &str, allow_filler_removal: bool) -> Vec<String> {
+    let sentences = normalized_sentences(input);
+    let mut retained = Vec::new();
+    for (index, sentence) in sentences.iter().enumerate() {
+        if is_retraction_or_retracted(&sentences, index) {
+            continue;
+        }
+        retained.extend(
+            required_sentence_words(&sentence.words)
+                .iter()
+                .filter(|word| !allow_filler_removal || !is_filler_word(word))
+                .cloned(),
+        );
+    }
+    retained
+}
+
+fn is_explicit_negation_word(word: &str) -> bool {
+    matches!(
+        word,
+        "not"
+            | "no"
+            | "cannot"
+            | "nothing"
+            | "nobody"
+            | "none"
+            | "nor"
+            | "neither"
+            | "never"
+            | "without"
+            | "non"
+            | "ne"
+            | "pas"
+            | "jamais"
+            | "aucun"
+            | "aucune"
+            | "sans"
+            | "rien"
+            | "ni"
+    )
+}
+
+fn is_english_contraction(pair: &[String]) -> bool {
+    pair[1] == "t"
+        && matches!(
+            pair[0].as_str(),
+            "aren"
+                | "can"
+                | "couldn"
+                | "didn"
+                | "doesn"
+                | "don"
+                | "hadn"
+                | "hasn"
+                | "haven"
+                | "isn"
+                | "mustn"
+                | "shouldn"
+                | "wasn"
+                | "weren"
+                | "won"
+                | "wouldn"
+        )
+}
+
+fn contains_french_n_apostrophe(text: &str) -> bool {
+    text.to_lowercase()
+        .split(|ch: char| !ch.is_alphabetic() && !matches!(ch, '\'' | '’'))
+        .any(|token| token.starts_with("n'") || token.starts_with("n’"))
+}
+
+/// Returns whether required content contains explicit negation.
+fn contains_negation(text: &str, words: &[String]) -> bool {
+    words.iter().any(|word| is_explicit_negation_word(word))
+        || words.windows(2).any(is_english_contraction)
+        || (contains_french_n_apostrophe(text) && words.iter().any(|word| word == "n"))
+}
+
+fn is_negation_component(word: &str) -> bool {
+    is_explicit_negation_word(word)
+        || word == "n"
+        || word == "t"
+        || matches!(
+            word,
+            "aren"
+                | "can"
+                | "couldn"
+                | "didn"
+                | "doesn"
+                | "don"
+                | "hadn"
+                | "hasn"
+                | "haven"
+                | "isn"
+                | "mustn"
+                | "shouldn"
+                | "wasn"
+                | "weren"
+                | "won"
+                | "wouldn"
+        )
+}
+
+/// Counts semantic negation markers without double-counting French `ne … pas`.
+fn negation_count(text: &str, words: &[String]) -> usize {
+    let english = words
+        .iter()
+        .filter(|word| {
+            matches!(
+                word.as_str(),
+                "not"
+                    | "no"
+                    | "cannot"
+                    | "nothing"
+                    | "nobody"
+                    | "none"
+                    | "nor"
+                    | "neither"
+                    | "never"
+                    | "without"
+            )
+        })
+        .count()
+        + words
+            .windows(2)
+            .filter(|pair| is_english_contraction(pair))
+            .count();
+    let french_strong = words
+        .iter()
+        .filter(|word| {
+            matches!(
+                word.as_str(),
+                "non" | "pas" | "jamais" | "aucun" | "aucune" | "sans" | "rien" | "ni"
+            )
+        })
+        .count();
+    let french_lead = usize::from(
+        french_strong == 0
+            && (words.iter().any(|word| word == "ne")
+                || (contains_french_n_apostrophe(text) && words.iter().any(|word| word == "n"))),
+    );
+
+    english + french_strong + french_lead
+}
+
+/// Splits provider output into clauses so a negation retained for one
+/// instruction cannot mask a negation dropped from another one.
+fn normalized_clauses(output: &str) -> Vec<Vec<String>> {
+    let mut clauses = Vec::new();
+    for sentence in normalized_sentences(output) {
+        let mut current = Vec::new();
+        for word in sentence.words {
+            if matches!(
+                word.as_str(),
+                "and" | "but" | "then" | "et" | "mais" | "puis"
+            ) {
+                if !current.is_empty() {
+                    clauses.push(std::mem::take(&mut current));
+                }
+            } else {
+                current.push(word);
+            }
+        }
+        if !current.is_empty() {
+            clauses.push(current);
+        }
+    }
+    clauses
+}
+
+fn negation_lost_by_instruction(input: &str, output: &str, allow_filler_removal: bool) -> bool {
+    let input_sentences = normalized_sentences(input);
+    let output_clauses = normalized_clauses(output);
+    let output_negations: usize = output_clauses
+        .iter()
+        .map(|clause| negation_count(output, clause))
+        .sum();
+    let mut required_negations = 0;
+
+    for (index, sentence) in input_sentences.iter().enumerate() {
+        if is_retraction_or_retracted(&input_sentences, index) {
+            continue;
+        }
+        let words: Vec<String> = required_sentence_words(&sentence.words)
+            .iter()
+            .filter(|word| !allow_filler_removal || !is_filler_word(word))
+            .cloned()
+            .collect();
+        if !contains_negation(sentence.raw, &words) {
+            continue;
+        }
+        required_negations += 1;
+
+        let anchors: HashSet<&str> = words
+            .iter()
+            .map(String::as_str)
+            .filter(|word| !is_negation_component(word))
+            .collect();
+        let best_overlap = output_clauses
+            .iter()
+            .map(|clause| {
+                clause
+                    .iter()
+                    .filter(|word| anchors.contains(word.as_str()))
+                    .count()
+            })
+            .max()
+            .unwrap_or(0);
+        if best_overlap == 0
+            || !output_clauses.iter().any(|clause| {
+                clause
+                    .iter()
+                    .filter(|word| anchors.contains(word.as_str()))
+                    .count()
+                    == best_overlap
+                    && contains_negation(output, clause)
+            })
+        {
+            return true;
+        }
+    }
+
+    required_negations > output_negations
+}
+
+/// The clean templates may repair individual words, but they must not silently
+/// lose a substantive sentence or produce an obvious low-overlap rewrite such
+/// as a whole-language translation. Filler words are excluded only for the
+/// template that explicitly permits removing them.
+fn clean_polish_lost_content(input: &str, output: &str, allow_filler_removal: bool) -> bool {
+    let input_words = retained_input_words(input, allow_filler_removal);
+    let output_word_list = normalized_words(output);
+    let output_words: HashSet<String> = output_word_list.iter().cloned().collect();
+    if input_words.is_empty() || output_words.is_empty() {
+        return !input_words.is_empty();
+    }
+
+    if negation_lost_by_instruction(input, output, allow_filler_removal) {
+        return true;
+    }
+
+    let retained = input_words
+        .iter()
+        .filter(|word| output_words.contains(*word))
+        .count();
+    if retained.saturating_mul(100) < input_words.len().saturating_mul(30) {
+        return true;
+    }
+
+    dropped_substantive_sentence(input, &output_words, allow_filler_removal)
+}
+
+/// Applies the template-specific expansion and content-preservation checks.
+fn guard_polish_content(
+    template_id: &str,
+    template_prompt: &str,
+    input: &str,
+    output: &str,
+) -> Result<String, &'static str> {
+    let output = clamp_polish_expansion(template_id, input, output);
+    if matches!(template_id, TEMPLATE_CLEAN | TEMPLATE_NO_FILLERS)
+        && default_polish_templates().into_iter().any(|template| {
+            template.id == template_id && template.prompt.trim() == template_prompt.trim()
+        })
+        && clean_polish_lost_content(input, &output, template_id == TEMPLATE_NO_FILLERS)
+    {
+        Err("Dictation polish dropped source content; using raw text")
+    } else {
+        Ok(output)
+    }
+}
+
 /// Clean / no-fillers must not invent a closing. If the model added a new
 /// paragraph, keep the first one when it still matches the dictation length.
 fn clamp_polish_expansion(template_id: &str, input: &str, output: &str) -> String {
@@ -566,7 +977,22 @@ pub async fn polish_dictation_text(
         Ok(text) => {
             let text = super::formatters::apply_post_polish_formatters(&text);
             let text = strip_prompt_leakage(&text, &stripped);
-            let text = clamp_polish_expansion(template.id.as_str(), &stripped, &text);
+            let text = match guard_polish_content(
+                template.id.as_str(),
+                &template_prompt,
+                &stripped,
+                &text,
+            ) {
+                Ok(text) => text,
+                Err(warning) => {
+                    tracing::warn!(model = %model, warning, "Dictation polish rejected");
+                    return DictationPolishResult {
+                        text: stripped.trim().to_string(),
+                        skipped: false,
+                        warning: Some(warning.to_string()),
+                    };
+                }
+            };
             if text.trim().is_empty() {
                 DictationPolishResult {
                     text: stripped.trim().to_string(),
@@ -595,8 +1021,9 @@ mod tests {
         SUPERSEDED_CLEAN_PROMPTS, TEMPLATE_BULLETS, TEMPLATE_CLEAN, TEMPLATE_EMAIL,
         TEMPLATE_NO_FILLERS, build_polish_user_prompt, clamp_polish_expansion,
         default_polish_templates, early_polish_dictation_result, effective_template_prompt,
-        is_blank_for_polish, is_own_app_name, merge_polish_templates, parse_polish_response,
-        strip_invisible_chars, strip_prompt_leakage, superseded_default_prompts,
+        guard_polish_content, is_blank_for_polish, is_own_app_name, merge_polish_templates,
+        parse_polish_response, strip_invisible_chars, strip_prompt_leakage,
+        superseded_default_prompts,
     };
     use crate::filter::DictionaryEntry;
     use crate::settings::{AppSettings, DictationPolishTemplate};
@@ -609,6 +1036,19 @@ mod tests {
             category: None,
             created_at: String::new(),
         }
+    }
+
+    fn guard_builtin_polish_content(
+        template_id: &str,
+        input: &str,
+        output: &str,
+    ) -> Result<String, &'static str> {
+        let prompt = default_polish_templates()
+            .into_iter()
+            .find(|template| template.id == template_id)
+            .expect("built-in polish template")
+            .prompt;
+        guard_polish_content(template_id, &prompt, input, output)
     }
 
     #[test]
@@ -692,18 +1132,20 @@ mod tests {
 
     #[test]
     fn merge_polish_templates_upgrades_an_unedited_superseded_builtin() {
-        let stored = vec![DictationPolishTemplate {
-            id: TEMPLATE_CLEAN.to_string(),
-            label: "Clean up".to_string(),
-            prompt: SUPERSEDED_CLEAN_PROMPTS[0].to_string(),
-        }];
-        let merged = merge_polish_templates(stored);
         let current = default_polish_templates();
-        assert_eq!(merged[0].prompt, current[0].prompt);
-        assert!(
-            merged[0].prompt.contains("misheard"),
-            "the upgraded prompt must carry the repair instruction"
-        );
+        for superseded in SUPERSEDED_CLEAN_PROMPTS {
+            let stored = vec![DictationPolishTemplate {
+                id: TEMPLATE_CLEAN.to_string(),
+                label: "Clean up".to_string(),
+                prompt: superseded.to_string(),
+            }];
+            let merged = merge_polish_templates(stored);
+            assert_eq!(merged[0].prompt, current[0].prompt);
+            assert!(
+                merged[0].prompt.contains("misheard"),
+                "the upgraded prompt must carry the repair instruction"
+            );
+        }
     }
 
     #[test]
@@ -860,6 +1302,159 @@ mod tests {
             clamp_polish_expansion(TEMPLATE_CLEAN, input, output),
             "Bonjour, mesdames et messieurs, chers enfants,"
         );
+    }
+
+    #[test]
+    fn clean_polish_rejects_a_dropped_short_opening_sentence() {
+        let input = "Dictation test. This opening sentence must stay in the pasted text.";
+        let output = "This opening sentence must stay in the pasted text.";
+
+        assert!(guard_builtin_polish_content(TEMPLATE_CLEAN, input, output).is_err());
+    }
+
+    #[test]
+    fn clean_polish_rejects_a_dropped_interior_sentence() {
+        let input =
+            "Keep this opening. Confidential launch details. Send the memo tomorrow morning.";
+        let output = "Keep this opening. Send the memo tomorrow morning.";
+
+        assert!(guard_builtin_polish_content(TEMPLATE_CLEAN, input, output).is_err());
+    }
+
+    #[test]
+    fn clean_polish_rejects_a_translation() {
+        let input = "Bonjour, ceci est un test de dictée entièrement en français.";
+        let output = "Hello, this is a dictation written entirely in English.";
+
+        assert!(guard_builtin_polish_content(TEMPLATE_CLEAN, input, output).is_err());
+    }
+
+    #[test]
+    fn clean_polish_allows_repairs_and_an_intentional_filler_opening_removal() {
+        let repaired = guard_builtin_polish_content(
+            TEMPLATE_CLEAN,
+            "petit maitre a jour également les document Confluence s'il te plait",
+            "Peux-tu mettre à jour également les documents Confluence s'il te plaît ?",
+        );
+        assert!(repaired.is_ok());
+
+        let without_filler = guard_builtin_polish_content(
+            TEMPLATE_NO_FILLERS,
+            "Euh. Envoie le document à Camille demain.",
+            "Envoie le document à Camille demain.",
+        );
+        assert!(without_filler.is_ok());
+    }
+
+    #[test]
+    fn clean_polish_allows_an_explicit_self_correction() {
+        let result = guard_builtin_polish_content(
+            TEMPLATE_CLEAN,
+            "Approve the detailed budget proposal and send every attachment to Alice and Bob by Friday. Scratch that. Reject the proposal tomorrow.",
+            "Reject the proposal tomorrow.",
+        );
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn clean_polish_allows_an_inline_self_correction_and_guards_its_replacement() {
+        let result = guard_builtin_polish_content(
+            TEMPLATE_CLEAN,
+            "Approve the detailed budget proposal. No wait, reject it.",
+            "Reject it.",
+        );
+        assert!(result.is_ok());
+
+        let missing_replacement = guard_builtin_polish_content(
+            TEMPLATE_CLEAN,
+            "Approve the detailed budget proposal. No wait, reject it tomorrow.",
+            "Tomorrow.",
+        );
+        assert!(missing_replacement.is_err());
+    }
+
+    #[test]
+    fn clean_polish_rejects_an_omitted_instruction_with_shared_words() {
+        let input = "Please send the invoice today. Please cancel the invoice tomorrow.";
+        let output = "Please send the invoice today.";
+
+        assert!(guard_builtin_polish_content(TEMPLATE_CLEAN, input, output).is_err());
+    }
+
+    #[test]
+    fn clean_polish_rejects_a_removed_negation() {
+        let result = guard_builtin_polish_content(
+            TEMPLATE_CLEAN,
+            "Do not send the invoice today.",
+            "Do send the invoice today.",
+        );
+        assert!(result.is_err());
+
+        let contracted = guard_builtin_polish_content(
+            TEMPLATE_CLEAN,
+            "Don't send the invoice.",
+            "Send the invoice.",
+        );
+        assert!(contracted.is_err());
+    }
+
+    #[test]
+    fn clean_polish_rejects_extended_and_french_apostrophe_negation_loss() {
+        let cannot = guard_builtin_polish_content(
+            TEMPLATE_CLEAN,
+            "You cannot send the invoice today.",
+            "You can send the invoice today.",
+        );
+        assert!(cannot.is_err());
+
+        let french = guard_builtin_polish_content(
+            TEMPLATE_CLEAN,
+            "N'envoyez le rapport demain.",
+            "Envoyez le rapport demain.",
+        );
+        assert!(french.is_err());
+
+        let non_negations = guard_builtin_polish_content(
+            TEMPLATE_CLEAN,
+            "La version N accueille une personne de plus.",
+            "La version accueille une personne.",
+        );
+        assert!(non_negations.is_ok());
+    }
+
+    #[test]
+    fn clean_polish_matches_negation_to_each_retained_instruction() {
+        let result = guard_builtin_polish_content(
+            TEMPLATE_CLEAN,
+            "Do not send the invoice today. Do not cancel the meeting tomorrow.",
+            "Do send the invoice today. Do not cancel the meeting tomorrow.",
+        );
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn edited_builtin_prompt_skips_the_builtin_preservation_guard() {
+        let result = guard_polish_content(
+            TEMPLATE_CLEAN,
+            "Rewrite this concisely.",
+            "The first detailed instruction must remain. The second detailed instruction must remain.",
+            "Keep both instructions.",
+        );
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn no_fillers_ignores_removed_fillers_in_the_retention_threshold() {
+        let result = guard_builtin_polish_content(
+            TEMPLATE_NO_FILLERS,
+            "um um um hello there",
+            "hello there",
+        );
+
+        assert!(result.is_ok());
     }
 
     #[test]
