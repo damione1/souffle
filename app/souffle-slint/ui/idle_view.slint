@@ -64,6 +64,9 @@ export component IdleView inherits Rectangle {
     // Declared first so it sits under everything and only gets the scrolls
     // nothing else took.
     TouchArea {
+        clicked => {
+            timeline-section.dismiss-delete-confirmation();
+        }
         scroll-event(event) => {
             history-scroll.content-y = clamp(history-scroll.content-y + event.delta-y, min(0px, history-scroll.height - history-scroll.content-height), 0px);
             accept
@@ -140,13 +143,18 @@ export component IdleView inherits Rectangle {
         history-scroll := Flickable {
             vertical-stretch: 1;
             content-width: self.width;
+            // Desktop history scrolls by wheel/trackpad. Disabling mouse
+            // drag-panning lets a plain press/release in an empty content
+            // gap reach the page underlay and cancel delete confirmation;
+            // touch panning and wheel scrolling remain available.
+            mouse-drag-pan-enabled: false;
 
             VerticalLayout {
                 width: parent.width;
                 alignment: start;
                 padding-bottom: 34px;
 
-                TimelineSection {
+                timeline-section := TimelineSection {
                     groups: root.timeline-groups;
                     is-empty: root.timeline-is-empty;
                     has-matches: root.timeline-has-matches;

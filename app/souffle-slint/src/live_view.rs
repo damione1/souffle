@@ -517,6 +517,35 @@ mod tests {
         );
     }
 
+    // SOU-257 AC1: a pointer-opened popup must own keyboard focus so its
+    // existing Escape handler actually receives the key.
+    #[test]
+    fn escape_closes_a_dictionary_popup_opened_with_the_mouse() {
+        let window = meeting_window();
+        let live_state: LiveTranscriptState = Arc::new(Mutex::new(LiveTranscript::new()));
+        apply_live_segment(
+            &window,
+            &live_state,
+            &final_seg("On migre vers Cubernetis demain", 0.0, Speaker::Me),
+        );
+        settle();
+
+        click(&window, &text_element(&window, "Cubernetis"));
+        assert_eq!(inputs_with_value(&window, "Cubernetis").len(), 1);
+
+        window
+            .window()
+            .dispatch_event(slint::platform::WindowEvent::KeyPressed {
+                text: slint::platform::Key::Escape.into(),
+            });
+        settle();
+
+        assert!(
+            inputs_with_value(&window, "Cubernetis").is_empty(),
+            "Escape did not close the pointer-opened dictionary popup"
+        );
+    }
+
     // SOU-256 AC5: the provisional tail is still being rewritten by the
     // engine - its words do not open the popover.
     #[test]

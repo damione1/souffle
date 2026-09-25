@@ -108,6 +108,30 @@ fn format_shortcut_label(shortcut: &str) -> String {
         .replace('+', " ")
 }
 
+/// Builds and persists one shortcut candidate without exposing rejected
+/// values through the cache. `save_shortcuts` writes both bindings together,
+/// so mutating the cache before it succeeds would let a later save commit a
+/// previously rejected value.
+fn persist_shortcut_candidate(
+    shortcuts_state: &Rc<RefCell<Option<ShortcutSettings>>>,
+    field: ShortcutField,
+    value: String,
+    persist: impl FnOnce(ShortcutSettings) -> Result<(), String>,
+) -> Result<Option<ShortcutSettings>, String> {
+    let Some(mut candidate) = shortcuts_state.borrow().clone() else {
+        return Ok(None);
+    };
+    match field {
+        ShortcutField::Toggle => candidate.toggle = value,
+        ShortcutField::Ptt => candidate.push_to_talk = value,
+        ShortcutField::None => return Ok(None),
+    }
+
+    persist(candidate.clone())?;
+    *shortcuts_state.borrow_mut() = Some(candidate.clone());
+    Ok(Some(candidate))
+}
+
 /// Shared by the diagnostics and MCP snippet "Copy" buttons - no webview
 /// clipboard API to fall back on in this headless shell (see the `arboard`
 /// dependency comment in Cargo.toml).
@@ -4450,13 +4474,10 @@ fn wire_callbacks(
         });
     }
 
-    // Mirrors `applyShortcutValue()` + `saveShortcutSettings()`: writes
-    // `value` into the cached `ShortcutSettings` under `field` ("toggle" or
-    // "ptt"), saves the whole thing (this also re-registers the global
-    // shortcut and syncs the native modifier tap, see
-    // `commands::settings::save_shortcuts`), and always clears the
-    // recording UI state regardless of outcome - only the error banner
-    // differs between success and failure, matching the Svelte controller.
+    // Builds a candidate with `value` under `field` ("toggle" or "ptt"),
+    // saves the whole thing (this also re-registers the global shortcut and
+    // syncs the native modifier tap), then commits the cache/projection only
+    // on success. The recording UI state is cleared regardless of outcome.
     fn apply_shortcut(
         handle: &AppHandle,
         shortcuts_state: &Rc<RefCell<Option<ShortcutSettings>>>,
@@ -4465,24 +4486,18 @@ fn wire_callbacks(
         value: String,
     ) {
         window.set_settings_recording_field(ShortcutField::None);
-        let mut guard = shortcuts_state.borrow_mut();
-        let Some(shortcuts) = guard.as_mut() else {
-            return;
-        };
-        match field {
-            ShortcutField::Toggle => shortcuts.toggle = value,
-            ShortcutField::Ptt => shortcuts.push_to_talk = value,
-            ShortcutField::None => return,
-        }
         let state = Arc::clone(handle);
-        match souffle_lib::commands::save_shortcuts(state, shortcuts.clone()) {
-            Ok(()) => {
+        match persist_shortcut_candidate(shortcuts_state, field, value, move |candidate| {
+            souffle_lib::commands::save_shortcuts(state, candidate)
+        }) {
+            Ok(Some(shortcuts)) => {
                 window.set_settings_shortcut_error("".into());
                 let natives = souffle_lib::commands::get_native_shortcuts();
                 let tap_installed =
                     souffle_lib::commands::get_modifier_tap_status().map(|s| s.installed);
-                settings_ui::populate_shortcuts(window, shortcuts, &natives, tap_installed);
+                settings_ui::populate_shortcuts(window, &shortcuts, &natives, tap_installed);
             }
+            Ok(None) => {}
             Err(e) => window.set_settings_shortcut_error(e.into()),
         }
     }
@@ -6764,13 +6779,14 @@ mod tests {
         apply_audio_device_projection_settlement, audio_device_load_configuration,
         capture_and_submit_window_geometry, clear_committed_summary_add_draft,
         dictation_transcript_disposition, finish_startup_presentation, merge_recovery_text,
-        prime_summary_template_editor, project_model_selection_snapshot, project_startup_settings,
-        reset_live_buffers, reset_stale_save_error, settle_audio_device_save,
-        settle_model_selection_save, settle_onboarding_completion,
-        should_clear_committed_summary_add_draft, wire_summary_template_edit_callbacks,
+        persist_shortcut_candidate, prime_summary_template_editor,
+        project_model_selection_snapshot, project_startup_settings, reset_live_buffers,
+        reset_stale_save_error, settle_audio_device_save, settle_model_selection_save,
+        settle_onboarding_completion, should_clear_committed_summary_add_draft,
+        wire_summary_template_edit_callbacks,
     };
     use super::{
-        LiveTranscript, LiveTranscriptState, RecordingMode, replay_pending_stop,
+        LiveTranscript, LiveTranscriptState, RecordingMode, ShortcutField, replay_pending_stop,
         settle_recording_start, show_recording_starting,
     };
     use crate::model_ui;
@@ -6779,7 +6795,7 @@ mod tests {
     use slint::ComponentHandle;
     use slint::platform::{Platform, WindowAdapter, software_renderer::MinimalSoftwareWindow};
     use souffle_lib::commands::{SettingsSaveError, SettingsSaveOutcome};
-    use souffle_lib::settings::AppSettings;
+    use souffle_lib::settings::{AppSettings, ShortcutSettings};
     use std::cell::{Cell, RefCell};
     use std::rc::Rc;
     use std::sync::{Arc, Mutex};
@@ -6796,6 +6812,45 @@ mod tests {
     fn test_window() -> MainWindow {
         let _ = slint::platform::set_platform(Box::new(TestPlatform));
         MainWindow::new().unwrap()
+    }
+
+    #[test]
+    fn a_rejected_shortcut_is_not_committed_by_the_next_successful_save() {
+        let initial = ShortcutSettings {
+            toggle: "CommandOrControl+Space".into(),
+            push_to_talk: "".into(),
+        };
+        let cache = Rc::new(RefCell::new(Some(initial.clone())));
+
+        assert_eq!(
+            persist_shortcut_candidate(
+                &cache,
+                ShortcutField::Toggle,
+                "CommandOrControl+Shift+Space".into(),
+                |_| Err("registration failed".into()),
+            ),
+            Err("registration failed".to_string())
+        );
+        assert_eq!(cache.borrow().as_ref(), Some(&initial));
+
+        let persisted: Rc<RefCell<Option<ShortcutSettings>>> = Rc::default();
+        let persisted_sink = persisted.clone();
+        let committed = persist_shortcut_candidate(
+            &cache,
+            ShortcutField::Ptt,
+            "Alt+Space".into(),
+            move |candidate| {
+                *persisted_sink.borrow_mut() = Some(candidate);
+                Ok(())
+            },
+        )
+        .unwrap()
+        .expect("cached shortcuts disappeared");
+
+        assert_eq!(committed.toggle, initial.toggle);
+        assert_eq!(committed.push_to_talk, "Alt+Space");
+        assert_eq!(persisted.borrow().as_ref(), Some(&committed));
+        assert_eq!(cache.borrow().as_ref(), Some(&committed));
     }
 
     // SOU-258 AC1/AC3: the recording view is up on the click, in its

@@ -67,6 +67,10 @@ export component TimelineSection inherits VerticalLayout {
     // per-row "focus lost" signal to hook instead (Damien, 2026-09-23).
     property <string> confirming-delete-id: "";
 
+    public function dismiss-delete-confirmation() {
+        root.confirming-delete-id = "";
+    }
+
     // Same predicate as TimelineSection.svelte's `showCalendarSetupCta`.
     property <bool> show-calendar-setup: root.upcoming.length == 0 && (!root.calendar-enabled || root.calendar-permission == AccessState.denied);
 

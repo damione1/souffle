@@ -41,10 +41,10 @@ export global Theme {
     out property <color> rule: root.dark ? rgba(235, 210, 170, 0.22) : rgba(23, 17, 11, 0.28);
     out property <color> modal-scrim: root.dark ? rgba(0, 0, 0, 0.72) : rgba(0, 0, 0, 0.54);
 
-    // Shared trailing columns on upcoming + timeline rows so times and
-    // play/chevron sit on one vertical grid. JetBrains Mono 11.5px:
-    // duration `0:00`/`0:00:00`, time `00:00` or range `00:00–00:00`.
+    // Trailing timeline columns. A clock label is compact beside the
+    // duration; calendar ranges keep the wider column they need.
     out property <length> row-duration-width: 42px;
+    out property <length> row-timeline-time-width: 42px;
     out property <length> row-time-width: 84px;
     out property <length> row-action-width: 22px;
 

@@ -181,6 +181,80 @@ pub fn upcoming_rows(events: &[CalendarEvent], now: DateTime<Utc>) -> Vec<Upcomi
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{AccessState, MainWindow};
+    use i_slint_backend_testing::{AccessibleRole, ElementHandle, ElementRoot};
+    use slint::ComponentHandle;
+    use slint::platform::{Platform, WindowAdapter, software_renderer::MinimalSoftwareWindow};
+    use std::rc::Rc;
+
+    const WIDTH: u32 = 1040;
+    const HEIGHT: u32 = 1280;
+
+    thread_local! {
+        static TEST_WINDOW: std::cell::RefCell<Option<Rc<MinimalSoftwareWindow>>> =
+            const { std::cell::RefCell::new(None) };
+    }
+
+    struct TestPlatform;
+
+    impl Platform for TestPlatform {
+        fn create_window_adapter(&self) -> Result<Rc<dyn WindowAdapter>, slint::PlatformError> {
+            let window = MinimalSoftwareWindow::new(Default::default());
+            TEST_WINDOW.with(|slot| *slot.borrow_mut() = Some(window.clone()));
+            Ok(window)
+        }
+    }
+
+    fn settle() {
+        let window = TEST_WINDOW
+            .with(|slot| slot.borrow().clone())
+            .expect("no test window");
+        let mut frame = vec![
+            slint::platform::software_renderer::Rgb565Pixel::default();
+            (WIDTH * HEIGHT) as usize
+        ];
+        for _ in 0..3 {
+            slint::platform::update_timers_and_animations();
+            window.request_redraw();
+            window.draw_if_needed(|renderer| {
+                renderer.render(&mut frame, WIDTH as usize);
+            });
+        }
+    }
+
+    fn timeline_window() -> MainWindow {
+        let _ = slint::platform::set_platform(Box::new(TestPlatform));
+        let window = MainWindow::new().unwrap();
+        window
+            .window()
+            .set_size(slint::PhysicalSize::new(WIDTH, HEIGHT));
+        window.set_settings_calendar_enabled(true);
+        window.set_settings_calendar_permission(AccessState::Granted);
+        window.set_timeline_is_empty(false);
+        window.set_timeline_has_matches(true);
+
+        let entries: Vec<_> = (0..30)
+            .map(|index| TimelineEntry {
+                kind: TimelineKind::Meeting,
+                id: format!("meeting-{index}").into(),
+                title: format!("Réunion {index}").into(),
+                time_label: "10:00".into(),
+                duration_label: "32:10".into(),
+                has_summary: false,
+                summary_is_stale: false,
+            })
+            .collect();
+        let group = TimelineDayGroup {
+            day: TimelineDay::Today,
+            weekday: 0,
+            day_of_month: 25,
+            month: 8,
+            entries: slint::ModelRc::new(slint::VecModel::from(entries)),
+        };
+        window.set_timeline_groups(slint::ModelRc::new(slint::VecModel::from(vec![group])));
+        settle();
+        window
+    }
 
     fn date(y: i32, m: u32, d: u32) -> NaiveDate {
         NaiveDate::from_ymd_opt(y, m, d).expect("valid date")
@@ -210,5 +284,126 @@ mod tests {
         assert_eq!(group.weekday, 0);
         assert_eq!(group.day_of_month, 21);
         assert_eq!(group.month, 8);
+    }
+
+    #[test]
+    fn clicking_the_empty_timeline_gutter_cancels_delete_confirmation() {
+        let window = timeline_window();
+        let removed: Rc<std::cell::RefCell<Vec<String>>> = Rc::default();
+        let removed_sink = removed.clone();
+        window.on_timeline_item_removed(move |_kind, id| {
+            removed_sink.borrow_mut().push(id.into());
+        });
+        let row = ElementHandle::find_by_accessible_label(&window, "Réunion 0")
+            .next()
+            .expect("no timeline row");
+        window
+            .window()
+            .dispatch_event(slint::platform::WindowEvent::PointerMoved {
+                position: slint::LogicalPosition::new(
+                    row.absolute_position().x + row.size().width / 2.0,
+                    row.absolute_position().y + row.size().height / 2.0,
+                ),
+            });
+        settle();
+        let delete = window
+            .root_element()
+            .query_descendants()
+            .match_predicate(|element| {
+                element.accessible_role() == Some(AccessibleRole::Button)
+                    && element
+                        .accessible_label()
+                        .is_some_and(|label| label == "Supprimer" || label == "Delete")
+            })
+            .find_first()
+            .expect("no timeline delete button");
+        delete.invoke_accessible_default_action();
+        settle();
+        assert!(
+            window
+                .root_element()
+                .query_descendants()
+                .match_predicate(|element| {
+                    element.accessible_label().is_some_and(|label| {
+                        label == "Confirmer la suppression" || label == "Confirm deletion"
+                    })
+                })
+                .find_first()
+                .is_some(),
+            "delete confirmation did not open"
+        );
+
+        // The six-pixel gap above the first row is inside the centered,
+        // scrollable history viewport but outside every row TouchArea.
+        let position = slint::LogicalPosition::new(
+            row.absolute_position().x + row.size().width / 2.0,
+            row.absolute_position().y - 3.0,
+        );
+        let button = slint::platform::PointerEventButton::Left;
+        window
+            .window()
+            .dispatch_event(slint::platform::WindowEvent::PointerPressed { position, button });
+        window
+            .window()
+            .dispatch_event(slint::platform::WindowEvent::PointerReleased { position, button });
+        settle();
+
+        assert!(
+            window
+                .root_element()
+                .query_descendants()
+                .match_predicate(|element| {
+                    element.accessible_label().is_some_and(|label| {
+                        label == "Confirmer la suppression" || label == "Confirm deletion"
+                    })
+                })
+                .find_first()
+                .is_none(),
+            "empty-gutter click left delete confirmation open"
+        );
+        assert!(
+            window
+                .root_element()
+                .query_descendants()
+                .match_predicate(|element| {
+                    element
+                        .accessible_label()
+                        .is_some_and(|label| label == "Supprimer" || label == "Delete")
+                })
+                .find_first()
+                .is_some(),
+            "delete action did not return after cancellation"
+        );
+
+        // Re-open confirmation, then use the actual pointer path on the
+        // button. The page underlay must not clear the state before the
+        // button's removal callback runs.
+        delete.invoke_accessible_default_action();
+        settle();
+        let confirm = window
+            .root_element()
+            .query_descendants()
+            .match_predicate(|element| {
+                element.accessible_label().is_some_and(|label| {
+                    label == "Confirmer la suppression" || label == "Confirm deletion"
+                })
+            })
+            .find_first()
+            .expect("confirmation did not reopen");
+        let position = slint::LogicalPosition::new(
+            confirm.absolute_position().x + confirm.size().width / 2.0,
+            confirm.absolute_position().y + confirm.size().height / 2.0,
+        );
+        window
+            .window()
+            .dispatch_event(slint::platform::WindowEvent::PointerMoved { position });
+        window
+            .window()
+            .dispatch_event(slint::platform::WindowEvent::PointerPressed { position, button });
+        window
+            .window()
+            .dispatch_event(slint::platform::WindowEvent::PointerReleased { position, button });
+        settle();
+        assert_eq!(removed.borrow().as_slice(), &["meeting-0"]);
     }
 }
