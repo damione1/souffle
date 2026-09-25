@@ -1,0 +1,182 @@
+import { ActionHero } from "components/action_hero.slint";
+import { SearchField } from "components/search_field.slint";
+import { StatusBanner } from "components/status_banner.slint";
+import { TimelineSection, TimelineDayGroup, UpcomingEvent } from "components/timeline_section.slint";
+import { FilterChip } from "components/filter_chip.slint";
+import { DictationRecovery } from "components/dictation_recovery.slint";
+import { TimelineFilter, TimelineKind, AccessState } from "types.slint";
+
+// Port of components/HomeView.svelte's idle branch. The hero, search, and
+// filter chips stay put; only the calendar + timeline list scrolls.
+export component IdleView inherits Rectangle {
+    in property <string> dictation-shortcut;
+    in property <bool> model-ready: true;
+    in-out property <string> search-query;
+    in property <TimelineFilter> kind-filter: TimelineFilter.all;
+    in property <string> transcription-status-message;
+    in-out property <string> dictation-recovery-text;
+    in property <string> meeting-status-message;
+    in property <[TimelineDayGroup]> timeline-groups;
+    in property <bool> timeline-is-empty: true;
+    in property <bool> timeline-has-matches: true;
+    in property <string> live-meeting-id;
+    in-out property <string> expanded-dictation-id;
+    in property <bool> calendar-enabled: false;
+    in property <AccessState> calendar-permission;
+    in property <[UpcomingEvent]> upcoming;
+
+    callback dictate-requested();
+    callback meeting-requested();
+    callback filter-changed(TimelineFilter);
+    callback search-changed(string);
+    callback dismiss-transcription-status();
+    callback copy-dictation-recovery();
+    callback discard-dictation-recovery();
+    callback dismiss-meeting-status();
+    callback timeline-item-opened(TimelineKind, string);
+    callback timeline-item-removed(TimelineKind, string);
+    callback timeline-item-copy-requested(string);
+    callback calendar-setup-requested();
+    callback calendar-event-start-requested(string);
+
+    pure function translate-error(error: string) -> string {
+        if error == "MODEL_NOT_DOWNLOADED" {
+            return @tr("Modèle non téléchargé - ouvrez Réglages pour le télécharger.");
+        }
+        if error == "MODEL_PREPARING" {
+            return @tr("Le modèle est en cours de préparation. Réessayez lorsqu’il est prêt.");
+        }
+        if error == "MODEL_ERROR" {
+            return @tr("Le modèle est en erreur. Réessayez depuis Réglages.");
+        }
+        if error == "MEETING_FINALIZATION_UNEXPECTED_STATE" {
+            return @tr("La réunion a quitté son état de finalisation de façon inattendue.");
+        }
+        if error == "MEETING_FINALIZATION_TIMEOUT" {
+            return @tr("La finalisation de la réunion a dépassé 30 secondes.");
+        }
+        return error;
+    }
+
+    // Wheel/trackpad anywhere on the page scrolls the history, like a web
+    // page: history-scroll only spans the centred column, so the side
+    // gutters (and the cards/search above it) used to swallow the scroll.
+    // Declared first so it sits under everything and only gets the scrolls
+    // nothing else took.
+    TouchArea {
+        clicked => {
+            timeline-section.dismiss-delete-confirmation();
+        }
+        scroll-event(event) => {
+            history-scroll.content-y = clamp(history-scroll.content-y + event.delta-y, min(0px, history-scroll.height - history-scroll.content-height), 0px);
+            accept
+        }
+    }
+
+    // No settings button here: `AppHeader` (mounted once in
+    // `main_window.slint`, above every view) owns that control now.
+    VerticalLayout {
+        width: min(root.width - 52px, 720px);
+        height: 100%;
+        x: (root.width - self.width) / 2;
+        padding-top: 26px;
+        spacing: 26px;
+
+        if root.transcription-status-message != "": StatusBanner {
+            vertical-stretch: 0;
+            message: root.translate-error(root.transcription-status-message);
+            dismissed => { root.dismiss-transcription-status(); }
+        }
+        if root.dictation-recovery-text != "": DictationRecovery {
+            text <=> root.dictation-recovery-text;
+            copy-requested => { root.copy-dictation-recovery(); }
+            discard-requested => { root.discard-dictation-recovery(); }
+        }
+        if root.meeting-status-message != "": StatusBanner {
+            vertical-stretch: 0;
+            message: root.translate-error(root.meeting-status-message);
+            dismissed => { root.dismiss-meeting-status(); }
+        }
+
+        ActionHero {
+            vertical-stretch: 0;
+            dictation-shortcut: root.dictation-shortcut;
+            model-ready: root.model-ready;
+            actions-enabled: root.dictation-recovery-text == "";
+            dictate-requested => { root.dictate-requested(); }
+            meeting-requested => { root.meeting-requested(); }
+        }
+
+        SearchField {
+            vertical-stretch: 0;
+            text <=> root.search-query;
+            placeholder: @tr("Rechercher transcriptions et réunions");
+            edited(text) => { root.search-changed(text); }
+        }
+
+        HorizontalLayout {
+            vertical-stretch: 0;
+            padding-left: 2px;
+            padding-right: 2px;
+            spacing: 6px;
+            alignment: start;
+
+            FilterChip {
+                text: @tr("Tout");
+                selected: root.kind-filter == TimelineFilter.all;
+                clicked => { root.filter-changed(TimelineFilter.all); }
+            }
+            FilterChip {
+                text: @tr("Réunions");
+                selected: root.kind-filter == TimelineFilter.meeting;
+                clicked => { root.filter-changed(TimelineFilter.meeting); }
+            }
+            FilterChip {
+                text: @tr("Dictées");
+                selected: root.kind-filter == TimelineFilter.dictation;
+                clicked => { root.filter-changed(TimelineFilter.dictation); }
+            }
+        }
+
+        // Stretch pool leftover. Do not bind `content-height` to the
+        // child's `.height` (binding loop, see transcript_section.slint).
+        history-scroll := Flickable {
+            vertical-stretch: 1;
+            content-width: self.width;
+            // Desktop history scrolls by wheel/trackpad. Disabling mouse
+            // drag-panning lets a plain press/release in an empty content
+            // gap reach the page underlay and cancel delete confirmation;
+            // touch panning and wheel scrolling remain available.
+            mouse-drag-pan-enabled: false;
+
+            VerticalLayout {
+                width: parent.width;
+                alignment: start;
+                padding-bottom: 34px;
+
+                timeline-section := TimelineSection {
+                    groups: root.timeline-groups;
+                    is-empty: root.timeline-is-empty;
+                    has-matches: root.timeline-has-matches;
+                    live-meeting-id: root.live-meeting-id;
+                    expanded-dictation-id: root.expanded-dictation-id;
+                    calendar-enabled: root.calendar-enabled;
+                    calendar-permission: root.calendar-permission;
+                    upcoming: root.upcoming;
+                    can-start-event: root.model-ready;
+                    item-opened(kind, id) => {
+                        if kind == TimelineKind.dictation {
+                            root.expanded-dictation-id = root.expanded-dictation-id == id ? "" : id;
+                        } else {
+                            root.timeline-item-opened(kind, id);
+                        }
+                    }
+                    item-removed(kind, id) => { root.timeline-item-removed(kind, id); }
+                    item-copy-requested(text) => { root.timeline-item-copy-requested(text); }
+                    calendar-setup-requested => { root.calendar-setup-requested(); }
+                    event-start-requested(id) => { root.calendar-event-start-requested(id); }
+                }
+            }
+        }
+    }
+}

@@ -1,0 +1,106 @@
+// Shared enums for closed state sets, instead of comparing bare strings
+// (kept as plain `string` in milestones 1-5 for recording-mode/kind-filter/
+// TimelineEntry.kind/notes-save-state - corrected here before more state
+// like this accumulates in the milestones ahead).
+
+export enum RecordingMode { idle, dictation, meeting }
+
+// Where the system-audio leg of the meeting being recorded stands, from
+// souffle_lib's live `SystemAudioStatus` snapshot (system-audio.ts's
+// `liveSystemAudioState` in the Tauri UI). Three states, not a bool: until
+// the capture thread has the tap up or has given up on it there is no
+// verdict yet, and reading that gap as "unavailable" is exactly the false
+// warning a healthy meeting used to show.
+export enum LiveSystemAudio { pending, active, unavailable }
+
+// Mirrors souffle_lib::engine::Speaker at the compiled UI boundary.
+export enum SpeakerRole { me, them }
+
+// A timeline entry's own kind - always one specific thing, never "all".
+export enum TimelineKind { meeting, dictation }
+
+// Which header a timeline day group gets. `earlier` groups are labelled
+// from their weekday/day/month fields; the wording is @tr() in
+// timeline_section.slint so it follows the UI locale (SOU-246).
+export enum TimelineDay { today, yesterday, earlier }
+
+// The Timeline's kind filter - a superset of TimelineKind with "all" added.
+export enum TimelineFilter { all, meeting, dictation }
+
+export enum NotesSaveState { idle, pending, saved }
+
+// Onboarding's model step - missed the string->enum cleanup above when it
+// was added later.
+export enum ModelPhase { pick, downloading, loading, ready }
+
+// Which wizard page is showing. The *order* of steps (and which ones a
+// given install still needs) is decided in Rust (`onboarding_flags::
+// wizard_steps`); Slint only branches on the current one.
+export enum OnboardingStep { permissions, microphone, model, shortcut }
+
+// Mirrors souffle_lib::app_events::UpdatePhase (the updater's download
+// state machine) at the UI boundary - `update_ui.rs` converts exhaustively.
+export enum UpdatePhase { idle, downloading, ready, failed }
+
+// Mirrors souffle_lib::commands::updater::InstallBlockReason. Absence
+// ("install is allowed") is a separate `bool` on the Window, never a
+// variant here.
+export enum InstallBlockReason { recording-dictation, recording-meeting, stopping, downloading, loading, unloading }
+
+// A pre-parsed Markdown block's kind (`markdown.rs`). Rendering branches on
+// it in `markdown_view.slint`; adding a variant must update that file.
+export enum MarkdownBlockKind { heading, bullet, paragraph, link }
+
+// Projection of souffle_lib::engine::TranscriptionRuntimePhase. The Rust
+// AppStateMachine owns every transition; Slint only derives presentation.
+export enum TranscriptionPhase { download-required, downloading, load-required, loading, ready, unloading, failed }
+
+// Today's calendar row: computed in Rust from start/end vs now, never a
+// free-form string. Adding a variant must break every `if phase ==` site.
+export enum UpcomingPhase { past, now, next, later }
+
+// Closed settings sets. Declared once here, converted exhaustively at the
+// Rust boundary (`settings_ui.rs`) from the matching `souffle_lib` enums.
+// Never pass these as strings through a property or callback.
+export enum SettingsTab { transcription, ai, audio, interface, meetings, system }
+export enum SettingsInteraction { open, tab, theme, menu, number }
+
+export enum AppTheme { dark, light, system }
+
+export enum AppLocale { en, fr }
+
+// `typing` not `type`: `type` is reserved in Slint. Maps to PasteMethod::Type.
+export enum PasteMethod { clipboard, typing, ax }
+
+export enum MeetingLanguage { auto, en, fr }
+
+export enum LogLevel { error, warn, info, debug, trace }
+
+export enum AudioRetention { off, keep-7d, keep-30d, keep-forever }
+
+export enum AccessState { granted, denied, unknown, unsupported, no-device }
+
+// Mirrors souffle_lib::permissions::PermissionKind at the UI boundary.
+export enum PermissionKind { microphone, system-audio, accessibility, calendar }
+
+export enum ShortcutField { none, toggle, ptt }
+
+// Mirrors souffle_lib::export::ExportFormat at the UI boundary
+// (`export_format_from_slint` in main.rs, exhaustive match). Used by
+// MeetingDetail's Export menu only - never a free string across this
+// callback.
+export enum MeetingExportFormat { markdown, json, srt, vtt }
+
+export enum SummaryProvider { auto, apple-intelligence, ollama }
+
+// Normalized at the FoundationModels FFI boundary. `unknown` is the real
+// observation produced for a future OS reason, not a catch-all branch.
+export enum AppleIntelligenceUnavailableReason {
+    device-not-eligible,
+    apple-intelligence-not-enabled,
+    model-not-ready,
+    macos-too-old,
+    stub,
+    unsupported-platform,
+    unknown,
+}

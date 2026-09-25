@@ -1,0 +1,179 @@
+import { Theme } from "../../theme.slint";
+import { ThemedButton } from "../themed_button.slint";
+import { AccessState, PermissionKind } from "../../types.slint";
+
+// Port of PermissionsStep.svelte. Each row's status comes from a real,
+// repeatedly-polled `get_permission_status()` snapshot (main.rs polls every
+// 600ms while this is visible) - never a value fixed once at launch (AC7,
+// added after PR #248 shipped exactly that fake pattern).
+export struct PermissionRow {
+    kind: PermissionKind,
+    state: AccessState,
+    busy: bool,
+}
+
+export component PermissionsStep inherits VerticalLayout {
+
+    pure function row-label(kind: PermissionKind) -> string {
+        if kind == PermissionKind.microphone { return @tr("Microphone"); }
+        if kind == PermissionKind.system-audio { return @tr("Audio système"); }
+        if kind == PermissionKind.accessibility { return @tr("Accessibilité"); }
+        if kind == PermissionKind.calendar { return @tr("Calendrier"); }
+        return "";
+    }
+    pure function row-description(kind: PermissionKind) -> string {
+        if kind == PermissionKind.microphone { return @tr("Nécessaire pour la dictée et les réunions."); }
+        if kind == PermissionKind.system-audio { return @tr("Capture l'autre côté d'un appel dans les réunions."); }
+        if kind == PermissionKind.accessibility { return @tr("Nécessaire pour le collage automatique et certains raccourcis."); }
+        return "";
+    }
+    pure function row-action-label(kind: PermissionKind) -> string {
+        if kind == PermissionKind.accessibility { return @tr("Ouvrir les Réglages"); }
+        return @tr("Autoriser");
+    }
+    pure function row-hint(kind: PermissionKind, state: AccessState) -> string {
+        if kind == PermissionKind.accessibility && state == AccessState.denied { return @tr("Refusé. Ouvrez Réglages Système > Confidentialité et sécurité > Accessibilité."); }
+        if kind == PermissionKind.microphone && state == AccessState.denied { return @tr("Refusé. Ouvrez Réglages Système pour l'autoriser."); }
+        if kind == PermissionKind.microphone && state == AccessState.no-device { return @tr("Aucun microphone détecté."); }
+        return "";
+    }
+    pure function row-hint-action-label(kind: PermissionKind, state: AccessState) -> string {
+        if kind == PermissionKind.accessibility && state == AccessState.denied { return @tr("Réglages Système"); }
+        if kind == PermissionKind.microphone && state == AccessState.denied { return @tr("Réglages Système"); }
+        return "";
+    }
+
+    in property <[PermissionRow]> rows;
+    in property <string> error-message;
+    in property <bool> repair-busy;
+    in property <bool> repair-success;
+    in property <bool> repair-cooldown;
+
+    callback grant-requested(PermissionKind);
+    callback hint-action-requested(PermissionKind);
+    callback repair-requested();
+
+    spacing: 4px;
+
+    for row in root.rows: VerticalLayout {
+        spacing: 4px;
+
+        Rectangle {
+            height: 1px;
+            background: Theme.rule;
+        }
+
+        HorizontalLayout {
+            padding-top: 8px;
+            padding-bottom: 8px;
+            spacing: 10px;
+            alignment: space-between;
+
+            VerticalLayout {
+                spacing: 1px;
+                horizontal-stretch: 1;
+                Text {
+                    text: row-label(row.kind);
+                    font-size: 12.5px;
+                    font-weight: 600;
+                    color: Theme.text-primary;
+                }
+                Text {
+                    text: row-description(row.kind);
+                    font-size: 11px;
+                    color: Theme.text-muted;
+                    wrap: word-wrap;
+                }
+            }
+
+            if row.state == AccessState.granted: Rectangle {
+                width: granted-label.preferred-width + 30px;
+                height: 28px;
+                horizontal-stretch: 0;
+                vertical-stretch: 0;
+                background: Theme.surface-2;
+                border-width: 1px;
+                border-color: Theme.border-soft;
+                border-radius: 4px;
+
+                Rectangle {
+                    x: 9px;
+                    y: (parent.height - self.height) / 2;
+                    width: 7px;
+                    height: 7px;
+                    border-radius: 4px;
+                    background: Theme.success;
+                }
+                granted-label := Text {
+                    x: 22px;
+                    height: parent.height;
+                    text: @tr("Accordé");
+                    color: Theme.text-secondary;
+                    font-family: "Archivo Medium";
+                    font-size: 11px;
+                    vertical-alignment: center;
+                }
+            }
+            if row.state == AccessState.unsupported: Text {
+                text: @tr("Non pris en charge");
+                color: Theme.text-faint;
+                font-size: 11px;
+                vertical-alignment: center;
+            }
+            if row.state != AccessState.granted && row.state != AccessState.unsupported: ThemedButton {
+                text: row.busy ? @tr("Vérification…") : row-action-label(row.kind);
+                enabled: !row.busy;
+                clicked => { root.grant-requested(row.kind); }
+            }
+        }
+
+        if row-hint(row.kind, row.state) != "": HorizontalLayout {
+            spacing: 8px;
+            alignment: space-between;
+
+            Text {
+                text: row-hint(row.kind, row.state);
+                font-size: 10.5px;
+                color: Theme.text-muted;
+                wrap: word-wrap;
+                horizontal-stretch: 1;
+            }
+            if row-hint-action-label(row.kind, row.state) != "": ThemedButton {
+                text: row-hint-action-label(row.kind, row.state);
+                clicked => { root.hint-action-requested(row.kind); }
+            }
+        }
+    }
+
+    Rectangle {
+        height: 1px;
+        background: Theme.rule;
+    }
+
+    HorizontalLayout {
+        padding-top: 8px;
+        spacing: 10px;
+        alignment: space-between;
+
+        Text {
+            text: root.repair-success
+                ? @tr("Réparation effectuée, en attente de confirmation macOS.")
+                : @tr("Un problème persiste ? Réparez l'entrée Accessibilité.");
+            font-size: 10.5px;
+            color: Theme.text-muted;
+            wrap: word-wrap;
+            horizontal-stretch: 1;
+        }
+        ThemedButton {
+            text: root.repair-busy ? @tr("Vérification…") : @tr("Réparer");
+            enabled: !root.repair-busy && !root.repair-cooldown;
+            clicked => { root.repair-requested(); }
+        }
+    }
+
+    if root.error-message != "": Text {
+        text: root.error-message;
+        color: Theme.danger;
+        font-size: 11px;
+    }
+}

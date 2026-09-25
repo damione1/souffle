@@ -1,0 +1,67 @@
+import { PermissionRow, PermissionsStep } from "../onboarding/permissions_step.slint";
+import { ThemedButton, ThemedButtonKind } from "../themed_button.slint";
+import { ModalDialog } from "../modal_dialog.slint";
+import { Theme } from "../../theme.slint";
+import { PermissionKind } from "../../types.slint";
+
+// Port of PermissionsOnboarding.svelte (the Settings-side re-check of the
+// wizard's permissions step): `ModalDialog` chrome, the same
+// `PermissionsStep` rows the wizard shows, and a `btn-ghost` "Terminé".
+export component SettingsPermissionsDialog inherits ModalDialog {
+    in property <[PermissionRow]> rows;
+    in property <string> error-message;
+    in property <bool> repair-busy;
+    in property <bool> repair-success;
+    in property <bool> repair-cooldown;
+
+    callback grant-requested(PermissionKind);
+    callback hint-action-requested(PermissionKind);
+    callback repair-requested();
+
+    title: @tr("Permissions macOS");
+    subtitle: @tr("Vérifiez chaque autorisation. La réparation réinitialise uniquement l’entrée Accessibilité avant de redemander l’accès.");
+    panel-max-width: 560px;
+    panel-height: 500px;
+
+    Rectangle {
+        vertical-stretch: 1;
+        clip: true;
+
+        Flickable {
+            width: parent.width - 10px;
+            height: parent.height;
+
+            PermissionsStep {
+                width: parent.width;
+                rows: root.rows;
+                error-message: root.error-message;
+                repair-busy: root.repair-busy;
+                repair-success: root.repair-success;
+                repair-cooldown: root.repair-cooldown;
+                grant-requested(kind) => { root.grant-requested(kind); }
+                hint-action-requested(kind) => { root.hint-action-requested(kind); }
+                repair-requested => { root.repair-requested(); }
+            }
+        }
+    }
+
+    HorizontalLayout {
+        alignment: space-between;
+        spacing: 12px;
+        vertical-stretch: 0;
+
+        Text {
+            text: @tr("Vous pourrez les accorder plus tard.");
+            font-size: 12px;
+            color: Theme.text-muted;
+            vertical-alignment: center;
+            wrap: word-wrap;
+            horizontal-stretch: 1;
+        }
+        ThemedButton {
+            text: @tr("Terminé");
+            kind: ThemedButtonKind.ghost;
+            clicked => { root.close-requested(); }
+        }
+    }
+}

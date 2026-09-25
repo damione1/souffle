@@ -1,0 +1,340 @@
+import { Theme } from "../theme.slint";
+import { TranscriptWord, TranscriptWordFlow, DictionaryAliasPopover } from "transcript_words.slint";
+export { TranscriptWord }
+import { LucideIcon, IconSet } from "lucide_icon.slint";
+import { SpeakerRole } from "../types.slint";
+
+// Port of MeetingTranscriptSection.svelte - paragraph grouping with speaker
+// labels and session-break dividers, click-to-seek on a paragraph's
+// timestamp, virtualized scrolling (AC15), and per-word dictionary-alias
+// popover (TranscriptWordLine.svelte, milestone 8d). Not yet ported: bulk
+// edit mode (the "Edit" affordance next to this title) - copying and
+// exporting the transcript (SOU-195-slice) don't need it.
+
+// Display names of the Me/Them lanes, shared by this post-meeting view
+// and the live view (recording_view.slint).
+export global SpeakerLabels {
+    pure public function of(role: SpeakerRole) -> string {
+        if role == SpeakerRole.me { return @tr("Moi"); }
+        return @tr("Eux");
+    }
+}
+
+export struct TranscriptBlock {
+    is-session-break: bool,
+    // Diarized lane of the paragraph. `has-speaker` false means an
+    // undiarized (mono) paragraph: no label at all, `speaker` is then
+    // meaningless. The label text is `SpeakerLabels.of()`, above, so it is
+    // translated with the rest of the UI instead of arriving as a French
+    // string built in Rust (SOU-246).
+    has-speaker: bool,
+    speaker: SpeakerRole,
+    timestamp: string,
+    text: string,
+    // SOU-223: rendered as a `FlexboxLayout` of `Text`/`TouchArea` items
+    // (see the `words` loop below) instead of a `StyledText` Markdown link
+    // render. The previous approach could make a word clickable but could
+    // not stop `StyledText`'s `Style::Link` from forcing an underline
+    // painted with the same brush as the glyph fill (`i-slint-core`'s
+    // `textlayout/sharedparley.rs`) - no public property could suppress
+    // that independently of link color. `FlexboxLayout` with `flex-wrap`
+    // gives natural paragraph reflow without going through `StyledText` at
+    // all, so a clickable word is just a `Text` with normal styling inside
+    // a `TouchArea`, no link semantics and no underline. Only became viable
+    // once Slint moved `FlexboxLayout` from `builtin_experimental()` to the
+    // stable builtin set in 1.18.1 (SOU-223 bumped the pin from 1.17.1).
+    words: [TranscriptWord],
+    // -1 when the paragraph isn't attributed to any recorded audio session.
+    recording-session-index: int,
+    start-time: float,
+    end-label: string,
+    start-label: string,
+}
+
+export component TranscriptSection inherits VerticalLayout {
+    // Only the currently visible slice of the transcript, not the whole
+    // thing - `main.rs` owns the full block list and pushes a new slice in
+    // whenever `scroll-top` moves far enough (AC15: only on-screen rows +
+    // margin are ever mounted here, verifiable by `blocks.length` staying
+    // small regardless of how many total paragraphs the meeting has).
+    in property <[TranscriptBlock]> blocks;
+    in property <int> segment-count;
+    in property <bool> has-audio: false;
+    // Estimated height in px (`main.rs`, see `transcript::compute_offsets`)
+    // of everything scrolled past above/below the current slice - plain
+    // `float`, not `length`, since `main.rs` only has access to Slint's
+    // stable `set_*`/`get_*` API, not the `length`-wrapping type used
+    // internally by generated component code. Rendered as blank spacers so
+    // the scrollbar/drag physics feel like a real list of `segment-count`
+    // items instead of just `blocks.length` of them.
+    in property <float> spacer-before: 0.0;
+    in property <float> spacer-after: 0.0;
+    // Two-way bound down from `MeetingDetail`/`MainWindow` to
+    // `flick.content-y` below, so `main.rs` can poll the real scroll
+    // position and decide the next slice - see the doc comment on
+    // `visible_window` in `transcript.rs` for why this can't be pure Slint
+    // (variable-height rows need real text layout to size precisely, which
+    // only the already-mounted rows have; the rest are estimates).
+    in-out property <length> scroll-top: 0px;
+
+    // (recording-session-index, start-time) of the clicked paragraph.
+    callback paragraph-clicked(int, float);
+    // (term, pronunciation) once the user saves the alias popover.
+    callback alias-save-requested(string, string);
+    // A click on the transcript that no word or timestamp handled - lets
+    // the page drop keyboard focus from the title/notes fields (a Flickable
+    // keeps unhandled presses, so the page could never see them).
+    callback background-clicked();
+    // Copy the transcript text to the pasteboard (SOU-195-slice). Rust
+    // renders it fresh from the full, un-windowed meeting - `blocks` above
+    // is only the on-screen slice (AC15), never a safe source for a full
+    // copy.
+    callback copy-requested();
+
+    // "Copié" feedback for 1.5s after a copy, like the Tauri CopyButton
+    // (and the summary's Copy, summary_section.slint).
+    property <bool> just-copied: false;
+    function copy-transcript() {
+        root.copy-requested();
+        root.just-copied = true;
+    }
+    Timer {
+        interval: 1.5s;
+        running: root.just-copied;
+        triggered => { root.just-copied = false; }
+    }
+
+    // SOU-243: this component now sits in the page's single scroll flow
+    // (meeting_detail.slint) instead of a fixed-height column, so it can no
+    // longer rely on `vertical-stretch: 1` to fill leftover window space -
+    // there is no bounded "leftover" inside a Flickable's own content, only
+    // a preferred-height. It gets an explicit height instead: the smaller of
+    // its natural content height (so a short transcript never reserves dead
+    // space or an internal scrollbar it doesn't need, AC3) and this cap (so
+    // a long transcript still gets a bounded box for `flick` below to
+    // virtualize inside, AC2/AC15, rather than expanding to its full
+    // unvirtualized height inside the page scroll). The cap is a
+    // placeholder: chosen to read as clearly the primary section without
+    // crowding Notes/Audio/Résumé out of view, but not visually verified
+    // (see SOU-243 PR) - a value Damien should confirm/adjust on screen.
+    property <length> max-visible-height: 440px;
+
+    spacing: 8px;
+
+    HorizontalLayout {
+        vertical-stretch: 0;
+        alignment: space-between;
+
+        Text {
+            text: @tr("Transcription");
+            font-family: "Archivo SemiBold";
+            font-size: 13px;
+            color: Theme.text-primary;
+            vertical-alignment: center;
+        }
+
+        if root.segment-count > 0: copy-btn := Rectangle {
+            width: copy-content.preferred-width + 16px;
+            height: 22px;
+            horizontal-stretch: 0;
+            border-radius: 4px;
+            border-width: copy-focus.has-focus ? 2px : 0px;
+            border-color: Theme.accent;
+            background: copy-area.pressed ? Theme.surface-4 : copy-area.has-hover ? Theme.surface-3 : transparent;
+
+            accessible-role: button;
+            accessible-label: @tr("Copier la transcription");
+            accessible-action-default => { root.copy-transcript(); }
+
+            forward-focus: copy-focus;
+            copy-focus := FocusScope {
+                key-pressed(event) => {
+                    if event.text == Key.Return || event.text == Key.Space {
+                        root.copy-transcript();
+                        return accept;
+                    }
+                    return reject;
+                }
+            }
+
+            copy-area := TouchArea {
+                mouse-cursor: pointer;
+                clicked => {
+                    copy-focus.focus();
+                    root.copy-transcript();
+                }
+            }
+
+            copy-content := HorizontalLayout {
+                padding-left: 8px;
+                padding-right: 8px;
+                spacing: 5px;
+                alignment: center;
+
+                Rectangle {
+                    width: 13px;
+                    horizontal-stretch: 0;
+
+                    LucideIcon {
+                        size: 13px;
+                        y: (parent.height - self.height) / 2;
+                        icon: root.just-copied ? IconSet.Check : IconSet.Copy;
+                        icon-color: root.just-copied ? Theme.accent : Theme.text-secondary;
+                    }
+                }
+                Text {
+                    text: root.just-copied ? @tr("Copié") : @tr("Copier");
+                    font-size: 11.5px;
+                    color: Theme.text-secondary;
+                    vertical-alignment: center;
+                }
+            }
+        }
+    }
+
+    if root.segment-count == 0: Text {
+        text: @tr("Aucun texte transcrit pour cette r\u{e9}union.");
+        color: Theme.text-muted;
+        font-size: 12px;
+    }
+
+    if root.segment-count > 0: Rectangle {
+        height: min(flick-inner.preferred-height, root.max-visible-height);
+        border-width: 1px;
+        border-color: Theme.surface-4;
+        clip: true;
+
+        // One shared popover rather than one instance per word (there can
+        // be hundreds of words on screen at once even virtualized). Opens
+        // under the clicked word.
+        alias-popup := DictionaryAliasPopover {
+            save-requested(term, pronunciation) => { root.alias-save-requested(term, pronunciation); }
+        }
+
+        flick := Flickable {
+            width: parent.width - 10px;
+            height: 100%;
+            content-width: self.width;
+            content-y <=> root.scroll-top;
+
+            TouchArea {
+                width: parent.content-width;
+                height: parent.content-height;
+                clicked => { root.background-clicked(); }
+            }
+
+            flick-inner := VerticalLayout {
+                width: flick.width;
+                padding: 12px;
+                spacing: 12px;
+                alignment: start;
+
+                Rectangle { height: root.spacer-before * 1px; }
+
+                for block in root.blocks: VerticalLayout {
+                    if !block.is-session-break: VerticalLayout {
+                        spacing: 2px;
+
+                        HorizontalLayout {
+                            spacing: 8px;
+                            alignment: start;
+
+                            if block.has-speaker: Text {
+                                text: SpeakerLabels.of(block.speaker);
+                                font-size: 11px;
+                                font-weight: 600;
+                                color: Theme.accent;
+                                vertical-alignment: center;
+                            }
+
+                            ts-btn := Rectangle {
+                                width: 40px;
+                                height: 22px;
+                                border-radius: 3px;
+                                border-width: ts-focus.has-focus ? 2px : 0px;
+                                border-color: Theme.accent;
+                                background: ts-area.has-hover ? Theme.surface-2 : transparent;
+
+                                accessible-role: button;
+                                accessible-label: @tr("Aller \u{e0} {}", block.timestamp);
+                                accessible-enabled: root.has-audio;
+                                accessible-action-default => {
+                                    root.paragraph-clicked(block.recording-session-index, block.start-time);
+                                }
+
+                                forward-focus: ts-focus;
+                                ts-focus := FocusScope {
+                                    enabled: root.has-audio;
+                                    key-pressed(event) => {
+                                        if event.text == Key.Return || event.text == Key.Space {
+                                            root.paragraph-clicked(block.recording-session-index, block.start-time);
+                                            return accept;
+                                        }
+                                        return reject;
+                                    }
+                                }
+
+                                ts-area := TouchArea {
+                                    enabled: root.has-audio;
+                                    clicked => {
+                                        ts-focus.focus();
+                                        root.paragraph-clicked(block.recording-session-index, block.start-time);
+                                    }
+                                }
+
+                                Text {
+                                    text: block.timestamp;
+                                    font-family: "monospace";
+                                    font-size: 10.5px;
+                                    color: Theme.text-faint;
+                                    vertical-alignment: center;
+                                }
+                            }
+                        }
+
+                        // SOU-223: click-to-correct (AC1/AC2/AC4) with no
+                        // underline and no web-link appearance (AC3) - see
+                        // the `words` doc comment on `TranscriptBlock` above.
+                        // Clickable words are plain `Text` in a `TouchArea`;
+                        // literal runs (whitespace/punctuation/short/numeric
+                        // tokens) are plain `Text` with no touch handling.
+                        // Always the word flow, never swapped for a cheaper
+                        // wrapped `Text` on hover: the two break lines
+                        // differently, so the text would jump under the
+                        // pointer. Virtualized, it costs ~12 ms on open in a
+                        // release build (SOU-258).
+                        TranscriptWordFlow {
+                            width: parent.width;
+                            words: block.words;
+                            word-clicked(word, at-x, at-y) => { alias-popup.open(word, at-x, at-y); }
+                        }
+                    }
+
+                    if block.is-session-break: HorizontalLayout {
+                        spacing: 8px;
+                        padding-top: 4px;
+                        padding-bottom: 4px;
+
+                        Rectangle {
+                            height: 1px;
+                            background: Theme.surface-4;
+                            vertical-stretch: 1;
+                        }
+                        Text {
+                            text: @tr("Fin de l'enregistrement précédent") + " / " + @tr("Nouvelle session d'enregistrement");
+                            font-size: 10px;
+                            color: Theme.text-faint;
+                        }
+                        Rectangle {
+                            height: 1px;
+                            background: Theme.surface-4;
+                            vertical-stretch: 1;
+                        }
+                    }
+                }
+
+                Rectangle { height: root.spacer-after * 1px; }
+            }
+        }
+    }
+}

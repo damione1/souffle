@@ -1,0 +1,86 @@
+import { Theme } from "../theme.slint";
+
+// Port of app.css's `.btn`/`.btn-primary`/`.btn-ghost`/`.btn-active` (see
+// that file for the exact color recipe). `std-widgets.slint`'s `Button`
+// can't be recolored to match: its Fluent-style skin ignores `Theme`
+// entirely, which is why every onboarding screen looked like generic
+// system-gray buttons instead of the app's actual amber design.
+// `danger` mirrors `recording_view.slint`'s Stop button recipe (the only
+// other destructive-action button in the app): `Theme.danger` fill,
+// `Theme.danger-strong` on press, `Theme.on-danger` text - never the
+// default gray or the accent gold for a destructive action.
+export enum ThemedButtonKind { default, primary, ghost, active, danger }
+
+export component ThemedButton inherits Rectangle {
+    in property <string> text;
+    in property <ThemedButtonKind> kind: ThemedButtonKind.default;
+    in property <bool> enabled: true;
+    // app.css `.btn-sm` (`padding: 0.25rem 0.5rem; font-size: 0.75rem`):
+    // the locale toggles on the wizard, inline "Vérifier"/banner actions.
+    in property <bool> compact: false;
+
+    callback clicked();
+
+    height: root.compact ? 26px : Theme.settings-control-height;
+    horizontal-stretch: 0;
+    vertical-stretch: 0;
+    border-radius: 4px;
+    border-width: key-focus.has-focus ? 2px : 1px;
+    border-color: key-focus.has-focus ? Theme.accent
+        : root.kind == ThemedButtonKind.primary ? Theme.accent.with-alpha(0.25)
+        : root.kind == ThemedButtonKind.ghost || root.kind == ThemedButtonKind.active || root.kind == ThemedButtonKind.danger ? transparent
+        : Theme.ghost-border;
+    background: root.kind == ThemedButtonKind.primary ? Theme.accent.with-alpha(area.pressed ? 0.28 : area.has-hover ? 0.20 : 0.12)
+        : root.kind == ThemedButtonKind.active ? (area.pressed || area.has-hover ? Theme.accent-hover : Theme.accent)
+        : root.kind == ThemedButtonKind.ghost ? (area.has-hover ? Theme.surface-2 : transparent)
+        : root.kind == ThemedButtonKind.danger ? (area.pressed ? Theme.danger-strong : area.has-hover ? Theme.danger.with-alpha(0.9) : Theme.danger)
+        : (area.pressed ? Theme.surface-2 : area.has-hover ? Theme.surface-4 : Theme.surface-3);
+    opacity: root.enabled ? 1.0 : 0.5;
+
+    accessible-role: button;
+    accessible-label: root.text;
+    accessible-enabled: root.enabled;
+    accessible-action-default => { if root.enabled { root.clicked(); } }
+
+    forward-focus: key-focus;
+
+    key-focus := FocusScope {
+        key-pressed(event) => {
+            if !root.enabled {
+                return reject;
+            }
+            if event.text == Key.Return || event.text == Key.Space {
+                root.clicked();
+                return accept;
+            }
+            return reject;
+        }
+    }
+
+    area := TouchArea {
+        enabled: root.enabled;
+        clicked => {
+            key-focus.focus();
+            root.clicked();
+        }
+    }
+
+    HorizontalLayout {
+        padding-left: root.compact ? 10px : 16px;
+        padding-right: root.compact ? 10px : 16px;
+        padding-top: 1px; // +1px for optical baseline center
+        alignment: center;
+
+        Text {
+            text: root.text;
+            font-size: root.compact ? 11.5px : 13px;
+            font-weight: root.kind == ThemedButtonKind.default ? 500 : 600;
+            color: root.kind == ThemedButtonKind.primary ? Theme.accent
+                : root.kind == ThemedButtonKind.active ? Theme.canvas
+                : root.kind == ThemedButtonKind.ghost ? (area.has-hover ? Theme.text-primary : Theme.text-muted)
+                : root.kind == ThemedButtonKind.danger ? Theme.on-danger
+                : Theme.text-primary;
+            vertical-alignment: center;
+        }
+    }
+}

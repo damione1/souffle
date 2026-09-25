@@ -1,0 +1,571 @@
+import { ScrollView } from "std-widgets.slint";
+import { RecordingMode, SpeakerRole, LiveSystemAudio } from "types.slint";
+import { Theme } from "theme.slint";
+import { LucideIcon, IconSet } from "components/lucide_icon.slint";
+import { ThemedTextArea } from "components/themed_text_area.slint";
+import { TranscriptBlock, SpeakerLabels } from "components/transcript_section.slint";
+import { TranscriptWord, TranscriptWordFlow, DictionaryAliasPopover } from "components/transcript_words.slint";
+
+// LiveSessionCard.svelte parity surface. The two modes deliberately share
+// the session toolbar, while their bodies stay distinct: dictation is a
+// single writing surface; meetings add transcript context and live notes.
+export component RecordingView inherits Rectangle {
+    in property <RecordingMode> mode; // never idle - see main_window.slint
+    // Dictation path - mono-lane flat buffer, unchanged (AC7).
+    in property <string> live-text;
+    in property <string> live-tentative;
+    // The dictation as words (Rust, `push_dictation_words`), the one the
+    // engine still holds dimmed at the end.
+    in property <[TranscriptWord]> live-dictation-words;
+    // Meeting path - paragraph model from LiveTranscript (SOU-237).
+    in property <[TranscriptBlock]> live-transcript-blocks;
+    // True when live-transcript-blocks is empty and live-tentative is empty
+    // (placeholder "À l'écoute…" logic).
+    in property <bool> live-transcript-empty: true;
+    // Elapsed offset in seconds, set by Rust to the real elapsed since
+    // recording started - anchors the free-running timer (AC6).
+    in property <int> live-elapsed-offset-seconds: 0;
+    in property <float> audio-level: 0.0;
+    in-out property <string> notes;
+    // Live verdict on the meeting's system-audio leg (see LiveSystemAudio).
+    in property <LiveSystemAudio> system-audio: LiveSystemAudio.pending;
+    in property <bool> auto-paste: false;
+    // SOU-258: the view mounts on the click, before the session exists (a
+    // meeting's engine reset takes seconds). SOU-260: capture already runs
+    // while this is true, so the clock counts from the click like the audio
+    // does; only the transcript waits, and catches up once the engine is
+    // ready. Stop stays live: main.rs stops capture at once and stops the
+    // session itself once it exists.
+    in property <bool> starting: false;
+    // A stop clicked during the start is queued behind it: the button dims
+    // and ignores further clicks until that stop has run.
+    in property <bool> stop-pending: false;
+
+    callback stop-requested();
+    callback notes-changed(string);
+    // (term, pronunciation) saved from a live word's alias popover - the
+    // same handler as the post-meeting transcript's.
+    callback alias-save-requested(string, string);
+
+    // Live meeting autoscroll (LiveSessionCard.svelte's scheduleAutoscroll),
+    // done here rather than from Rust: follow the bottom while the reader
+    // is within `live-follow-slack` of it, and leave them alone once they
+    // scroll further up. It used to be a Rust poll reading the content and
+    // viewport heights through `in-out` properties bound `<=>` to
+    // MainWindow; the outer, binding-less side of that two-way binding won,
+    // so Rust always read 0 and never scrolled (SOU-256).
+    property <bool> live-follow: true;
+    property <length> live-follow-slack: 40px;
+    function live-pin-to-bottom() {
+        live-scroll.content-y = min(0px, live-scroll.visible-height - live-scroll.content-height);
+    }
+
+    property <string> combined-text: root.live-tentative == "" ? root.live-text
+        : root.live-text == "" ? root.live-tentative
+        : root.live-text + @tr(" {}", root.live-tentative);
+
+    // Seconds counted by the timer since Rust last anchored the offset.
+    // Kept apart from the offset so a late anchor (the start settling after
+    // the clock already ran from the click) replaces the count instead of
+    // being lost: assigning to a bound property would drop its binding.
+    property <int> ticks-since-anchor: 0;
+    changed live-elapsed-offset-seconds => { root.ticks-since-anchor = 0; }
+    property <int> elapsed-seconds: root.live-elapsed-offset-seconds + root.ticks-since-anchor;
+    property <int> elapsed-minutes: root.elapsed-seconds / 60;
+    property <int> elapsed-remainder: Math.mod(root.elapsed-seconds, 60);
+    property <string> elapsed-label: root.elapsed-minutes + ":" +
+        (root.elapsed-remainder < 10 ? "0" : "") + root.elapsed-remainder;
+
+    Timer {
+        interval: 1s;
+        running: root.mode != RecordingMode.idle;
+        triggered => { root.ticks-since-anchor += 1; }
+    }
+
+    VerticalLayout {
+        width: min(root.width - 52px, 720px);
+        height: root.height;
+        x: (root.width - self.width) / 2;
+        padding-top: 26px;
+        padding-bottom: 34px;
+        spacing: 18px;
+
+        HorizontalLayout {
+            height: 38px;
+            vertical-stretch: 0;
+            spacing: 14px;
+
+            status := Rectangle {
+                width: status-label.preferred-width + 38px;
+                height: 38px;
+                horizontal-stretch: 0;
+                background: transparent;
+
+                Rectangle {
+                    y: (parent.height - self.height) / 2;
+                    height: 27px;
+                    background: Theme.danger;
+
+                    Rectangle {
+                        x: 11px;
+                        y: (parent.height - self.height) / 2;
+                        width: 8px;
+                        height: 8px;
+                        border-radius: 4px;
+                        background: Theme.on-danger;
+                    }
+                    status-label := Text {
+                        x: 27px;
+                        width: self.preferred-width;
+                        height: parent.height;
+                        text: root.mode == RecordingMode.meeting ? @tr("Réunion en direct") : @tr("Dictée");
+                        font-family: "Archivo SemiBold";
+                        font-size: 12.5px;
+                        color: Theme.on-danger;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+
+            // Waveform.svelte (variant "pill") parity: 48 bars of 3px with a
+            // 2px gap, centred in the space between the badge and the clock,
+            // always moving (two travelling sines) and pushed up by the live
+            // audio level. `animation-tick()` redraws every frame, which is
+            // fine here: this view only exists while recording.
+            waveform := Rectangle {
+                horizontal-stretch: 1;
+                height: 38px;
+                clip: true;
+
+                property <int> bar-count: 48;
+                property <length> bar-width: 3px;
+                property <length> bar-gap: 2px;
+                property <length> bars-height: 32px;
+                property <float> t: animation-tick() / 1ms;
+                // The level arrives at ~15 Hz; ease between samples like the
+                // canvas did (bars += (target - bars) * 0.3 per frame).
+                property <float> level: root.audio-level;
+                animate level { duration: 120ms; easing: ease-out; }
+
+                for i in self.bar-count: Rectangle {
+                    // Same curve as the Svelte canvas: level + per-bar ripple,
+                    // clamped to [0.05, 1] of the strip height.
+                    property <float> level: max(0.05, min(1.0,
+                        waveform.level
+                        + Math.sin((waveform.t / 200 + i * 0.5) * 1rad) * 0.15
+                        + Math.sin((i * 0.3 + waveform.t / 300) * 1rad) * 0.1));
+                    x: (parent.width - (waveform.bar-count * (waveform.bar-width + waveform.bar-gap) - waveform.bar-gap)) / 2
+                        + i * (waveform.bar-width + waveform.bar-gap);
+                    width: waveform.bar-width;
+                    height: self.level * (waveform.bars-height - 4px);
+                    y: (parent.height - self.height) / 2;
+                    border-radius: 1.5px;
+                    background: Theme.accent;
+                    opacity: 0.4 + self.level * 0.6;
+                }
+            }
+
+            Text {
+                width: 46px;
+                horizontal-stretch: 0;
+                text: root.elapsed-label;
+                font-family: "JetBrains Mono";
+                font-size: 14px;
+                color: Theme.text-tertiary;
+                horizontal-alignment: right;
+                vertical-alignment: center;
+            }
+
+            stop-control := FocusScope {
+                width: 92px;
+                height: 38px;
+                horizontal-stretch: 0;
+                accessible-role: button;
+                accessible-label: @tr("Arrêter l'enregistrement");
+                accessible-enabled: !root.stop-pending;
+                accessible-action-default => { root.stop-requested(); }
+
+                key-pressed(event) => {
+                    if !root.stop-pending && (event.text == Key.Return || event.text == Key.Space) {
+                        root.stop-requested();
+                        return accept;
+                    }
+                    return reject;
+                }
+
+                Rectangle {
+                    border-radius: 4px;
+                    border-width: stop-control.has-focus ? 2px : 0px;
+                    border-color: Theme.text-primary;
+                    background: root.stop-pending ? Theme.danger.with-alpha(0.5) : stop-area.pressed ? Theme.danger-strong : stop-area.has-hover ? Theme.danger.with-alpha(0.9) : Theme.danger;
+
+                    stop-area := TouchArea {
+                        enabled: !root.stop-pending;
+                        clicked => {
+                            stop-control.focus();
+                            root.stop-requested();
+                        }
+                    }
+
+                    HorizontalLayout {
+                        padding-left: 16px;
+                        padding-right: 16px;
+                        spacing: 8px;
+                        alignment: center;
+
+                        Rectangle {
+                            width: 13px;
+                            height: parent.height;
+
+                            LucideIcon {
+                                x: 0px;
+                                y: (parent.height - self.height) / 2;
+                                width: 13px;
+                                height: 13px;
+                                icon: IconSet.Square;
+                                icon-color: Theme.on-danger;
+                                filled: true;
+                            }
+                        }
+                        Text {
+                            text: @tr("Arrêter");
+                            font-family: "Archivo SemiBold";
+                            font-size: 13.5px;
+                            color: Theme.on-danger;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+            }
+        }
+
+        if root.mode == RecordingMode.meeting && root.system-audio == LiveSystemAudio.unavailable: Rectangle {
+            min-height: 48px;
+            vertical-stretch: 0;
+            border-radius: 4px;
+            border-width: 1px;
+            border-color: Theme.warning.with-alpha(0.55);
+            background: Theme.warning.with-alpha(0.10);
+
+            accessible-role: text;
+            accessible-label: @tr("Attention. Seul votre microphone est enregistré. L'audio des autres participants est indisponible.");
+
+            HorizontalLayout {
+                padding-left: 14px;
+                padding-right: 14px;
+                padding-top: 10px;
+                padding-bottom: 10px;
+                spacing: 10px;
+                alignment: start;
+
+                // A fixed-size child of a HorizontalLayout is top-aligned
+                // in its cell, not centred: wrap it and centre by hand, the
+                // same recipe as the Stop button icon above.
+                Rectangle {
+                    width: 17px;
+                    horizontal-stretch: 0;
+
+                    LucideIcon {
+                        size: 17px;
+                        y: (parent.height - self.height) / 2;
+                        icon: IconSet.TriangleAlert;
+                        icon-color: Theme.warning;
+                    }
+                }
+
+                Text {
+                    text: @tr("Seul votre microphone est enregistré. L’audio des autres participants est indisponible.");
+                    font-size: 12.5px;
+                    font-family: "Archivo SemiBold";
+                    color: Theme.text-secondary;
+                    wrap: word-wrap;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                }
+            }
+        }
+
+        if root.mode == RecordingMode.dictation: Rectangle {
+            min-height: 240px;
+            vertical-stretch: 1;
+            border-radius: 4px;
+            border-width: 1px;
+            border-color: Theme.border-soft;
+
+            VerticalLayout {
+                padding-left: 22px;
+                padding-right: 22px;
+                padding-top: 20px;
+                padding-bottom: 18px;
+                spacing: 14px;
+
+                // Stretched by this (default-alignment) layout over what the
+                // auto-paste row leaves - see live-scroll below for why there
+                // is no wrapper Rectangle or `height: 100%` (SOU-256).
+                dictation-scroll := ScrollView {
+                    vertical-stretch: 1;
+
+                    VerticalLayout {
+                        width: parent.width;
+                        alignment: start;
+                        // Gutter for the overlay scrollbar, so it never
+                        // sits on the last characters of a line.
+                        padding-right: 12px;
+                        if root.starting || root.combined-text == "": Text {
+                            text: root.starting ? @tr("Démarrage…") : @tr("À l'écoute…");
+                            font-size: 14px;
+                            color: Theme.text-muted;
+                            wrap: word-wrap;
+                        }
+                        if !root.starting && root.combined-text != "": TranscriptWordFlow {
+                            words: root.live-dictation-words;
+                            font-size: 19px;
+                            color: Theme.text-secondary;
+                        }
+                    }
+                }
+
+                if root.auto-paste: HorizontalLayout {
+                    height: 18px;
+                    vertical-stretch: 0;
+                    spacing: 9px;
+                    alignment: start;
+
+                    LucideIcon {
+                        icon: IconSet.ClipboardCheck;
+                        icon-color: Theme.accent;
+                        size: 15px;
+                    }
+                    Text {
+                        text: @tr("Collé automatiquement dans votre dernière app à l’arrêt");
+                        font-size: 12.5px;
+                        color: Theme.text-muted;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+        }
+
+        Rectangle {
+            visible: root.mode == RecordingMode.meeting;
+            min-height: root.mode == RecordingMode.meeting ? 170px : 0px;
+            vertical-stretch: root.mode == RecordingMode.meeting ? 1 : 0;
+
+            border-radius: 4px;
+            border-width: 1px;
+            border-color: Theme.border-soft;
+
+            // Click a finalized word -> add it to the dictionary, same popover
+            // as the post-meeting transcript (SOU-223). Shared by all rows,
+            // so rows updating or scrolling underneath never touch it.
+            live-alias := DictionaryAliasPopover {
+                save-requested(term, pronunciation) => { root.alias-save-requested(term, pronunciation); }
+            }
+
+            VerticalLayout {
+                padding-left: 18px;
+                padding-right: 18px;
+                padding-top: 16px;
+                // Bottom padding is inside live-content, not here: text that
+                // overflows scrolls to the card's border instead of stopping
+                // on a blank 16px strip that reads as a clipped UI.
+                spacing: 16px;
+                // SOU-256: no `alignment` here, on purpose. Any alignment
+                // other than the default `stretch` makes a layout give each
+                // child its *preferred* height and ignore vertical-stretch.
+                // That is what collapsed live-scroll to ~3 lines (its
+                // preferred height), and once live-scroll was wrapped in a
+                // Rectangle with `height: 100%` (#312) the wrapper's
+                // preferred height was 0, so the whole transcript vanished
+                // while recording. The header is fixed-height and
+                // vertical-stretch:0, so the ScrollView takes all the rest.
+
+                HorizontalLayout {
+                    height: 17px;
+                    vertical-stretch: 0;
+                    alignment: space-between;
+
+                    Text {
+                        text: @tr("TRANSCRIPTION EN DIRECT");
+                        font-family: "Archivo SemiBold";
+                        font-size: 11px;
+                        color: Theme.text-muted;
+                        vertical-alignment: center;
+                    }
+
+                    HorizontalLayout {
+                        width: audio-label.preferred-width + 14px;
+                        horizontal-stretch: 0;
+                        spacing: 6px;
+                        alignment: center;
+
+                        // Centred by hand for the same reason as the banner
+                        // icon above: a bare 6px dot sat on the top edge.
+                        Rectangle {
+                            width: 6px;
+                            horizontal-stretch: 0;
+
+                            Rectangle {
+                                y: (parent.height - self.height) / 2;
+                                width: 6px;
+                                height: 6px;
+                                border-radius: 3px;
+                                // LiveSessionCard.svelte's SYSTEM_AUDIO_DOT.
+                                background: root.system-audio == LiveSystemAudio.active ? Theme.accent
+                                    : root.system-audio == LiveSystemAudio.pending ? Theme.warning
+                                    : Theme.surface-4;
+                            }
+                        }
+                        audio-label := Text {
+                            text: root.system-audio == LiveSystemAudio.active ? @tr("Audio système actif")
+                                : root.system-audio == LiveSystemAudio.pending ? @tr("Vérification de l’audio système")
+                                : @tr("Micro seul");
+                            font-size: 11.5px;
+                            color: Theme.text-muted;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+
+                // A plain layout child: the parent VerticalLayout stretches
+                // it over everything the header leaves. No `height: 100%`
+                // (it would measure against the whole layout, header
+                // included - 709afdd) and no wrapper Rectangle (a Rectangle
+                // has no layout of its own, so it reports no preferred
+                // height and hides whatever it holds under a non-stretch
+                // alignment - SOU-256).
+                live-scroll := ScrollView {
+                    vertical-stretch: 1;
+
+                    changed content-height => {
+                        if root.live-follow {
+                            root.live-pin-to-bottom();
+                        }
+                    }
+                    changed visible-height => {
+                        if root.live-follow {
+                            root.live-pin-to-bottom();
+                        }
+                    }
+                    // Only a scroll the reader made (wheel, trackpad or
+                    // scrollbar drag) decides whether new text keeps
+                    // following. Not `changed content-y`: that also fires
+                    // for the pin above, and when the content grows again
+                    // before it runs (a long final wrapping onto more
+                    // lines) it would read the fresh pin as "scrolled up"
+                    // and stop following for good.
+                    scrolled => {
+                        root.live-follow = self.content-y <= self.visible-height - self.content-height + root.live-follow-slack;
+                    }
+
+                    live-content := VerticalLayout {
+                        width: parent.width;
+                        alignment: start;
+                        spacing: 10px;
+                        padding-bottom: 16px;
+                        // Gutter for the overlay scrollbar, so it never
+                        // sits on the last characters of a line.
+                        padding-right: 12px;
+
+                        if root.live-transcript-empty: Text {
+                            text: root.starting ? @tr("Démarrage…") : @tr("À l'écoute…");
+                            font-size: 14px;
+                            color: Theme.text-muted;
+                        }
+
+                        for block[i] in root.live-transcript-blocks: VerticalLayout {
+                            alignment: start;
+                            spacing: 2px;
+
+                            HorizontalLayout {
+                                alignment: start;
+                                spacing: 8px;
+
+                                Text {
+                                    text: block.has-speaker ? SpeakerLabels.of(block.speaker) : "";
+                                    font-family: "Archivo SemiBold";
+                                    font-size: 11.5px;
+                                    color: Theme.accent;
+                                }
+                                Text {
+                                    text: block.timestamp;
+                                    font-family: "JetBrains Mono";
+                                    font-size: 10.5px;
+                                    color: Theme.text-faint;
+                                }
+                            }
+                            // Words of finalized text are clickable; the
+                            // provisional tail (tentative) never is, see
+                            // `LivePara::to_slint_block`.
+                            TranscriptWordFlow {
+                                width: parent.width;
+                                words: block.words;
+                                font-size: 15px;
+                                color: Theme.text-secondary;
+                                word-clicked(word, at-x, at-y) => { live-alias.open(word, at-x, at-y); }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if root.mode == RecordingMode.meeting: Rectangle {
+            height: 132px;
+            vertical-stretch: 0;
+
+            // Same width as the transcript card above, like the Svelte
+            // MeetingNotesSection sibling: no side padding, and the text
+            // area sized by this layout (a `width: parent.width` here
+            // counted the padding too and pushed the box 12px past the
+            // card's right edge).
+            VerticalLayout {
+                spacing: 0px;
+
+                Rectangle {
+                    height: 1px;
+                    vertical-stretch: 0;
+                    background: Theme.rule;
+                }
+
+                Rectangle {
+                    height: 15px;
+                    vertical-stretch: 0;
+                }
+
+                HorizontalLayout {
+                    height: 18px;
+                    vertical-stretch: 0;
+                    spacing: 8px;
+                    alignment: start;
+
+                    LucideIcon {
+                        icon: IconSet.PenLine;
+                        icon-color: Theme.accent;
+                        size: 14px;
+                    }
+                    Text {
+                        text: @tr("NOTES");
+                        font-family: "Archivo SemiBold";
+                        font-size: 11px;
+                        color: Theme.text-muted;
+                        vertical-alignment: center;
+                    }
+                }
+
+                Rectangle {
+                    height: 10px;
+                    vertical-stretch: 0;
+                }
+
+                notes-input := ThemedTextArea {
+                    area-height: 76px;
+                    text <=> root.notes;
+                    placeholder: @tr("Notez décisions, actions, noms…");
+                    control-label: @tr("Notes de la réunion");
+                    edited(value) => { root.notes-changed(value); }
+                }
+            }
+        }
+    }
+}

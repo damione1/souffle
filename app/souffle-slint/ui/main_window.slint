@@ -1,0 +1,1017 @@
+import { IdleView } from "idle_view.slint";
+import { RecordingView } from "recording_view.slint";
+import { MeetingDetail, MeetingParticipantChip, MeetingMeta } from "meeting_detail.slint";
+import { SettingsView } from "settings_view.slint";
+import { OnboardingView } from "onboarding_view.slint";
+import { PermissionRow } from "components/onboarding/permissions_step.slint";
+import { SettingsPermissionsDialog } from "components/settings/settings_permissions_dialog.slint";
+import { WhatsNewDialog } from "components/onboarding/whats_new_dialog.slint";
+import { UpdateAvailableDialog } from "components/onboarding/update_available_dialog.slint";
+import { MarkdownBlock } from "components/onboarding/markdown_block.slint";
+import { CalendarRow } from "components/settings/calendar_section.slint";
+import { MicrophoneRow } from "components/settings/microphone_section.slint";
+import { DictionaryRow } from "components/settings/dictionary_section.slint";
+import { SnippetRow } from "components/settings/snippets_section.slint";
+import { TimelineDayGroup, UpcomingEvent } from "components/timeline_section.slint";
+import { TranscriptBlock } from "components/transcript_section.slint";
+import { TranscriptWord } from "components/transcript_words.slint";
+import { StructuredActionItem } from "components/summary_section.slint";
+import { RecordingMode, LiveSystemAudio, SpeakerRole, TimelineFilter, TimelineKind, NotesSaveState, ModelPhase, TranscriptionPhase, UpcomingPhase, SettingsTab, SettingsInteraction, AppTheme, AppLocale, PasteMethod, MeetingLanguage, LogLevel, AudioRetention, AccessState, PermissionKind, ShortcutField, SummaryProvider, AppleIntelligenceUnavailableReason, OnboardingStep, UpdatePhase, InstallBlockReason, MeetingExportFormat } from "types.slint";
+export { SettingsTab, SettingsInteraction, AppTheme, AppLocale, PasteMethod, MeetingLanguage, LogLevel, AudioRetention, AccessState, PermissionKind, ShortcutField, SummaryProvider, AppleIntelligenceUnavailableReason, SpeakerRole }
+import { Theme } from "theme.slint";
+// Re-exported (not just imported) so Slint's codegen generates a Rust
+// accessor for it (`window.global::<Theme>()`) - main.rs sets `Theme.dark`
+// at launch and on every theme toggle. A plain `import` alone is enough for
+// every other `.slint` file to read `Theme.canvas` etc., but not for Rust
+// to reach the global at all.
+export { Theme }
+import { AppHeader } from "components/app_header.slint";
+
+// Self-hosted variable fonts from src/app.css, instantiated to static
+// per-weight TTFs (scripts/... none checked in - see the ticket notes: Slint
+// 1.17's renderer wants static instances, not a single variable font) so
+// `font-family: "Archivo SemiBold"` etc. resolve to the right weight instead
+// of the variable font's own default instance (600, SemiBold - which is
+// what every unweighted Text would render as if only one file were embedded).
+import "assets/fonts/archivo-regular.ttf";
+import "assets/fonts/archivo-medium.ttf";
+import "assets/fonts/archivo-semibold.ttf";
+import "assets/fonts/archivo-bold.ttf";
+import "assets/fonts/jetbrains-mono.ttf";
+
+export component MainWindow inherits Window {
+    title: @tr("Soufflé");
+    // SOU-242: bumped from the original Tauri window (860x1040, still in
+    // tauri.conf.json for the retired frontend) - onboarding/permissions and
+    // the home view rendered visibly cramped at the old default on a fresh
+    // install with no saved geometry yet (`window_width`/`window_height` in
+    // `AppSettings::default()`, applied via `with_inner_size` in
+    // `main.rs::main()`). This `preferred-*` pair is the value actually used
+    // outside the macOS `with_inner_size` hook (non-macOS dev builds); keep
+    // it in sync with `AppSettings::default()`. Home content still caps at a
+    // 720px column (idle_view.slint) and onboarding at 512px
+    // (onboarding_view.slint), so the extra width only adds side margin -
+    // the fix is mainly the extra height. `min-width`/`min-height` are the
+    // user-resizable floor (SOU-219) and are unrelated to this default.
+    preferred-width: 1040px;
+    preferred-height: 1280px;
+    min-width: 680px;
+    min-height: 560px;
+    default-font-family: "Archivo";
+    default-font-size: 14px;
+    background: Theme.canvas;
+
+    in property <string> dictation-shortcut;
+    in property <TranscriptionPhase> model-runtime-phase: TranscriptionPhase.download-required;
+    out property <bool> model-ready: root.model-runtime-phase == TranscriptionPhase.ready;
+    in-out property <string> search-query;
+    in-out property <TimelineFilter> kind-filter: TimelineFilter.all;
+    in property <string> transcription-status-message;
+    in property <string> meeting-status-message;
+    in property <[TimelineDayGroup]> timeline-groups;
+    in property <bool> timeline-is-empty: true;
+    in property <bool> timeline-has-matches: true;
+    in property <string> live-meeting-id;
+    in-out property <string> expanded-dictation-id;
+    in property <[UpcomingEvent]> upcoming-events;
+    // Rust-driven, never set from the UI alone. SOU-258: a start switches
+    // it on the click with `recording-starting` true, so the view appears
+    // at once; `recording-starting` drops when the command succeeds, and a
+    // failed start puts the mode back to idle.
+    in-out property <RecordingMode> recording-mode: RecordingMode.idle;
+    in property <bool> recording-starting: false;
+    // A stop that arrived during `recording-starting` and waits for it.
+    in property <bool> recording-stop-pending: false;
+    in-out property <string> live-text;
+    in-out property <string> live-tentative;
+    // `live-text` + `live-tentative` as words for the dictation view, the
+    // tentative dimmed (see `live_view::push_dictation_words`).
+    in property <[TranscriptWord]> live-dictation-words;
+    in-out property <string> dictation-recovery-text;
+    in property <[TranscriptBlock]> live-transcript-blocks;
+    in property <bool> live-transcript-empty: true;
+    in property <int> live-elapsed-offset-seconds: 0;
+    in property <float> audio-level: 0.0;
+    // Polled from souffle_lib's live system-audio snapshot while a meeting
+    // records (main.rs). Not derived from Settings: the Settings flags say
+    // what was *asked for*, not whether the tap actually came up.
+    in property <LiveSystemAudio> live-system-audio: LiveSystemAudio.pending;
+    in-out property <string> live-notes;
+
+    // Non-empty while a completed meeting is open in MeetingDetail. Empty
+    // means "show the Timeline instead" - checked together with
+    // recording-mode below so a live meeting always shows RecordingView
+    // first, never MeetingDetail underneath it.
+    in-out property <string> active-meeting-id;
+    in property <string> meeting-detail-title;
+    in property <MeetingMeta> meeting-detail-meta;
+    in property <string> meeting-detail-model-label;
+    in property <[MeetingParticipantChip]> meeting-detail-participants;
+    in-out property <string> meeting-detail-notes;
+    in property <NotesSaveState> meeting-detail-notes-save-state;
+    in property <bool> meeting-detail-has-audio;
+    in property <bool> meeting-detail-audio-is-playing;
+    in property <bool> meeting-detail-audio-loading;
+    in property <string> meeting-detail-audio-waveform-commands;
+    in property <int> meeting-detail-audio-waveform-bars;
+    in property <float> meeting-detail-audio-progress;
+    in property <string> meeting-detail-audio-position-label;
+    in property <string> meeting-detail-audio-duration-label;
+    in property <[TranscriptBlock]> meeting-detail-transcript-blocks;
+    in property <int> meeting-detail-transcript-segment-count;
+    in property <float> meeting-detail-transcript-spacer-before: 0.0;
+    in property <float> meeting-detail-transcript-spacer-after: 0.0;
+    // `length`-typed so it can two-way bind all the way down to the real
+    // Flickable inside TranscriptSection (see that component's doc comment
+    // on `scroll-top`) - internal plumbing only, not read directly by Rust.
+    in-out property <length> meeting-detail-transcript-scroll-top: 0px;
+    // What `main.rs` actually polls on a timer to decide the next visible
+    // slice (AC15): the same value as above, converted to a plain float so
+    // Rust doesn't need Slint's internal `length`-wrapping type.
+    out property <float> meeting-detail-transcript-scroll-top-px: root.meeting-detail-transcript-scroll-top / 1px;
+    // MeetingDetail's own single-page scroll (SOU-243) - no Rust polling
+    // needed (unlike the transcript above, it isn't virtualized), just
+    // reset on navigation like meeting-detail-transcript-scroll-top below.
+    in-out property <length> meeting-detail-page-scroll-top: 0px;
+    in property <string> meeting-detail-summary;
+    in property <bool> meeting-detail-summary-is-stale;
+    in property <string> meeting-detail-summary-model-label;
+    in property <[string]> meeting-detail-summary-key-points;
+    in property <[string]> meeting-detail-summary-decisions;
+    in property <[StructuredActionItem]> meeting-detail-summary-action-items;
+    in property <[string]> meeting-detail-summary-open-questions;
+    in property <bool> meeting-detail-summary-is-generating: false;
+    in property <string> meeting-detail-summary-generation-progress: "";
+    in property <string> meeting-detail-summary-generation-error: "";
+    in property <[string]> meeting-detail-summary-available-models;
+    in property <[string]> meeting-detail-summary-available-model-ids;
+    in-out property <string> meeting-detail-summary-selected-model-id;
+    in-out property <string> meeting-detail-summary-selected-model-label;
+    in property <bool> meeting-detail-can-resume: false;
+    in property <string> meeting-detail-resume-error: "";
+    in property <string> meeting-detail-delete-error: "";
+    in property <string> meeting-detail-export-error: "";
+    in property <string> meeting-detail-audio-export-error: "";
+
+    // SOU-188: Settings overlay. Toggled from IdleView's gear button;
+    // `settings-requested` (not a plain property flip) because opening it
+    // must first load the real settings from disk (see main.rs) - closing
+    // needs no such round trip, so `settings-open` alone is enough there.
+    in-out property <bool> settings-open: false;
+    in-out property <bool> settings-permissions-dialog-open: false;
+    // The gear opens Transcription; the homepage calendar CTA opens Meetings.
+    in-out property <SettingsTab> settings-tab: SettingsTab.transcription;
+    in property <bool> settings-autostart-enabled;
+    in property <bool> settings-debug-transcription;
+    in property <LogLevel> settings-log-level;
+    // SOU-224: virtualized live-log tail. Rust owns the full line list and
+    // only pushes the visible slice + estimated spacers, same pattern as
+    // `meeting-detail-transcript-*` above.
+    in property <[string]> settings-log-lines;
+    in property <int> settings-log-line-count;
+    in property <float> settings-log-spacer-before: 0.0;
+    in property <float> settings-log-spacer-after: 0.0;
+    in-out property <length> settings-log-scroll-top: 0px;
+    // What `main.rs` polls to decide the next visible slice - same
+    // float-conversion trick as `meeting-detail-transcript-scroll-top-px`.
+    out property <float> settings-log-scroll-top-px: root.settings-log-scroll-top / 1px;
+    in property <bool> settings-copying-diagnostics;
+    in property <AppTheme> settings-theme;
+    in property <AppLocale> settings-locale;
+    in property <bool> settings-auto-paste;
+    in property <PasteMethod> settings-paste-method;
+    in property <int> settings-paste-delay-ms;
+    in property <int> settings-paste-delay-min;
+    in property <int> settings-paste-delay-max;
+    in property <bool> settings-pill-hidden;
+    in property <bool> settings-feedback-sounds-enabled;
+    in property <int> settings-feedback-sounds-volume;
+    in property <int> settings-feedback-sounds-volume-min;
+    in property <int> settings-feedback-sounds-volume-max;
+    in property <string> settings-toggle-shortcut-label;
+    in property <string> settings-ptt-shortcut-label;
+    in property <bool> settings-native-tap-warning-visible;
+    in-out property <ShortcutField> settings-recording-field: ShortcutField.none;
+    in-out property <string> settings-shortcut-error: "";
+    in property <string> settings-save-error;
+    in property <bool> settings-save-error-unavailable;
+    in property <string> settings-draft-save-error;
+    in property <bool> settings-draft-save-error-unavailable;
+    in property <bool> settings-calendar-enabled;
+    in property <AccessState> settings-calendar-permission;
+    in property <bool> settings-calendar-autostart-enabled;
+    in property <int> settings-calendar-reminder-minutes;
+    in property <int> settings-calendar-reminder-minutes-min;
+    in property <int> settings-calendar-reminder-minutes-max;
+    in property <[CalendarRow]> settings-calendars;
+    in property <[string]> settings-audio-device-labels;
+    in property <string> settings-selected-device-label;
+    in property <bool> settings-pin-unavailable;
+    in property <string> settings-sample-rate-label;
+    in property <bool> settings-sample-rate-high;
+    in property <bool> settings-resetting-sample-rate;
+    in property <bool> settings-allow-bluetooth-mic;
+    in property <[MicrophoneRow]> settings-microphones;
+    in property <bool> settings-has-disconnected-devices;
+    in property <bool> settings-is-laptop;
+    in property <[string]> settings-clamshell-device-labels;
+    in property <string> settings-clamshell-device-label;
+    in property <bool> settings-system-audio-supported;
+    in property <bool> settings-capture-system-audio;
+    in property <MeetingLanguage> settings-meeting-transcription-language;
+    in property <bool> settings-meeting-autostop-enabled;
+    in property <[string]> settings-meeting-autostop-labels;
+    in property <string> settings-meeting-autostop-label;
+    in property <[string]> settings-meeting-max-duration-labels;
+    in property <string> settings-meeting-max-duration-label;
+    in property <bool> settings-vad-enabled;
+    in property <bool> settings-filler-removal;
+    in property <bool> settings-stutter-collapse;
+    in property <bool> settings-dictionary-correction;
+    in property <string> settings-data-stats-line;
+    in property <string> settings-data-recordings-line;
+    in property <AudioRetention> settings-meeting-audio-retention;
+    in property <bool> settings-data-exporting;
+    in property <string> settings-data-export-status;
+    in property <bool> settings-data-export-status-is-error;
+    in property <string> settings-mcp-binary-path;
+    in property <bool> settings-mcp-exists;
+    in property <string> settings-mcp-claude-desktop-snippet;
+    in property <string> settings-mcp-claude-code-command;
+    in property <bool> settings-testing-mcp;
+    in property <string> settings-mcp-test-status;
+    in property <string> settings-app-version;
+    in property <string> settings-about-transcription-label;
+    in property <string> settings-about-summary-label;
+    in property <bool> settings-auto-update-check;
+    in property <bool> settings-checking-updates;
+    in property <string> settings-update-status;
+    in property <SummaryProvider> settings-summary-provider;
+    in property <bool> settings-apple-intelligence-available;
+    in property <AppleIntelligenceUnavailableReason> settings-apple-intelligence-reason: AppleIntelligenceUnavailableReason.unknown;
+    in property <string> settings-ollama-url;
+    in property <bool> settings-ollama-available;
+    in property <bool> settings-ollama-checking;
+    in property <int> settings-summary-model-count;
+    in property <bool> settings-summary-model-picker-visible;
+    in property <[string]> settings-summary-model-ids;
+    in property <[string]> settings-summary-model-labels;
+    in property <string> settings-selected-summary-model-label;
+    in property <bool> settings-show-ollama-setup;
+    in property <bool> settings-ollama-pulling;
+    in property <string> settings-ollama-pull-status;
+    in property <string> settings-ollama-pull-error;
+    in property <string> settings-recommended-ollama-model;
+    in property <string> settings-summary-refresh-error;
+    in property <string> settings-summary-unusable-message;
+    in property <bool> settings-dictation-polish-enabled;
+    in property <bool> settings-dictation-polish-provider-available;
+    in property <[string]> settings-dictation-polish-template-ids;
+    in property <[string]> settings-dictation-polish-template-labels;
+    in property <string> settings-active-dictation-polish-label;
+    in-out property <string> settings-active-dictation-polish-prompt;
+    in property <[string]> settings-summary-template-ids;
+    in property <[string]> settings-summary-template-labels;
+    in property <string> settings-default-summary-template-label;
+    in property <string> settings-editing-summary-template-label;
+    in property <bool> settings-editing-summary-template-is-builtin;
+    in-out property <string> settings-editing-summary-template-name;
+    in-out property <string> settings-editing-summary-template-prompt;
+    in-out property <string> settings-new-summary-template-draft: "";
+    in property <[string]> settings-model-labels;
+    in property <string> settings-selected-model-label;
+    // Bare model label ("STT 1B FR/EN") for AppHeader's status pill - kept
+    // separate from `settings-selected-model-label` above, which is the
+    // combined "Engine — Model" form the settings picker needs to
+    // disambiguate engines (matches App.svelte's StatusChip reading
+    // `findTranscriptionModel(...)?.label` instead of
+    // `listAvailableModelOptions()`'s flat label).
+    in property <string> header-model-label;
+    out property <bool> settings-model-busy: root.model-runtime-phase == TranscriptionPhase.downloading
+        || root.model-runtime-phase == TranscriptionPhase.loading
+        || root.model-runtime-phase == TranscriptionPhase.unloading;
+    out property <bool> settings-model-downloading: root.model-runtime-phase == TranscriptionPhase.downloading;
+    in property <string> settings-model-download-progress-label;
+    in property <float> settings-model-download-progress-fraction;
+    in property <[string]> settings-unload-timeout-labels;
+    in property <string> settings-unload-timeout-label;
+    in property <string> settings-model-error-message;
+    in property <string> settings-model-delete-error;
+    in property <bool> settings-dictation-learn-from-edit;
+    // Windowed slice of the dictionary, not the full list (SOU-229) - same
+    // spacer/scroll-mirror plumbing as `meeting-detail-transcript-*` above:
+    // `lists_ui.rs` polls the `-px` mirror and pushes the next slice.
+    in property <[DictionaryRow]> settings-dictionary-entries;
+    in property <int> settings-dictionary-count: 0;
+    in property <float> settings-dictionary-content-height: 0.0;
+    in property <float> settings-dictionary-spacer-before: 0.0;
+    in property <float> settings-dictionary-spacer-after: 0.0;
+    in-out property <length> settings-dictionary-scroll-top: 0px;
+    out property <float> settings-dictionary-scroll-top-px: root.settings-dictionary-scroll-top / 1px;
+    in property <string> settings-dictionary-add-error;
+    in property <int> settings-dictionary-delete-error-id;
+    in property <string> settings-dictionary-delete-error;
+    in-out property <string> settings-new-dictionary-term-draft: "";
+    in-out property <string> settings-new-dictionary-pronunciation-draft: "";
+    in-out property <string> settings-new-dictionary-category-draft: "";
+    // Same SOU-229 windowing plumbing as `settings-dictionary-*`.
+    in property <[SnippetRow]> settings-snippets;
+    in property <int> settings-snippets-count: 0;
+    in property <float> settings-snippets-content-height: 0.0;
+    in property <float> settings-snippets-spacer-before: 0.0;
+    in property <float> settings-snippets-spacer-after: 0.0;
+    in-out property <length> settings-snippets-scroll-top: 0px;
+    out property <float> settings-snippets-scroll-top-px: root.settings-snippets-scroll-top / 1px;
+    in property <string> settings-snippet-add-error;
+    in property <int> settings-snippet-delete-error-id;
+    in property <string> settings-snippet-delete-error;
+    in property <string> settings-snippet-update-error;
+    in-out property <string> settings-new-snippet-trigger-draft: "";
+    in-out property <string> settings-new-snippet-expansion-draft: "";
+    in-out property <string> settings-edit-snippet-trigger-draft: "";
+    in-out property <string> settings-edit-snippet-expansion-draft: "";
+
+    callback settings-requested();
+    callback settings-instrument-input(SettingsInteraction);
+    callback settings-tab-changed();
+    callback settings-closed();
+    callback settings-quit-requested();
+    callback theme-toggle-requested();
+    callback settings-autostart-changed(bool);
+    callback settings-permissions-review-requested();
+    callback settings-debug-transcription-changed(bool);
+    callback settings-log-level-changed(LogLevel);
+    callback settings-copy-diagnostics-requested();
+    callback settings-theme-changed(AppTheme);
+    callback settings-locale-changed(AppLocale);
+    callback settings-auto-paste-changed(bool);
+    callback settings-paste-method-changed(PasteMethod);
+    callback settings-paste-delay-changed(int);
+    callback settings-pill-hidden-changed(bool);
+    callback settings-feedback-sounds-enabled-changed(bool);
+    callback settings-feedback-sounds-volume-changed(int);
+    callback settings-shortcut-record-requested(ShortcutField);
+    callback settings-shortcut-captured(ShortcutField, string, bool, bool, bool, bool);
+    callback settings-shortcut-released(ShortcutField, string, bool, bool, bool, bool);
+    callback settings-shortcut-cleared(ShortcutField);
+    callback settings-shortcut-cancelled();
+    callback settings-calendar-enabled-changed(bool);
+    callback settings-calendar-autostart-enabled-changed(bool);
+    callback settings-calendar-reminder-minutes-changed(int);
+    callback settings-calendar-toggled(string);
+    callback settings-calendar-open-system-settings-requested();
+    callback settings-device-changed(string);
+    callback settings-refresh-devices-requested();
+    callback settings-reset-devices-requested();
+    callback settings-reset-sample-rate-requested();
+    callback settings-allow-bluetooth-mic-changed(bool);
+    callback settings-move-device-requested(string, int);
+    callback settings-toggle-hidden-requested(string, bool);
+    callback settings-remove-device-requested(string);
+    callback settings-clamshell-device-changed(string);
+    callback settings-capture-system-audio-changed(bool);
+    callback settings-meeting-transcription-language-changed(MeetingLanguage);
+    callback settings-meeting-autostop-enabled-changed(bool);
+    callback settings-meeting-autostop-changed(string);
+    callback settings-meeting-max-duration-changed(string);
+    callback settings-vad-enabled-changed(bool);
+    callback settings-filler-removal-changed(bool);
+    callback settings-stutter-collapse-changed(bool);
+    callback settings-dictionary-correction-changed(bool);
+    callback settings-meeting-audio-retention-changed(AudioRetention);
+    callback settings-data-export-requested();
+    callback settings-data-reveal-requested();
+    callback settings-mcp-copy-desktop-snippet-requested();
+    callback settings-mcp-copy-code-command-requested();
+    callback settings-mcp-test-requested();
+    callback settings-check-updates-requested();
+    callback settings-auto-update-check-changed(bool);
+    callback settings-summary-provider-changed(SummaryProvider);
+    callback settings-ollama-url-changed(string);
+    callback settings-ollama-model-changed(string);
+    callback settings-summary-providers-retry-requested();
+    callback settings-download-recommended-ollama-model-requested();
+    callback settings-open-apple-intelligence-settings-requested();
+    callback settings-dictation-polish-enabled-changed(bool);
+    callback settings-dictation-polish-template-changed(string);
+    callback settings-dictation-polish-prompt-changed(string);
+    callback settings-summary-template-default-changed(string);
+    callback settings-summary-template-edit-target-changed(string);
+    callback settings-summary-template-delete-requested();
+    callback settings-summary-template-name-changed(string);
+    callback settings-summary-template-prompt-changed(string);
+    callback settings-summary-template-add-requested(string);
+    callback settings-model-changed(string);
+    callback settings-unload-timeout-changed(string);
+    callback settings-delete-model-requested();
+    callback settings-dictation-learn-from-edit-changed(bool);
+    callback settings-dictionary-add-requested(string, string, string);
+    callback settings-dictionary-delete-requested(int);
+    callback settings-snippet-add-requested(string, string);
+    callback settings-snippet-delete-requested(int);
+    callback settings-snippet-edit-requested(int);
+    callback settings-snippet-cancel-edit-requested();
+    callback settings-snippet-save-edit-requested(int, string, string);
+
+    callback dictate-requested();
+    callback meeting-requested();
+    callback filter-changed(TimelineFilter);
+    callback search-changed(string);
+    callback dismiss-transcription-status();
+    callback copy-dictation-recovery();
+    callback discard-dictation-recovery();
+    callback dismiss-meeting-status();
+    callback timeline-item-opened(TimelineKind, string);
+    callback timeline-item-removed(TimelineKind, string);
+    callback timeline-item-copy-requested(string);
+    callback calendar-event-start-requested(string);
+    callback stop-requested();
+    callback cancel-dictation-requested();
+    callback meeting-detail-back();
+    callback meeting-detail-resume();
+    callback meeting-detail-summarize();
+    callback meeting-detail-copy-summary();
+    callback meeting-detail-delete();
+    callback meeting-detail-rename(string);
+    callback meeting-detail-notes-changed(string);
+    callback meeting-detail-audio-play-pause-requested();
+    callback meeting-detail-audio-seek-requested(float);
+    callback meeting-detail-transcript-paragraph-clicked(int, float);
+    callback meeting-detail-transcript-alias-save-requested(string, string);
+    // Same save as above, from a word clicked in the live meeting view.
+    callback live-transcript-alias-save-requested(string, string);
+    callback meeting-detail-export-requested(MeetingExportFormat);
+    callback meeting-detail-export-audio-requested();
+    callback meeting-detail-copy-transcript-requested();
+
+    // Invoked by `main.rs` (as `invoke_reset_meeting_detail_transcript_scroll`)
+    // when a different meeting's transcript loads, so scrolling meeting A
+    // down doesn't leave meeting B's transcript scrolled down too - a
+    // `public function` rather than a Rust-side property write, since the
+    // property below needs `length`, which isn't part of Slint's stable
+    // Rust API (see the doc comment on it). Also resets the page's own
+    // single-scroll region (SOU-243) for the same reason: MeetingDetail is
+    // a keep-alive component, so without this, opening meeting B lands
+    // scrolled to wherever meeting A's page was left (past the header,
+    // Notes hidden) instead of at the top.
+    public function reset-meeting-detail-transcript-scroll() {
+        root.meeting-detail-transcript-scroll-top = 0px;
+        root.meeting-detail-page-scroll-top = 0px;
+    }
+
+    // SOU-190: first-run wizard, drawn above everything else while visible -
+    // same overlay-not-replace pattern as `settings-open`.
+    in-out property <bool> onboarding-open: false;
+    in property <int> onboarding-step-index;
+    in property <int> onboarding-step-count;
+    in property <OnboardingStep> onboarding-step;
+    in property <string> onboarding-status-message;
+    in property <[PermissionRow]> onboarding-permission-rows;
+    in property <string> onboarding-permissions-error;
+    in property <bool> onboarding-repair-busy;
+    in property <bool> onboarding-repair-success;
+    in property <bool> onboarding-repair-cooldown;
+    in property <[string]> onboarding-device-labels;
+    in property <string> onboarding-selected-device-label;
+    in property <ModelPhase> onboarding-model-phase: ModelPhase.pick;
+    in property <[string]> onboarding-model-labels;
+    in property <string> onboarding-selected-model-label;
+    in property <string> onboarding-download-progress-label;
+    in property <float> onboarding-download-progress-fraction;
+    in property <string> onboarding-toggle-shortcut-label;
+    in-out property <bool> onboarding-shortcut-recording: false;
+    in-out property <string> onboarding-shortcut-error: "";
+    in property <bool> onboarding-auto-paste;
+    in property <bool> onboarding-accessibility-granted;
+    in property <bool> onboarding-busy;
+    in property <bool> onboarding-continue-enabled: true;
+
+    callback onboarding-locale-changed(AppLocale);
+    callback onboarding-grant-requested(PermissionKind);
+    callback onboarding-hint-action-requested(PermissionKind);
+    callback onboarding-repair-requested();
+    callback onboarding-device-changed(string);
+    callback onboarding-refresh-devices-requested();
+    callback onboarding-model-picked(string);
+    callback onboarding-shortcut-record-requested();
+    callback onboarding-shortcut-captured(string, bool, bool, bool, bool);
+    callback onboarding-shortcut-released(string, bool, bool, bool, bool);
+    callback onboarding-shortcut-cleared();
+    callback onboarding-shortcut-cancelled();
+    callback onboarding-auto-paste-changed(bool);
+    callback onboarding-review-accessibility-requested();
+    callback onboarding-back-requested();
+    callback onboarding-continue-requested();
+
+    in-out property <bool> whats-new-open: false;
+    in property <string> whats-new-version;
+    in property <[MarkdownBlock]> whats-new-content-blocks;
+    callback whats-new-dismissed();
+    callback whats-new-link-clicked(string);
+
+    in-out property <bool> update-available-open: false;
+    in property <string> update-latest-version;
+    in property <[MarkdownBlock]> update-release-notes-blocks;
+    in property <string> update-release-url;
+    in property <UpdatePhase> update-phase;
+    in property <string> update-error-message;
+    // `Option<InstallBlockReason>` split across the boundary: Rust
+    // (`update_ui::project_install_block`) always writes the pair together.
+    in property <bool> update-install-blocked: false;
+    in property <InstallBlockReason> update-install-block-reason;
+    callback update-download-requested();
+    callback update-install-requested();
+    callback update-open-release-requested();
+    callback update-dismiss-requested();
+    callback update-link-clicked(string);
+
+    // Header + content wrapped together so the gear icon (in `AppHeader`)
+    // stays visible and clickable while Settings is open, matching
+    // App.svelte's `<header>` staying mounted above `<HomeView>`/
+    // `<SettingsView>` alike (see `AppHeader`'s doc comment). Onboarding
+    // replaces this whole shell instead of living inside it - same as
+    // App.svelte's `{#if showOnboarding} <OnboardingView /> {:else} ...`.
+    if !root.onboarding-open: VerticalLayout {
+        AppHeader {
+            settings-open: root.settings-open;
+            model-phase: root.model-runtime-phase;
+            
+            recording-mode: root.recording-mode;
+            model-label: root.header-model-label;
+            settings-toggled => {
+                if root.settings-open {
+                    root.settings-open = false;
+                    root.settings-closed();
+                } else {
+                    root.settings-tab = SettingsTab.transcription;
+                    root.settings-instrument-input(SettingsInteraction.open);
+                    root.settings-requested();
+                }
+            }
+            theme-toggle-requested => { root.theme-toggle-requested(); }
+        }
+
+        Rectangle {
+    if root.recording-mode == RecordingMode.idle && root.active-meeting-id == "": IdleView {
+        width: 100%;
+        height: 100%;
+        dictation-shortcut: root.dictation-shortcut;
+        // A model unloaded after inactivity can be loaded lazily by Start.
+        // The header still says LoadRequired until the FSM actually reaches Ready.
+        model-ready: root.model-ready || root.model-runtime-phase == TranscriptionPhase.load-required;
+        search-query <=> root.search-query;
+        kind-filter: root.kind-filter;
+        transcription-status-message: root.transcription-status-message;
+        dictation-recovery-text <=> root.dictation-recovery-text;
+        meeting-status-message: root.meeting-status-message;
+        timeline-groups: root.timeline-groups;
+        timeline-is-empty: root.timeline-is-empty;
+        timeline-has-matches: root.timeline-has-matches;
+        live-meeting-id: root.live-meeting-id;
+        expanded-dictation-id <=> root.expanded-dictation-id;
+        calendar-enabled: root.settings-calendar-enabled;
+        calendar-permission: root.settings-calendar-permission;
+        upcoming: root.upcoming-events;
+        dictate-requested => { root.dictate-requested(); }
+        meeting-requested => { root.meeting-requested(); }
+        filter-changed(kind) => { root.filter-changed(kind); }
+        search-changed(query) => { root.search-changed(query); }
+        dismiss-transcription-status => { root.dismiss-transcription-status(); }
+        copy-dictation-recovery => { root.copy-dictation-recovery(); }
+        discard-dictation-recovery => { root.discard-dictation-recovery(); }
+        dismiss-meeting-status => { root.dismiss-meeting-status(); }
+        timeline-item-opened(kind, id) => { root.timeline-item-opened(kind, id); }
+        timeline-item-removed(kind, id) => { root.timeline-item-removed(kind, id); }
+        timeline-item-copy-requested(text) => { root.timeline-item-copy-requested(text); }
+        calendar-setup-requested => {
+            root.settings-tab = SettingsTab.meetings;
+            root.settings-instrument-input(SettingsInteraction.open);
+            root.settings-requested();
+        }
+        calendar-event-start-requested(id) => { root.calendar-event-start-requested(id); }
+    }
+
+    if root.recording-mode == RecordingMode.idle && root.active-meeting-id != "": MeetingDetail {
+        width: 100%;
+        height: 100%;
+        title: root.meeting-detail-title;
+        meta: root.meeting-detail-meta;
+        model-label: root.meeting-detail-model-label;
+        participants: root.meeting-detail-participants;
+        notes <=> root.meeting-detail-notes;
+        notes-save-state: root.meeting-detail-notes-save-state;
+        has-audio: root.meeting-detail-has-audio;
+        audio-is-playing: root.meeting-detail-audio-is-playing;
+        audio-loading: root.meeting-detail-audio-loading;
+        audio-waveform-commands: root.meeting-detail-audio-waveform-commands;
+        audio-waveform-bars: root.meeting-detail-audio-waveform-bars;
+        audio-progress: root.meeting-detail-audio-progress;
+        audio-position-label: root.meeting-detail-audio-position-label;
+        audio-duration-label: root.meeting-detail-audio-duration-label;
+        transcript-blocks: root.meeting-detail-transcript-blocks;
+        transcript-segment-count: root.meeting-detail-transcript-segment-count;
+        transcript-spacer-before: root.meeting-detail-transcript-spacer-before;
+        transcript-spacer-after: root.meeting-detail-transcript-spacer-after;
+        transcript-scroll-top <=> root.meeting-detail-transcript-scroll-top;
+        page-scroll-top <=> root.meeting-detail-page-scroll-top;
+        summary: root.meeting-detail-summary;
+        summary-is-stale: root.meeting-detail-summary-is-stale;
+        summary-model-label: root.meeting-detail-summary-model-label;
+        summary-key-points: root.meeting-detail-summary-key-points;
+        summary-decisions: root.meeting-detail-summary-decisions;
+        summary-action-items: root.meeting-detail-summary-action-items;
+        summary-open-questions: root.meeting-detail-summary-open-questions;
+        summary-is-generating: root.meeting-detail-summary-is-generating;
+        summary-generation-progress: root.meeting-detail-summary-generation-progress;
+        summary-generation-error: root.meeting-detail-summary-generation-error;
+        summary-available-models: root.meeting-detail-summary-available-models;
+        summary-available-model-ids: root.meeting-detail-summary-available-model-ids;
+        summary-selected-model-id <=> root.meeting-detail-summary-selected-model-id;
+        summary-selected-model-label <=> root.meeting-detail-summary-selected-model-label;
+        can-resume: root.meeting-detail-can-resume;
+        resume-error: root.meeting-detail-resume-error;
+        delete-error: root.meeting-detail-delete-error;
+        export-error: root.meeting-detail-export-error;
+        audio-export-error: root.meeting-detail-audio-export-error;
+        back-requested => { root.meeting-detail-back(); }
+        resume-requested => { root.meeting-detail-resume(); }
+        summarize-requested => { root.meeting-detail-summarize(); }
+        copy-summary-requested => { root.meeting-detail-copy-summary(); }
+        delete-requested => { root.meeting-detail-delete(); }
+        rename-requested(title) => { root.meeting-detail-rename(title); }
+        notes-changed(value) => { root.meeting-detail-notes-changed(value); }
+        audio-play-pause-requested => { root.meeting-detail-audio-play-pause-requested(); }
+        audio-seek-requested(fraction) => { root.meeting-detail-audio-seek-requested(fraction); }
+        transcript-paragraph-clicked(session, time) => { root.meeting-detail-transcript-paragraph-clicked(session, time); }
+        transcript-alias-save-requested(term, pronunciation) => { root.meeting-detail-transcript-alias-save-requested(term, pronunciation); }
+        export-requested(format) => { root.meeting-detail-export-requested(format); }
+        export-audio-requested => { root.meeting-detail-export-audio-requested(); }
+        copy-transcript-requested => { root.meeting-detail-copy-transcript-requested(); }
+    }
+
+    if root.recording-mode != RecordingMode.idle: rv := RecordingView {
+        width: 100%;
+        height: 100%;
+        mode: root.recording-mode;
+        starting: root.recording-starting;
+        stop-pending: root.recording-stop-pending;
+        live-text: root.live-text;
+        live-tentative: root.live-tentative;
+        live-dictation-words: root.live-dictation-words;
+        live-transcript-blocks: root.live-transcript-blocks;
+        live-transcript-empty: root.live-transcript-empty;
+        live-elapsed-offset-seconds: root.live-elapsed-offset-seconds;
+        audio-level: root.audio-level;
+        notes <=> root.live-notes;
+        system-audio: root.live-system-audio;
+        auto-paste: root.settings-auto-paste;
+        stop-requested => { root.stop-requested(); }
+        alias-save-requested(term, pronunciation) => { root.live-transcript-alias-save-requested(term, pronunciation); }
+        
+        
+    }
+
+    // Drawn last so it overlays whatever is behind it, mirroring App.svelte
+    // hiding HomeView under the Settings overlay rather than replacing it.
+    // SOU-202: retain conditional mounting. With OS/DB excluded and a forced
+    // same-data software-render pass (30 repetitions), cold/warm medians were
+    // 65.761/65.872 ms debug and 2.815/2.784 ms release. Both scenarios are
+    // remounts; the measured release reopen is below one frame, Settings is a
+    // rare overlay, and its internal tabs already stay alive, so a permanent
+    // overlay tree is not worth its memory. Software rendering only forces
+    // item-tree/layout work; this is not a shipped Skia/Metal frame claim.
+    if root.settings-open: SettingsView {
+        width: 100%;
+        height: 100%;
+        tab <=> root.settings-tab;
+        autostart-enabled: root.settings-autostart-enabled;
+        debug-transcription: root.settings-debug-transcription;
+        log-level: root.settings-log-level;
+        log-lines: root.settings-log-lines;
+        log-line-count: root.settings-log-line-count;
+        log-spacer-before: root.settings-log-spacer-before;
+        log-spacer-after: root.settings-log-spacer-after;
+        log-scroll-top <=> root.settings-log-scroll-top;
+        copying-diagnostics: root.settings-copying-diagnostics;
+        theme: root.settings-theme;
+        locale: root.settings-locale;
+        auto-paste: root.settings-auto-paste;
+        paste-method: root.settings-paste-method;
+        paste-delay-ms: root.settings-paste-delay-ms;
+        paste-delay-min: root.settings-paste-delay-min;
+        paste-delay-max: root.settings-paste-delay-max;
+        pill-hidden: root.settings-pill-hidden;
+        feedback-sounds-enabled: root.settings-feedback-sounds-enabled;
+        feedback-sounds-volume: root.settings-feedback-sounds-volume;
+        feedback-sounds-volume-min: root.settings-feedback-sounds-volume-min;
+        feedback-sounds-volume-max: root.settings-feedback-sounds-volume-max;
+        toggle-shortcut-label: root.settings-toggle-shortcut-label;
+        ptt-shortcut-label: root.settings-ptt-shortcut-label;
+        native-tap-warning-visible: root.settings-native-tap-warning-visible;
+        recording-field <=> root.settings-recording-field;
+        shortcut-error <=> root.settings-shortcut-error;
+        save-error: root.settings-save-error;
+        save-error-unavailable: root.settings-save-error-unavailable;
+        draft-save-error: root.settings-draft-save-error;
+        draft-save-error-unavailable: root.settings-draft-save-error-unavailable;
+        calendar-enabled: root.settings-calendar-enabled;
+        calendar-permission: root.settings-calendar-permission;
+        calendar-autostart-enabled: root.settings-calendar-autostart-enabled;
+        calendar-reminder-minutes: root.settings-calendar-reminder-minutes;
+        calendar-reminder-minutes-min: root.settings-calendar-reminder-minutes-min;
+        calendar-reminder-minutes-max: root.settings-calendar-reminder-minutes-max;
+        calendars: root.settings-calendars;
+        audio-device-labels: root.settings-audio-device-labels;
+        selected-device-label: root.settings-selected-device-label;
+        pin-unavailable: root.settings-pin-unavailable;
+        sample-rate-label: root.settings-sample-rate-label;
+        sample-rate-high: root.settings-sample-rate-high;
+        resetting-sample-rate: root.settings-resetting-sample-rate;
+        allow-bluetooth-mic: root.settings-allow-bluetooth-mic;
+        microphones: root.settings-microphones;
+        has-disconnected-devices: root.settings-has-disconnected-devices;
+        is-laptop: root.settings-is-laptop;
+        clamshell-device-labels: root.settings-clamshell-device-labels;
+        clamshell-device-label: root.settings-clamshell-device-label;
+        system-audio-supported: root.settings-system-audio-supported;
+        capture-system-audio: root.settings-capture-system-audio;
+        meeting-transcription-language: root.settings-meeting-transcription-language;
+        meeting-autostop-enabled: root.settings-meeting-autostop-enabled;
+        meeting-autostop-labels: root.settings-meeting-autostop-labels;
+        meeting-autostop-label: root.settings-meeting-autostop-label;
+        meeting-max-duration-labels: root.settings-meeting-max-duration-labels;
+        meeting-max-duration-label: root.settings-meeting-max-duration-label;
+        vad-enabled: root.settings-vad-enabled;
+        filler-removal: root.settings-filler-removal;
+        stutter-collapse: root.settings-stutter-collapse;
+        dictionary-correction: root.settings-dictionary-correction;
+        data-stats-line: root.settings-data-stats-line;
+        data-recordings-line: root.settings-data-recordings-line;
+        meeting-audio-retention: root.settings-meeting-audio-retention;
+        data-exporting: root.settings-data-exporting;
+        data-export-status: root.settings-data-export-status;
+        data-export-status-is-error: root.settings-data-export-status-is-error;
+        mcp-binary-path: root.settings-mcp-binary-path;
+        mcp-exists: root.settings-mcp-exists;
+        mcp-claude-desktop-snippet: root.settings-mcp-claude-desktop-snippet;
+        mcp-claude-code-command: root.settings-mcp-claude-code-command;
+        testing-mcp: root.settings-testing-mcp;
+        mcp-test-status: root.settings-mcp-test-status;
+        app-version: root.settings-app-version;
+        about-transcription-label: root.settings-about-transcription-label;
+        about-summary-label: root.settings-about-summary-label;
+        auto-update-check: root.settings-auto-update-check;
+        checking-updates: root.settings-checking-updates;
+        update-status: root.settings-update-status;
+        summary-provider: root.settings-summary-provider;
+        apple-intelligence-available: root.settings-apple-intelligence-available;
+        apple-intelligence-reason: root.settings-apple-intelligence-reason;
+        ollama-url: root.settings-ollama-url;
+        ollama-available: root.settings-ollama-available;
+        ollama-checking: root.settings-ollama-checking;
+        summary-model-count: root.settings-summary-model-count;
+        summary-model-picker-visible: root.settings-summary-model-picker-visible;
+        summary-model-ids: root.settings-summary-model-ids;
+        summary-model-labels: root.settings-summary-model-labels;
+        selected-summary-model-label: root.settings-selected-summary-model-label;
+        show-ollama-setup: root.settings-show-ollama-setup;
+        ollama-pulling: root.settings-ollama-pulling;
+        ollama-pull-status: root.settings-ollama-pull-status;
+        ollama-pull-error: root.settings-ollama-pull-error;
+        recommended-ollama-model: root.settings-recommended-ollama-model;
+        summary-refresh-error: root.settings-summary-refresh-error;
+        summary-unusable-message: root.settings-summary-unusable-message;
+        dictation-polish-enabled: root.settings-dictation-polish-enabled;
+        dictation-polish-provider-available: root.settings-dictation-polish-provider-available;
+        dictation-polish-template-ids: root.settings-dictation-polish-template-ids;
+        dictation-polish-template-labels: root.settings-dictation-polish-template-labels;
+        active-dictation-polish-label: root.settings-active-dictation-polish-label;
+        active-dictation-polish-prompt <=> root.settings-active-dictation-polish-prompt;
+        summary-template-ids: root.settings-summary-template-ids;
+        summary-template-labels: root.settings-summary-template-labels;
+        default-summary-template-label: root.settings-default-summary-template-label;
+        editing-summary-template-label: root.settings-editing-summary-template-label;
+        editing-summary-template-is-builtin: root.settings-editing-summary-template-is-builtin;
+        editing-summary-template-name <=> root.settings-editing-summary-template-name;
+        editing-summary-template-prompt <=> root.settings-editing-summary-template-prompt;
+        new-summary-template-draft <=> root.settings-new-summary-template-draft;
+        model-phase: root.model-runtime-phase;
+        model-ready: root.model-ready;
+        model-labels: root.settings-model-labels;
+        selected-model-label: root.settings-selected-model-label;
+        model-busy: root.settings-model-busy;
+        model-downloading: root.settings-model-downloading;
+        model-download-progress-label: root.settings-model-download-progress-label;
+        model-download-progress-fraction: root.settings-model-download-progress-fraction;
+        unload-timeout-labels: root.settings-unload-timeout-labels;
+        unload-timeout-label: root.settings-unload-timeout-label;
+        model-error-message: root.settings-model-error-message;
+        model-delete-error: root.settings-model-delete-error;
+        dictation-learn-from-edit: root.settings-dictation-learn-from-edit;
+        dictionary-entries: root.settings-dictionary-entries;
+        dictionary-entry-count: root.settings-dictionary-count;
+        dictionary-list-content-height: root.settings-dictionary-content-height;
+        dictionary-list-spacer-before: root.settings-dictionary-spacer-before;
+        dictionary-list-spacer-after: root.settings-dictionary-spacer-after;
+        dictionary-list-scroll-top <=> root.settings-dictionary-scroll-top;
+        dictionary-add-error: root.settings-dictionary-add-error;
+        dictionary-delete-error-id: root.settings-dictionary-delete-error-id;
+        dictionary-delete-error: root.settings-dictionary-delete-error;
+        new-dictionary-term-draft <=> root.settings-new-dictionary-term-draft;
+        new-dictionary-pronunciation-draft <=> root.settings-new-dictionary-pronunciation-draft;
+        new-dictionary-category-draft <=> root.settings-new-dictionary-category-draft;
+        snippets: root.settings-snippets;
+        snippets-entry-count: root.settings-snippets-count;
+        snippets-list-content-height: root.settings-snippets-content-height;
+        snippets-list-spacer-before: root.settings-snippets-spacer-before;
+        snippets-list-spacer-after: root.settings-snippets-spacer-after;
+        snippets-list-scroll-top <=> root.settings-snippets-scroll-top;
+        snippet-add-error: root.settings-snippet-add-error;
+        snippet-delete-error-id: root.settings-snippet-delete-error-id;
+        snippet-delete-error: root.settings-snippet-delete-error;
+        snippet-update-error: root.settings-snippet-update-error;
+        new-snippet-trigger-draft <=> root.settings-new-snippet-trigger-draft;
+        new-snippet-expansion-draft <=> root.settings-new-snippet-expansion-draft;
+        edit-snippet-trigger-draft <=> root.settings-edit-snippet-trigger-draft;
+        edit-snippet-expansion-draft <=> root.settings-edit-snippet-expansion-draft;
+        close-requested => {
+            root.settings-open = false;
+            root.settings-closed();
+        }
+        tab-changed => {
+            root.settings-instrument-input(SettingsInteraction.tab);
+            root.settings-tab-changed();
+        }
+        autostart-changed(value) => { root.settings-autostart-changed(value); }
+        permissions-review-requested => { root.settings-permissions-review-requested(); }
+        debug-transcription-changed(value) => { root.settings-debug-transcription-changed(value); }
+        log-level-changed(value) => { root.settings-instrument-input(SettingsInteraction.menu); root.settings-log-level-changed(value); }
+        copy-diagnostics-requested => { root.settings-copy-diagnostics-requested(); }
+        theme-changed(value) => { root.settings-instrument-input(SettingsInteraction.theme); root.settings-theme-changed(value); }
+        locale-changed(value) => { root.settings-locale-changed(value); }
+        auto-paste-changed(value) => { root.settings-auto-paste-changed(value); }
+        paste-method-changed(value) => { root.settings-paste-method-changed(value); }
+        paste-delay-changed(value) => { root.settings-instrument-input(SettingsInteraction.number); root.settings-paste-delay-changed(value); }
+        pill-hidden-changed(value) => { root.settings-pill-hidden-changed(value); }
+        feedback-sounds-enabled-changed(value) => { root.settings-feedback-sounds-enabled-changed(value); }
+        feedback-sounds-volume-changed(value) => { root.settings-feedback-sounds-volume-changed(value); }
+        shortcut-record-requested(field) => { root.settings-shortcut-record-requested(field); }
+        shortcut-captured(field, text, ctrl, shift, alt, meta) => { root.settings-shortcut-captured(field, text, ctrl, shift, alt, meta); }
+        shortcut-released(field, text, ctrl, shift, alt, meta) => { root.settings-shortcut-released(field, text, ctrl, shift, alt, meta); }
+        shortcut-cleared(field) => { root.settings-shortcut-cleared(field); }
+        shortcut-cancelled => { root.settings-shortcut-cancelled(); }
+        calendar-enabled-changed(value) => { root.settings-calendar-enabled-changed(value); }
+        calendar-autostart-enabled-changed(value) => { root.settings-calendar-autostart-enabled-changed(value); }
+        calendar-reminder-minutes-changed(value) => { root.settings-calendar-reminder-minutes-changed(value); }
+        calendar-toggled(id) => { root.settings-calendar-toggled(id); }
+        calendar-open-system-settings-requested => { root.settings-calendar-open-system-settings-requested(); }
+        device-changed(value) => { root.settings-device-changed(value); }
+        refresh-devices-requested => { root.settings-refresh-devices-requested(); }
+        reset-devices-requested => { root.settings-reset-devices-requested(); }
+        reset-sample-rate-requested => { root.settings-reset-sample-rate-requested(); }
+        allow-bluetooth-mic-changed(value) => { root.settings-allow-bluetooth-mic-changed(value); }
+        move-device-requested(uid, direction) => { root.settings-move-device-requested(uid, direction); }
+        toggle-hidden-requested(uid, hidden) => { root.settings-toggle-hidden-requested(uid, hidden); }
+        remove-device-requested(uid) => { root.settings-remove-device-requested(uid); }
+        clamshell-device-changed(value) => { root.settings-clamshell-device-changed(value); }
+        capture-system-audio-changed(value) => { root.settings-capture-system-audio-changed(value); }
+        meeting-transcription-language-changed(value) => { root.settings-meeting-transcription-language-changed(value); }
+        meeting-autostop-enabled-changed(value) => { root.settings-meeting-autostop-enabled-changed(value); }
+        meeting-autostop-changed(value) => { root.settings-meeting-autostop-changed(value); }
+        meeting-max-duration-changed(value) => { root.settings-meeting-max-duration-changed(value); }
+        vad-enabled-changed(value) => { root.settings-vad-enabled-changed(value); }
+        filler-removal-changed(value) => { root.settings-filler-removal-changed(value); }
+        stutter-collapse-changed(value) => { root.settings-stutter-collapse-changed(value); }
+        dictionary-correction-changed(value) => { root.settings-dictionary-correction-changed(value); }
+        meeting-audio-retention-changed(value) => { root.settings-meeting-audio-retention-changed(value); }
+        data-export-requested => { root.settings-data-export-requested(); }
+        data-reveal-requested => { root.settings-data-reveal-requested(); }
+        mcp-copy-desktop-snippet-requested => { root.settings-mcp-copy-desktop-snippet-requested(); }
+        mcp-copy-code-command-requested => { root.settings-mcp-copy-code-command-requested(); }
+        mcp-test-requested => { root.settings-mcp-test-requested(); }
+        check-updates-requested => { root.settings-check-updates-requested(); }
+        auto-update-check-changed(value) => { root.settings-auto-update-check-changed(value); }
+        summary-provider-changed(value) => { root.settings-summary-provider-changed(value); }
+        ollama-url-changed(value) => { root.settings-ollama-url-changed(value); }
+        ollama-model-changed(value) => { root.settings-ollama-model-changed(value); }
+        summary-providers-retry-requested => { root.settings-summary-providers-retry-requested(); }
+        download-recommended-ollama-model-requested => { root.settings-download-recommended-ollama-model-requested(); }
+        open-apple-intelligence-settings-requested => { root.settings-open-apple-intelligence-settings-requested(); }
+        dictation-polish-enabled-changed(value) => { root.settings-dictation-polish-enabled-changed(value); }
+        dictation-polish-template-changed(value) => { root.settings-dictation-polish-template-changed(value); }
+        dictation-polish-prompt-changed(value) => { root.settings-dictation-polish-prompt-changed(value); }
+        summary-template-default-changed(value) => { root.settings-summary-template-default-changed(value); }
+        summary-template-edit-target-changed(value) => { root.settings-summary-template-edit-target-changed(value); }
+        summary-template-delete-requested => { root.settings-summary-template-delete-requested(); }
+        summary-template-name-changed(value) => { root.settings-summary-template-name-changed(value); }
+        summary-template-prompt-changed(value) => { root.settings-summary-template-prompt-changed(value); }
+        summary-template-add-requested(name) => { root.settings-summary-template-add-requested(name); }
+        model-changed(value) => { root.settings-model-changed(value); }
+        unload-timeout-changed(value) => { root.settings-unload-timeout-changed(value); }
+        delete-model-requested => { root.settings-delete-model-requested(); }
+        dictation-learn-from-edit-changed(value) => { root.settings-dictation-learn-from-edit-changed(value); }
+        dictionary-add-requested(term, pronunciation, category) => { root.settings-dictionary-add-requested(term, pronunciation, category); }
+        dictionary-delete-requested(id) => { root.settings-dictionary-delete-requested(id); }
+        snippet-add-requested(trigger, expansion) => { root.settings-snippet-add-requested(trigger, expansion); }
+        snippet-delete-requested(id) => { root.settings-snippet-delete-requested(id); }
+        snippet-edit-requested(id) => { root.settings-snippet-edit-requested(id); }
+        snippet-cancel-edit-requested => { root.settings-snippet-cancel-edit-requested(); }
+        snippet-save-edit-requested(id, trigger, expansion) => { root.settings-snippet-save-edit-requested(id, trigger, expansion); }
+    }
+        }
+    }
+
+    // Drawn last of all: the first-run wizard takes over the whole window
+    // until finished, above even the Settings overlay (the two are never
+    // open at the same time in practice, but this ordering is the honest
+    // one if they ever were).
+    if root.onboarding-open: OnboardingView {
+        width: 100%;
+        height: 100%;
+        locale: root.settings-locale;
+        step-index: root.onboarding-step-index;
+        step-count: root.onboarding-step-count;
+        step: root.onboarding-step;
+        status-message: root.onboarding-status-message;
+        permission-rows: root.onboarding-permission-rows;
+        permissions-error: root.onboarding-permissions-error;
+        repair-busy: root.onboarding-repair-busy;
+        repair-success: root.onboarding-repair-success;
+        repair-cooldown: root.onboarding-repair-cooldown;
+        device-labels: root.onboarding-device-labels;
+        selected-device-label: root.onboarding-selected-device-label;
+        model-phase: root.onboarding-model-phase;
+        model-labels: root.onboarding-model-labels;
+        selected-model-label: root.onboarding-selected-model-label;
+        download-progress-label: root.onboarding-download-progress-label;
+        download-progress-fraction: root.onboarding-download-progress-fraction;
+        toggle-shortcut-label: root.onboarding-toggle-shortcut-label;
+        shortcut-recording: root.onboarding-shortcut-recording;
+        shortcut-error: root.onboarding-shortcut-error;
+        auto-paste: root.onboarding-auto-paste;
+        accessibility-granted: root.onboarding-accessibility-granted;
+        busy: root.onboarding-busy;
+        continue-enabled: root.onboarding-continue-enabled;
+        locale-changed(value) => { root.onboarding-locale-changed(value); }
+        grant-requested(kind) => { root.onboarding-grant-requested(kind); }
+        hint-action-requested(kind) => { root.onboarding-hint-action-requested(kind); }
+        repair-requested => { root.onboarding-repair-requested(); }
+        device-changed(value) => { root.onboarding-device-changed(value); }
+        refresh-devices-requested => { root.onboarding-refresh-devices-requested(); }
+        model-picked(value) => { root.onboarding-model-picked(value); }
+        shortcut-record-requested => { root.onboarding-shortcut-record-requested(); }
+        shortcut-captured(text, ctrl, shift, alt, meta) => { root.onboarding-shortcut-captured(text, ctrl, shift, alt, meta); }
+        shortcut-released(text, ctrl, shift, alt, meta) => { root.onboarding-shortcut-released(text, ctrl, shift, alt, meta); }
+        shortcut-cleared => { root.onboarding-shortcut-cleared(); }
+        shortcut-cancelled => { root.onboarding-shortcut-cancelled(); }
+        auto-paste-changed(value) => { root.onboarding-auto-paste-changed(value); }
+        review-accessibility-requested => { root.onboarding-review-accessibility-requested(); }
+        back-requested => { root.onboarding-back-requested(); }
+        continue-requested => { root.onboarding-continue-requested(); }
+    }
+
+    if root.settings-permissions-dialog-open: SettingsPermissionsDialog {
+        width: 100%;
+        height: 100%;
+        rows: root.onboarding-permission-rows;
+        error-message: root.onboarding-permissions-error;
+        repair-busy: root.onboarding-repair-busy;
+        repair-success: root.onboarding-repair-success;
+        repair-cooldown: root.onboarding-repair-cooldown;
+        close-requested => { root.settings-permissions-dialog-open = false; }
+        grant-requested(kind) => { root.onboarding-grant-requested(kind); }
+        hint-action-requested(kind) => { root.onboarding-hint-action-requested(kind); }
+        repair-requested => { root.onboarding-repair-requested(); }
+    }
+
+    if root.whats-new-open: WhatsNewDialog {
+        width: 100%;
+        height: 100%;
+        version: root.whats-new-version;
+        content-blocks: root.whats-new-content-blocks;
+        dismissed => {
+            root.whats-new-open = false;
+            root.whats-new-dismissed();
+        }
+        link-clicked(url) => { root.whats-new-link-clicked(url); }
+    }
+
+    if root.update-available-open: UpdateAvailableDialog {
+        width: 100%;
+        height: 100%;
+        latest-version: root.update-latest-version;
+        release-notes-blocks: root.update-release-notes-blocks;
+        phase: root.update-phase;
+        error-message: root.update-error-message;
+        install-blocked: root.update-install-blocked;
+        install-block-reason: root.update-install-block-reason;
+        download-requested => { root.update-download-requested(); }
+        install-requested => { root.update-install-requested(); }
+        open-release-requested => { root.update-open-release-requested(); }
+        dismiss-requested => {
+            root.update-available-open = false;
+            root.update-dismiss-requested();
+        }
+        link-clicked(url) => { root.update-link-clicked(url); }
+    }
+}

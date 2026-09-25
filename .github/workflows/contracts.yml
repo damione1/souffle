@@ -8,6 +8,11 @@ on:
   pull_request:
   merge_group:
 
+# Checkout-only workflow: pin the GITHUB_TOKEN down instead of inheriting
+# the default scope (same convention as release.yml / deploy-site.yml).
+permissions:
+  contents: read
+
 # A new push makes the in-flight run obsolete. Also cancel on develop:
 # two merges in a row otherwise serialize on the single macOS runner.
 concurrency:
@@ -15,23 +20,6 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  frontend:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-
-    steps:
-      - uses: actions/checkout@v6.0.1
-
-      - uses: actions/setup-node@v6.1.0
-        with:
-          node-version: 24
-          check-latest: true
-          cache: npm
-
-      - run: npm ci
-      - run: npm test
-      - run: npm run check
-
   rust:
     runs-on: macos-latest
     # Warm cache: ~5 min. Without a cap, a hung step runs to GitHub's 6 h
@@ -51,7 +39,7 @@ jobs:
       # used entry.
       - uses: Swatinem/rust-cache@v2.9.1
         with:
-          workspaces: src-tauri -> target
+          workspaces: app -> target
           save-if: ${{ github.ref == 'refs/heads/develop' }}
 
       # Cheap: cargo metadata honors CARGO_TARGET_DIR (no release build).
@@ -62,15 +50,15 @@ jobs:
       # Two PRs can each be green and still break develop together: one turned
       # a &str into a String while the other added a caller. Only the merged
       # tree catches that, so run the suites here as well as locally.
-      - run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
-      - run: cargo clippy --manifest-path src-tauri/Cargo.toml --workspace --all-targets -- -D warnings
+      - run: cargo fmt --manifest-path app/Cargo.toml --all -- --check
+      - run: cargo clippy --manifest-path app/Cargo.toml --workspace --all-targets -- -D warnings
       # Silero's two ort tests have hung here indefinitely: whichever thread
       # wins the `Once` in `ensure_ort_initialized` can stall inside
       # `ort::init_from`, and every other thread then blocks on that `Once`
       # with no timeout. Fail the step instead of holding the runner.
-      # `export_typescript_bindings` is part of this suite; the next step
-      # checks it didn't drift the committed files (same as
-      # `npm run check:generated-types`).
-      - run: cargo test --manifest-path src-tauri/Cargo.toml --workspace
+      - run: cargo test --manifest-path app/Cargo.toml --workspace
         timeout-minutes: 15
-      - run: git diff --exit-code src/lib/types/generated.ts src/lib/api/generated.ts
+      # The catalogue gate extracts the @tr() calls before validating both PO
+      # files. Keep the extractor aligned with the Slint compiler in Cargo.lock.
+      - run: cargo install slint-tr-extractor --version 1.17.1 --locked
+      - run: ./scripts/check_slint_translations.sh

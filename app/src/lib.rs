@@ -1,0 +1,50 @@
+pub mod app_events;
+pub mod apple_intelligence;
+pub mod archive;
+pub mod async_runtime;
+pub mod audio;
+pub mod autostart;
+pub mod ax_text;
+pub mod bootstrap;
+pub mod calendar;
+pub mod cli;
+pub mod clipboard;
+pub mod commands;
+pub mod constants;
+pub mod db;
+pub mod debug;
+pub mod diagnostics;
+pub mod dictation_cancel;
+pub mod engine;
+pub mod errors;
+pub mod export;
+pub mod filter;
+pub mod frontmost;
+pub mod lid;
+pub mod lock_ext;
+pub mod logging;
+mod main_thread;
+pub mod models;
+mod modifier_shortcut;
+pub mod native;
+pub mod ort_runtime;
+pub mod permissions;
+pub mod pill;
+pub mod pipeline;
+pub mod platform;
+pub mod power;
+pub mod progress;
+pub mod settings;
+pub mod state;
+pub mod state_machine;
+pub mod summary;
+pub mod thread_qos;
+pub mod transcript;
+pub mod tray;
+pub mod update_check;
+
+#[cfg(test)]
+pub mod test_helpers;
+
+/// Default shortcut strings
+pub const DEFAULT_TOGGLE_SHORTCUT: &str = "CommandOrControl+Shift+Space";

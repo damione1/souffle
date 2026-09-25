@@ -1,0 +1,171 @@
+import { SettingsField } from "settings_field.slint";
+import { SettingsGroup } from "settings_group.slint";
+import { Theme } from "../../theme.slint";
+import { ThemedSwitch } from "../themed_switch.slint";
+import { ThemedButton } from "../themed_button.slint";
+import { ThemedComboBox } from "../themed_combo.slint";
+import { LogLevel } from "../../types.slint";
+
+// Port of DiagnosticsSettingsSection.svelte. The live log is virtualized
+// (SOU-224): main.rs owns the full tail and only pushes the visible slice
+// (`log-lines`) plus estimated spacers, same pattern as TranscriptSection.
+// The refresh/scroll timers only run while the Système tab is actually
+// active (see `sync_settings_log_timers` in main.rs), not for the whole
+// life of the Settings sheet.
+export component DiagnosticsSection inherits VerticalLayout {
+    in-out property <bool> debug-transcription;
+    in property <LogLevel> log-level;
+    // Only the currently visible slice of the log tail - main.rs owns the
+    // full line list and re-windows it as `log-scroll-top` moves (SOU-224).
+    in property <[string]> log-lines;
+    in property <int> log-line-count;
+    // Estimated px height of the lines scrolled past above/below the
+    // mounted slice - plain `float` for the same set_*/get_* reason as
+    // TranscriptSection's spacers.
+    in property <float> log-spacer-before: 0.0;
+    in property <float> log-spacer-after: 0.0;
+    // Two-way bound up to MainWindow so main.rs can poll the real scroll
+    // position and decide the next slice.
+    in-out property <length> log-scroll-top: 0px;
+    in property <bool> copying-diagnostics: false;
+
+    callback debug-transcription-changed(bool);
+    callback log-level-changed(LogLevel);
+    callback copy-diagnostics-requested();
+
+    pure function log-level-label(value: LogLevel) -> string {
+        if value == LogLevel.error { return @tr("Erreur"); }
+        if value == LogLevel.warn { return @tr("Avertissement"); }
+        if value == LogLevel.info { return @tr("Information"); }
+        if value == LogLevel.debug { return @tr("Débogage"); }
+        if value == LogLevel.trace { return @tr("Trace"); }
+        return "";
+    }
+
+    spacing: 22px;
+    alignment: start;
+
+    SettingsGroup {
+        title: @tr("DIAGNOSTICS");
+
+        SettingsField {
+            show-divider: false;
+            label: @tr("Niveau de journal");
+            description: @tr("Quantité de détails que Soufflé écrit dans le fichier journal.");
+
+            ThemedComboBox {
+                control-label: @tr("Niveau de journal");
+                model: [
+                    root.log-level-label(LogLevel.error),
+                    root.log-level-label(LogLevel.warn),
+                    root.log-level-label(LogLevel.info),
+                    root.log-level-label(LogLevel.debug),
+                    root.log-level-label(LogLevel.trace),
+                ];
+                current-value: root.log-level-label(root.log-level);
+                selected(value) => {
+                    if value == root.log-level-label(LogLevel.error) { root.log-level-changed(LogLevel.error); }
+                    if value == root.log-level-label(LogLevel.warn) { root.log-level-changed(LogLevel.warn); }
+                    if value == root.log-level-label(LogLevel.info) { root.log-level-changed(LogLevel.info); }
+                    if value == root.log-level-label(LogLevel.debug) { root.log-level-changed(LogLevel.debug); }
+                    if value == root.log-level-label(LogLevel.trace) { root.log-level-changed(LogLevel.trace); }
+                }
+            }
+        }
+
+        SettingsField {
+            label: @tr("Journaux détaillés de transcription");
+            description: @tr("Enregistre des détails supplémentaires sur la reconnaissance vocale pour le dépannage.");
+
+            ThemedSwitch {
+                control-label: @tr("Journaux détaillés de transcription");
+                checked: root.debug-transcription;
+                toggled(new) => { root.debug-transcription-changed(new); }
+            }
+        }
+
+        VerticalLayout {
+            padding-top: 15px;
+            padding-bottom: 8px;
+            padding-left: Theme.settings-inset;
+            padding-right: Theme.settings-inset;
+            spacing: 8px;
+            alignment: start;
+
+            Text {
+                text: @tr("Journal en direct");
+                font-size: 13.5px;
+                color: Theme.text-secondary;
+            }
+            Text {
+                text: @tr("Fin du fichier journal actuel, actualisé toutes les quelques secondes.");
+                font-size: 12px;
+                color: Theme.text-muted;
+                wrap: word-wrap;
+            }
+
+            Rectangle {
+                height: 140px;
+                border-width: 1px;
+                border-color: Theme.ghost-border;
+                background: Theme.input;
+                vertical-stretch: 0;
+                clip: true;
+
+                accessible-role: groupbox;
+                accessible-label: @tr("Journal en direct");
+
+                Flickable {
+                    width: 100%;
+                    height: 100%;
+                    content-width: self.width;
+                    content-y <=> root.log-scroll-top;
+
+                    VerticalLayout {
+                        padding: 8px;
+                        spacing: 0px;
+                        alignment: start;
+
+                        Rectangle { height: root.log-spacer-before * 1px; }
+
+                        if root.log-line-count == 0: Text {
+                            text: @tr("Aucune entrée de journal pour l'instant.");
+                            font-family: "JetBrains Mono";
+                            font-size: 10.5px;
+                            color: Theme.text-secondary;
+                            wrap: word-wrap;
+                        }
+
+                        // One read-only TextInput per mounted line rather
+                        // than one for the whole tail, so a 2s poll that
+                        // appends lines never relayouts the already-rendered
+                        // ones (SOU-224). Selection/copy still works within
+                        // a line; the "Copier les diagnostics" button below
+                        // remains the way to grab the full text.
+                        for line in root.log-lines: TextInput {
+                            text: line;
+                            font-family: "JetBrains Mono";
+                            font-size: 10.5px;
+                            color: Theme.text-secondary;
+                            wrap: word-wrap;
+                            single-line: false;
+                            read-only: true;
+                            selection-background-color: Theme.accent.with-alpha(0.28);
+                        }
+
+                        Rectangle { height: root.log-spacer-after * 1px; }
+                    }
+                }
+            }
+
+            HorizontalLayout {
+                alignment: end;
+                ThemedButton {
+                    text: root.copying-diagnostics ? @tr("Copie…") : @tr("Copier les diagnostics");
+                    enabled: !root.copying-diagnostics;
+                    clicked => { root.copy-diagnostics-requested(); }
+                }
+            }
+        }
+    }
+}

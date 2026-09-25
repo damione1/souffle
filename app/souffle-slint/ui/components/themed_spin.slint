@@ -1,0 +1,135 @@
+import { Theme } from "../theme.slint";
+import { LucideIcon, IconSet } from "lucide_icon.slint";
+
+// Port of app.css `.field-number`. Stock SpinBox ignores Theme and
+// inflates to a huge square inside SettingsField's stretch pool.
+export component ThemedSpinBox inherits Rectangle {
+    in property <int> value;
+    in property <int> minimum: 0;
+    in property <int> maximum: 100;
+    in property <int> step: 1;
+    in property <bool> enabled: true;
+    in property <string> control-label: @tr("Valeur");
+
+    callback edited(int);
+
+    width: 96px;
+    height: Theme.settings-control-height;
+    horizontal-stretch: 0;
+    vertical-stretch: 0;
+    border-radius: 4px;
+    border-width: key-focus.has-focus ? 2px : 1px;
+    border-color: key-focus.has-focus ? Theme.accent : Theme.ghost-border;
+    background: Theme.input;
+    opacity: root.enabled ? 1.0 : 0.5;
+
+    accessible-role: spinbox;
+    accessible-label: root.control-label;
+    accessible-enabled: root.enabled;
+    accessible-value: root.value;
+    accessible-value-minimum: root.minimum;
+    accessible-value-maximum: root.maximum;
+    accessible-value-step: root.step;
+    accessible-read-only: !root.enabled;
+    accessible-action-set-value(v) => {
+        if root.enabled && v.is-float() {
+            root.publish(round(v.to-float()));
+        }
+    }
+    accessible-action-increment => { root.increment(); }
+    accessible-action-decrement => { root.decrement(); }
+
+    forward-focus: key-focus;
+
+    key-focus := FocusScope {
+        key-pressed(event) => {
+            if !root.enabled {
+                return reject;
+            }
+            if event.text == Key.UpArrow {
+                root.increment();
+                return accept;
+            }
+            if event.text == Key.DownArrow {
+                root.decrement();
+                return accept;
+            }
+            if event.text == Key.Home {
+                root.publish(root.minimum);
+                return accept;
+            }
+            if event.text == Key.End {
+                root.publish(root.maximum);
+                return accept;
+            }
+            return reject;
+        }
+    }
+
+    Text {
+        x: 10px;
+        width: parent.width - 28px;
+        height: parent.height;
+        text: root.value;
+        font-size: 14px;
+        color: Theme.text-secondary;
+        vertical-alignment: center;
+        horizontal-alignment: right;
+    }
+
+    up := TouchArea {
+        x: parent.width - 22px;
+        y: 1px;
+        width: 20px;
+        height: 17px;
+        enabled: root.enabled && root.value < root.maximum;
+        clicked => {
+            key-focus.focus();
+            root.increment();
+        }
+    }
+    LucideIcon {
+        icon: IconSet.ChevronUp;
+        icon-color: Theme.text-muted;
+        size: 12px;
+        x: parent.width - 18px;
+        y: 3px;
+    }
+
+    down := TouchArea {
+        x: parent.width - 22px;
+        y: 18px;
+        width: 20px;
+        height: 17px;
+        enabled: root.enabled && root.value > root.minimum;
+        clicked => {
+            key-focus.focus();
+            root.decrement();
+        }
+    }
+    LucideIcon {
+        icon: IconSet.ChevronDown;
+        icon-color: Theme.text-muted;
+        size: 12px;
+        x: parent.width - 18px;
+        y: 20px;
+    }
+
+    function publish(candidate: int) {
+        if !root.enabled {
+            return;
+        }
+        let bounded = max(root.minimum, min(root.maximum, candidate));
+        if bounded != root.value {
+            root.edited(bounded);
+        }
+    }
+
+    function increment() {
+        root.publish(root.value + root.step);
+    }
+
+    function decrement() {
+        root.publish(root.value - root.step);
+    }
+}

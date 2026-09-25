@@ -1,0 +1,199 @@
+import { Theme } from "../theme.slint";
+import { RecordingMode, TranscriptionPhase } from "../types.slint";
+import { LucideIcon, IconSet } from "lucide_icon.slint";
+
+// Port of App.svelte's `<header>` - persistent across every view except
+// Onboarding (which replaces the whole app shell, header included). Tauri
+// draws this same bar over Home *and* Settings so the gear icon can close
+// Settings by toggling the same control that opened it; `main_window.slint`
+// keeps this component mounted once instead of duplicating a "Paramètres"
+// button per view (SOU-195: that duplication, plus Settings' own invented
+// "Terminé" button, were both drift from the reference).
+//
+// `padding-left: 88px` leaves room for the traffic lights: main.rs configures
+// the native NSWindow with a hidden title bar + transparent titlebar +
+// full-size content view (the native counterpart to Tauri's
+// `titleBarStyle: overlay` + `hiddenTitle: true`), so this Rectangle is the
+// *only* title bar the window has - the traffic lights float over its left
+// edge at their standard native position, same as the reference.
+// `with_movable_by_window_background` (also set in main.rs) makes the whole
+// window draggable from any empty background, covering this bar's
+// `data-tauri-drag-region` role without a Slint-side drag handler.
+export component AppHeader inherits Rectangle {
+    in property <bool> settings-open: false;
+    in property <TranscriptionPhase> model-phase;
+    in property <RecordingMode> recording-mode: RecordingMode.idle;
+    in property <string> model-label: "";
+
+    callback settings-toggled();
+    // main.rs flips the real `Theme.dark` (and persists the choice) on this
+    // callback - the icon below reads `Theme.dark` directly rather than
+    // keeping its own copy, so it can't drift from the actual palette.
+    callback theme-toggle-requested();
+
+    property <string> status-label: root.recording-mode != RecordingMode.idle ? @tr("Enregistrement")
+        : root.model-phase == TranscriptionPhase.download-required ? @tr("Téléchargement requis")
+        : root.model-phase == TranscriptionPhase.downloading ? @tr("Téléchargement…")
+        : root.model-phase == TranscriptionPhase.load-required ? @tr("Chargement requis")
+        : root.model-phase == TranscriptionPhase.loading ? @tr("Chargement…")
+        : root.model-phase == TranscriptionPhase.ready ? @tr("Prêt")
+        : root.model-phase == TranscriptionPhase.unloading ? @tr("Déchargement…")
+        : root.model-phase == TranscriptionPhase.failed ? @tr("Erreur du modèle")
+        : "";
+    property <color> status-color: root.recording-mode != RecordingMode.idle ? Theme.danger
+        : root.model-phase == TranscriptionPhase.ready ? Theme.accent : Theme.warning;
+    property <bool> show-model-label: root.recording-mode == RecordingMode.idle && root.model-phase == TranscriptionPhase.ready && root.model-label != "";
+
+    height: 52px;
+    background: Theme.canvas;
+
+    Rectangle {
+        y: parent.height - 1px;
+        height: 1px;
+        background: Theme.rule;
+    }
+
+    // Two independently-sized, independently-anchored groups instead of one
+    // `HorizontalLayout` with a stretchy spacer: a plain `Rectangle`'s
+    // children aren't stretch-distributed at all (unlike a layout's), so
+    // each group naturally shrinks to its own content width - the spacer
+    // approach fed the status pill's `Rectangle` (a layout-wrapping shrink-
+    // to-fit badge, same recipe as `FilterChip`) into the *same* stretch
+    // pool as the spacer, which inflated it to fill the leftover space
+    // instead of leaving it pill-sized.
+    // Each child of this row is either a full-height `Text` (vertical-
+    // alignment: center) or a full-height `Rectangle`/`TouchArea` that
+    // centers its own content with an explicit `y:`. `y:` on a
+    // HorizontalLayout child is ignored (the layout owns positioning),
+    // which is why the logo / title / pill / icon buttons used to sit on
+    // different vertical baselines: some had a `y:` that never applied,
+    // the title stretched and centered, the 32px buttons sat at the top.
+    HorizontalLayout {
+        width: 100%;
+        height: 100%;
+        padding-left: 88px;
+        padding-right: 26px;
+        spacing: 9px;
+
+        Rectangle {
+            width: 25px;
+            Image {
+                source: @image-url("../assets/icon.png");
+                width: 25px;
+                height: 25px;
+                y: (parent.height - self.height) / 2;
+            }
+        }
+
+        Text {
+            text: @tr("Soufflé");
+            height: 100%;
+            font-family: "Archivo SemiBold";
+            font-size: 14.5px;
+            color: Theme.text-primary;
+            vertical-alignment: center;
+        }
+
+        Rectangle { horizontal-stretch: 1; }
+
+        // Manually positioned (not a `Rectangle` wrapping a `HorizontalLayout`,
+        // even with `alignment: start` on this row): a plain `Rectangle`
+        // does not expose its content's computed size as its own natural
+        // width, so a nested layout inside it resolves to an ambiguous
+        // (observed: window-width-sized) preferred width regardless of
+        // `horizontal-stretch`. Every child below gets an explicit `x`, and
+        // the pill's own `width` is the plain arithmetic sum of their
+        // natural (content-driven) widths - deterministic, no layout
+        // ambiguity. `model-label-text`'s text is `""` (not an `if`) when
+        // hidden, so its `.width` is always a real value to sum, never a
+        // conditionally-absent element.
+        Rectangle {
+            width: 9px + dot.width + 5px + status-text.width + (root.show-model-label ? 5px + model-label-text.width : 0px) + 9px;
+
+            pill := Rectangle {
+                y: (parent.height - self.height) / 2;
+                height: 22px;
+                width: parent.width;
+                border-radius: 4px;
+                border-width: 1px;
+                border-color: Theme.ghost-border;
+
+                dot := Rectangle {
+                    x: 9px;
+                    y: (parent.height - self.height) / 2;
+                    width: 7px;
+                    height: 7px;
+                    border-radius: 3.5px;
+                    background: root.status-color;
+                }
+                status-text := Text {
+                    x: dot.x + dot.width + 5px;
+                    y: 0;
+                    height: parent.height;
+                    text: root.status-label;
+                    font-size: 11px;
+                    color: Theme.text-muted;
+                    vertical-alignment: center;
+                }
+                model-label-text := Text {
+                    x: status-text.x + status-text.width + 5px;
+                    y: 0;
+                    height: parent.height;
+                    text: root.show-model-label ? root.model-label : "";
+                    font-family: "JetBrains Mono";
+                    font-size: 11px;
+                    color: Theme.text-muted;
+                    vertical-alignment: center;
+                }
+            }
+        }
+
+        theme-area := TouchArea {
+            width: 32px;
+            accessible-role: button;
+            accessible-label: @tr("Basculer clair / sombre");
+            accessible-action-default => { root.theme-toggle-requested(); }
+            clicked => { root.theme-toggle-requested(); }
+
+            Rectangle {
+                width: 32px;
+                height: 32px;
+                y: (parent.height - self.height) / 2;
+                border-radius: 6px;
+                background: theme-area.has-hover ? Theme.surface-2 : transparent;
+
+                LucideIcon {
+                    icon: Theme.dark ? IconSet.Sun : IconSet.Moon;
+                    icon-color: theme-area.has-hover ? Theme.text-primary : Theme.text-muted;
+                    size: 17px;
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
+                }
+            }
+        }
+
+        settings-area := TouchArea {
+            width: 32px;
+            accessible-role: button;
+            accessible-label: @tr("Réglages");
+            accessible-action-default => { root.settings-toggled(); }
+            clicked => { root.settings-toggled(); }
+
+            Rectangle {
+                width: 32px;
+                height: 32px;
+                y: (parent.height - self.height) / 2;
+                border-radius: 6px;
+                background: root.settings-open || settings-area.has-hover ? Theme.surface-2 : transparent;
+
+                LucideIcon {
+                    icon: IconSet.SlidersHorizontal;
+                    icon-color: root.settings-open || settings-area.has-hover ? Theme.text-primary : Theme.text-muted;
+                    size: 18px;
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
+                }
+            }
+        }
+    }
+}

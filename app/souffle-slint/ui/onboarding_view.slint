@@ -1,0 +1,419 @@
+import { ThemedComboBox } from "components/themed_combo.slint";
+import { PermissionsStep, PermissionRow } from "components/onboarding/permissions_step.slint";
+import { ShortcutRecorderButton } from "components/settings/interface_section.slint";
+import { LucideIcon, IconSet } from "components/lucide_icon.slint";
+import { StatusBanner } from "components/status_banner.slint";
+import { AppLocale, ModelPhase, OnboardingStep, PermissionKind } from "types.slint";
+import { Theme } from "theme.slint";
+import { ThemedButton, ThemedButtonKind } from "components/themed_button.slint";
+import { ThemedSwitch } from "components/themed_switch.slint";
+
+// Port of OnboardingView.svelte (+ PermissionsStep.svelte inlined as the
+// first step). Model download and shortcut capture reuse the same Rust
+// modules (`model_ui.rs`, `shortcut_capture.rs`) the Settings tab uses, but
+// through their own `onboarding-*` window properties - this overlay and the
+// Settings overlay are never visible at the same time, but keeping their
+// state separate avoids one leaking into the other's fields.
+//
+// Layout follows the reference's `flex h-screen items-center justify-center
+// p-8` > `w-full max-w-lg gap-6` card: a Slint `VerticalLayout` child that
+// only has a `max-width` is pinned to the layout's left edge (there is no
+// cross-axis alignment), which is what made the wizard hug the left of a
+// wide window - the card takes an explicit width and a `HorizontalLayout {
+// alignment: center }` centers it.
+export component OnboardingView inherits Rectangle {
+    in property <AppLocale> locale;
+    in property <int> step-index;
+    in property <int> step-count;
+    in property <OnboardingStep> step;
+    in property <string> status-message;
+
+    in property <[PermissionRow]> permission-rows;
+    in property <string> permissions-error;
+    in property <bool> repair-busy;
+    in property <bool> repair-success;
+    in property <bool> repair-cooldown;
+
+    in property <[string]> device-labels;
+    in property <string> selected-device-label;
+
+    in property <ModelPhase> model-phase: ModelPhase.pick;
+    in property <[string]> model-labels;
+    in property <string> selected-model-label;
+    in property <string> download-progress-label;
+    in property <float> download-progress-fraction;
+
+    in property <string> toggle-shortcut-label;
+    in property <bool> shortcut-recording;
+    in property <string> shortcut-error;
+    in property <bool> auto-paste;
+    in property <bool> accessibility-granted;
+
+    in property <bool> busy;
+    in property <bool> continue-enabled: true;
+
+    callback locale-changed(AppLocale);
+    callback grant-requested(PermissionKind);
+    callback hint-action-requested(PermissionKind);
+    callback repair-requested();
+    callback device-changed(string);
+    callback refresh-devices-requested();
+    callback model-picked(string);
+    callback shortcut-record-requested();
+    callback shortcut-captured(string, bool, bool, bool, bool);
+    callback shortcut-released(string, bool, bool, bool, bool);
+    callback shortcut-cleared();
+    callback shortcut-cancelled();
+    callback auto-paste-changed(bool);
+    callback review-accessibility-requested();
+    callback back-requested();
+    callback continue-requested();
+
+    pure function step-title(step: OnboardingStep) -> string {
+        if step == OnboardingStep.permissions { return @tr("Permissions"); }
+        if step == OnboardingStep.microphone { return @tr("Choisissez votre microphone"); }
+        if step == OnboardingStep.model { return @tr("Modèle de transcription"); }
+        if step == OnboardingStep.shortcut { return @tr("Raccourci clavier"); }
+        return "";
+    }
+    pure function step-subtitle(step: OnboardingStep) -> string {
+        if step == OnboardingStep.permissions { return @tr("Soufflé a besoin de ces autorisations macOS pour fonctionner."); }
+        if step == OnboardingStep.microphone { return @tr("Vous pourrez changer ce choix plus tard dans les Réglages."); }
+        if step == OnboardingStep.model { return @tr("Téléchargé une seule fois, tout tourne ensuite hors ligne."); }
+        if step == OnboardingStep.shortcut { return @tr("Utilisé pour démarrer et arrêter la dictée depuis n'importe quelle application."); }
+        return "";
+    }
+
+    property <bool> is-last-step: root.step-index == root.step-count - 1;
+    property <string> continue-label: root.step == OnboardingStep.model && root.model-phase != ModelPhase.ready ? @tr("Télécharger et continuer")
+        : root.is-last-step ? @tr("Terminer")
+        : @tr("Continuer");
+
+    background: Theme.canvas;
+
+    VerticalLayout {
+        alignment: center;
+        padding: 32px;
+
+        HorizontalLayout {
+            alignment: center;
+
+            card := VerticalLayout {
+                width: min(root.width - 64px, 512px);
+                spacing: 24px;
+
+                // Header: icon, name, tagline, privacy note, locale toggle.
+                VerticalLayout {
+                    alignment: center;
+                    spacing: 10px;
+
+                    HorizontalLayout {
+                        alignment: center;
+                        Image {
+                            source: @image-url("assets/icon.png");
+                            width: 64px;
+                            height: 64px;
+                        }
+                    }
+                    Text {
+                        text: @tr("Soufflé");
+                        font-family: "Archivo SemiBold";
+                        font-size: 24px;
+                        font-weight: 700;
+                        color: Theme.text-primary;
+                        horizontal-alignment: center;
+                    }
+                    Text {
+                        text: @tr("Transcription vocale locale pour la dictée et les meetings.");
+                        font-size: 14px;
+                        color: Theme.text-secondary;
+                        horizontal-alignment: center;
+                        wrap: word-wrap;
+                    }
+                    HorizontalLayout {
+                        alignment: center;
+                        spacing: 6px;
+                        LucideIcon {
+                            icon: IconSet.Lock;
+                            size: 12px;
+                            icon-color: Theme.text-muted;
+                            y: (parent.height - self.height) / 2;
+                        }
+                        Text {
+                            text: @tr("100 % local — rien ne quitte votre Mac. Pas de compte, pas de cloud.");
+                            font-size: 12px;
+                            color: Theme.text-muted;
+                            vertical-alignment: center;
+                            wrap: word-wrap;
+                        }
+                    }
+
+                    if root.step-index == 0: HorizontalLayout {
+                        alignment: center;
+                        spacing: 4px;
+                        ThemedButton {
+                            text: @tr("English");
+                            compact: true;
+                            kind: root.locale == AppLocale.en ? ThemedButtonKind.active : ThemedButtonKind.default;
+                            clicked => { root.locale-changed(AppLocale.en); }
+                        }
+                        ThemedButton {
+                            text: @tr("Français");
+                            compact: true;
+                            kind: root.locale == AppLocale.fr ? ThemedButtonKind.active : ThemedButtonKind.default;
+                            clicked => { root.locale-changed(AppLocale.fr); }
+                        }
+                    }
+                }
+
+                if root.step-count > 1: HorizontalLayout {
+                    alignment: center;
+                    spacing: 6px;
+                    for i in root.step-count: Rectangle {
+                        width: 24px;
+                        height: 6px;
+                        background: i == root.step-index ? Theme.accent : Theme.surface-3;
+                    }
+                }
+
+                VerticalLayout {
+                    spacing: 4px;
+                    Text {
+                        text: step-title(root.step);
+                        font-family: "Archivo SemiBold";
+                        font-size: 18px;
+                        font-weight: 600;
+                        color: Theme.text-primary;
+                    }
+                    Text {
+                        text: step-subtitle(root.step);
+                        font-size: 14px;
+                        color: Theme.text-muted;
+                        wrap: word-wrap;
+                    }
+                }
+
+                // Rust clears this on every step change and only ever puts a
+                // real error message here (a failed save/download/load), so
+                // the banner has no dismiss action of its own.
+                if root.status-message != "": StatusBanner {
+                    message: root.status-message;
+                    dismissible: false;
+                }
+
+                if root.step == OnboardingStep.permissions: PermissionsStep {
+                    rows: root.permission-rows;
+                    error-message: root.permissions-error;
+                    repair-busy: root.repair-busy;
+                    repair-success: root.repair-success;
+                    repair-cooldown: root.repair-cooldown;
+                    grant-requested(kind) => { root.grant-requested(kind); }
+                    hint-action-requested(kind) => { root.hint-action-requested(kind); }
+                    repair-requested => { root.repair-requested(); }
+                }
+
+                if root.step == OnboardingStep.microphone: VerticalLayout {
+                    spacing: 10px;
+                    HorizontalLayout {
+                        spacing: 8px;
+                        LucideIcon {
+                            icon: IconSet.Mic;
+                            size: 16px;
+                            icon-color: Theme.text-muted;
+                            y: (parent.height - self.height) / 2;
+                        }
+                        // Explicit arithmetic rather than `horizontal-stretch`: the
+                        // combo carries its own `width:` binding, which a layout
+                        // treats as a fixed constraint (see the status-pill note in
+                        // `app_header.slint`).
+                        ThemedComboBox {
+                            width: parent.width - 16px - 8px - 8px - refresh-btn.width;
+                            model: root.device-labels;
+                            current-value: root.selected-device-label;
+                            control-label: @tr("Choisissez votre microphone");
+                            selected(value) => { root.device-changed(value); }
+                        }
+                        refresh-btn := ThemedButton {
+                            width: 110px;
+                            text: @tr("Actualiser");
+                            clicked => { root.refresh-devices-requested(); }
+                        }
+                    }
+                    Text {
+                        text: @tr("Le microphone peut être changé plus tard dans les Réglages.");
+                        font-size: 12px;
+                        color: Theme.text-muted;
+                        wrap: word-wrap;
+                    }
+                }
+
+                if root.step == OnboardingStep.model: VerticalLayout {
+                    spacing: 8px;
+
+                    if root.model-phase == ModelPhase.downloading: VerticalLayout {
+                        spacing: 6px;
+                        Text { text: @tr("Téléchargement du modèle…"); font-size: 14px; color: Theme.text-secondary; }
+                        Rectangle {
+                            height: 6px;
+                            border-radius: 3px;
+                            background: Theme.ghost-border;
+                            Rectangle {
+                                x: 0;
+                                width: parent.width * max(0.02, root.download-progress-fraction);
+                                height: 100%;
+                                border-radius: 3px;
+                                background: Theme.accent;
+                            }
+                        }
+                        Text { text: root.download-progress-label; font-size: 12px; color: Theme.text-muted; }
+                    }
+                    if root.model-phase == ModelPhase.loading: Text {
+                        text: @tr("Chargement du modèle…");
+                        font-size: 14px;
+                        color: Theme.text-secondary;
+                        horizontal-alignment: center;
+                    }
+                    if root.model-phase == ModelPhase.ready: Text {
+                        text: @tr("Modèle prêt.");
+                        font-size: 14px;
+                        color: Theme.text-secondary;
+                    }
+                    if root.model-phase == ModelPhase.pick: Text {
+                        text: @tr("Modèle de transcription");
+                        font-family: "Archivo SemiBold";
+                        font-size: 11px;
+                        font-weight: 600;
+                        color: Theme.text-muted;
+                    }
+                    if root.model-phase == ModelPhase.pick: ThemedComboBox {
+                        width: parent.width;
+                        model: root.model-labels;
+                        current-value: root.selected-model-label;
+                        control-label: @tr("Modèle de transcription");
+                        enabled: !root.busy;
+                        selected(value) => { root.model-picked(value); }
+                    }
+                }
+
+                if root.step == OnboardingStep.shortcut: VerticalLayout {
+                    spacing: 16px;
+
+                    HorizontalLayout {
+                        spacing: 12px;
+                        LucideIcon {
+                            icon: IconSet.Keyboard;
+                            size: 16px;
+                            icon-color: Theme.text-muted;
+                            y: (parent.height - self.height) / 2;
+                        }
+                        ShortcutRecorderButton {
+                            horizontal-stretch: 1;
+                            shortcut-label: root.toggle-shortcut-label;
+                            recording: root.shortcut-recording;
+                            record-requested => { root.shortcut-record-requested(); }
+                            captured(text, ctrl, shift, alt, meta) => { root.shortcut-captured(text, ctrl, shift, alt, meta); }
+                            released(text, ctrl, shift, alt, meta) => { root.shortcut-released(text, ctrl, shift, alt, meta); }
+                            cleared => { root.shortcut-cleared(); }
+                            cancelled => { root.shortcut-cancelled(); }
+                        }
+                    }
+
+                    Text {
+                        text: @tr("Cliquez sur le raccourci, puis appuyez sur les touches voulues. Échap annule.");
+                        font-size: 12px;
+                        color: Theme.text-muted;
+                        wrap: word-wrap;
+                    }
+
+                    if root.shortcut-error != "": Text {
+                        text: root.shortcut-error;
+                        color: Theme.danger;
+                        font-size: 12px;
+                        wrap: word-wrap;
+                    }
+
+                    HorizontalLayout {
+                        alignment: space-between;
+                        spacing: 16px;
+                        VerticalLayout {
+                            spacing: 2px;
+                            horizontal-stretch: 1;
+                            Text {
+                                text: @tr("Coller automatiquement le texte transcrit");
+                                font-size: 13px;
+                                color: Theme.text-primary;
+                            }
+                            Text {
+                                text: @tr("À l'arrêt, colle la transcription dans l'app que vous utilisiez. Nécessite Accessibilité.");
+                                font-size: 12px;
+                                color: Theme.text-muted;
+                                wrap: word-wrap;
+                            }
+                        }
+                        VerticalLayout {
+                            alignment: start;
+                            horizontal-stretch: 0;
+                            ThemedSwitch {
+                                control-label: @tr("Coller automatiquement le texte transcrit");
+                                checked: root.auto-paste;
+                                toggled(new) => { root.auto-paste-changed(new); }
+                            }
+                        }
+                    }
+
+                    if !root.accessibility-granted: Rectangle {
+                        border-width: 1px;
+                        border-color: Theme.warning.with-alpha(0.4);
+                        border-radius: 4px;
+                        VerticalLayout {
+                            padding-left: 12px;
+                            padding-right: 12px;
+                            padding-top: 8px;
+                            padding-bottom: 8px;
+                            Text {
+                                text: @tr("Le collage automatique a besoin de l'Accessibilité, qui n'est pas encore accordée. Le texte ira dans votre historique à la place.");
+                                color: Theme.warning;
+                                font-size: 13px;
+                                wrap: word-wrap;
+                            }
+                        }
+                    }
+                    if !root.accessibility-granted: HorizontalLayout {
+                        alignment: end;
+                        ThemedButton {
+                            text: @tr("Vérifier les permissions");
+                            compact: true;
+                            clicked => { root.review-accessibility-requested(); }
+                        }
+                    }
+                }
+
+                HorizontalLayout {
+                    spacing: 12px;
+
+                    if root.step-index > 0: ThemedButton {
+                        text: @tr("Retour");
+                        kind: ThemedButtonKind.ghost;
+                        enabled: !root.busy;
+                        clicked => { root.back-requested(); }
+                    }
+                    if root.step-index == 0 && root.step == OnboardingStep.permissions: Text {
+                        text: @tr("Vous pourrez les accorder plus tard.");
+                        font-size: 12px;
+                        color: Theme.text-muted;
+                        vertical-alignment: center;
+                    }
+
+                    Rectangle { horizontal-stretch: 1; }
+
+                    ThemedButton {
+                        text: root.continue-label;
+                        kind: ThemedButtonKind.primary;
+                        enabled: !root.busy && root.continue-enabled;
+                        clicked => { root.continue-requested(); }
+                    }
+                }
+            }
+        }
+    }
+}

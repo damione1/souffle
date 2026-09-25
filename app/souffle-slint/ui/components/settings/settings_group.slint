@@ -1,0 +1,35 @@
+import { Theme } from "../../theme.slint";
+
+// Port of app.css `.settings-group` + `.settings-rows`: uppercase tracking
+// label, then a hairline, then the rows. Children should be SettingsField
+// (or a full-width block) with `show-divider` false on the first one.
+export component SettingsGroup inherits VerticalLayout {
+    in property <string> title;
+
+    spacing: 0px;
+    alignment: start;
+    vertical-stretch: 0;
+
+    HorizontalLayout {
+        padding-left: Theme.settings-inset;
+        padding-right: Theme.settings-inset;
+        padding-bottom: 11px;
+        Text {
+            text: root.title;
+            font-size: 11px;
+            font-weight: 600;
+            letter-spacing: 1.65px;
+            color: Theme.text-muted;
+            horizontal-alignment: left;
+            overflow: elide;
+        }
+    }
+
+    Rectangle {
+        height: 1px;
+        background: Theme.rule;
+        vertical-stretch: 0;
+    }
+
+    @children
+}

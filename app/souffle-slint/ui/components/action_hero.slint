@@ -1,0 +1,180 @@
+import { Theme } from "../theme.slint";
+import { LucideIcon, IconSet } from "lucide_icon.slint";
+
+// Port of features/home/ActionHero.svelte: two equal-width CTAs (dictate,
+// start a meeting), each disabled while the transcription model isn't ready.
+export component ActionHero inherits HorizontalLayout {
+    in property <string> dictation-shortcut;
+    in property <bool> model-ready: true;
+    in property <bool> actions-enabled: true;
+    property <bool> can-start: root.model-ready && root.actions-enabled;
+
+    callback dictate-requested();
+    callback meeting-requested();
+
+    spacing: 1px;
+
+    Rectangle {
+        width: (root.width - 1px) / 2;
+        horizontal-stretch: 0;
+        border-width: dictate-focus.has-focus ? 2px : 1px;
+        border-color: dictate-focus.has-focus ? Theme.accent : Theme.border-soft;
+        background: dictate-area.pressed ? Theme.surface-3 : dictate-area.has-hover ? Theme.surface-2 : transparent;
+        opacity: root.can-start ? 1.0 : 0.5;
+
+        // TouchArea alone has no accessible role (SOU-186's LineEdit-vs-bare-
+        // TextInput lesson applies here too): without these, this control is
+        // invisible to assistive tech and AppleScript UI scripting alike.
+        accessible-role: button;
+        accessible-label: @tr("Démarrer une dictée");
+        accessible-enabled: root.can-start;
+        accessible-action-default => { if root.can-start { root.dictate-requested(); } }
+
+        forward-focus: dictate-focus;
+
+        dictate-focus := FocusScope {
+            key-pressed(event) => {
+                if root.can-start && (event.text == Key.Return || event.text == Key.Space) {
+                    root.dictate-requested();
+                    return accept;
+                }
+                return reject;
+            }
+        }
+
+        dictate-area := TouchArea {
+            enabled: root.can-start;
+            clicked => {
+                dictate-focus.focus();
+                root.dictate-requested();
+            }
+        }
+
+        HorizontalLayout {
+            padding: 18px;
+            spacing: 15px;
+            alignment: start;
+
+            LucideIcon {
+                icon: IconSet.Mic;
+                icon-color: Theme.accent;
+                size: 22px;
+                y: 2px;
+            }
+
+            VerticalLayout {
+                spacing: 4px;
+                alignment: start;
+
+                Text {
+                    text: @tr("Dicter");
+                    font-family: "Archivo SemiBold";
+                    font-size: 15px;
+                    color: Theme.text-primary;
+                }
+
+                if root.dictation-shortcut == "": Text {
+                    text: @tr("Définissez un raccourci");
+                    font-size: 12.5px;
+                    color: Theme.text-muted;
+                }
+                if root.dictation-shortcut != "": HorizontalLayout {
+                    spacing: 5px;
+                    alignment: start;
+
+                    Text {
+                        text: @tr("Appuyez sur");
+                        font-size: 12.5px;
+                        color: Theme.text-muted;
+                        vertical-alignment: center;
+                    }
+
+                    Rectangle {
+                        background: Theme.surface-2;
+                        border-radius: 3px;
+
+                        HorizontalLayout {
+                            padding-left: 6px;
+                            padding-right: 6px;
+                            padding-top: 1.5px;
+                            padding-bottom: 1.5px;
+
+                            Text {
+                                text: root.dictation-shortcut;
+                                font-family: "JetBrains Mono";
+                                font-size: 11px;
+                                color: Theme.text-tertiary;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Rectangle {
+        width: (root.width - 1px) / 2;
+        horizontal-stretch: 0;
+        border-width: meeting-focus.has-focus ? 2px : 1px;
+        border-color: meeting-focus.has-focus ? Theme.accent : Theme.border-soft;
+        background: meeting-area.pressed ? Theme.surface-3 : meeting-area.has-hover ? Theme.surface-2 : transparent;
+        opacity: root.can-start ? 1.0 : 0.5;
+
+        accessible-role: button;
+        accessible-label: @tr("Démarrer une réunion");
+        accessible-enabled: root.can-start;
+        accessible-action-default => { if root.can-start { root.meeting-requested(); } }
+
+        forward-focus: meeting-focus;
+
+        meeting-focus := FocusScope {
+            key-pressed(event) => {
+                if root.can-start && (event.text == Key.Return || event.text == Key.Space) {
+                    root.meeting-requested();
+                    return accept;
+                }
+                return reject;
+            }
+        }
+
+        meeting-area := TouchArea {
+            enabled: root.can-start;
+            clicked => {
+                meeting-focus.focus();
+                root.meeting-requested();
+            }
+        }
+
+        HorizontalLayout {
+            padding: 18px;
+            spacing: 15px;
+            alignment: start;
+
+            LucideIcon {
+                icon: IconSet.Users;
+                icon-color: Theme.secondary;
+                size: 22px;
+                y: 2px;
+            }
+
+            VerticalLayout {
+                spacing: 4px;
+                alignment: start;
+
+                Text {
+                    text: @tr("Démarrer une réunion");
+                    font-family: "Archivo SemiBold";
+                    font-size: 15px;
+                    color: Theme.text-primary;
+                }
+                Text {
+                    text: @tr("Transcrire en direct avec l’audio système");
+                    font-size: 12.5px;
+                    color: Theme.text-muted;
+                    wrap: word-wrap;
+                }
+            }
+        }
+    }
+}

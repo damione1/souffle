@@ -1,0 +1,83 @@
+{
+  "$schema": "https://raw.githubusercontent.com/nicegui-org/nicegui/main/tauri.conf.json",
+  "productName": "Soufflé",
+  "mainBinaryName": "souffle",
+  "identifier": "com.souffle.desktop",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build && ./scripts/build-mcp-sidecar.sh",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "withGlobalTauri": false,
+    "windows": [
+      {
+        "label": "main",
+        "title": "Soufflé",
+        "width": 1040,
+        "height": 1280,
+        "minWidth": 680,
+        "minHeight": 560,
+        "resizable": true,
+        "fullscreen": false,
+        "center": true,
+        "transparent": true,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "windowEffects": {
+          "effects": [
+            "underWindowBackground"
+          ],
+          "state": "active"
+        }
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' http://localhost:* https://huggingface.co https://*.hf.co; img-src 'self' data:; font-src 'self'; media-src 'self' asset: http://asset.localhost",
+      "assetProtocol": {
+        "enable": true,
+        "scope": [
+          "$APPDATA/recordings/**"
+        ]
+      }
+    },
+    "macOSPrivateApi": true
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "externalBin": [
+      "binaries/souffle-mcp"
+    ],
+    "resources": {
+      "resources/silero_vad_v4.onnx": "resources/silero_vad_v4.onnx",
+      "resources/sounds/dictation_start.wav": "resources/sounds/dictation_start.wav",
+      "resources/sounds/dictation_stop.wav": "resources/sounds/dictation_stop.wav"
+    },
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "createUpdaterArtifacts": true,
+    "macOS": {
+      "entitlements": "./entitlements.plist",
+      "minimumSystemVersion": "13.0",
+      "hardenedRuntime": true,
+      "frameworks": [
+        "resources/libonnxruntime.dylib"
+      ]
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDRCNEIzOEFGNTQwMUM1RkIKUldUN3hRRlVyemhMUzBqLzZuSWpCY2RtYnM0djNQUHZvdkFGNWxNVFA1d1hUZllDUjFJK3NPZzMK",
+      "endpoints": [
+        "https://github.com/damione1/souffle/releases/latest/download/latest.json"
+      ]
+    }
+  }
+}

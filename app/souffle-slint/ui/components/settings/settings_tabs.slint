@@ -1,0 +1,193 @@
+import { Theme } from "../../theme.slint";
+import { SettingsTab } from "../../types.slint";
+
+component SettingsTabChip inherits Rectangle {
+    in property <string> title;
+    in property <bool> active;
+    callback clicked();
+    callback previous-requested();
+    callback next-requested();
+
+    height: 28px;
+    width: label.width + 24px;
+    vertical-stretch: 0;
+    horizontal-stretch: 0;
+    border-radius: 4px;
+    border-width: key-focus.has-focus ? 2px : 0px;
+    border-color: Theme.accent;
+    background: root.active ? Theme.surface-3 : (area.has-hover ? Theme.surface-2 : transparent);
+
+    accessible-role: tab;
+    accessible-label: root.title;
+    accessible-checkable: true;
+    accessible-checked: root.active;
+    accessible-action-default => { root.clicked(); }
+
+    forward-focus: key-focus;
+
+    key-focus := FocusScope {
+        key-pressed(event) => {
+            if event.text == Key.Return || event.text == Key.Space {
+                root.clicked();
+                return accept;
+            }
+            if event.text == Key.LeftArrow {
+                root.previous-requested();
+                return accept;
+            }
+            if event.text == Key.RightArrow {
+                root.next-requested();
+                return accept;
+            }
+            return reject;
+        }
+    }
+
+    label := Text {
+        x: 12px;
+        height: parent.height;
+        text: root.title;
+        font-size: 13px;
+        font-weight: root.active ? 600 : 500;
+        color: root.active ? Theme.text-primary : (area.has-hover ? Theme.text-secondary : Theme.text-muted);
+        vertical-alignment: center;
+    }
+
+    area := TouchArea {
+        clicked => {
+            key-focus.focus();
+            root.clicked();
+        }
+    }
+}
+
+// Port of app.css `.settings-tabs` / `.settings-tab`. Replaces stock
+// TabWidget, whose Fluent skin ignores Theme and stretches each tab.
+export component SettingsTabBar inherits Rectangle {
+    in-out property <SettingsTab> current: SettingsTab.transcription;
+    callback changed(SettingsTab);
+
+    height: 36px;
+    width: chips.preferred-width;
+    horizontal-stretch: 0;
+    vertical-stretch: 0;
+    border-radius: 4px;
+    border-width: 1px;
+    border-color: Theme.border-soft;
+    background: Theme.surface-1;
+
+    accessible-role: tab-list;
+    accessible-label: @tr("Sections des paramètres");
+
+    function previous() {
+        if root.current == SettingsTab.transcription { root.select(SettingsTab.system); }
+        else if root.current == SettingsTab.ai { root.select(SettingsTab.transcription); }
+        else if root.current == SettingsTab.audio { root.select(SettingsTab.ai); }
+        else if root.current == SettingsTab.interface { root.select(SettingsTab.audio); }
+        else if root.current == SettingsTab.meetings { root.select(SettingsTab.interface); }
+        else if root.current == SettingsTab.system { root.select(SettingsTab.meetings); }
+    }
+
+    function next() {
+        if root.current == SettingsTab.transcription { root.select(SettingsTab.ai); }
+        else if root.current == SettingsTab.ai { root.select(SettingsTab.audio); }
+        else if root.current == SettingsTab.audio { root.select(SettingsTab.interface); }
+        else if root.current == SettingsTab.interface { root.select(SettingsTab.meetings); }
+        else if root.current == SettingsTab.meetings { root.select(SettingsTab.system); }
+        else if root.current == SettingsTab.system { root.select(SettingsTab.transcription); }
+    }
+
+    function select(value: SettingsTab) {
+        root.current = value;
+        root.changed(value);
+    }
+
+    chips := HorizontalLayout {
+        padding: 4px;
+        spacing: 4px;
+        alignment: start;
+
+        SettingsTabChip {
+            title: @tr("Transcription");
+            active: root.current == SettingsTab.transcription;
+            clicked => {
+                root.select(SettingsTab.transcription);
+            }
+            previous-requested => { root.previous(); }
+            next-requested => { root.next(); }
+        }
+        SettingsTabChip {
+            title: @tr("IA");
+            active: root.current == SettingsTab.ai;
+            clicked => {
+                root.select(SettingsTab.ai);
+            }
+            previous-requested => { root.previous(); }
+            next-requested => { root.next(); }
+        }
+        SettingsTabChip {
+            title: @tr("Audio");
+            active: root.current == SettingsTab.audio;
+            clicked => {
+                root.select(SettingsTab.audio);
+            }
+            previous-requested => { root.previous(); }
+            next-requested => { root.next(); }
+        }
+        SettingsTabChip {
+            title: @tr("Interface");
+            active: root.current == SettingsTab.interface;
+            clicked => {
+                root.select(SettingsTab.interface);
+            }
+            previous-requested => { root.previous(); }
+            next-requested => { root.next(); }
+        }
+        SettingsTabChip {
+            title: @tr("Réunions");
+            active: root.current == SettingsTab.meetings;
+            clicked => {
+                root.select(SettingsTab.meetings);
+            }
+            previous-requested => { root.previous(); }
+            next-requested => { root.next(); }
+        }
+        SettingsTabChip {
+            title: @tr("Système");
+            active: root.current == SettingsTab.system;
+            clicked => {
+                root.select(SettingsTab.system);
+            }
+            previous-requested => { root.previous(); }
+            next-requested => { root.next(); }
+        }
+    }
+}
+
+// Keeps a tab's item tree alive when inactive. `if tab ==` tears the
+// whole section down and rebuilds it on every click (hundreds of ms with
+// FemtoVG, still a hitch with Skia). Pages are overlaid in a non-layout
+// Rectangle (so `visible: false` cannot insert a gap). Each page owns its
+// Flickable so scroll position is per-tab and starts at the top.
+export component SettingsTabPage inherits Rectangle {
+    in property <bool> active;
+
+    visible: root.active;
+    clip: true;
+
+    Flickable {
+        width: parent.width - 10px;
+        height: 100%;
+        content-width: self.width;
+
+        content := VerticalLayout {
+            width: parent.width;
+            spacing: 22px;
+            alignment: start;
+            padding-right: 14px;
+            padding-bottom: 28px;
+
+            @children
+        }
+    }
+}

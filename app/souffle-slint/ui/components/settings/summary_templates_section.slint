@@ -1,0 +1,132 @@
+import { SettingsField } from "settings_field.slint";
+import { SettingsFieldVertical } from "settings_field_vertical.slint";
+import { SettingsGroup } from "settings_group.slint";
+import { Theme } from "../../theme.slint";
+import { ThemedButton } from "../themed_button.slint";
+import { ThemedComboBox } from "../themed_combo.slint";
+import { ThemedLineEdit } from "../themed_line_edit.slint";
+import { ThemedTextArea } from "../themed_text_area.slint";
+
+// Port of SummaryTemplatesSettingsSection.svelte. Which template is being
+// edited is tracked in Rust (`summary_templates_state` in main.rs), not as
+// local `.slint` state, because switching the edit target needs Rust to
+// resolve the corresponding name/prompt/is-builtin fields anyway - same
+// picker-forwards-an-id pattern as the other open-set catalogues.
+export component SummaryTemplatesSection inherits VerticalLayout {
+    in property <[string]> template-ids;
+    in property <[string]> template-labels;
+    in property <string> default-template-label;
+    in property <string> editing-template-label;
+    in property <bool> editing-is-builtin;
+    in-out property <string> editing-name;
+    in-out property <string> editing-prompt;
+    in-out property <string> new-template-draft: "";
+
+    callback default-changed(string);
+    callback edit-target-changed(string);
+    callback delete-requested();
+    callback name-changed(string);
+    callback prompt-changed(string);
+    callback add-requested(string);
+
+    spacing: 22px;
+    alignment: start;
+
+    SettingsGroup {
+        title: @tr("MODÈLES DE RÉSUMÉ");
+
+    VerticalLayout {
+        padding-left: Theme.settings-inset;
+        padding-right: Theme.settings-inset;
+        padding-top: 15px;
+        padding-bottom: 15px;
+        Text {
+            text: @tr("Le modèle par défaut est utilisé pour résumer automatiquement une réunion terminée.");
+            font-size: 12px;
+            color: Theme.text-muted;
+            wrap: word-wrap;
+        }
+    }
+
+    SettingsField {
+        show-divider: false;
+        label: @tr("Modèle par défaut");
+
+        ThemedComboBox {
+            control-label: @tr("Modèle de résumé par défaut");
+            model: root.template-labels;
+            option-values: root.template-ids;
+            current-value: root.default-template-label;
+            selected(id) => { root.default-changed(id); }
+        }
+    }
+
+    SettingsField {
+        label: @tr("Modifier");
+
+        HorizontalLayout {
+            spacing: 6px;
+            alignment: center;
+            horizontal-stretch: 0;
+
+            ThemedComboBox {
+                control-label: @tr("Modèle de résumé à modifier");
+                model: root.template-labels;
+                option-values: root.template-ids;
+                current-value: root.editing-template-label;
+                selected(id) => { root.edit-target-changed(id); }
+            }
+            if !root.editing-is-builtin: ThemedButton {
+                text: @tr("Supprimer");
+                clicked => { root.delete-requested(); }
+            }
+        }
+    }
+
+    if !root.editing-is-builtin: SettingsField {
+        label: @tr("Nom");
+
+        ThemedLineEdit {
+            control-label: @tr("Nom du modèle de résumé");
+            text <=> root.editing-name;
+            edited(value) => { root.name-changed(value); }
+        }
+    }
+
+    SettingsFieldVertical {
+        label: @tr("Instruction");
+        description: root.editing-is-builtin
+            ? @tr("Modèle intégré : le prompt peut être personnalisé mais pas supprimé.")
+            : @tr("Prompt envoyé à l'IA pour générer le résumé.");
+
+        ThemedTextArea {
+            text <=> root.editing-prompt;
+            area-height: 220px;
+            placeholder: @tr("Instruction de génération du résumé");
+            control-label: @tr("Instruction du modèle de résumé");
+            edited(value) => { root.prompt-changed(value); }
+        }
+    }
+
+    HorizontalLayout {
+        padding-left: Theme.settings-inset;
+        padding-right: Theme.settings-inset;
+        padding-bottom: 8px;
+        spacing: 6px;
+
+        ThemedLineEdit {
+            text <=> root.new-template-draft;
+            placeholder: @tr("Nom du nouveau modèle");
+            control-label: @tr("Nom du nouveau modèle de résumé");
+            horizontal-stretch: 1;
+        }
+        ThemedButton {
+            text: @tr("Ajouter");
+            enabled: root.new-template-draft != "";
+            clicked => {
+                root.add-requested(root.new-template-draft);
+            }
+        }
+    }
+    }
+}

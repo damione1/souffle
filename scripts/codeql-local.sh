@@ -15,13 +15,19 @@ out=".codeql"
 rm -rf "$out"
 mkdir -p "$out"
 
+# CodeQL defaults to a single query-evaluation thread. Use every logical core
+# for the local gate unless the caller deliberately caps it, for example
+# CODEQL_THREADS=4 ./scripts/codeql-local.sh.
+codeql_threads="${CODEQL_THREADS:-0}"
+echo "CodeQL threads: $codeql_threads (0 = every logical core)"
+
 # Match CI: build-mode none (no cargo build) for rust; extractors for js/actions.
 codeql database create "$out/rust" \
-  --language=rust --build-mode=none --source-root=.
+  --language=rust --build-mode=none --source-root=. --threads="$codeql_threads"
 codeql database create "$out/js" \
-  --language=javascript-typescript --source-root=.
+  --language=javascript-typescript --source-root=. --threads="$codeql_threads"
 codeql database create "$out/actions" \
-  --language=actions --source-root=.
+  --language=actions --source-root=. --threads="$codeql_threads"
 
 # Suites are named by pack spec, not by bare name. The bare name only
 # resolves inside the CodeQL Action's bundle, which ships the query packs; the
@@ -31,12 +37,12 @@ codeql pack download codeql/rust-queries codeql/javascript-queries codeql/action
 
 codeql database analyze "$out/rust" \
   'codeql/rust-queries:codeql-suites/rust-code-scanning.qls' \
-  --format=sarif-latest --output="$out/rust.sarif"
+  --format=sarif-latest --output="$out/rust.sarif" --threads="$codeql_threads"
 codeql database analyze "$out/js" \
   'codeql/javascript-queries:codeql-suites/javascript-code-scanning.qls' \
-  --format=sarif-latest --output="$out/js.sarif"
+  --format=sarif-latest --output="$out/js.sarif" --threads="$codeql_threads"
 codeql database analyze "$out/actions" \
   'codeql/actions-queries:codeql-suites/actions-code-scanning.qls' \
-  --format=sarif-latest --output="$out/actions.sarif"
+  --format=sarif-latest --output="$out/actions.sarif" --threads="$codeql_threads"
 
 echo "CodeQL local gate green. SARIF under $out/*.sarif"

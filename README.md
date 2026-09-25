@@ -38,7 +38,7 @@
 System-audio capture separates **Me** from **Them** in the live transcript, with no virtual audio device to install. The recording looks after itself: it offers to start when a calendar meeting begins, notices when the meeting seems over and stops on its own after warning you, closes cleanly when the Mac sleeps and offers to resume on wake, and recovers or salvages the session if the engine stalls or the microphone disappears.
 
 - **Live transcript** with editable notes and participants beside it.
-- **Optional audio**, kept as compact Opus files for 7 days, 30 days or until you delete them, replayable with click-to-seek from any line.
+- **Optional audio**, kept as compact Opus files for 7 days, 30 days or until you delete them, replayable with click-to-seek from any line. A meeting with system audio is stored as stereo (left = you, right = the other participants) so the two sides can be separated later, for example with `ffmpeg -map_channel 0.0.0` / `0.0.1`; the built-in player plays them mixed. Stereo costs about 1.5x the disk of a mono recording.
 - **Corrections that stick**: fix a misheard name by hand once and Soufflé keeps that spelling, in a custom dictionary you can also edit yourself.
 - **A summary when you want one**, written on-device by Apple Intelligence on macOS 26 or newer, or by a local [Ollama](https://ollama.com/), with the decisions, the action items and their owners, and the questions nobody answered pulled out alongside it.
 

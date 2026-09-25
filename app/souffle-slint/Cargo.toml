@@ -1,0 +1,63 @@
+[package]
+name = "souffle-slint"
+version = "0.0.0"
+description = "Standalone Slint UI shell for Souffle, without Tauri"
+authors = ["Damien Goehrig"]
+license = "GPL-3.0-or-later"
+edition = "2024"
+
+[[bin]]
+name = "souffle-slint"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+# `unstable-winit-030`: lets main.rs configure the native NSWindow (hidden
+# title, transparent titlebar, full-size content view) via
+# `slint::BackendSelector::with_winit_window_attributes_hook` before the
+# window is created - the native-window equivalent of Tauri's
+# `titleBarStyle: overlay` + `hiddenTitle: true`, needed so the app draws one
+# custom dark header with inline traffic lights instead of a native title
+# bar stacked on top of it.
+# Default Slint renderer is FemtoVG (OpenGL ES), not Metal. `renderer-skia`
+# selects Skia, which uses Metal on macOS. Without it, tab switches and
+# scrolling feel like a webview. Keep `unstable-winit-030` for the overlay
+# titlebar hook in main.rs.
+# SOU-223: floor raised to 1.18 - FlexboxLayout (used by the transcript's
+# per-word click rendering, see transcript_section.slint) only became a
+# stable builtin in 1.18.1; 1.17.x fails to compile it.
+slint = { version = "1.18", features = ["unstable-winit-030", "renderer-skia", "gettext"] }
+souffle_lib = { path = "..", package = "souffle" }
+# SOU-137: the paragraph grouper and its pause threshold, declared once for
+# the export, the summary, this UI and the MCP sidecar.
+souffle-schema = { path = "../souffle-schema" }
+chrono = "0.4"
+tokio = { version = "1", features = ["sync"] }
+serde_json = "1"
+# SOU-187 milestone 7: native audio playback for MeetingDetail (AC14/AC16).
+# Same version already used by the main `souffle` crate for capture.
+cpal = "0.17"
+# SOU-191: receives NativeAction from souffle_lib::native::bridge (global
+# shortcuts, tray, pill HUD stop, single-instance, background update check).
+crossbeam-channel = "0.5"
+# SOU-188: native clipboard write for "Copy diagnostics" - same crate/version
+# the main `souffle` crate already uses (src/clipboard.rs), no webview
+# clipboard API to fall back on here.
+arboard = "3.6"
+# SOU-188: new custom summary-template/dictionary-entry/snippet ids, same
+# crate/version the main `souffle` crate already uses (src/state.rs).
+uuid = { version = "1", features = ["v4"] }
+slint-build = "1.18"
+
+[build-dependencies]
+lucide-slint = "1.46.0"
+slint-build = "1.18"
+
+[dev-dependencies]
+tempfile = "3"
+# SOU-256: element lookup by id + geometry, so a test can assert the live
+# meeting transcript really gets laid out at a usable height. Already in the
+# tree through slint's backend selector; same version as `slint`.
+i-slint-backend-testing = "1.18"

@@ -1,0 +1,247 @@
+import { SettingsField } from "settings_field.slint";
+import { SettingsGroup } from "settings_group.slint";
+import { Theme } from "../../theme.slint";
+import { ThemedButton } from "../themed_button.slint";
+import { ThemedComboBox } from "../themed_combo.slint";
+import { ThemedLineEdit } from "../themed_line_edit.slint";
+import { AppleIntelligenceUnavailableReason, SummaryProvider } from "../../types.slint";
+import { StatusIndicator } from "status_indicator.slint";
+
+// Port of IntelligenceSettingsSection.svelte. The exact per-reason-code
+// wording (`KNOWN_REASON_KEYS`) and the fine-grained model-picker
+// visibility state machine (`ollamaModelPickerState`) are simplified to
+// generic messages/conditions here - functional parity (the real
+// check_summary_providers status drives everything), wording polish is a
+// follow-up pass. Summary models keep their open-set ids paired with labels
+// through the picker so duplicate labels remain distinct.
+export component IntelligenceSection inherits VerticalLayout {
+    in property <SummaryProvider> summary-provider;
+    in property <bool> apple-intelligence-available;
+    in property <AppleIntelligenceUnavailableReason> apple-intelligence-reason;
+    in property <string> ollama-url;
+    in property <bool> ollama-available;
+    in property <bool> ollama-checking;
+    in property <int> summary-model-count;
+    in property <bool> model-picker-visible;
+    in property <[string]> model-ids;
+    in property <[string]> model-labels;
+    in property <string> selected-model-label;
+    in property <bool> show-ollama-setup;
+    in property <bool> ollama-pulling;
+    in property <string> ollama-pull-status;
+    in property <string> ollama-pull-error;
+    in property <string> recommended-model;
+    in property <string> refresh-error;
+    in property <string> unusable-message; // "" when the chosen provider can run
+
+    callback summary-provider-changed(SummaryProvider);
+    callback ollama-url-changed(string);
+    callback ollama-model-changed(string);
+    callback retry-requested();
+    callback download-recommended-requested();
+    callback open-apple-intelligence-settings-requested();
+
+    pure function provider-label(value: SummaryProvider) -> string {
+        if value == SummaryProvider.apple-intelligence { return @tr("Apple Intelligence"); }
+        if value == SummaryProvider.ollama { return @tr("Ollama"); }
+        if value == SummaryProvider.auto { return @tr("Automatique"); }
+        return "";
+    }
+
+    pure function apple-reason-label(value: AppleIntelligenceUnavailableReason) -> string {
+        if value == AppleIntelligenceUnavailableReason.device-not-eligible { return @tr("Ce Mac ne prend pas en charge Apple Intelligence."); }
+        if value == AppleIntelligenceUnavailableReason.apple-intelligence-not-enabled { return @tr("Activez Apple Intelligence dans les Réglages Système, puis rouvrez Soufflé."); }
+        if value == AppleIntelligenceUnavailableReason.model-not-ready { return @tr("macOS télécharge encore le modèle on-device ; réessayez plus tard."); }
+        if value == AppleIntelligenceUnavailableReason.macos-too-old { return @tr("Apple Intelligence nécessite macOS 26 ou plus récent."); }
+        if value == AppleIntelligenceUnavailableReason.stub { return @tr("Cette version ne comprend pas le support d'Apple Intelligence."); }
+        if value == AppleIntelligenceUnavailableReason.unsupported-platform { return @tr("Apple Intelligence nécessite une puce Apple Silicon."); }
+        if value == AppleIntelligenceUnavailableReason.unknown { return @tr("Apple Intelligence n'est pas disponible."); }
+        return "";
+    }
+
+    spacing: 22px;
+    alignment: start;
+
+    SettingsGroup {
+        title: @tr("RÉSUMÉS");
+
+    SettingsField {
+        show-divider: false;
+        label: @tr("Moteur");
+        description: @tr("Le moteur qui rédige les résumés et nettoie la dictée.");
+
+        ThemedComboBox {
+            control-label: @tr("Moteur de résumé");
+            model: [
+                root.provider-label(SummaryProvider.auto),
+                root.provider-label(SummaryProvider.apple-intelligence),
+                root.provider-label(SummaryProvider.ollama),
+            ];
+            current-value: root.provider-label(root.summary-provider);
+            selected(value) => {
+                if value == root.provider-label(SummaryProvider.apple-intelligence) {
+                    root.summary-provider-changed(SummaryProvider.apple-intelligence);
+                }
+                if value == root.provider-label(SummaryProvider.ollama) {
+                    root.summary-provider-changed(SummaryProvider.ollama);
+                }
+                if value == root.provider-label(SummaryProvider.auto) {
+                    root.summary-provider-changed(SummaryProvider.auto);
+                }
+            }
+        }
+    }
+
+    if root.unusable-message != "": Rectangle {
+        border-width: 1px;
+        border-color: Theme.danger;
+        border-radius: 6px;
+        background: Theme.surface-2;
+
+        VerticalLayout {
+            padding: 10px;
+            Text {
+                text: root.unusable-message;
+                color: Theme.danger;
+                font-size: 11.5px;
+                wrap: word-wrap;
+            }
+        }
+    }
+
+    if root.refresh-error != "": Rectangle {
+        border-width: 1px;
+        border-color: Theme.danger;
+        border-radius: 6px;
+        background: Theme.surface-2;
+
+        VerticalLayout {
+            padding: 10px;
+            Text {
+                text: root.refresh-error;
+                color: Theme.danger;
+                font-size: 11.5px;
+                wrap: word-wrap;
+            }
+        }
+    }
+
+    SettingsField {
+        label: @tr("Apple Intelligence");
+
+        StatusIndicator {
+            text: root.apple-intelligence-available ? @tr("Disponible") : @tr("Non disponible");
+            indicator-color: root.apple-intelligence-available ? Theme.success : Theme.text-faint;
+        }
+    }
+
+    if !root.apple-intelligence-available: Rectangle {
+        border-width: 1px;
+        border-color: Theme.surface-4;
+        border-radius: 6px;
+
+        HorizontalLayout {
+            padding: 10px;
+            spacing: 10px;
+            alignment: space-between;
+
+            Text {
+                text: root.apple-reason-label(root.apple-intelligence-reason);
+                color: Theme.text-muted;
+                font-size: 11px;
+                wrap: word-wrap;
+                horizontal-stretch: 1;
+            }
+            if root.apple-intelligence-reason == AppleIntelligenceUnavailableReason.apple-intelligence-not-enabled: ThemedButton {
+                text: @tr("Réglages Système");
+                clicked => { root.open-apple-intelligence-settings-requested(); }
+            }
+        }
+    }
+
+    SettingsField {
+        label: @tr("URL Ollama");
+        description: @tr("Adresse du serveur Ollama local ou distant.");
+
+        ThemedLineEdit {
+            width: Theme.settings-control-width;
+            control-label: @tr("URL Ollama");
+            placeholder: @tr("http://localhost:11434");
+            text: root.ollama-url;
+            edited(value) => { root.ollama-url-changed(value); }
+        }
+    }
+
+    SettingsField {
+        label: @tr("État de la connexion");
+        description: root.summary-model-count == 0 ? @tr("Aucun modèle trouvé.")
+            : root.summary-model-count == 1 ? @tr("1 modèle trouvé.")
+            : @tr("{} modèles trouvés.", root.summary-model-count);
+
+        Rectangle {
+            height: Theme.settings-control-height;
+            width: status.width + 12px + retry.width;
+            horizontal-stretch: 0;
+            vertical-stretch: 0;
+
+            status := StatusIndicator {
+                x: 0px;
+                y: (parent.height - self.height) / 2;
+                text: root.ollama-available ? @tr("Connecté") : @tr("Non disponible");
+                indicator-color: root.ollama-available ? Theme.success : Theme.text-faint;
+            }
+            retry := ThemedButton {
+                x: status.width + 12px;
+                y: 0px;
+                width: 92px;
+                text: @tr("Réessayer");
+                enabled: !root.ollama-checking && !root.ollama-pulling;
+                clicked => { root.retry-requested(); }
+            }
+        }
+    }
+
+    if root.model-picker-visible: SettingsField {
+        label: @tr("Modèle de résumé");
+
+        ThemedComboBox {
+            control-label: @tr("Modèle de résumé");
+            model: root.model-labels;
+            option-values: root.model-ids;
+            current-value: root.selected-model-label;
+            selected(id) => { root.ollama-model-changed(id); }
+        }
+    }
+
+    if root.show-ollama-setup: VerticalLayout {
+        spacing: 8px;
+
+        Text {
+            text: @tr("Aucun modèle compatible installé.");
+            color: Theme.warning;
+            font-size: 11.5px;
+        }
+
+        if root.ollama-pull-error != "": Text {
+            text: @tr("Échec du téléchargement : {}", root.ollama-pull-error);
+            color: Theme.danger;
+            font-size: 11.5px;
+            wrap: word-wrap;
+        }
+
+        if root.ollama-pulling: Text {
+            text: root.ollama-pull-status == "" ? @tr("Téléchargement de {}…", root.recommended-model) : root.ollama-pull-status;
+            color: Theme.text-muted;
+            font-size: 11.5px;
+        }
+
+        if !root.ollama-pulling: HorizontalLayout {
+            alignment: end;
+            ThemedButton {
+                text: @tr("Télécharger {}", root.recommended-model);
+                clicked => { root.download-recommended-requested(); }
+            }
+        }
+    }
+    }
+}

@@ -1,0 +1,260 @@
+//! Mock transcription engine for testing pipeline behavior without GPU/hardware.
+#![cfg(any(test, feature = "test-support"))]
+
+use super::{
+    AudioInputRequirements, EngineError, Speaker, TranscriptionEngine, TranscriptionSegment,
+};
+use std::collections::VecDeque;
+use std::path::Path;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
+/// Every `transcribe_dual()` frame pair a mock received, as (me, them).
+pub type DualFrameLog = Arc<Mutex<Vec<(Vec<f32>, Vec<f32>)>>>;
+
+/// A configurable mock engine for testing.
+/// Push responses into `transcribe_responses` and `flush_responses` queues;
+/// calls to `transcribe()` / `flush()` will pop from the front.
+pub struct MockEngine {
+    loaded: bool,
+    pub transcribe_responses: VecDeque<Result<Vec<TranscriptionSegment>, EngineError>>,
+    pub flush_responses: VecDeque<Result<Vec<TranscriptionSegment>, EngineError>>,
+    /// Shared with tests via `unload_count_handle()` (clone it before handing
+    /// the mock to the actor's factory, since the mock itself is moved), so
+    /// idle-unload behavior can be observed from outside the actor thread.
+    unload_count: Arc<AtomicUsize>,
+    /// Shared with tests via `reset_state_count_handle()`, for asserting the
+    /// actor's pre-warm / skip-reset-when-fresh behavior.
+    reset_state_count: Arc<AtomicUsize>,
+    /// Shared with tests via `reset_state_preserving_count_handle()`. Kept
+    /// separate from `reset_state_count` so a test can tell the two
+    /// `TranscriptionEngine` reset methods apart: the trait default routes
+    /// `reset_state_preserving_timeline()` back into `reset_state()`, so a
+    /// single shared counter would climb identically no matter which one the
+    /// caller actually invoked.
+    reset_state_preserving_count: Arc<AtomicUsize>,
+    /// Value returned by `emission_delay_seconds()`; configurable via
+    /// `with_emission_delay_seconds` for drain-window tests.
+    emission_delay_seconds: f64,
+    /// Popped into `tail_drained_value` on each `transcribe()` call, so tests
+    /// can script when the engine reports its tail as drained (e.g. "false"
+    /// for the first N frames, then "true") independently of
+    /// `transcribe_responses`. Once exhausted, the last value sticks.
+    tail_drained_schedule: VecDeque<bool>,
+    tail_drained_value: bool,
+    pub dual_calls: Vec<(Vec<f32>, Vec<f32>)>,
+    /// How long `reset_state()` blocks, to stand in for Kyutai's
+    /// seconds-long diarized rebuild (SOU-260).
+    reset_delay: Duration,
+    /// Every sample handed to `transcribe()`, in order. Shared with tests
+    /// via `fed_audio_handle()`.
+    fed_audio: Arc<Mutex<Vec<f32>>>,
+    /// Every `transcribe_dual()` frame pair, in order. Shared with tests via
+    /// `fed_dual_handle()` (the mock itself moves into the actor).
+    fed_dual: DualFrameLog,
+}
+
+impl Default for MockEngine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl MockEngine {
+    pub fn new() -> Self {
+        Self {
+            loaded: false,
+            transcribe_responses: VecDeque::new(),
+            flush_responses: VecDeque::new(),
+            unload_count: Arc::new(AtomicUsize::new(0)),
+            reset_state_count: Arc::new(AtomicUsize::new(0)),
+            reset_state_preserving_count: Arc::new(AtomicUsize::new(0)),
+            emission_delay_seconds: 0.0,
+            tail_drained_schedule: VecDeque::new(),
+            tail_drained_value: false,
+            dual_calls: Vec::new(),
+            reset_delay: Duration::ZERO,
+            fed_audio: Arc::new(Mutex::new(Vec::new())),
+            fed_dual: Arc::new(Mutex::new(Vec::new())),
+        }
+    }
+
+    /// Make `reset_state()` block for `delay`, like a real engine rebuild.
+    pub fn with_reset_delay(mut self, delay: Duration) -> Self {
+        self.reset_delay = delay;
+        self
+    }
+
+    /// Clone of the log of every sample `transcribe()` received; call
+    /// before the mock is moved into the actor's factory closure.
+    pub fn fed_audio_handle(&self) -> Arc<Mutex<Vec<f32>>> {
+        Arc::clone(&self.fed_audio)
+    }
+
+    /// Clone of the log of every `transcribe_dual()` frame pair; call
+    /// before the mock is moved into the actor's factory closure.
+    pub fn fed_dual_handle(&self) -> DualFrameLog {
+        Arc::clone(&self.fed_dual)
+    }
+
+    /// Clone of the unload counter; call before the mock is moved into the
+    /// actor's factory closure.
+    pub fn unload_count_handle(&self) -> Arc<AtomicUsize> {
+        Arc::clone(&self.unload_count)
+    }
+
+    /// Clone of the reset_state call counter; call before the mock is moved
+    /// into the actor's factory closure.
+    pub fn reset_state_count_handle(&self) -> Arc<AtomicUsize> {
+        Arc::clone(&self.reset_state_count)
+    }
+
+    /// Clone of the reset_state_preserving_timeline call counter; call
+    /// before the mock is moved into the actor's factory closure.
+    pub fn reset_state_preserving_count_handle(&self) -> Arc<AtomicUsize> {
+        Arc::clone(&self.reset_state_preserving_count)
+    }
+
+    /// Configure the value returned by `emission_delay_seconds()`.
+    pub fn with_emission_delay_seconds(mut self, seconds: f64) -> Self {
+        self.emission_delay_seconds = seconds;
+        self
+    }
+
+    /// Configure the sequence of `tail_drained()` results, advanced one
+    /// value per `transcribe()` call (the last value sticks once exhausted).
+    pub fn with_tail_drained_schedule(mut self, schedule: impl IntoIterator<Item = bool>) -> Self {
+        self.tail_drained_schedule = schedule.into_iter().collect();
+        self
+    }
+
+    /// Convenience: pre-load N identical transcribe responses.
+    pub fn with_transcribe_response(
+        mut self,
+        resp: Result<Vec<TranscriptionSegment>, EngineError>,
+        count: usize,
+    ) -> Self {
+        for _ in 0..count {
+            self.transcribe_responses.push_back(match &resp {
+                Ok(segments) => Ok(segments.clone()),
+                Err(e) => Err(match e {
+                    EngineError::ModelNotFound(p) => EngineError::ModelNotFound(p.clone()),
+                    EngineError::LoadError(s) => EngineError::LoadError(s.clone()),
+                    EngineError::InferenceError(s) => EngineError::InferenceError(s.clone()),
+                    EngineError::UnsupportedLanguage(s) => {
+                        EngineError::UnsupportedLanguage(s.clone())
+                    }
+                    EngineError::NotInitialized => EngineError::NotInitialized,
+                    EngineError::OutOfMemory => EngineError::OutOfMemory,
+                }),
+            });
+        }
+        self
+    }
+
+    /// Convenience: pre-load a single flush response.
+    pub fn with_flush_response(
+        mut self,
+        resp: Result<Vec<TranscriptionSegment>, EngineError>,
+    ) -> Self {
+        self.flush_responses.push_back(resp);
+        self
+    }
+}
+
+impl TranscriptionEngine for MockEngine {
+    fn load_model(&mut self, _path: &Path) -> Result<(), EngineError> {
+        self.loaded = true;
+        Ok(())
+    }
+
+    fn unload_model(&mut self) -> Result<(), EngineError> {
+        self.loaded = false;
+        self.unload_count.fetch_add(1, Ordering::SeqCst);
+        Ok(())
+    }
+
+    fn transcribe(
+        &mut self,
+        audio: &[f32],
+        _language: Option<&str>,
+    ) -> Result<Vec<TranscriptionSegment>, EngineError> {
+        if let Ok(mut fed) = self.fed_audio.lock() {
+            fed.extend_from_slice(audio);
+        }
+        if let Some(drained) = self.tail_drained_schedule.pop_front() {
+            self.tail_drained_value = drained;
+        }
+        self.transcribe_responses.pop_front().unwrap_or(Ok(vec![]))
+    }
+
+    fn flush(&mut self) -> Result<Vec<TranscriptionSegment>, EngineError> {
+        self.flush_responses.pop_front().unwrap_or(Ok(vec![]))
+    }
+
+    fn reset_state(&mut self) -> Result<(), EngineError> {
+        if !self.reset_delay.is_zero() {
+            std::thread::sleep(self.reset_delay);
+        }
+        self.reset_state_count.fetch_add(1, Ordering::SeqCst);
+        Ok(())
+    }
+
+    fn reset_state_preserving_timeline(&mut self) -> Result<(), EngineError> {
+        self.reset_state_preserving_count
+            .fetch_add(1, Ordering::SeqCst);
+        Ok(())
+    }
+
+    fn emission_delay_seconds(&self) -> f64 {
+        self.emission_delay_seconds
+    }
+
+    fn tail_drained(&self) -> bool {
+        self.tail_drained_value
+    }
+
+    fn audio_requirements(&self) -> AudioInputRequirements {
+        AudioInputRequirements {
+            sample_rate_hz: crate::constants::SAMPLE_RATE,
+            channels: 1,
+            chunk_size_samples: crate::constants::MIMI_FRAME_SIZE as u32,
+        }
+    }
+
+    fn supports_diarization(&self) -> bool {
+        true
+    }
+
+    /// Emit a speaker-tagged segment for each lane that carries non-silent
+    /// audio, so tests can assert the diarized loop routes by speaker.
+    fn transcribe_dual(
+        &mut self,
+        me: &[f32],
+        them: &[f32],
+    ) -> Result<Vec<TranscriptionSegment>, EngineError> {
+        self.dual_calls.push((me.to_vec(), them.to_vec()));
+        if let Ok(mut fed) = self.fed_dual.lock() {
+            fed.push((me.to_vec(), them.to_vec()));
+        }
+
+        let tagged = |speaker: Speaker, text: &str| TranscriptionSegment {
+            text: text.to_string(),
+            start_time: 0.0,
+            end_time: 0.0,
+            is_final: true,
+            language: None,
+            confidence: None,
+            speaker: Some(speaker),
+        };
+        let mut segments = Vec::new();
+        if me.iter().any(|s| *s != 0.0) {
+            segments.push(tagged(Speaker::Me, "me-speaks"));
+        }
+        if them.iter().any(|s| *s != 0.0) {
+            segments.push(tagged(Speaker::Them, "them-speaks"));
+        }
+        Ok(segments)
+    }
+}
