@@ -440,6 +440,7 @@ fn expanded_too_much(input: &str, output: &str) -> bool {
     out > inn.saturating_add(inn / 2).saturating_add(8)
 }
 
+/// Splits text into lowercase, accent-insensitive lexical tokens.
 fn normalized_words(text: &str) -> Vec<String> {
     let mut words = Vec::new();
     let mut word = String::new();
@@ -458,32 +459,107 @@ fn normalized_words(text: &str) -> Vec<String> {
     words
 }
 
-fn is_filler_sentence(words: &[String]) -> bool {
-    !words.is_empty()
-        && words.iter().all(|word| {
-            matches!(
-                word.as_str(),
-                "um" | "uh" | "erm" | "euh" | "hum" | "hmm" | "like"
-            )
-        })
+/// Returns whether a normalized token is removable speech filler.
+fn is_filler_word(word: &str) -> bool {
+    matches!(word, "um" | "uh" | "erm" | "euh" | "hum" | "hmm" | "like")
 }
 
-fn dropped_substantive_sentence(input: &str, output_words: &HashSet<String>) -> bool {
+/// Recognizes a standalone command that retracts the preceding sentence.
+fn is_self_correction_sentence(words: &[String]) -> bool {
+    matches!(
+        words,
+        [first, second]
+            if matches!(
+                (first.as_str(), second.as_str()),
+                ("scratch", "that") | ("no", "wait") | ("non", "attends") | ("never", "mind")
+            )
+    )
+}
+
+/// Splits source text into non-empty normalized sentences.
+fn normalized_sentences(input: &str) -> Vec<Vec<String>> {
     input
         .split(['.', '!', '?', '\n', '\r'])
         .map(normalized_words)
-        .any(|words| {
-            words.len() >= 2
-                && !is_filler_sentence(&words)
-                && !words.iter().any(|word| output_words.contains(word))
-        })
+        .filter(|words| !words.is_empty())
+        .collect()
+}
+
+/// Returns whether a sentence is a retraction command or the content it retracts.
+fn is_retraction_or_retracted(sentences: &[Vec<String>], index: usize) -> bool {
+    is_self_correction_sentence(&sentences[index])
+        || sentences
+            .get(index + 1)
+            .is_some_and(|next| is_self_correction_sentence(next))
+}
+
+/// Detects a source sentence whose substantive or distinctive content vanished.
+fn dropped_substantive_sentence(
+    input: &str,
+    output_words: &HashSet<String>,
+    allow_filler_removal: bool,
+) -> bool {
+    let sentences = normalized_sentences(input);
+
+    sentences.iter().enumerate().any(|(index, sentence)| {
+        if is_retraction_or_retracted(&sentences, index) {
+            return false;
+        }
+
+        let words: Vec<&str> = sentence
+            .iter()
+            .map(String::as_str)
+            .filter(|word| !allow_filler_removal || !is_filler_word(word))
+            .collect();
+        if words.len() < 2 {
+            return false;
+        }
+
+        let retained = words
+            .iter()
+            .filter(|word| output_words.contains(**word))
+            .count();
+        if retained.saturating_mul(100) < words.len().saturating_mul(30) {
+            return true;
+        }
+
+        let distinctive: HashSet<&str> = words
+            .iter()
+            .copied()
+            .filter(|word| {
+                !sentences.iter().enumerate().any(|(other_index, other)| {
+                    other_index != index && other.iter().any(|candidate| candidate == word)
+                })
+            })
+            .collect();
+        distinctive.len() >= 2 && !distinctive.iter().any(|word| output_words.contains(*word))
+    })
+}
+
+/// Returns source words that the selected template is required to retain.
+fn retained_input_words(input: &str, allow_filler_removal: bool) -> Vec<String> {
+    let sentences = normalized_sentences(input);
+    let mut retained = Vec::new();
+    for (index, sentence) in sentences.iter().enumerate() {
+        if is_retraction_or_retracted(&sentences, index) {
+            continue;
+        }
+        retained.extend(
+            sentence
+                .iter()
+                .filter(|word| !allow_filler_removal || !is_filler_word(word))
+                .cloned(),
+        );
+    }
+    retained
 }
 
 /// The clean templates may repair individual words, but they must not silently
 /// lose a substantive sentence or produce an obvious low-overlap rewrite such
-/// as a whole-language translation. A rejected answer falls back to raw text.
-fn clean_polish_lost_content(input: &str, output: &str) -> bool {
-    let input_words = normalized_words(input);
+/// as a whole-language translation. Filler words are excluded only for the
+/// template that explicitly permits removing them.
+fn clean_polish_lost_content(input: &str, output: &str, allow_filler_removal: bool) -> bool {
+    let input_words = retained_input_words(input, allow_filler_removal);
     let output_words: HashSet<String> = normalized_words(output).into_iter().collect();
     if input_words.is_empty() || output_words.is_empty() {
         return !input_words.is_empty();
@@ -497,9 +573,10 @@ fn clean_polish_lost_content(input: &str, output: &str) -> bool {
         return true;
     }
 
-    dropped_substantive_sentence(input, &output_words)
+    dropped_substantive_sentence(input, &output_words, allow_filler_removal)
 }
 
+/// Applies the template-specific expansion and content-preservation checks.
 fn guard_polish_content(
     template_id: &str,
     input: &str,
@@ -507,7 +584,7 @@ fn guard_polish_content(
 ) -> Result<String, &'static str> {
     let output = clamp_polish_expansion(template_id, input, output);
     if matches!(template_id, TEMPLATE_CLEAN | TEMPLATE_NO_FILLERS)
-        && clean_polish_lost_content(input, &output)
+        && clean_polish_lost_content(input, &output, template_id == TEMPLATE_NO_FILLERS)
     {
         Err("Dictation polish dropped source content; using raw text")
     } else {
@@ -1002,6 +1079,33 @@ mod tests {
             "Envoie le document à Camille demain.",
         );
         assert!(without_filler.is_ok());
+    }
+
+    #[test]
+    fn clean_polish_allows_an_explicit_self_correction() {
+        let result = guard_polish_content(
+            TEMPLATE_CLEAN,
+            "Approve the detailed budget proposal and send every attachment to Alice and Bob by Friday. Scratch that. Reject the proposal tomorrow.",
+            "Reject the proposal tomorrow.",
+        );
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn clean_polish_rejects_an_omitted_instruction_with_shared_words() {
+        let input = "Please send the invoice today. Please cancel the invoice tomorrow.";
+        let output = "Please send the invoice today.";
+
+        assert!(guard_polish_content(TEMPLATE_CLEAN, input, output).is_err());
+    }
+
+    #[test]
+    fn no_fillers_ignores_removed_fillers_in_the_retention_threshold() {
+        let result =
+            guard_polish_content(TEMPLATE_NO_FILLERS, "um um um hello there", "hello there");
+
+        assert!(result.is_ok());
     }
 
     #[test]
