@@ -3,6 +3,8 @@
 Base: `8e54d47d` (`origin/develop`). Local fixes: `e17df52d` and
 `0ae6746f`. No Moshi/Candle fork, weights change, replay, prime, language gate
 or proactive refresh-policy change.
+Review follow-up: `efb4f644` adds failed-reset invalidity, bounded stop tails,
+asserted SoftOnly acceptance and deterministic scheduling coverage.
 
 ## Batch epochs (SOU-001)
 
@@ -109,6 +111,15 @@ not a WER score or phoneme alignment; the 123 unmatched reference words mix
 recognition differences and actual omission. Source RMS activity totals 421.52 s;
 planned speech intervals include natural pauses and total 462.920667 s.
 
+The pure `soft_only_verdict` rejects clamps, future timestamps, 15-second famine,
+incomplete source and inconsistent Word/final/callback counters. The long harness
+asserts that verdict **after writing its artifacts**. Unit tests validate both
+retained healthy summaries and inject each failing condition; LCS/omissions stay
+metrics without a threshold. Nominal stepping/reset output was unchanged by the
+review follow-up, so the two complete controls remain applicable. A real ECorp
+recheck again produced 622 segments / 311 finals, zero clamps/future timestamps,
+and a byte-identical event stream (84.138 seconds wall duration).
+
 ## SOU-272 decision and limits
 
 **No SOU-272 implementation.** Neither complete deterministic SoftOnly control
@@ -152,7 +163,7 @@ reset, replay/prime/gate, or second audio buffer was added.
 ## Reproduce
 
 The required local gate completed in order: sidecar test/build, fmt check,
-workspace Clippy with warnings denied, workspace tests (**1,279 passed, zero
+workspace Clippy with warnings denied, workspace tests (**1,284 passed, zero
 failed, 13 ignored**), Slint translations, and CodeQL. Every command exited zero.
 CodeQL emitted zero SARIF results across Rust, JavaScript and Actions, but this
 is not a claim of complete static-analysis coverage: extraction diagnostics

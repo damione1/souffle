@@ -1,9 +1,11 @@
 {
+  "validated_code_commit": "efb4f644",
+  "review_followup": "Full current CLAUDE.md gate rerun in order after reset invalidity, bounded tail, pure SoftOnly assertions and deterministic scheduling changes",
   "ordered_commands": [
     {"command": "./scripts/build-mcp-sidecar.test.sh && ./scripts/build-mcp-sidecar.sh", "exit_code": 0, "result": "target resolution test passed; aarch64-apple-darwin sidecar built"},
     {"command": "cargo fmt --manifest-path app/Cargo.toml --all -- --check", "exit_code": 0},
     {"command": "cargo clippy --manifest-path app/Cargo.toml --workspace --all-targets -- -D warnings", "exit_code": 0, "note": "Dependency block 0.1.6 emitted a Cargo future-incompatibility notice; no Clippy warnings/errors"},
-    {"command": "cargo test --manifest-path app/Cargo.toml --workspace", "exit_code": 0, "passed": 1279, "failed": 0, "ignored": 13, "note": "Native paste main/worker layout lookup executable also passed without posting input. Ignored real-model controls were explicitly executed separately."},
+    {"command": "cargo test --manifest-path app/Cargo.toml --workspace", "exit_code": 0, "passed": 1284, "failed": 0, "ignored": 13, "note": "Native paste main/worker layout lookup executable also passed without posting input. Ignored real-model controls were explicitly executed separately; ECorp was rerun after the review fix."},
     {"command": "./scripts/check_slint_translations.sh", "exit_code": 0, "result": "en/fr complete"},
     {"command": "CODEQL_THREADS=0 ./scripts/codeql-local.sh", "exit_code": 0, "result": "CodeQL local gate green"}
   ],
@@ -12,9 +14,9 @@
     "queries": {"rust": "0.1.43", "javascript": "2.4.6", "actions": "0.6.36"},
     "sarif_result_counts": {"rust": 0, "javascript": 0, "actions": 0},
     "sarif_sha256": {
-      "rust": "903dcd46d8c35044b951ae9249535b782c5c68d5c9e4058865f3e66e48161485",
-      "javascript": "3817d99fca59018269b51e6f9e68bfb7b5936c06772bddd42dfa88a696c7148e",
-      "actions": "ec1bfb39927581c3ff65d82a0ba5af7faaa0f9c6470befd674f9182d86340d77"
+      "rust": "45a74436783e7c842c89b84608ec5bffdcb7a392ee06f89690c6d9d4d9fbd411",
+      "javascript": "8caa7101cd689507f2aeaa572796b50433560ed01e878efba478a847240811e3",
+      "actions": "c285a5ab50c7b787cbaf9034afd3021fa47fa48dad8e93822fd9e5c2d11f4398"
     },
     "extraction_limits": {
       "rust_files_with_errors": 29,
