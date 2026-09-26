@@ -72,6 +72,79 @@ fn lcs(reference: &[String], observed: &[String]) -> usize {
     row[observed.len()]
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum ControlFailure {
+    Clamp,
+    FutureTimestamp,
+    Famine,
+    IncompleteSource,
+    InconsistentCounters,
+}
+
+// Pure acceptance verdict. Content alignment remains a reported metric,
+// never an arbitrary quality threshold in this integrity control.
+fn soft_only_verdict(summary: &Value, expected_samples: usize) -> Result<(), ControlFailure> {
+    if summary["clamps"] != 0 {
+        return Err(ControlFailure::Clamp);
+    }
+    if summary["future_times"] != 0 {
+        return Err(ControlFailure::FutureTimestamp);
+    }
+    if !summary["first_15s_famine"].is_null() {
+        return Err(ControlFailure::Famine);
+    }
+    let calls = expected_samples.div_ceil(MIMI_FRAME_SIZE);
+    if summary["accepted_samples"] != expected_samples
+        || summary["lost_samples"] != 0
+        || summary["source_calls"] != calls
+    {
+        return Err(ControlFailure::IncompleteSource);
+    }
+    let counts = &summary["phase_counts"];
+    let count = |phase: usize, column: usize| counts[phase][column].as_u64().unwrap_or(u64::MAX);
+    let words = count(0, 0).saturating_add(count(1, 0));
+    let callbacks = count(0, 2).saturating_add(count(1, 2));
+    if count(0, 2) != calls as u64
+        || summary["step_after_flush"] != callbacks
+        || summary["previews"] != words
+        || summary["finals"] != words
+    {
+        return Err(ControlFailure::InconsistentCounters);
+    }
+    Ok(())
+}
+
+#[test]
+fn soft_only_verdict_rejects_famine_clamp_future_and_incomplete_traces() {
+    // Actual complete controls remain applicable after the failure-path fix.
+    for input in [
+        include_str!("../../../artifacts/sou-001-271/run1/summary.json"),
+        include_str!("../../../artifacts/sou-001-271/run2/summary.json"),
+    ] {
+        let healthy: Value = serde_json::from_str(input).unwrap();
+        assert_eq!(soft_only_verdict(&healthy, 11_171_296), Ok(()));
+        for (key, value, failure) in [
+            ("first_15s_famine", json!(20.0), ControlFailure::Famine),
+            ("clamps", json!(1), ControlFailure::Clamp),
+            ("future_times", json!(1), ControlFailure::FutureTimestamp),
+            (
+                "accepted_samples",
+                json!(1),
+                ControlFailure::IncompleteSource,
+            ),
+            (
+                "step_after_flush",
+                json!(1),
+                ControlFailure::InconsistentCounters,
+            ),
+        ] {
+            let mut broken = healthy.clone();
+            broken[key] = value;
+            assert_eq!(soft_only_verdict(&broken, 11_171_296), Err(failure));
+        }
+    }
+}
+
 #[test]
 #[ignore = "requires Nightly model, ECorp fixture and original E1 baseline artifacts"]
 fn language_mismatch_fixture_preserves_text_and_finals() {
@@ -370,5 +443,7 @@ fn soft_only_full_fixture() {
     )
     .unwrap();
     println!("{summary}");
+    // Persist evidence even when an integrity assertion fails.
+    assert_eq!(soft_only_verdict(&summary, pcm.len()), Ok(()));
     engine.unload_model().unwrap();
 }

@@ -2311,7 +2311,9 @@ mod tests {
 
     #[test]
     fn atomic_pairs_survive_stop_during_reset_and_session_changes() {
-        let mock = MockEngine::new().with_reset_delay(RESET);
+        let (entered_tx, entered_rx) = crossbeam_channel::bounded(1);
+        let (release_tx, release_rx) = crossbeam_channel::bounded(1);
+        let mock = MockEngine::new().with_reset_barrier(entered_tx, release_rx);
         let fed = mock.fed_dual_handle();
         let (actor, tx) = spawn_with_mock(mock);
         let budget = crate::audio::capture::AudioQueueBudget::new(20);
@@ -2320,6 +2322,7 @@ mod tests {
             let pending = actor
                 .begin_session(session_id, diarized_config(), Box::new(|_| {}))
                 .unwrap();
+            entered_rx.recv_timeout(Duration::from_secs(1)).unwrap();
             let chunk = |n| AudioChunk {
                 queue_permit: None,
                 session_id,
@@ -2335,7 +2338,16 @@ mod tests {
                 &budget
             ));
             tx.send(end_of_stream(session_id)).unwrap();
-            actor.stop_session(Duration::from_secs(2)).unwrap();
+            let (reply_tx, reply_rx) = crossbeam_channel::bounded(1);
+            actor
+                .cmd_tx
+                .send(super::EngineCommand::StopSession { reply: reply_tx })
+                .unwrap();
+            release_tx.send(()).unwrap();
+            reply_rx
+                .recv_timeout(Duration::from_secs(2))
+                .unwrap()
+                .unwrap();
             pending.wait(Duration::from_secs(1)).unwrap();
             // A stale pair and marker must be discarded before the next session.
             assert!(crate::audio::capture::offer_chunk_pair(
@@ -2356,6 +2368,88 @@ mod tests {
             assert_eq!(me.len(), if index % 8 == 7 { 137 } else { MIMI_FRAME_SIZE });
         }
         actor.shutdown().unwrap();
+    }
+
+    #[test]
+    fn atomic_pairs_twenty_deterministic_reset_stop_orderings() {
+        for schedule in 0..20 {
+            let (entered_tx, entered_rx) = crossbeam_channel::bounded(1);
+            let (release_tx, release_rx) = crossbeam_channel::bounded(1);
+            let mock = MockEngine::new().with_reset_barrier(entered_tx, release_rx);
+            let fed = mock.fed_dual_handle();
+            let (actor, tx) = spawn_with_mock(mock);
+            let pending = actor
+                .begin_session(1, diarized_config(), Box::new(|_| {}))
+                .unwrap();
+            entered_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+            let budget = crate::audio::capture::AudioQueueBudget::new(4);
+            let dropped = std::sync::atomic::AtomicU64::new(0);
+            let samples: Vec<f32> = (0..10 * MIMI_FRAME_SIZE + 137).map(|i| i as f32).collect();
+            let split = 1 + schedule * 997;
+            let (reply_tx, reply_rx) = crossbeam_channel::bounded(1);
+            let mut stop = Some(reply_tx);
+            // Twenty fixed schedules combine distinct split points with stop
+            // queued before first pair, between pairs, before EOS or after EOS.
+            for position in 0..4 {
+                if position == schedule % 4 {
+                    actor
+                        .cmd_tx
+                        .send(super::EngineCommand::StopSession {
+                            reply: stop.take().unwrap(),
+                        })
+                        .unwrap();
+                }
+                if position < 2 {
+                    let range = if position == 0 {
+                        0..split
+                    } else {
+                        split..samples.len()
+                    };
+                    let chunk = |values| AudioChunk {
+                        queue_permit: None,
+                        session_id: 1,
+                        samples: values,
+                        captured_at: Instant::now(),
+                        speaker: None,
+                    };
+                    let me = samples[range].to_vec();
+                    let them = me.iter().map(|v| -*v).collect();
+                    assert!(crate::audio::capture::offer_chunk_pair(
+                        &tx,
+                        chunk(me),
+                        chunk(them),
+                        &dropped,
+                        &budget
+                    ));
+                } else if position == 2 {
+                    tx.send(end_of_stream(1)).unwrap();
+                }
+            }
+            release_tx.send(()).unwrap();
+            pending.wait(Duration::from_secs(1)).unwrap();
+            reply_rx
+                .recv_timeout(Duration::from_secs(2))
+                .unwrap()
+                .unwrap();
+            let calls = fed.lock().unwrap();
+            assert_eq!(calls.len(), 11, "schedule {schedule}");
+            assert_eq!(
+                calls
+                    .iter()
+                    .flat_map(|(me, _)| me.iter().copied())
+                    .collect::<Vec<_>>(),
+                samples
+            );
+            assert_eq!(
+                calls
+                    .iter()
+                    .flat_map(|(_, them)| them.iter().copied())
+                    .collect::<Vec<_>>(),
+                samples.iter().map(|v| -*v).collect::<Vec<_>>()
+            );
+            drop(calls);
+            actor.shutdown().unwrap();
+        }
     }
 
     /// A non-silent chunk tagged with its source, so the mock's transcribe_dual

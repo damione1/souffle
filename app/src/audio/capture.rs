@@ -205,10 +205,10 @@ pub const AUDIO_BACKLOG_CAP_SECONDS: u64 = 30;
 const PEAK_CHUNKS_PER_SECOND: usize = 2 * (1000 / MEETING_TICK.as_millis() as usize);
 
 /// Capacity in single-lane chunks. A diarized payload costs two slots, so
-/// the shared admission budget preserves both mono and dual temporal/memory
-/// bounds, including mixed backlogs across sessions, without another buffer.
-/// At least
-/// [`AUDIO_BACKLOG_CAP_SECONDS`] of meeting audio. About 6 MB when full.
+/// the shared admission budget preserves both mono and dual lane-chunk bounds,
+/// including mixed backlogs across sessions, without another buffer. At nominal
+/// 20-ms ticks this holds 30 seconds / ~5.76 MB PCM of meeting audio; variable
+/// chunks do not provide a strict byte or duration bound.
 pub const AUDIO_QUEUE_CAPACITY: usize = AUDIO_BACKLOG_CAP_SECONDS as usize * PEAK_CHUNKS_PER_SECOND;
 
 /// Admission is measured in lane chunks, independently of message count.
@@ -249,12 +249,9 @@ impl AudioQueueBudget {
 }
 
 impl AudioQueueBudget {
-    fn reserve_tail(self: &Arc<Self>) -> Option<Arc<AudioQueuePermit>> {
-        self.reserve_tail_with_wait(|| {})
-    }
-
     fn reserve_tail_with_wait(
         self: &Arc<Self>,
+        deadline: Instant,
         mut on_wait: impl FnMut(),
     ) -> Option<Arc<AudioQueuePermit>> {
         let mut guard = self.wait_lock.lock().unwrap();
@@ -265,8 +262,12 @@ impl AudioQueueBudget {
             if let Some(permit) = self.reserve(1) {
                 return Some(permit);
             }
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return None;
+            }
             on_wait();
-            guard = self.released.wait(guard).unwrap();
+            guard = self.released.wait_timeout(guard, remaining).unwrap().0;
         }
     }
 }
@@ -284,6 +285,34 @@ impl Drop for AudioQueuePermit {
         self.budget.reserved.fetch_sub(self.lanes, Ordering::AcqRel);
         self.budget.released.notify_one();
     }
+}
+
+/// Stop-only tail seam: bounded admission/delivery, explicit loss accounting.
+/// The caller sends EOS afterwards regardless of this result.
+fn offer_stop_tail(
+    sender: &Sender<AudioMessage>,
+    mut tail: AudioChunk,
+    dropped: &AtomicU64,
+    budget: &Arc<AudioQueueBudget>,
+    deadline: Instant,
+    on_wait: impl FnMut(),
+) -> bool {
+    let samples = tail.samples.len();
+    if let Some(permit) = budget.reserve_tail_with_wait(deadline, on_wait) {
+        tail.queue_permit = Some(permit);
+        if sender
+            .send_timeout(AudioMessage::Chunk(tail), Duration::from_secs(1))
+            .is_ok()
+        {
+            return true;
+        }
+    }
+    dropped.fetch_add(1, Ordering::Relaxed);
+    warn!(
+        samples,
+        "Lost resampler stop tail: capacity/delivery deadline expired or receiver closed"
+    );
+    false
 }
 
 /// Hand one chunk to the engine without blocking (this runs on the
@@ -3723,15 +3752,20 @@ impl AudioCapture {
                 let tail = r.flush();
                 if !tail.is_empty() {
                     self.push_recording_mono(&tail);
-                    if let Some(permit) = self.audio_budget.reserve_tail() {
-                        let _ = self.audio_sender.send(AudioMessage::Chunk(AudioChunk {
-                            queue_permit: Some(permit),
+                    offer_stop_tail(
+                        &self.audio_sender,
+                        AudioChunk {
+                            queue_permit: None,
                             session_id,
                             samples: tail,
                             captured_at: Instant::now(),
                             speaker: None,
-                        }));
-                    }
+                        },
+                        &self.dropped_counter,
+                        &self.audio_budget,
+                        Instant::now() + Duration::from_secs(1),
+                        || {},
+                    );
                 }
             }
 
@@ -3814,7 +3848,7 @@ mod backlog_cap_tests {
         offer_chunk, offer_chunk_pair,
     };
     use std::sync::atomic::{AtomicU64, Ordering};
-    use std::time::Instant;
+    use std::time::{Duration, Instant};
 
     fn chunk(n: f32) -> AudioChunk {
         AudioChunk {
@@ -3927,11 +3961,14 @@ mod backlog_cap_tests {
         let worker_budget = std::sync::Arc::clone(&budget);
         let worker = std::thread::spawn(move || {
             let mut signal = Some(waiting_tx);
-            let result = worker_budget.reserve_tail_with_wait(|| {
-                if let Some(tx) = signal.take() {
-                    tx.send(()).unwrap();
-                }
-            });
+            let result = worker_budget.reserve_tail_with_wait(
+                Instant::now() + Duration::from_secs(1),
+                || {
+                    if let Some(tx) = signal.take() {
+                        tx.send(()).unwrap();
+                    }
+                },
+            );
             done_tx.send(result.is_none()).unwrap();
         });
         waiting_rx
@@ -3944,6 +3981,74 @@ mod backlog_cap_tests {
                 .unwrap()
         );
         worker.join().unwrap();
+    }
+
+    #[test]
+    fn live_nonconsumer_tail_deadline_is_bounded_without_sleep() {
+        let budget = super::AudioQueueBudget::new(1);
+        let (tx, rx) = crossbeam_channel::bounded(2);
+        let dropped = AtomicU64::new(0);
+        assert!(offer_chunk(&tx, chunk(1.0), &dropped, &budget));
+        // Inject an already expired deadline: no real-time delay or polling.
+        assert!(!super::offer_stop_tail(
+            &tx,
+            chunk(2.0),
+            &dropped,
+            &budget,
+            Instant::now(),
+            || panic!("expired wait")
+        ));
+        assert_eq!(dropped.load(Ordering::Relaxed), 1);
+        tx.send(super::AudioMessage::EndOfStream { session_id: 1 })
+            .unwrap();
+        assert_eq!(rx.len(), 2); // Cleanup can proceed to EOS with receiver alive.
+        drop(rx);
+        drop(tx);
+        assert_eq!(budget.reserved.load(Ordering::Acquire), 0);
+    }
+
+    #[test]
+    fn tail_capacity_resumption_delivers_once_before_eos() {
+        let budget = super::AudioQueueBudget::new(1);
+        let (tx, rx) = crossbeam_channel::bounded(2);
+        let dropped = AtomicU64::new(0);
+        assert!(offer_chunk(&tx, chunk(1.0), &dropped, &budget));
+        let (waiting_tx, waiting_rx) = crossbeam_channel::bounded(1);
+        let worker_budget = std::sync::Arc::clone(&budget);
+        let worker = std::thread::spawn(move || {
+            let mut signal = Some(waiting_tx);
+            let dropped = AtomicU64::new(0);
+            assert!(super::offer_stop_tail(
+                &tx,
+                chunk(2.0),
+                &dropped,
+                &worker_budget,
+                Instant::now() + Duration::from_secs(1),
+                || {
+                    if let Some(tx) = signal.take() {
+                        tx.send(()).unwrap();
+                    }
+                }
+            ));
+            assert_eq!(dropped.load(Ordering::Relaxed), 0);
+            tx.send(super::AudioMessage::EndOfStream { session_id: 1 })
+                .unwrap();
+        });
+        waiting_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+        drop(rx.recv().unwrap()); // Release the reservation after waiter entry.
+        match rx.recv_timeout(Duration::from_secs(1)).unwrap() {
+            super::AudioMessage::Chunk(tail) => assert_eq!(tail.samples, chunk(2.0).samples),
+            super::AudioMessage::DiarizedPair { .. } | super::AudioMessage::EndOfStream { .. } => {
+                panic!("tail must precede EOS")
+            }
+        }
+        assert!(matches!(
+            rx.recv_timeout(Duration::from_secs(1)).unwrap(),
+            super::AudioMessage::EndOfStream { .. }
+        ));
+        worker.join().unwrap();
+        assert_eq!(budget.reserved.load(Ordering::Acquire), 0);
+        assert!(rx.try_recv().is_err());
     }
 
     #[test]

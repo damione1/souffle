@@ -258,6 +258,7 @@ fn has_extra_heads_tensor(tensor_names: impl IntoIterator<Item = impl AsRef<str>
 
 /// Loaded model components — kept together so they can be used by the inference loop
 struct LoadedModel {
+    integrity: ModelIntegrity,
     state: moshi::asr::State,
     text_tokenizer: sentencepiece::SentencePieceProcessor,
     config: KyutaiConfig,
@@ -304,6 +305,24 @@ struct LoadedModel {
     orphaned_words: Vec<PendingWord>,
 }
 
+#[derive(Default)]
+enum ModelIntegrity {
+    #[default]
+    Ready,
+    Invalid,
+}
+
+impl ModelIntegrity {
+    fn ensure_ready(&self) -> Result<(), EngineError> {
+        match self {
+            Self::Ready => Ok(()),
+            Self::Invalid => Err(EngineError::InferenceError(
+                "ASR reset left invalid state; full model reconstruction required".into(),
+            )),
+        }
+    }
+}
+
 /// A decoded word held until moshi emits `EndWord` so `end_time` is real.
 #[derive(Clone)]
 struct PendingWord {
@@ -318,6 +337,7 @@ struct PendingWord {
 // The test implementation delegates timeline and pending-word operations to
 // the same production primitives; it only substitutes decoding and KV reset.
 trait AsrBatchModel {
+    fn integrity(&mut self) -> &mut ModelIntegrity;
     fn batch_size(&self) -> usize;
     fn decode(&self, tokens: &[u32]) -> String;
     fn map_time(&mut self, raw: f64, lane: usize) -> (f64, f64);
@@ -328,6 +348,9 @@ trait AsrBatchModel {
 }
 
 impl AsrBatchModel for LoadedModel {
+    fn integrity(&mut self) -> &mut ModelIntegrity {
+        &mut self.integrity
+    }
     fn batch_size(&self) -> usize {
         self.state.batch_size()
     }
@@ -453,6 +476,7 @@ impl KyutaiEngine {
         }
         let state = Self::build_state(&device, &model_path, &config, batch_size, has_extra_heads)?;
         Ok(LoadedModel {
+            integrity: ModelIntegrity::Ready,
             state,
             text_tokenizer,
             config,
@@ -732,6 +756,7 @@ impl KyutaiEngine {
         batch_idx: usize,
         kind: RefreshKind,
     ) -> Result<(), EngineError> {
+        model.integrity.ensure_ready()?;
         // This path feeds no silence prefix, so the lane's offset goes to zero
         // along with its clock.
         Self::credit_lane_epoch(
@@ -740,10 +765,12 @@ impl KyutaiEngine {
             &mut model.frames_since_lane_reset,
             batch_idx,
         );
-        model
-            .state
-            .reset_batch_idx(batch_idx)
-            .map_err(|e| EngineError::InferenceError(format!("ASR lane reset: {e}")))?;
+        if let Err(e) = model.state.reset_batch_idx(batch_idx) {
+            // Moshi can mutate ItemState before LM/Mimi fails. Only a genuine
+            // rebuild can make this model safe to forward again; no rollback.
+            model.integrity = ModelIntegrity::Invalid;
+            return Err(EngineError::InferenceError(format!("ASR lane reset: {e}")));
+        }
         if let Some(streak) = model.vad_pause_streak.get_mut(batch_idx) {
             *streak = 0;
         }
@@ -773,6 +800,7 @@ impl KyutaiEngine {
     }
 
     fn maybe_refresh_before_frame(model: &mut LoadedModel) -> Result<(), EngineError> {
+        model.integrity.ensure_ready()?;
         let batch_size = model.state.batch_size();
         match decide_refresh(
             model.frames_since_refresh,
@@ -865,7 +893,7 @@ impl KyutaiEngine {
             };
             // Prefix frames can still emit delayed words from the previous
             // epoch's lookahead — keep consuming them with correct timestamps.
-            Self::consume_asr_msgs(model, &asr_msgs, debug_enabled, segments);
+            Self::consume_asr_msgs(model, &asr_msgs, debug_enabled, segments)?;
         }
         Ok(())
     }
@@ -876,6 +904,7 @@ impl KyutaiEngine {
         chunk_data: &[f32],
         debug_enabled: bool,
     ) -> Result<Vec<moshi::asr::AsrMsg>, EngineError> {
+        model.integrity.ensure_ready()?;
         // Wrap Metal operations in autorelease pool to drain ObjC objects
         // created by candle's Metal backend (matmul, attention, etc.).
         // Without this, autoreleased objects accumulate and corrupt GPU
@@ -939,6 +968,7 @@ impl KyutaiEngine {
         device: &Device,
         data: &[f32],
     ) -> Result<Vec<moshi::asr::AsrMsg>, EngineError> {
+        model.integrity.ensure_ready()?;
         let asr_msgs = with_autorelease_pool(|| {
             let pcm_tensor = Tensor::new(data, device)
                 .and_then(|t| t.reshape((2, 1, MIMI_FRAME_SIZE)))
@@ -972,7 +1002,8 @@ impl KyutaiEngine {
         asr_msgs: &[moshi::asr::AsrMsg],
         debug_enabled: bool,
         segments: &mut Vec<TranscriptionSegment>,
-    ) {
+    ) -> Result<(), EngineError> {
+        model.integrity().ensure_ready()?;
         let (_, orphans) = model.words();
         Self::drain_orphans(orphans, segments);
         let frame_num = FRAME_COUNT.load(Ordering::Relaxed).saturating_sub(1);
@@ -1090,11 +1121,22 @@ impl KyutaiEngine {
         }
         for lane in requested_resets {
             if let Err(e) = model.reset_lane(lane) {
-                warn!(lane, "Language mismatch lane reset failed: {e}");
+                *model.integrity() = ModelIntegrity::Invalid;
+                // Engine API returns Result, not partial segments + error.
+                // Explicitly discard this call's mapped outputs rather than
+                // silently publishing a subset of a failed inference call.
+                warn!(
+                    lane,
+                    discarded_segments = segments.len(),
+                    "ASR reset failed; invalidating model and discarding this call's outputs: {e}"
+                );
+                segments.clear();
+                return Err(e);
             }
         }
         let (_, orphans) = model.words();
         Self::drain_orphans(orphans, segments);
+        Ok(())
     }
 
     fn context_window_stats(&self) -> Option<super::ContextWindowStats> {
@@ -1323,6 +1365,7 @@ impl TranscriptionEngine for KyutaiEngine {
         let model = self.model.as_mut().ok_or(EngineError::NotInitialized)?;
 
         let mut segments = Vec::new();
+        model.integrity.ensure_ready()?;
 
         // Debug: save first 3s of audio per session to WAV for offline analysis
         if debug_enabled {
@@ -1398,7 +1441,7 @@ impl TranscriptionEngine for KyutaiEngine {
             };
 
             let asr_msgs = Self::step_pcm_single(model, &device, chunk_data, debug_enabled)?;
-            Self::consume_asr_msgs(model, &asr_msgs, debug_enabled, &mut segments);
+            Self::consume_asr_msgs(model, &asr_msgs, debug_enabled, &mut segments)?;
         }
 
         Ok(segments)
@@ -1408,6 +1451,7 @@ impl TranscriptionEngine for KyutaiEngine {
         let diarize = self.diarize;
         let (delay_frames, suffix_seconds, pause_streak, drained) = {
             let model = self.model.as_ref().ok_or(EngineError::NotInitialized)?;
+            model.integrity.ensure_ready()?;
             let delay_frames = Self::emission_delay_frames(model);
             let suffix_seconds = model.config.stt_config.audio_delay_seconds + 1.0;
             let pause_streak = model.vad_pause_streak.first().copied().unwrap_or(0);
@@ -1476,6 +1520,7 @@ impl TranscriptionEngine for KyutaiEngine {
         let model = self.model.as_mut().ok_or(EngineError::NotInitialized)?;
         let device = model.device.clone();
         let mut segments = Vec::new();
+        model.integrity.ensure_ready()?;
 
         // Both lanes step together; cover whichever is longer (the mixer keeps
         // them equal, but pad defensively).
@@ -1495,7 +1540,7 @@ impl TranscriptionEngine for KyutaiEngine {
             data.extend_from_slice(&frame_at(them, f));
 
             let asr_msgs = Self::step_pcm_dual(model, &device, &data)?;
-            Self::consume_asr_msgs(model, &asr_msgs, debug_enabled, &mut segments);
+            Self::consume_asr_msgs(model, &asr_msgs, debug_enabled, &mut segments)?;
         }
 
         Ok(segments)
@@ -1542,6 +1587,9 @@ impl TranscriptionEngine for KyutaiEngine {
 #[cfg(test)]
 mod tests {
     struct BatchTestModel {
+        integrity: ModelIntegrity,
+        partial_mutation: bool,
+        item_reset: bool,
         origins: Vec<f64>,
         offsets: Vec<f64>,
         frames: Vec<usize>,
@@ -1575,6 +1623,9 @@ mod tests {
                 }
             }
             Self {
+                integrity: ModelIntegrity::Ready,
+                partial_mutation: false,
+                item_reset: false,
                 origins: vec![48.80; lanes],
                 offsets: vec![prefix; lanes],
                 frames: vec![738; lanes],
@@ -1589,6 +1640,9 @@ mod tests {
     }
 
     impl AsrBatchModel for BatchTestModel {
+        fn integrity(&mut self) -> &mut ModelIntegrity {
+            &mut self.integrity
+        }
         fn batch_size(&self) -> usize {
             self.origins.len()
         }
@@ -1615,6 +1669,7 @@ mod tests {
                 lane,
             );
             if self.fail_reset {
+                self.item_reset = self.partial_mutation;
                 return Err(EngineError::InferenceError("E1 injected KV failure".into()));
             }
             self.tracker.reset_lane(lane);
@@ -1649,7 +1704,7 @@ mod tests {
             },
         ];
         let mut segments = Vec::new();
-        KyutaiEngine::consume_asr_msgs(&mut model, &batch, false, &mut segments);
+        KyutaiEngine::consume_asr_msgs(&mut model, &batch, false, &mut segments).unwrap();
         assert_eq!(segments.len(), 2);
         assert!(
             (segments[1].end_time - 107.36).abs() < 1e-8,
@@ -1682,7 +1737,17 @@ mod tests {
                         });
                     }
                     let mut segments = Vec::new();
-                    KyutaiEngine::consume_asr_msgs(&mut model, &batch, false, &mut segments);
+                    let result =
+                        KyutaiEngine::consume_asr_msgs(&mut model, &batch, false, &mut segments);
+                    if failed {
+                        assert!(result.is_err());
+                        assert!(segments.is_empty());
+                        assert!(model.integrity.ensure_ready().is_err());
+                        assert_eq!(model.timeline(1), other);
+                        assert_eq!(model.resets, 1);
+                        continue;
+                    }
+                    result.unwrap();
                     near(model.origins[0], 107.84 - prefix);
                     near(segments[0].start_time, 107.36 - prefix);
                     if !word_only {
@@ -1715,7 +1780,7 @@ mod tests {
             },
         ];
         let mut segments = Vec::new();
-        KyutaiEngine::consume_asr_msgs(&mut model, &batch, false, &mut segments);
+        KyutaiEngine::consume_asr_msgs(&mut model, &batch, false, &mut segments).unwrap();
         assert_eq!(model.resets, 2);
         assert_eq!(segments.iter().filter(|s| s.is_final).count(), 2);
         // A failed reset leaves the LID mismatch active. The next Word in the
@@ -1732,9 +1797,50 @@ mod tests {
             },
         ];
         let mut segments = Vec::new();
-        KyutaiEngine::consume_asr_msgs(&mut model, &batch, false, &mut segments);
+        assert!(KyutaiEngine::consume_asr_msgs(&mut model, &batch, false, &mut segments).is_err());
         assert_eq!(model.resets, 1);
-        assert_eq!(segments.iter().filter(|s| s.is_final).count(), 2);
+        assert!(segments.is_empty());
+    }
+
+    #[test]
+    fn batch_reset_failure_before_or_after_mutation_blocks_forward_until_rebuild() {
+        for partial in [false, true] {
+            let mut model = BatchTestModel::new(2, 0.0);
+            model.fail_reset = true;
+            model.partial_mutation = partial;
+            let batch = [
+                e1_word(0, 58.56),
+                moshi::asr::AsrMsg::EndWord {
+                    stop_time: 58.64,
+                    batch_idx: 0,
+                },
+            ];
+            let mut segments = Vec::new();
+            assert!(
+                KyutaiEngine::consume_asr_msgs(&mut model, &batch, false, &mut segments).is_err()
+            );
+            assert_eq!(model.item_reset, partial);
+            assert!(segments.is_empty()); // Explicit error API: no partial publication.
+            let credited = model.timeline(0);
+            let mut forwards = 0;
+            for _ in 0..3 {
+                // Same pre-forward validity guard used by both production steps.
+                if model.integrity.ensure_ready().is_ok() {
+                    forwards += 1;
+                }
+                assert!(
+                    KyutaiEngine::consume_asr_msgs(&mut model, &batch, false, &mut segments)
+                        .is_err()
+                );
+            }
+            assert_eq!(forwards, 0);
+            assert_eq!(model.resets, 1);
+            assert_eq!(model.timeline(0), credited);
+            assert!((model.origins[0] - 107.84).abs() < 1e-8);
+            assert_eq!(model.frames[0], 0); // Recovery carry cannot double-credit.
+            model = BatchTestModel::new(2, 0.0); // A fresh reconstructed model only.
+            assert!(model.integrity.ensure_ready().is_ok());
+        }
     }
 
     use super::*;

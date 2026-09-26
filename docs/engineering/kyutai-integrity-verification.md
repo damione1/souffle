@@ -14,9 +14,15 @@ mapped the end to **166.40 s instead of 107.36 s**. The same test passes after
 reset requests are coalesced per lane and applied after all messages are mapped.
 
 The matrix covers Word alone, Word+EndWord, prefixes 0 / 0.48 s, two lanes,
-isolation of the other lane, multiple requests, and reset failure. It preserves
-the existing error behavior: epoch credit precedes a failing KV reset. Pending
-and orphan finals retain their existing ordering. The real Metal Auto-language
+isolation of the other lane, multiple requests, and reset failure. Failed lane
+resets now invalidate the entire model: Moshi may have mutated ItemState before
+LM/Mimi fails, so every subsequent forward is blocked until real reconstruction.
+The error propagates to the actor; this call's already mapped segments are
+explicitly discarded and logged because the engine API cannot return partial
+outputs plus an error. Epoch credit happens once and cleared lane-frame counts
+prevent double credit during timeline-preserving recovery. Tests cover failure
+before and after partial mutation. Pending and orphan finals retain their nominal
+ordering. The real Metal Auto-language
 ECorp control compares every emitted text and final flag against the original
 E1 baseline, including flush: **622 segments / 311 finals**, identical text and
 final flags, **zero clamps / future timestamps**, over 3,743,820 accepted samples.
@@ -37,17 +43,24 @@ tests cover stop while reset runs, EOS, stale pairs and two successive sessions.
 
 Admission remains **3,000 lane chunks**, not 3,000 pairs: mono costs one,
 paired ingress two. Thus 1,500 diarized 20-ms ticks retain the historical
-30-second / 1,440,000-float (~5.76 MB PCM) meeting bound, while mono retains
+30-second / 1,440,000-float (~5.76 MB PCM) meeting capacity **at nominal 20-ms
+ticks**, while mono retains
 3,000 slots. Atomic reservations also cover mixed backlogs. Payloads own RAII
 permits; rejected sends and dropped/consumed payloads release them. Payload clones
 share their reservation until the last clone is dropped. EOS is not audio and
-still occupies its physical channel slot as before.
+still occupies its physical channel slot as before. This is a lane-chunk bound,
+not a strict byte/time bound for variable-size chunks; no sample-budget redesign
+is claimed.
 
 The receiver explicitly closes the budget when the actor exits, waking a stop
 tail blocked on weighted capacity. A deterministic test signals actual entry into
 the condition-variable wait before dropping the receiver; the waiter then returns
-failure within one second. No timing sleep is used. Normal stop still sends its
-accepted tail before EOS. The callback uses atomic admission; permit release takes
+failure within one second. No timing sleep is used. Admission also has a
+one-second deadline when the receiver remains alive but consumption is wedged;
+delivery and EOS each use the existing one-second bounded-send convention. A lost
+tail is counted/logged explicitly before cleanup proceeds. Tests inject an expired
+deadline without sleep and prove consumption resumption delivers the accepted tail
+exactly once before EOS. The callback uses atomic admission; permit release takes
 only the short condition-variable synchronization lock, never I/O or engine work.
 
 ## Complete SoftOnly controls
@@ -125,11 +138,16 @@ reset, replay/prime/gate, or second audio buffer was added.
 - SOU-271 AC5: `atomic_pairs_survive_stop_during_reset_and_session_changes`,
   the 137-sample tail matrix, and
   `closing_receiver_wakes_a_tail_waiting_for_weighted_capacity`.
+  Reset entry is proven by channel barriers, and
+  `atomic_pairs_twenty_deterministic_reset_stop_orderings` exercises twenty fixed
+  split-point / stop-versus-pair-versus-EOS schedules without sleeps.
 - SOU-271 AC6: `meeting_mixer_burst_reaches_actor_with_both_lanes_exact`
   uses the real mixer with more than 560 ms accumulated before its tick.
 - Post-fix SOU-270 controls: two complete real SoftOnly runs with identical
   event/segment streams; SOU-272 is deliberately not implemented for the reason
-  above. Live UI/capture QA and detector calibration are not claimed.
+  above. The ticket's **real dual-lane meeting with system capture lasting more
+  than two minutes was NOT executed**; MockEngine/mixer tests do not satisfy that
+  manual QA step. Live UI/capture QA and detector calibration remain outstanding.
 
 ## Reproduce
 

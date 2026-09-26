@@ -41,6 +41,15 @@
   "initial_long_harness_sha256": "9d411d4fd7644d476ee88287e6f31badcae44a4e89230094895320b0f6564d6f",
   "initial_long_instrumentation_patch_sha256": "7936394bd0553253920389ff6a11eb02a6e6a97f264e56ad1dfcff3c3ef7aa53",
   "harness_revision_note": "The two long runs used identical binary/instrumentation. Afterwards event tags were typed as an exhaustive Rust enum and the Auto ECorp comparator was added; production policy and stepping remained unchanged.",
+  "review_revision": {
+    "verification_source_sha256": "2c43a6e7052b984b1f21bbaac56d351b34c4554ca80b3bd8ba7c18479dd70b5f",
+    "long_controls_applicability": "Only failed-reset state and stop-tail handling changed; nominal reset mapping, stepping and SoftOnly policy unchanged. Pure verdict unit test validates both retained summaries.",
+    "ecorp_recheck": "622 segments / 311 finals identical to E1; zero clamps/future; all events byte-identical to original post-fix control",
+    "ecorp_recheck_events_sha256": "f5e5817f3a1de886331dce1dce2aafa1a4cc1c2c028cb3c98651d3d828c9a075",
+    "ecorp_recheck_summary_sha256": "06233f2969a0b99e8b5dcee40697b67c10df3c30c7a5dc22cdff0a0a9668b66c",
+    "ecorp_recheck_wall_seconds": 84.137554541,
+    "manual_capture_QA": "NOT executed: real dual-lane meeting with system capture lasting more than two minutes"
+  },
   "output_hashes": {
     "run1_events": "e3209da433a905baedbda20404c0ee86ba1c52e8ebcacbeb7342d05bffe936ee",
     "run2_events": "e3209da433a905baedbda20404c0ee86ba1c52e8ebcacbeb7342d05bffe936ee",

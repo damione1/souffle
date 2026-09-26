@@ -17,6 +17,7 @@ pub type DualFrameLog = Arc<Mutex<Vec<(Vec<f32>, Vec<f32>)>>>;
 /// Push responses into `transcribe_responses` and `flush_responses` queues;
 /// calls to `transcribe()` / `flush()` will pop from the front.
 pub struct MockEngine {
+    diarize: bool,
     loaded: bool,
     pub transcribe_responses: VecDeque<Result<Vec<TranscriptionSegment>, EngineError>>,
     pub flush_responses: VecDeque<Result<Vec<TranscriptionSegment>, EngineError>>,
@@ -47,6 +48,10 @@ pub struct MockEngine {
     /// How long `reset_state()` blocks, to stand in for Kyutai's
     /// seconds-long diarized rebuild (SOU-260).
     reset_delay: Duration,
+    reset_barrier: Option<(
+        crossbeam_channel::Sender<()>,
+        crossbeam_channel::Receiver<()>,
+    )>,
     /// Every sample handed to `transcribe()`, in order. Shared with tests
     /// via `fed_audio_handle()`.
     fed_audio: Arc<Mutex<Vec<f32>>>,
@@ -64,6 +69,7 @@ impl Default for MockEngine {
 impl MockEngine {
     pub fn new() -> Self {
         Self {
+            diarize: false,
             loaded: false,
             transcribe_responses: VecDeque::new(),
             flush_responses: VecDeque::new(),
@@ -75,6 +81,7 @@ impl MockEngine {
             tail_drained_value: false,
             dual_calls: Vec::new(),
             reset_delay: Duration::ZERO,
+            reset_barrier: None,
             fed_audio: Arc::new(Mutex::new(Vec::new())),
             fed_dual: Arc::new(Mutex::new(Vec::new())),
         }
@@ -83,6 +90,16 @@ impl MockEngine {
     /// Make `reset_state()` block for `delay`, like a real engine rebuild.
     pub fn with_reset_delay(mut self, delay: Duration) -> Self {
         self.reset_delay = delay;
+        self
+    }
+
+    /// A deterministic reset entry/release handshake, without timer sleeps.
+    pub fn with_reset_barrier(
+        mut self,
+        entered: crossbeam_channel::Sender<()>,
+        release: crossbeam_channel::Receiver<()>,
+    ) -> Self {
+        self.reset_barrier = Some((entered, release));
         self
     }
 
@@ -194,6 +211,12 @@ impl TranscriptionEngine for MockEngine {
     }
 
     fn reset_state(&mut self) -> Result<(), EngineError> {
+        if self.diarize
+            && let Some((entered, release)) = &self.reset_barrier
+        {
+            entered.send(()).unwrap();
+            release.recv_timeout(Duration::from_secs(2)).unwrap();
+        }
         if !self.reset_delay.is_zero() {
             std::thread::sleep(self.reset_delay);
         }
@@ -225,6 +248,10 @@ impl TranscriptionEngine for MockEngine {
 
     fn supports_diarization(&self) -> bool {
         true
+    }
+
+    fn set_diarization(&mut self, enabled: bool) {
+        self.diarize = enabled;
     }
 
     /// Emit a speaker-tagged segment for each lane that carries non-silent
