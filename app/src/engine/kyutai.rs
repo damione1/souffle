@@ -15,6 +15,10 @@ use crate::lid::{LanguageTracker, detect_word};
 use crate::platform::with_autorelease_pool;
 use crate::settings::MeetingTranscriptionLanguage;
 
+#[cfg(test)]
+#[path = "kyutai_verification.rs"]
+mod verification;
+
 /// Extra-head index used for pause detection, matching Kyutai's reference
 /// stt-rs example (`prs[2][0] > 0.5`).
 const VAD_PAUSE_HEAD: usize = 2;
@@ -888,6 +892,8 @@ impl KyutaiEngine {
                     None,
                     &().into(),
                     |items, text_tensor, _audio_tensors| {
+                        #[cfg(test)]
+                        verification::tokens(items);
                         let frame = FRAME_COUNT.load(Ordering::Relaxed);
                         if debug_enabled
                             && (frame < 20 || frame.is_multiple_of(50))
@@ -1018,7 +1024,17 @@ impl KyutaiEngine {
                     }
                     let language = detect_word(&text).map(|code| code.as_str().to_string());
                     // Keep the input epoch until every message is mapped.
-                    let (_, start_time) = model.map_time(*start_time, *batch_idx);
+                    let (raw_start, start_time) = model.map_time(*start_time, *batch_idx);
+                    #[cfg(test)]
+                    verification::mapped(
+                        verification::TraceKind::Word,
+                        *batch_idx,
+                        raw_start,
+                        start_time,
+                        Some(&text),
+                    );
+                    #[cfg(not(test))]
+                    let _ = raw_start;
                     // SOU-060: `on_word` only requests a KV wipe when Auto
                     // inferred a prior (model lock-in). Explicit Fr/En still
                     // labels the segment above and never wipes a healthy lane.
@@ -1053,7 +1069,17 @@ impl KyutaiEngine {
                     stop_time,
                     batch_idx,
                 } => {
-                    let (_, end_time) = model.map_time(*stop_time, *batch_idx);
+                    let (raw_end, end_time) = model.map_time(*stop_time, *batch_idx);
+                    #[cfg(test)]
+                    verification::mapped(
+                        verification::TraceKind::EndWord,
+                        *batch_idx,
+                        raw_end,
+                        end_time,
+                        None,
+                    );
+                    #[cfg(not(test))]
+                    let _ = raw_end;
                     let (pending, _) = model.words();
                     Self::emit_pending(pending, *batch_idx, end_time, segments);
                 }
