@@ -1593,10 +1593,10 @@ fn apply_waveform_summary(
 
 /// Loads (decodes + opens a paused output stream for) the first recorded
 /// session of `meeting_id`, if any - mirrors `getMeetingAudio` populating
-/// `MeetingAudioPlayerSection`. Multiple recording sessions (a meeting
-/// resumed after being stopped) are real but out of scope here: only the
-/// first session plays, same honest v1 boundary as the rest of this
-/// milestone, not silently wrong for the common single-session case.
+/// `MeetingAudioPlayerSection`. A meeting resumed after being stopped has
+/// one file per recording session: a transcript paragraph of another
+/// session swaps the player to that session's file (SOU-251, see
+/// `meeting_detail_transcript_paragraph_clicked`).
 ///
 /// SOU-258: only the file listing and the cached waveform summary run here,
 /// on the UI thread. Decoding, resampling and opening the output stream
@@ -1614,18 +1614,55 @@ fn load_meeting_audio(
     let sessions = souffle_lib::commands::get_meeting_audio(meeting_id.to_string())
         .inspect_err(|e| eprintln!("Failed to list meeting audio: {e}"))
         .unwrap_or_default();
+    let Some(session) = sessions.first() else {
+        reset_meeting_audio_labels(window);
+        window.set_meeting_detail_has_audio(false);
+        window.set_meeting_detail_audio_loading(false);
+        return;
+    };
+    load_session_audio(
+        window,
+        session.session_index,
+        std::path::PathBuf::from(&session.path),
+        SessionAudioStart {
+            seconds: 0.0,
+            play: false,
+        },
+        player,
+        progress_timer,
+        weak,
+    );
+}
+
+fn reset_meeting_audio_labels(window: &MainWindow) {
     window.set_meeting_detail_audio_waveform_commands("".into());
     window.set_meeting_detail_audio_waveform_bars(0);
     window.set_meeting_detail_audio_duration_label("".into());
     window.set_meeting_detail_audio_position_label(timeline::format_duration(0.0).into());
     window.set_meeting_detail_audio_progress(0.0);
     window.set_meeting_detail_audio_is_playing(false);
-    let Some(session) = sessions.first() else {
-        window.set_meeting_detail_has_audio(false);
-        window.set_meeting_detail_audio_loading(false);
-        return;
-    };
-    let path = std::path::PathBuf::from(&session.path);
+}
+
+/// Where a freshly loaded session starts: seek position within the session
+/// and whether playback resumes at once (a click while already playing).
+struct SessionAudioStart {
+    seconds: f64,
+    play: bool,
+}
+
+/// Loads one recording session's file into the player, off the UI thread
+/// (see `load_meeting_audio`), then applies `start`. The caller has already
+/// stopped any previous player.
+fn load_session_audio(
+    window: &MainWindow,
+    session_index: usize,
+    path: std::path::PathBuf,
+    start: SessionAudioStart,
+    player: &Rc<RefCell<Option<audio_player::AudioPlayer>>>,
+    progress_timer: &Rc<RefCell<Option<slint::Timer>>>,
+    weak: slint::Weak<MainWindow>,
+) {
+    reset_meeting_audio_labels(window);
     window.set_meeting_detail_has_audio(true);
     window.set_meeting_detail_audio_loading(true);
     if let Some(summary) = audio_player::cached_summary(&path) {
@@ -1637,7 +1674,7 @@ fn load_meeting_audio(
     let progress_timer = progress_timer.clone();
     slint::spawn_local(async move {
         let result = souffle_lib::async_runtime::spawn_blocking(move || {
-            audio_player::load(&path, || {
+            audio_player::load(session_index, &path, || {
                 AUDIO_LOAD_GENERATION.load(Ordering::Relaxed) == generation
             })
         })
@@ -1657,6 +1694,15 @@ fn load_meeting_audio(
                 window.set_meeting_detail_audio_duration_label(
                     timeline::format_duration(loaded.duration_seconds()).into(),
                 );
+                loaded.seek_to_seconds(start.seconds);
+                if start.play {
+                    loaded.play();
+                }
+                window.set_meeting_detail_audio_progress(loaded.progress());
+                window.set_meeting_detail_audio_position_label(
+                    timeline::format_duration(loaded.position_seconds()).into(),
+                );
+                window.set_meeting_detail_audio_is_playing(loaded.is_playing());
                 *player.borrow_mut() = Some(loaded);
                 *progress_timer.borrow_mut() =
                     Some(start_audio_progress_timer(weak.clone(), player.clone()));
@@ -3943,10 +3989,53 @@ fn wire_callbacks(
         }
     });
 
+    let weak = window.as_weak();
     let player_for_paragraph = player.clone();
-    window.on_meeting_detail_transcript_paragraph_clicked(move |_session_index, start_time| {
-        if let Some(p) = player_for_paragraph.borrow().as_ref() {
-            p.seek_to_seconds(f64::from(start_time));
+    let progress_timer_for_paragraph = progress_timer.clone();
+    window.on_meeting_detail_transcript_paragraph_clicked(move |session_index, start_time| {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        // SOU-251: a resumed meeting has one file per recording session;
+        // the paragraph's session decides which one plays.
+        let (loaded_session, was_playing) = match player_for_paragraph.borrow().as_ref() {
+            Some(p) => (Some(p.session_index()), p.is_playing()),
+            None => return,
+        };
+        let sessions =
+            souffle_lib::commands::get_meeting_audio(window.get_active_meeting_id().to_string())
+                .inspect_err(|e| eprintln!("Failed to list meeting audio: {e}"))
+                .unwrap_or_default();
+        match audio_player::plan_paragraph_seek(
+            &sessions,
+            loaded_session,
+            session_index,
+            f64::from(start_time),
+        ) {
+            audio_player::ParagraphSeek::InLoaded { seconds } => {
+                if let Some(p) = player_for_paragraph.borrow().as_ref() {
+                    p.seek_to_seconds(seconds);
+                }
+            }
+            audio_player::ParagraphSeek::LoadSession {
+                session_index,
+                path,
+                seconds,
+            } => {
+                stop_audio_player(&player_for_paragraph, &progress_timer_for_paragraph);
+                load_session_audio(
+                    &window,
+                    session_index,
+                    std::path::PathBuf::from(path),
+                    SessionAudioStart {
+                        seconds,
+                        play: was_playing,
+                    },
+                    &player_for_paragraph,
+                    &progress_timer_for_paragraph,
+                    weak.clone(),
+                );
+            }
         }
     });
 
