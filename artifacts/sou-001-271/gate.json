@@ -1,11 +1,11 @@
 {
-  "validated_code_commit": "187b969d",
-  "review_followup": "Full current CLAUDE.md gate rerun in order after inference-free pending-word salvage, flush error propagation to stop/abort and removal of identifying local paths",
+  "validated_code_commit": "ae2ec391",
+  "review_followup": "Full current CLAUDE.md gate rerun in order after aligned paired mono mixing and one-time preservation of completed finals from failed reset calls",
   "ordered_commands": [
     {"command": "./scripts/build-mcp-sidecar.test.sh && ./scripts/build-mcp-sidecar.sh", "exit_code": 0, "result": "target resolution test passed; aarch64-apple-darwin sidecar built"},
     {"command": "cargo fmt --manifest-path app/Cargo.toml --all -- --check", "exit_code": 0},
     {"command": "cargo clippy --manifest-path app/Cargo.toml --workspace --all-targets -- -D warnings", "exit_code": 0, "note": "Dependency block 0.1.6 emitted a Cargo future-incompatibility notice; no Clippy warnings/errors"},
-    {"command": "cargo test --manifest-path app/Cargo.toml --workspace", "exit_code": 0, "passed": 1287, "failed": 0, "ignored": 13, "note": "Native paste main/worker layout lookup executable also passed without posting input. Ignored real-model controls were explicitly executed separately; ECorp was rerun after the reset-invalidation fix. Nominal inference/flush output unchanged by the salvage-only follow-up."},
+    {"command": "cargo test --manifest-path app/Cargo.toml --workspace", "exit_code": 0, "passed": 1289, "failed": 0, "ignored": 13, "note": "Native paste main/worker layout lookup executable also passed without posting input. Ignored real-model controls were explicitly executed separately; ECorp was rerun after the reset-invalidation fix. Long controls bypass SingleMode; successful Kyutai stepping/reset/flush paths remain unchanged."},
     {"command": "./scripts/check_slint_translations.sh", "exit_code": 0, "result": "en/fr complete"},
     {"command": "CODEQL_THREADS=0 ./scripts/codeql-local.sh", "exit_code": 0, "result": "CodeQL local gate green"}
   ],
@@ -14,9 +14,9 @@
     "queries": {"rust": "0.1.43", "javascript": "2.4.6", "actions": "0.6.36"},
     "sarif_result_counts": {"rust": 0, "javascript": 0, "actions": 0},
     "sarif_sha256": {
-      "rust": "a1c4e23bac861dda5b82bf9daf9a52ed9a72edeead39a22a1afaaa74a8f65b92",
-      "javascript": "fa828de1611c4e22cf96483b489d08262db5e9c322092a1927d8db3ef7e2a33d",
-      "actions": "55789c7bca201ad02f922dbee3b016ec415b0bec4030190a9743be320cc884e7"
+      "rust": "8cfd3106e5323211cded38bbc0d0cafebbf7ed73115f819a382ceae9a56ccb66",
+      "javascript": "20a22ad2a0c0142261f489b698c130453430b2d4b92a30197f6a494d4f68e0c8",
+      "actions": "855186ef5434f0333fc6d532c82b2d0696bbf405b29772eb4e1f83afebcbd88b"
     },
     "extraction_limits": {
       "rust_files_with_errors": 29,
