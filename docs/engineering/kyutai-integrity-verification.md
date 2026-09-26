@@ -175,7 +175,7 @@ reset, replay/prime/gate, or second audio buffer was added.
 ## Reproduce
 
 The required local gate completed in order: sidecar test/build, fmt check,
-workspace Clippy with warnings denied, workspace tests (**1,284 passed, zero
+workspace Clippy with warnings denied, workspace tests (**1,287 passed, zero
 failed, 13 ignored**), Slint translations, and CodeQL. Every command exited zero.
 CodeQL emitted zero SARIF results across Rust, JavaScript and Actions, but this
 is not a claim of complete static-analysis coverage: extraction diagnostics
