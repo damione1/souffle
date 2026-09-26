@@ -204,9 +204,87 @@ pub const AUDIO_BACKLOG_CAP_SECONDS: u64 = 30;
 /// about half as many, so the same queue holds about a minute of it.
 const PEAK_CHUNKS_PER_SECOND: usize = 2 * (1000 / MEETING_TICK.as_millis() as usize);
 
-/// Capacity of the capture-to-engine queue, in chunks: at least
+/// Capacity in single-lane chunks. A diarized payload costs two slots, so
+/// the shared admission budget preserves both mono and dual temporal/memory
+/// bounds, including mixed backlogs across sessions, without another buffer.
+/// At least
 /// [`AUDIO_BACKLOG_CAP_SECONDS`] of meeting audio. About 6 MB when full.
 pub const AUDIO_QUEUE_CAPACITY: usize = AUDIO_BACKLOG_CAP_SECONDS as usize * PEAK_CHUNKS_PER_SECOND;
+
+/// Admission is measured in lane chunks, independently of message count.
+#[derive(Debug)]
+pub(crate) struct AudioQueueBudget {
+    capacity: usize,
+    reserved: std::sync::atomic::AtomicUsize,
+    released: std::sync::Condvar,
+    wait_lock: Mutex<()>,
+    closed: std::sync::atomic::AtomicBool,
+}
+
+impl AudioQueueBudget {
+    pub(crate) fn new(capacity: usize) -> Arc<Self> {
+        Arc::new(Self {
+            capacity,
+            reserved: std::sync::atomic::AtomicUsize::new(0),
+            released: std::sync::Condvar::new(),
+            wait_lock: Mutex::new(()),
+            closed: std::sync::atomic::AtomicBool::new(false),
+        })
+    }
+
+    fn reserve(self: &Arc<Self>, lanes: usize) -> Option<Arc<AudioQueuePermit>> {
+        self.reserved
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |used| {
+                used.checked_add(lanes)
+                    .filter(|next| *next <= self.capacity)
+            })
+            .ok()
+            .map(|_| {
+                Arc::new(AudioQueuePermit {
+                    budget: Arc::clone(self),
+                    lanes,
+                })
+            })
+    }
+}
+
+impl AudioQueueBudget {
+    fn reserve_tail(self: &Arc<Self>) -> Option<Arc<AudioQueuePermit>> {
+        self.reserve_tail_with_wait(|| {})
+    }
+
+    fn reserve_tail_with_wait(
+        self: &Arc<Self>,
+        mut on_wait: impl FnMut(),
+    ) -> Option<Arc<AudioQueuePermit>> {
+        let mut guard = self.wait_lock.lock().unwrap();
+        loop {
+            if self.closed.load(Ordering::Acquire) {
+                return None;
+            }
+            if let Some(permit) = self.reserve(1) {
+                return Some(permit);
+            }
+            on_wait();
+            guard = self.released.wait(guard).unwrap();
+        }
+    }
+}
+
+/// Opaque ownership of a queue reservation; clones share one reservation.
+#[derive(Debug)]
+pub struct AudioQueuePermit {
+    budget: Arc<AudioQueueBudget>,
+    lanes: usize,
+}
+
+impl Drop for AudioQueuePermit {
+    fn drop(&mut self) {
+        let _guard = self.budget.wait_lock.lock().unwrap();
+        self.budget.reserved.fetch_sub(self.lanes, Ordering::AcqRel);
+        self.budget.released.notify_one();
+    }
+}
 
 /// Hand one chunk to the engine without blocking (this runs on the
 /// real-time mic callback for dictation). A full queue means the engine has
@@ -214,11 +292,15 @@ pub const AUDIO_QUEUE_CAPACITY: usize = AUDIO_BACKLOG_CAP_SECONDS as usize * PEA
 /// and counted, which is what bounds the startup buffer.
 fn offer_chunk(
     sender: &Sender<AudioMessage>,
-    chunk: AudioChunk,
+    mut chunk: AudioChunk,
     dropped_counter: &AtomicU64,
+    budget: &Arc<AudioQueueBudget>,
 ) -> bool {
-    if sender.try_send(AudioMessage::Chunk(chunk)).is_ok() {
-        return true;
+    if let Some(permit) = budget.reserve(1) {
+        chunk.queue_permit = Some(permit);
+        if sender.try_send(AudioMessage::Chunk(chunk)).is_ok() {
+            return true;
+        }
     }
     let dropped = dropped_counter.fetch_add(1, Ordering::Relaxed) + 1;
     if dropped == 1 || dropped.is_multiple_of(100) {
@@ -234,29 +316,34 @@ fn offer_chunk(
 /// the engine, both or neither. The engine pairs the two lanes sample for
 /// sample, so dropping only one of them would shift that lane for the rest
 /// of the session. The meeting tick is the only producer while a meeting
-/// records, so the room checked here is still there for the two sends.
-fn offer_chunk_pair(
+/// records. A single reservation and payload make admission and consumption atomic.
+pub(crate) fn offer_chunk_pair(
     sender: &Sender<AudioMessage>,
     me: AudioChunk,
     them: AudioChunk,
     dropped_counter: &AtomicU64,
+    budget: &Arc<AudioQueueBudget>,
 ) -> bool {
-    let room = sender
-        .capacity()
-        .map_or(usize::MAX, |cap| cap.saturating_sub(sender.len()));
-    if room < 2 {
-        let dropped = dropped_counter.fetch_add(2, Ordering::Relaxed) + 2;
-        if dropped <= 2 || dropped % 100 < 2 {
-            warn!(
-                "Audio queue full (about {AUDIO_BACKLOG_CAP_SECONDS} s waiting for the engine), \
-                 dropping samples ({dropped} chunks dropped this session)"
-            );
-        }
-        return false;
+    if let Some(permit) = budget.reserve(2)
+        && sender
+            .try_send(AudioMessage::DiarizedPair {
+                session_id: me.session_id,
+                captured_at: me.captured_at.min(them.captured_at),
+                me: me.samples,
+                them: them.samples,
+                queue_permit: Some(permit),
+            })
+            .is_ok()
+    {
+        return true;
     }
-    let me_sent = offer_chunk(sender, me, dropped_counter);
-    let them_sent = offer_chunk(sender, them, dropped_counter);
-    me_sent && them_sent
+    let dropped = dropped_counter.fetch_add(2, Ordering::Relaxed) + 2;
+    if dropped <= 2 || dropped % 100 < 2 {
+        warn!(
+            "Audio queue full (about {AUDIO_BACKLOG_CAP_SECONDS} s waiting for the engine), dropping samples ({dropped} chunks dropped this session)"
+        );
+    }
+    false
 }
 
 /// How often the meeting tick re-checks the default output route. Property
@@ -1730,6 +1817,8 @@ impl MeetingState {
 
 #[derive(Debug, Clone)]
 pub struct AudioChunk {
+    /// Queue admission ownership, released when the actor ingests the chunk.
+    pub queue_permit: Option<Arc<AudioQueuePermit>>,
     pub session_id: u64,
     pub samples: Vec<f32>,
     /// When the chunk left the capture callback — used for lag tracking.
@@ -1744,12 +1833,59 @@ pub struct AudioChunk {
 #[derive(Debug, Clone)]
 pub enum AudioMessage {
     Chunk(AudioChunk),
+    /// One mixer tick: both lanes enter the actor before any frame is drained.
+    DiarizedPair {
+        session_id: u64,
+        captured_at: Instant,
+        me: Vec<f32>,
+        them: Vec<f32>,
+        queue_permit: Option<Arc<AudioQueuePermit>>,
+    },
     /// Sent after the cpal stream is dropped and the resampler flushed —
     /// guaranteed to be the last message of a session, so the actor can
     /// drain deterministically instead of sleeping.
     EndOfStream {
         session_id: u64,
     },
+}
+
+/// List all available input devices. Logged at info level (device count) so
+impl AudioMessage {
+    pub(crate) fn session_id(&self) -> u64 {
+        match self {
+            Self::Chunk(chunk) => chunk.session_id,
+            Self::DiarizedPair { session_id, .. } | Self::EndOfStream { session_id } => *session_id,
+        }
+    }
+}
+
+/// Owns receiver liveness so closing the actor wakes a waiting stop tail.
+pub struct AudioReceiver {
+    rx: Receiver<AudioMessage>,
+    budget: Option<Arc<AudioQueueBudget>>,
+}
+
+impl From<Receiver<AudioMessage>> for AudioReceiver {
+    fn from(rx: Receiver<AudioMessage>) -> Self {
+        Self { rx, budget: None }
+    }
+}
+
+impl std::ops::Deref for AudioReceiver {
+    type Target = Receiver<AudioMessage>;
+    fn deref(&self) -> &Self::Target {
+        &self.rx
+    }
+}
+
+impl Drop for AudioReceiver {
+    fn drop(&mut self) {
+        if let Some(budget) = &self.budget {
+            let _guard = budget.wait_lock.lock().unwrap();
+            budget.closed.store(true, Ordering::Release);
+            budget.released.notify_all();
+        }
+    }
 }
 
 /// List all available input devices. Logged at info level (device count) so
@@ -1851,6 +1987,7 @@ fn mic_device_is_alive(id: u32) -> bool {
 pub struct AudioCapture {
     stream: Option<Stream>,
     audio_sender: Sender<AudioMessage>,
+    audio_budget: Arc<AudioQueueBudget>,
     /// Pinned input device UID (or legacy name during migration).
     selected_device: Option<String>,
     /// Preferred microphone UID while the lid is closed with an external display
@@ -1950,13 +2087,18 @@ impl AudioCapture {
         audio_rms: Arc<AtomicU32>,
         dropped_counter: Arc<AtomicU64>,
         audio_gone_reason: Arc<Mutex<Option<String>>>,
-    ) -> Result<(Sender<AudioCommand>, Receiver<AudioMessage>), String> {
+    ) -> Result<(Sender<AudioCommand>, AudioReceiver), String> {
         let (cmd_tx, cmd_rx) = crossbeam_channel::unbounded::<AudioCommand>();
         // Bounded channel: many small chunks per second from cpal; inference (Kyutai/Metal)
         // can lag real-time. If this fills, try_send drops audio while RMS/waveform still
         // updates — use a generous bound so the inference thread can catch up.
         let (audio_tx, audio_rx) = crossbeam_channel::bounded::<AudioMessage>(AUDIO_QUEUE_CAPACITY);
 
+        let audio_budget = AudioQueueBudget::new(AUDIO_QUEUE_CAPACITY);
+        let audio_receiver = AudioReceiver {
+            rx: audio_rx,
+            budget: Some(Arc::clone(&audio_budget)),
+        };
         std::thread::Builder::new()
             .name("audio-capture".into())
             .spawn(move || {
@@ -1964,6 +2106,7 @@ impl AudioCapture {
                 let mut capture = AudioCapture {
                     stream: None,
                     audio_sender: audio_tx,
+                    audio_budget,
                     selected_device: None,
                     clamshell_device: None,
                     input_priority: InputPriority::default(),
@@ -2137,7 +2280,7 @@ impl AudioCapture {
             })
             .map_err(|e| format!("Failed to spawn audio thread: {e}"))?;
 
-        Ok((cmd_tx, audio_rx))
+        Ok((cmd_tx, audio_receiver))
     }
 
     /// Which device UID `find_device` should target, given the user's pin,
@@ -2403,6 +2546,7 @@ impl AudioCapture {
         )));
         self.resampler = Some(Arc::clone(&resampler));
         let sender = self.audio_sender.clone();
+        let audio_budget = Arc::clone(&self.audio_budget);
         let recorder_feed = self.recorder.as_ref().and_then(|r| r.push_handle());
         let active_session_id = Arc::clone(&self.active_session_id);
         let rms_ref = Arc::clone(&self.audio_rms);
@@ -2468,12 +2612,14 @@ impl AudioCapture {
                                 offer_chunk(
                                     &sender,
                                     AudioChunk {
+                                        queue_permit: None,
                                         session_id,
                                         samples: resampled,
                                         captured_at: Instant::now(),
                                         speaker: None,
                                     },
                                     &dropped_counter,
+                                    &audio_budget,
                                 );
                             }
                         }));
@@ -3186,12 +3332,14 @@ impl AudioCapture {
         offer_chunk(
             &self.audio_sender,
             AudioChunk {
+                queue_permit: None,
                 session_id,
                 samples,
                 captured_at: Instant::now(),
                 speaker,
             },
             &self.dropped_counter,
+            &self.audio_budget,
         );
     }
 
@@ -3209,18 +3357,21 @@ impl AudioCapture {
                 offer_chunk_pair(
                     &self.audio_sender,
                     AudioChunk {
+                        queue_permit: None,
                         session_id,
                         samples: me,
                         captured_at,
                         speaker: Some(Speaker::Me),
                     },
                     AudioChunk {
+                        queue_permit: None,
                         session_id,
                         samples: them,
                         captured_at,
                         speaker: Some(Speaker::Them),
                     },
                     &self.dropped_counter,
+                    &self.audio_budget,
                 );
             }
         }
@@ -3469,16 +3620,18 @@ impl AudioCapture {
             return;
         }
         self.push_recording_mono(&tail);
-        if self
-            .audio_sender
-            .try_send(AudioMessage::Chunk(AudioChunk {
+        if !offer_chunk(
+            &self.audio_sender,
+            AudioChunk {
+                queue_permit: None,
                 session_id,
                 samples: tail,
                 captured_at: Instant::now(),
                 speaker: None,
-            }))
-            .is_err()
-        {
+            },
+            &self.dropped_counter,
+            &self.audio_budget,
+        ) {
             debug!("Dropped the resampler tail on mic rebuild (channel full)");
         }
     }
@@ -3570,12 +3723,15 @@ impl AudioCapture {
                 let tail = r.flush();
                 if !tail.is_empty() {
                     self.push_recording_mono(&tail);
-                    let _ = self.audio_sender.send(AudioMessage::Chunk(AudioChunk {
-                        session_id,
-                        samples: tail,
-                        captured_at: Instant::now(),
-                        speaker: None,
-                    }));
+                    if let Some(permit) = self.audio_budget.reserve_tail() {
+                        let _ = self.audio_sender.send(AudioMessage::Chunk(AudioChunk {
+                            queue_permit: Some(permit),
+                            session_id,
+                            samples: tail,
+                            captured_at: Instant::now(),
+                            speaker: None,
+                        }));
+                    }
                 }
             }
 
@@ -3662,6 +3818,7 @@ mod backlog_cap_tests {
 
     fn chunk(n: f32) -> AudioChunk {
         AudioChunk {
+            queue_permit: None,
             session_id: 1,
             samples: vec![n; 480],
             captured_at: Instant::now(),
@@ -3676,15 +3833,127 @@ mod backlog_cap_tests {
     fn the_queue_holds_the_whole_startup_cap_of_a_diarized_meeting() {
         let ticks_per_second = 1000 / MEETING_TICK.as_millis() as usize;
         assert!(AUDIO_QUEUE_CAPACITY >= AUDIO_BACKLOG_CAP_SECONDS as usize * 2 * ticks_per_second);
+        let (tx, rx) = crossbeam_channel::bounded(AUDIO_QUEUE_CAPACITY);
+        let budget = super::AudioQueueBudget::new(AUDIO_QUEUE_CAPACITY);
+        let dropped = AtomicU64::new(0);
+        for _ in 0..AUDIO_QUEUE_CAPACITY / 2 {
+            assert!(offer_chunk_pair(
+                &tx,
+                chunk(1.0),
+                chunk(-1.0),
+                &dropped,
+                &budget
+            ));
+        }
+        assert!(!offer_chunk_pair(
+            &tx,
+            chunk(1.0),
+            chunk(-1.0),
+            &dropped,
+            &budget
+        ));
+        assert_eq!(rx.len(), AUDIO_QUEUE_CAPACITY / 2);
+        assert_eq!(
+            budget.reserved.load(Ordering::Acquire),
+            AUDIO_QUEUE_CAPACITY
+        );
+        assert_eq!(dropped.load(Ordering::Relaxed), 2);
+    }
+
+    #[test]
+    fn mixed_queue_preserves_lane_capacity_and_releases_on_drop() {
+        let (tx, rx) = crossbeam_channel::bounded(3);
+        let budget = super::AudioQueueBudget::new(3);
+        let dropped = AtomicU64::new(0);
+        assert!(offer_chunk_pair(
+            &tx,
+            chunk(1.0),
+            chunk(-1.0),
+            &dropped,
+            &budget
+        ));
+        assert!(offer_chunk(&tx, chunk(2.0), &dropped, &budget));
+        assert!(!offer_chunk(&tx, chunk(3.0), &dropped, &budget));
+        let pair = rx.recv().unwrap();
+        let retained = pair.clone();
+        drop(pair);
+        assert!(!offer_chunk_pair(
+            &tx,
+            chunk(4.0),
+            chunk(-4.0),
+            &dropped,
+            &budget
+        ));
+        drop(retained);
+        assert!(offer_chunk_pair(
+            &tx,
+            chunk(4.0),
+            chunk(-4.0),
+            &dropped,
+            &budget
+        ));
+        drop(rx);
+        // Crossbeam retains queued values until its last handle is dropped.
+        assert_eq!(budget.reserved.load(Ordering::Acquire), 3);
+        assert!(!offer_chunk_pair(
+            &tx,
+            chunk(5.0),
+            chunk(-5.0),
+            &dropped,
+            &budget
+        ));
+        drop(tx);
+        assert_eq!(budget.reserved.load(Ordering::Acquire), 0);
+    }
+
+    #[test]
+    fn closing_receiver_wakes_a_tail_waiting_for_weighted_capacity() {
+        let budget = super::AudioQueueBudget::new(2);
+        let (tx, rx) = crossbeam_channel::bounded(2);
+        let receiver = super::AudioReceiver {
+            rx,
+            budget: Some(std::sync::Arc::clone(&budget)),
+        };
+        let dropped = AtomicU64::new(0);
+        assert!(offer_chunk_pair(
+            &tx,
+            chunk(1.0),
+            chunk(-1.0),
+            &dropped,
+            &budget
+        ));
+        let (waiting_tx, waiting_rx) = crossbeam_channel::bounded(1);
+        let (done_tx, done_rx) = crossbeam_channel::bounded(1);
+        let worker_budget = std::sync::Arc::clone(&budget);
+        let worker = std::thread::spawn(move || {
+            let mut signal = Some(waiting_tx);
+            let result = worker_budget.reserve_tail_with_wait(|| {
+                if let Some(tx) = signal.take() {
+                    tx.send(()).unwrap();
+                }
+            });
+            done_tx.send(result.is_none()).unwrap();
+        });
+        waiting_rx
+            .recv_timeout(std::time::Duration::from_secs(1))
+            .unwrap();
+        drop(receiver);
+        assert!(
+            done_rx
+                .recv_timeout(std::time::Duration::from_secs(1))
+                .unwrap()
+        );
+        worker.join().unwrap();
     }
 
     #[test]
     fn past_the_cap_chunks_are_dropped_and_counted_and_the_queue_keeps_its_order() {
         let (tx, rx) = crossbeam_channel::bounded(3);
         let dropped = AtomicU64::new(0);
+        let budget = super::AudioQueueBudget::new(3);
 
         let offered: Vec<bool> = (0..5)
-            .map(|n| offer_chunk(&tx, chunk(n as f32), &dropped))
+            .map(|n| offer_chunk(&tx, chunk(n as f32), &dropped, &budget))
             .collect();
 
         assert_eq!(offered, vec![true, true, true, false, false]);
@@ -3695,12 +3964,13 @@ mod backlog_cap_tests {
             .try_iter()
             .map(|m| match m {
                 AudioMessage::Chunk(c) => c.samples[0],
+                AudioMessage::DiarizedPair { me, .. } => me[0],
                 AudioMessage::EndOfStream { .. } => f32::NAN,
             })
             .collect();
         assert_eq!(kept, vec![0.0, 1.0, 2.0]);
         // Once the engine reads again, audio flows again.
-        assert!(offer_chunk(&tx, chunk(9.0), &dropped));
+        assert!(offer_chunk(&tx, chunk(9.0), &dropped, &budget));
     }
 
     /// A full queue drops a diarized tick whole: keeping only its Me half
@@ -3709,23 +3979,42 @@ mod backlog_cap_tests {
     fn a_diarized_tick_is_kept_or_dropped_whole() {
         let (tx, rx) = crossbeam_channel::bounded(3);
         let dropped = AtomicU64::new(0);
+        let budget = super::AudioQueueBudget::new(3);
 
-        assert!(offer_chunk_pair(&tx, chunk(1.0), chunk(-1.0), &dropped));
+        assert!(offer_chunk_pair(
+            &tx,
+            chunk(1.0),
+            chunk(-1.0),
+            &dropped,
+            &budget
+        ));
         // One slot left: the next pair does not fit, neither half goes in.
-        assert!(!offer_chunk_pair(&tx, chunk(2.0), chunk(-2.0), &dropped));
-        assert_eq!(tx.len(), 2);
+        assert!(!offer_chunk_pair(
+            &tx,
+            chunk(2.0),
+            chunk(-2.0),
+            &dropped,
+            &budget
+        ));
+        assert_eq!(tx.len(), 1);
         assert_eq!(dropped.load(Ordering::Relaxed), 2);
 
         let _ = rx.try_recv();
-        let _ = rx.try_recv();
-        assert!(offer_chunk_pair(&tx, chunk(3.0), chunk(-3.0), &dropped));
+        assert!(offer_chunk_pair(
+            &tx,
+            chunk(3.0),
+            chunk(-3.0),
+            &dropped,
+            &budget
+        ));
         let kept: Vec<f32> = rx
             .try_iter()
             .map(|m| match m {
                 AudioMessage::Chunk(c) => c.samples[0],
                 AudioMessage::EndOfStream { .. } => f32::NAN,
+                AudioMessage::DiarizedPair { me, .. } => me[0],
             })
             .collect();
-        assert_eq!(kept, vec![3.0, -3.0]);
+        assert_eq!(kept, vec![3.0]);
     }
 }

@@ -153,6 +153,7 @@ fn build_harness(mock: MockEngine) -> Harness {
 /// tagged for the given session (matches `pipeline::actor::tests::audio_chunk`).
 fn audio_chunk(session_id: u64) -> AudioMessage {
     AudioMessage::Chunk(AudioChunk {
+        queue_permit: None,
         session_id,
         samples: vec![0.1f32; MIMI_FRAME_SIZE],
         captured_at: std::time::Instant::now(),

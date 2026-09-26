@@ -188,11 +188,12 @@ impl EngineActorHandle {
     /// left there (e.g. an unrecoverable mic loss) instead of assuming a
     /// generic failure.
     pub fn spawn(
-        audio_rx: Receiver<AudioMessage>,
+        audio_rx: impl Into<crate::audio::capture::AudioReceiver>,
         dropped_counter: Arc<AtomicU64>,
         audio_gone_reason: Arc<Mutex<Option<String>>>,
         factory: EngineFactory,
     ) -> Result<Self, String> {
+        let audio_rx = audio_rx.into();
         let (cmd_tx, cmd_rx) = crossbeam_channel::unbounded::<EngineCommand>();
         let engine_info = Arc::new(Mutex::new(None));
         let actor_engine_info = Arc::clone(&engine_info);
@@ -396,7 +397,7 @@ impl Drop for EngineActorHandle {
 /// The actor itself — only ever touched by its own thread.
 struct EngineActor {
     cmd_rx: Receiver<EngineCommand>,
-    audio_rx: Receiver<AudioMessage>,
+    audio_rx: crate::audio::capture::AudioReceiver,
     factory: EngineFactory,
     engine: Option<Box<dyn TranscriptionEngine>>,
     app: Option<Arc<AppState>>,
@@ -953,8 +954,9 @@ fn take_session_backlog(
     let mut dropped = 0usize;
     while let Ok(message) = audio_rx.try_recv() {
         let own = match &message {
-            AudioMessage::Chunk(chunk) => chunk.session_id == session_id,
-            AudioMessage::EndOfStream { session_id: id } => *id == session_id,
+            AudioMessage::Chunk(_)
+            | AudioMessage::DiarizedPair { .. }
+            | AudioMessage::EndOfStream { .. } => message.session_id() == session_id,
         };
         if own {
             kept.push_back(message);
@@ -1068,6 +1070,9 @@ const MAX_CONSECUTIVE_FRAME_ERRORS: u32 = 25;
 trait SessionMode {
     /// Buffer a chunk's samples (single buffer, or routed by `chunk.speaker`).
     fn ingest(&mut self, chunk: AudioChunk);
+
+    /// An indivisible ingress transition: no engine readiness check between lanes.
+    fn ingest_pair(&mut self, me: Vec<f32>, them: Vec<f32>);
 
     /// True while a full engine frame can be drained from the buffer(s).
     fn frame_ready(&self, chunk_size: usize) -> bool;
@@ -1282,7 +1287,20 @@ impl SingleMode {
     }
 }
 
+fn ingest_message(mode: &mut dyn SessionMode, message: AudioMessage) {
+    match message {
+        AudioMessage::Chunk(chunk) => mode.ingest(chunk),
+        AudioMessage::DiarizedPair { me, them, .. } => mode.ingest_pair(me, them),
+        AudioMessage::EndOfStream { .. } => unreachable!("EOS is not audio"),
+    }
+}
+
 impl SessionMode for SingleMode {
+    fn ingest_pair(&mut self, me: Vec<f32>, them: Vec<f32>) {
+        self.buffer.extend(me);
+        self.buffer.extend(them);
+    }
+
     fn ingest(&mut self, chunk: AudioChunk) {
         self.buffer.extend_from_slice(&chunk.samples);
     }
@@ -1469,6 +1487,15 @@ impl DiarizedMode {
 }
 
 impl SessionMode for DiarizedMode {
+    fn ingest_pair(&mut self, me: Vec<f32>, them: Vec<f32>) {
+        self.me_samples_received = self.me_samples_received.saturating_add(me.len() as u64);
+        self.them_samples_received = self.them_samples_received.saturating_add(them.len() as u64);
+        self.pad_me = false;
+        self.pad_them = false;
+        self.me_buf.extend(me);
+        self.them_buf.extend(them);
+    }
+
     fn ingest(&mut self, chunk: AudioChunk) {
         let n = chunk.samples.len() as u64;
         match chunk.speaker {
@@ -1756,8 +1783,8 @@ fn run_session_loop(
                     return SessionEnd::Stopped(reply, summary);
                 }
             }
-            Ok(AudioMessage::Chunk(chunk)) => {
-                if chunk.session_id != session_id {
+            Ok(message @ (AudioMessage::Chunk(_) | AudioMessage::DiarizedPair { .. })) => {
+                if message.session_id() != session_id {
                     summary.skipped_chunks += 1;
                     if crate::debug::transcription_debug_enabled()
                         && (summary.skipped_chunks <= 5
@@ -1765,24 +1792,34 @@ fn run_session_loop(
                     {
                         debug!(
                             "Ignoring stale audio chunk from session {} while expecting {}",
-                            chunk.session_id, session_id
+                            message.session_id(),
+                            session_id
                         );
                     }
                     continue;
                 }
 
-                health.note_chunk(chunk.captured_at);
+                let (captured_at, lane_samples) = match &message {
+                    AudioMessage::Chunk(chunk) => (
+                        chunk.captured_at,
+                        if chunk.speaker == Some(Speaker::Them) {
+                            0
+                        } else {
+                            chunk.samples.len()
+                        },
+                    ),
+                    AudioMessage::DiarizedPair {
+                        captured_at, me, ..
+                    } => (*captured_at, me.len()),
+                    AudioMessage::EndOfStream { .. } => unreachable!("handled above"),
+                };
+                health.note_chunk(captured_at);
                 // Audio is still arriving, so the audio thread is alive: the
                 // EndOfStream a stop waits for is queued behind it.
                 if let Some((_, requested_at)) = pending_stop.as_mut() {
                     *requested_at = Instant::now();
                 }
-                let lane_samples = if chunk.speaker == Some(Speaker::Them) {
-                    0
-                } else {
-                    chunk.samples.len()
-                };
-                mode.ingest(chunk);
+                ingest_message(mode, message);
 
                 // Process complete engine-sized frames
                 while mode.frame_ready(chunk_size) {
@@ -1881,11 +1918,15 @@ fn finish_session(
     let mut drained = 0usize;
     while let Some(msg) = audio.try_recv() {
         match msg {
-            AudioMessage::Chunk(chunk) if chunk.session_id == session_id => {
-                mode.ingest(chunk);
+            message @ (AudioMessage::Chunk(_) | AudioMessage::DiarizedPair { .. })
+                if message.session_id() == session_id =>
+            {
+                ingest_message(mode, message);
                 drained += 1;
             }
-            AudioMessage::Chunk(_) => summary.skipped_chunks += 1,
+            AudioMessage::Chunk(_) | AudioMessage::DiarizedPair { .. } => {
+                summary.skipped_chunks += 1
+            }
             AudioMessage::EndOfStream { .. } => {}
         }
     }
@@ -2104,6 +2145,7 @@ mod tests {
     /// Helper: create a chunk message with MIMI_FRAME_SIZE samples for the given session.
     fn audio_chunk(session_id: u64) -> AudioMessage {
         AudioMessage::Chunk(AudioChunk {
+            queue_permit: None,
             session_id,
             samples: vec![0.0f32; MIMI_FRAME_SIZE],
             captured_at: std::time::Instant::now(),
@@ -2158,10 +2200,169 @@ mod tests {
         actor.shutdown().expect("second shutdown");
     }
 
+    fn queued_pair_calls(me: Vec<f32>, them: Vec<f32>) -> Vec<(Vec<f32>, Vec<f32>)> {
+        let (tx, rx) = unbounded();
+        let dropped = std::sync::atomic::AtomicU64::new(0);
+        let budget = crate::audio::capture::AudioQueueBudget::new(
+            crate::audio::capture::AUDIO_QUEUE_CAPACITY,
+        );
+        let chunk = |samples, speaker| AudioChunk {
+            queue_permit: None,
+            session_id: 271,
+            samples,
+            captured_at: Instant::now(),
+            speaker: Some(speaker),
+        };
+        assert!(crate::audio::capture::offer_chunk_pair(
+            &tx,
+            chunk(me.clone(), Speaker::Me),
+            chunk(them.clone(), Speaker::Them),
+            &dropped,
+            &budget
+        ));
+        tx.send(end_of_stream(271)).unwrap();
+        let mock = MockEngine::new();
+        let fed = mock.fed_dual_handle();
+        let cell = Mutex::new(Some(mock));
+        let actor = EngineActorHandle::spawn(
+            rx,
+            Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            Arc::new(Mutex::new(None)),
+            Box::new(move |_| Ok(Box::new(cell.lock().unwrap().take().unwrap()))),
+        )
+        .unwrap();
+        actor
+            .load_model(default_transcription_profile(), PathBuf::from("/tmp"))
+            .unwrap();
+        actor
+            .start_session(271, diarized_config(), Box::new(|_| {}))
+            .unwrap();
+        actor.stop_session(Duration::from_secs(2)).unwrap();
+
+        let calls = fed.lock().unwrap().clone();
+        actor.shutdown().unwrap();
+        calls
+    }
+
+    #[test]
+    fn diarized_bursts_queued_before_actor_stay_aligned() {
+        for frames in [1, 6, 7, 10] {
+            for tail in [0, 137] {
+                let me: Vec<f32> = (1..=frames * MIMI_FRAME_SIZE + tail)
+                    .map(|n| n as f32)
+                    .collect();
+                let them: Vec<f32> = me.iter().map(|n| -*n).collect();
+                let calls = queued_pair_calls(me.clone(), them.clone());
+                assert_eq!(
+                    calls.len(),
+                    frames + usize::from(tail > 0),
+                    "burst {frames} tail {tail}"
+                );
+                assert_eq!(
+                    calls
+                        .iter()
+                        .flat_map(|(m, _)| m.clone())
+                        .collect::<Vec<_>>(),
+                    me
+                );
+                assert_eq!(
+                    calls
+                        .iter()
+                        .flat_map(|(_, t)| t.clone())
+                        .collect::<Vec<_>>(),
+                    them
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn meeting_mixer_burst_reaches_actor_with_both_lanes_exact() {
+        use ringbuf::{
+            HeapRb,
+            traits::{Producer, Split},
+        };
+        let (mut mic, mic_rx) = HeapRb::<f32>::new(24000).split();
+        let (mut tap, tap_rx) = HeapRb::<f32>::new(24000).split();
+        let mut mixer =
+            crate::audio::mixer::MeetingMixer::new(mic_rx, 24000, 1, 1.0, tap_rx, 24000, 24000);
+        let len = 10 * MIMI_FRAME_SIZE + 137;
+        assert_eq!(mic.push_slice(&vec![0.25; len]), len);
+        assert_eq!(tap.push_slice(&vec![0.5; len]), len);
+        let (me, them) = mixer.tick_split();
+        assert!(me.len() >= 7 * MIMI_FRAME_SIZE);
+        assert_eq!(me.len(), them.len());
+        let calls = queued_pair_calls(me.clone(), them.clone());
+        assert_eq!(
+            calls
+                .iter()
+                .flat_map(|(m, _)| m.clone())
+                .collect::<Vec<_>>(),
+            me
+        );
+        assert_eq!(
+            calls
+                .iter()
+                .flat_map(|(_, t)| t.clone())
+                .collect::<Vec<_>>(),
+            them
+        );
+    }
+
+    #[test]
+    fn atomic_pairs_survive_stop_during_reset_and_session_changes() {
+        let mock = MockEngine::new().with_reset_delay(RESET);
+        let fed = mock.fed_dual_handle();
+        let (actor, tx) = spawn_with_mock(mock);
+        let budget = crate::audio::capture::AudioQueueBudget::new(20);
+        let dropped = std::sync::atomic::AtomicU64::new(0);
+        for session_id in [1, 2] {
+            let pending = actor
+                .begin_session(session_id, diarized_config(), Box::new(|_| {}))
+                .unwrap();
+            let chunk = |n| AudioChunk {
+                queue_permit: None,
+                session_id,
+                captured_at: Instant::now(),
+                speaker: None,
+                samples: vec![n; 7 * MIMI_FRAME_SIZE + 137],
+            };
+            assert!(crate::audio::capture::offer_chunk_pair(
+                &tx,
+                chunk(session_id as f32),
+                chunk(-(session_id as f32)),
+                &dropped,
+                &budget
+            ));
+            tx.send(end_of_stream(session_id)).unwrap();
+            actor.stop_session(Duration::from_secs(2)).unwrap();
+            pending.wait(Duration::from_secs(1)).unwrap();
+            // A stale pair and marker must be discarded before the next session.
+            assert!(crate::audio::capture::offer_chunk_pair(
+                &tx,
+                chunk(99.0),
+                chunk(-99.0),
+                &dropped,
+                &budget
+            ));
+            tx.send(end_of_stream(session_id)).unwrap();
+        }
+        let calls = fed.lock().unwrap();
+        assert_eq!(calls.len(), 16);
+        for (index, (me, them)) in calls.iter().enumerate() {
+            let value = (index / 8 + 1) as f32;
+            assert!(me.iter().all(|sample| *sample == value));
+            assert!(them.iter().all(|sample| *sample == -value));
+            assert_eq!(me.len(), if index % 8 == 7 { 137 } else { MIMI_FRAME_SIZE });
+        }
+        actor.shutdown().unwrap();
+    }
+
     /// A non-silent chunk tagged with its source, so the mock's transcribe_dual
     /// emits a segment for that lane.
     fn audio_chunk_from(session_id: u64, speaker: Option<Speaker>) -> AudioMessage {
         AudioMessage::Chunk(AudioChunk {
+            queue_permit: None,
             session_id,
             samples: vec![0.5f32; MIMI_FRAME_SIZE],
             captured_at: std::time::Instant::now(),
@@ -2224,6 +2425,7 @@ mod tests {
 
     fn diarized_lane_chunk(speaker: Speaker) -> AudioChunk {
         AudioChunk {
+            queue_permit: None,
             session_id: 1,
             samples: vec![0.5f32; MIMI_FRAME_SIZE],
             captured_at: Instant::now(),
@@ -2801,6 +3003,7 @@ mod tests {
 
         let chunk_size = MIMI_FRAME_SIZE;
         let make_frame = || AudioChunk {
+            queue_permit: None,
             session_id: 1,
             samples: vec![0.0f32; chunk_size],
             captured_at: Instant::now(),
@@ -2855,6 +3058,7 @@ mod tests {
 
         let chunk_size = MIMI_FRAME_SIZE;
         let make_frame = || AudioChunk {
+            queue_permit: None,
             session_id: 1,
             samples: vec![0.0f32; chunk_size],
             captured_at: Instant::now(),
@@ -2922,6 +3126,7 @@ mod tests {
 
         let chunk_size = MIMI_FRAME_SIZE;
         let make_frame = || AudioChunk {
+            queue_permit: None,
             session_id: 1,
             samples: vec![0.0f32; chunk_size],
             captured_at: Instant::now(),
@@ -3001,6 +3206,7 @@ mod tests {
 
         let chunk_size = MIMI_FRAME_SIZE;
         let make_frame = || AudioChunk {
+            queue_permit: None,
             session_id: 1,
             samples: vec![0.0f32; chunk_size],
             captured_at: Instant::now(),
@@ -3057,6 +3263,7 @@ mod tests {
 
         let chunk_size = MIMI_FRAME_SIZE;
         let make_frame = || AudioChunk {
+            queue_permit: None,
             session_id: 1,
             samples: vec![0.0f32; chunk_size],
             captured_at: Instant::now(),
@@ -3093,6 +3300,7 @@ mod tests {
 
         let chunk_size = MIMI_FRAME_SIZE;
         let make_frame = || AudioChunk {
+            queue_permit: None,
             session_id: 1,
             samples: vec![0.0f32; chunk_size],
             captured_at: Instant::now(),
@@ -3136,6 +3344,7 @@ mod tests {
 
         let chunk_size = MIMI_FRAME_SIZE;
         let make_frame = || AudioChunk {
+            queue_permit: None,
             session_id: 1,
             samples: vec![0.0f32; chunk_size],
             captured_at: Instant::now(),
@@ -3164,6 +3373,7 @@ mod tests {
 
         // A partial tail (less than a full frame) left over at session end.
         mode.ingest(AudioChunk {
+            queue_permit: None,
             session_id: 1,
             samples: vec![0.0f32; chunk_size / 2],
             captured_at: Instant::now(),
@@ -3198,6 +3408,7 @@ mod tests {
 
         let chunk_size = MIMI_FRAME_SIZE;
         let make_chunk = |samples: usize| AudioChunk {
+            queue_permit: None,
             session_id: 1,
             samples: vec![0.0f32; samples],
             captured_at: Instant::now(),
@@ -3396,6 +3607,7 @@ mod tests {
             .push_back(Ok(vec![seg("speech")]));
 
         mode.ingest(AudioChunk {
+            queue_permit: None,
             session_id: 1,
             samples: vec![0.0f32; chunk_size],
             captured_at: Instant::now(),
@@ -3420,6 +3632,7 @@ mod tests {
         let mut engine = MockEngine::new();
 
         let make_frame = || AudioChunk {
+            queue_permit: None,
             session_id: 1,
             samples: vec![0.0f32; chunk_size],
             captured_at: Instant::now(),
@@ -3478,6 +3691,7 @@ mod tests {
             1.0
         };
         AudioMessage::Chunk(AudioChunk {
+            queue_permit: None,
             session_id,
             samples: (first..first + len)
                 .map(|i| sign * (i + 1) as f32)
@@ -3727,6 +3941,7 @@ mod tests {
             .iter()
             .map(|m| match m {
                 AudioMessage::Chunk(c) => format!("chunk {}", c.samples[0]),
+                AudioMessage::DiarizedPair { me, .. } => format!("pair {}", me[0]),
                 AudioMessage::EndOfStream { session_id } => format!("eos {session_id}"),
             })
             .collect();
