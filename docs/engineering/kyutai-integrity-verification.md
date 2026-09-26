@@ -30,6 +30,18 @@ E1 baseline, including flush: **622 segments / 311 finals**, identical text and
 final flags, **zero clamps / future timestamps**, over 3,743,820 accepted samples.
 Its result is in the adjacent verification artifacts.
 
+On stop, an invalid model still returns a flush error and cannot forward.
+`salvage_pending_after_flush_error` is a separate inference-free, stop-only
+path that consumes already decoded pending/orphan words exactly once, orphans
+first. It returns finals with the original mapped start and `end = start`,
+preserving text/language/speaker without inventing an EndWord or consulting the
+partially reset State. It never sets Ready. A second salvage is empty (a second
+invalid flush still errors). `finish_session` emits those finals and propagates
+the original flush failure to the stop reply/session-abort path. The normal
+flush path is unchanged. Tests: `invalid_pending_salvage_is_final_once_without_state_or_forward`,
+`finish_session_emits_salvage_after_flush_error_exactly_once` and
+`actor_stop_reports_flush_failure_after_emitting_salvage`.
+
 ## Atomic capture ingress (SOU-271)
 
 The producer now sends one `DiarizedPair` domain payload. The actor invokes

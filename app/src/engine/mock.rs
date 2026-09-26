@@ -21,6 +21,7 @@ pub struct MockEngine {
     loaded: bool,
     pub transcribe_responses: VecDeque<Result<Vec<TranscriptionSegment>, EngineError>>,
     pub flush_responses: VecDeque<Result<Vec<TranscriptionSegment>, EngineError>>,
+    pub salvage_segments: Vec<TranscriptionSegment>,
     /// Shared with tests via `unload_count_handle()` (clone it before handing
     /// the mock to the actor's factory, since the mock itself is moved), so
     /// idle-unload behavior can be observed from outside the actor thread.
@@ -73,6 +74,7 @@ impl MockEngine {
             loaded: false,
             transcribe_responses: VecDeque::new(),
             flush_responses: VecDeque::new(),
+            salvage_segments: Vec::new(),
             unload_count: Arc::new(AtomicUsize::new(0)),
             reset_state_count: Arc::new(AtomicUsize::new(0)),
             reset_state_preserving_count: Arc::new(AtomicUsize::new(0)),
@@ -208,6 +210,10 @@ impl TranscriptionEngine for MockEngine {
 
     fn flush(&mut self) -> Result<Vec<TranscriptionSegment>, EngineError> {
         self.flush_responses.pop_front().unwrap_or(Ok(vec![]))
+    }
+
+    fn salvage_pending_after_flush_error(&mut self) -> Vec<TranscriptionSegment> {
+        std::mem::take(&mut self.salvage_segments)
     }
 
     fn reset_state(&mut self) -> Result<(), EngineError> {

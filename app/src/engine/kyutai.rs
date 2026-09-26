@@ -701,6 +701,26 @@ impl KyutaiEngine {
         }
     }
 
+    fn salvage_invalid_pending<M: AsrBatchModel>(
+        model: &mut M,
+    ) -> Option<Vec<TranscriptionSegment>> {
+        match model.integrity() {
+            ModelIntegrity::Ready => return None,
+            ModelIntegrity::Invalid => {}
+        }
+        // No State access: these starts were mapped in their original epoch.
+        // Without a trustworthy EndWord, close at start rather than inventing
+        // a duration from a partially reset model's clock. Keep invalidity.
+        let mut segments = Vec::new();
+        let (pending, orphans) = model.words();
+        Self::drain_orphans(orphans, &mut segments);
+        for word in pending.iter_mut().filter_map(Option::take) {
+            let end = word.start_time;
+            segments.push(Self::pending_to_segment(word, end));
+        }
+        Some(segments)
+    }
+
     /// Soft KV-cache clear: empties LM/Mimi/ItemState without rebuilding Metal
     /// devices or remapping weights. Preferred over full `reset_state` mid-session.
     fn refresh_loaded(model: &mut LoadedModel, kind: RefreshKind) -> Result<(), EngineError> {
@@ -1495,6 +1515,13 @@ impl TranscriptionEngine for KyutaiEngine {
         KyutaiEngine::reset_state(self)
     }
 
+    fn salvage_pending_after_flush_error(&mut self) -> Vec<TranscriptionSegment> {
+        self.model
+            .as_mut()
+            .and_then(Self::salvage_invalid_pending)
+            .unwrap_or_default()
+    }
+
     fn reset_state_preserving_timeline(&mut self) -> Result<(), EngineError> {
         KyutaiEngine::reset_state_preserving_timeline(self)
     }
@@ -1841,6 +1868,42 @@ mod tests {
             model = BatchTestModel::new(2, 0.0); // A fresh reconstructed model only.
             assert!(model.integrity.ensure_ready().is_ok());
         }
+    }
+
+    #[test]
+    fn invalid_pending_salvage_is_final_once_without_state_or_forward() {
+        let mut model = BatchTestModel::new(2, 0.0);
+        let word = |text: &str, start, speaker| PendingWord {
+            text: text.into(),
+            start_time: start,
+            language: Some("fr".into()),
+            speaker: Some(speaker),
+        };
+        model.orphans.push(word("orphan", 9.0, Speaker::Them));
+        model.pending[0] = Some(word("pending", 10.0, Speaker::Me));
+        assert!(KyutaiEngine::salvage_invalid_pending(&mut model).is_none());
+        model.integrity = ModelIntegrity::Invalid;
+        let timeline = [model.timeline(0), model.timeline(1)];
+        let segments = KyutaiEngine::salvage_invalid_pending(&mut model).unwrap();
+        assert_eq!(
+            segments.iter().map(|s| s.text.as_str()).collect::<Vec<_>>(),
+            ["orphan", "pending"]
+        );
+        for segment in &segments {
+            assert!(segment.is_final);
+            assert_eq!(segment.end_time, segment.start_time);
+            assert_eq!(segment.language.as_deref(), Some("fr"));
+        }
+        assert_eq!(segments[0].speaker, Some(Speaker::Them));
+        assert_eq!(segments[1].speaker, Some(Speaker::Me));
+        assert!(
+            KyutaiEngine::salvage_invalid_pending(&mut model)
+                .unwrap()
+                .is_empty()
+        );
+        assert!(model.integrity.ensure_ready().is_err());
+        assert_eq!([model.timeline(0), model.timeline(1)], timeline);
+        assert_eq!(model.resets, 0);
     }
 
     use super::*;

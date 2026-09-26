@@ -1697,7 +1697,7 @@ fn run_session_loop(
                 }
                 if eos_received {
                     summary.dropped_chunks = health.dropped_chunks();
-                    finish_session(
+                    if let Err(error) = finish_session(
                         audio,
                         engine,
                         on_segment,
@@ -1705,7 +1705,10 @@ fn run_session_loop(
                         text_filters,
                         mode,
                         &mut summary,
-                    );
+                    ) {
+                        let _ = reply.send(Err(error.clone()));
+                        return SessionEnd::Aborted(error);
+                    }
                     return SessionEnd::Stopped(reply, summary);
                 }
                 // All audio up to the stream drop is still in flight —
@@ -1750,7 +1753,7 @@ fn run_session_loop(
             warn!("End-of-stream marker never arrived; finishing session anyway");
             let (reply, _) = pending_stop.take().expect("pending_stop checked above");
             summary.dropped_chunks = health.dropped_chunks();
-            finish_session(
+            if let Err(error) = finish_session(
                 audio,
                 engine,
                 on_segment,
@@ -1758,7 +1761,10 @@ fn run_session_loop(
                 text_filters,
                 mode,
                 &mut summary,
-            );
+            ) {
+                let _ = reply.send(Err(error.clone()));
+                return SessionEnd::Aborted(error);
+            }
             return SessionEnd::Stopped(reply, summary);
         }
 
@@ -1771,7 +1777,7 @@ fn run_session_loop(
                 eos_received = true;
                 if let Some((reply, _)) = pending_stop.take() {
                     summary.dropped_chunks = health.dropped_chunks();
-                    finish_session(
+                    if let Err(error) = finish_session(
                         audio,
                         engine,
                         on_segment,
@@ -1779,7 +1785,10 @@ fn run_session_loop(
                         text_filters,
                         mode,
                         &mut summary,
-                    );
+                    ) {
+                        let _ = reply.send(Err(error.clone()));
+                        return SessionEnd::Aborted(error);
+                    }
                     return SessionEnd::Stopped(reply, summary);
                 }
             }
@@ -1910,7 +1919,7 @@ fn finish_session(
     text_filters: &Rc<RefCell<TextFilterChain>>,
     mode: &mut dyn SessionMode,
     summary: &mut SessionSummary,
-) {
+) -> Result<(), String> {
     let chunk_size = engine.audio_requirements().chunk_size_samples as usize;
 
     // Collect anything still queued (normally nothing — EndOfStream is the
@@ -1983,8 +1992,26 @@ fn finish_session(
             for seg in segments {
                 emit_filtered(engine, text_filters, seg, on_segment);
             }
+            Ok(())
         }
-        Err(e) => error!("Flush error: {e}"),
+        Err(e) => {
+            error!("Flush error: {e}");
+            // Preserve the failure signal while recovering already decoded
+            // words through a separate, inference-free stop-only path.
+            match catch_engine(|| {
+                Ok::<_, crate::engine::EngineError>(engine.salvage_pending_after_flush_error())
+            }) {
+                Ok(segments) => {
+                    for seg in segments {
+                        emit_filtered(engine, text_filters, seg, on_segment);
+                    }
+                }
+                Err(salvage_error) => {
+                    error!("Pending-word salvage error after flush failed: {salvage_error}")
+                }
+            }
+            Err(e)
+        }
     }
 }
 
@@ -2737,6 +2764,75 @@ mod tests {
             "Expected flush segment 'flushed', got: {:?}",
             segments.iter().map(|s| &s.text).collect::<Vec<_>>()
         );
+    }
+
+    #[test]
+    fn finish_session_emits_salvage_after_flush_error_exactly_once() {
+        let mut engine = MockEngine::new();
+        for _ in 0..2 {
+            engine
+                .flush_responses
+                .push_back(Err(crate::engine::EngineError::InferenceError(
+                    "invalid reset".into(),
+                )));
+        }
+        let mut recovered = seg("pending");
+        recovered.is_final = true;
+        recovered.end_time = recovered.start_time;
+        engine.salvage_segments.push(recovered);
+        let fed = engine.fed_dual_handle();
+        let (_tx, rx) = unbounded::<AudioMessage>();
+        let (collected, cb) = collecting_callback();
+        let filters = Rc::new(RefCell::new(TextFilterChain::new(vec![])));
+        let mut audio = super::SessionAudio::new(&rx, std::collections::VecDeque::new());
+        let mut mode = DiarizedMode::new();
+        let mut summary = SessionSummary::default();
+        for _ in 0..2 {
+            assert!(
+                finish_session(
+                    &mut audio,
+                    &mut engine,
+                    &cb,
+                    1,
+                    &filters,
+                    &mut mode,
+                    &mut summary,
+                )
+                .is_err()
+            );
+        }
+        let segments = collected.lock().unwrap();
+        assert_eq!(segments.len(), 1);
+        assert_eq!(segments[0].text, "pending");
+        assert!(segments[0].is_final);
+        assert!(fed.lock().unwrap().is_empty());
+        assert!(engine.flush_responses.is_empty()); // Both flushes still failed.
+    }
+
+    #[test]
+    fn actor_stop_reports_flush_failure_after_emitting_salvage() {
+        let mut mock = MockEngine::new().with_flush_response(Err(
+            crate::engine::EngineError::InferenceError("invalid reset".into()),
+        ));
+        let mut recovered = seg("salvaged");
+        recovered.is_final = true;
+        mock.salvage_segments.push(recovered);
+        let (actor, tx) = spawn_with_mock(mock);
+        let (collected, callback) = collecting_callback();
+        actor.start_session(1, session_config(), callback).unwrap();
+        tx.send(end_of_stream(1)).unwrap();
+        let error = actor.stop_session(Duration::from_secs(2)).unwrap_err();
+        assert!(error.contains("invalid reset"));
+        assert_eq!(
+            collected
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|s| s.text.clone())
+                .collect::<Vec<_>>(),
+            ["salvaged"]
+        );
+        actor.shutdown().unwrap();
     }
 
     #[test]
@@ -3548,7 +3644,8 @@ mod tests {
             &text_filters,
             &mut mode,
             &mut summary,
-        );
+        )
+        .unwrap();
 
         let texts: Vec<String> = collected
             .lock()
