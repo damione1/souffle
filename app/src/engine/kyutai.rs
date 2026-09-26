@@ -708,6 +708,31 @@ impl KyutaiEngine {
         }
     }
 
+    fn transcription_call<M: AsrBatchModel>(
+        model: &mut M,
+        run: impl FnOnce(&mut M, &mut Vec<TranscriptionSegment>) -> Result<(), EngineError>,
+    ) -> Result<Vec<TranscriptionSegment>, EngineError> {
+        model.integrity().ensure_ready()?;
+        let mut segments = Vec::new();
+        match run(model, &mut segments) {
+            Ok(()) => Ok(segments),
+            Err(error) => {
+                match model.integrity() {
+                    ModelIntegrity::Ready => {}
+                    ModelIntegrity::Invalid => {
+                        // Result cannot publish partial outputs. Retain finals
+                        // from every frame/prefix of this call, regardless of
+                        // which reset failed. Pending metadata supplies previews.
+                        model
+                            .completed_salvage()
+                            .extend(segments.into_iter().filter(|segment| segment.is_final));
+                    }
+                }
+                Err(error)
+            }
+        }
+    }
+
     fn salvage_invalid_pending<M: AsrBatchModel>(
         model: &mut M,
     ) -> Option<Vec<TranscriptionSegment>> {
@@ -792,12 +817,13 @@ impl KyutaiEngine {
             &mut model.frames_since_lane_reset,
             batch_idx,
         );
-        if let Err(e) = model.state.reset_batch_idx(batch_idx) {
-            // Moshi can mutate ItemState before LM/Mimi fails. Only a genuine
-            // rebuild can make this model safe to forward again; no rollback.
-            model.integrity = ModelIntegrity::Invalid;
-            return Err(EngineError::InferenceError(format!("ASR lane reset: {e}")));
-        }
+        Self::complete_reset(
+            &mut model.integrity,
+            model
+                .state
+                .reset_batch_idx(batch_idx)
+                .map_err(|e| EngineError::InferenceError(format!("ASR lane reset: {e}"))),
+        )?;
         if let Some(streak) = model.vad_pause_streak.get_mut(batch_idx) {
             *streak = 0;
         }
@@ -824,6 +850,18 @@ impl KyutaiEngine {
             "ASR lane context reset (per-batch KV clear)"
         );
         Ok(())
+    }
+
+    fn complete_reset(
+        integrity: &mut ModelIntegrity,
+        result: Result<(), EngineError>,
+    ) -> Result<(), EngineError> {
+        if result.is_err() {
+            // Per-lane Moshi reset can mutate ItemState before LM/Mimi fails.
+            // Only reconstruction permits another forward.
+            *integrity = ModelIntegrity::Invalid;
+        }
+        result
     }
 
     fn maybe_refresh_before_frame(model: &mut LoadedModel) -> Result<(), EngineError> {
@@ -1149,20 +1187,10 @@ impl KyutaiEngine {
         for lane in requested_resets {
             if let Err(e) = model.reset_lane(lane) {
                 *model.integrity() = ModelIntegrity::Invalid;
-                // Engine API returns Result, not partial segments + error.
-                // Keep completed finals for stop-only salvage, including those
-                // from earlier frames of this failed call. Previews are not
-                // retained: pending/orphan metadata will supply their finals.
-                let completed = segments.iter().filter(|segment| segment.is_final).count();
                 warn!(
                     lane,
-                    completed_segments = completed,
-                    discarded_previews = segments.len() - completed,
-                    "ASR reset failed; invalidating model and retaining completed outputs for stop salvage: {e}"
+                    "ASR reset failed; invalidating model; call boundary retains completed outputs for stop salvage: {e}"
                 );
-                model
-                    .completed_salvage()
-                    .extend(segments.drain(..).filter(|segment| segment.is_final));
                 return Err(e);
             }
         }
@@ -1396,13 +1424,12 @@ impl TranscriptionEngine for KyutaiEngine {
         let debug_enabled = crate::debug::transcription_debug_enabled();
         let model = self.model.as_mut().ok_or(EngineError::NotInitialized)?;
 
-        let mut segments = Vec::new();
         model.integrity.ensure_ready()?;
 
         // Debug: save first 3s of audio per session to WAV for offline analysis
         if debug_enabled {
             let Ok(mut dbg) = DEBUG_SAMPLES.lock() else {
-                return Ok(segments);
+                return Ok(Vec::new());
             };
             if dbg.is_none() && FRAME_COUNT.load(Ordering::Relaxed) == 0 {
                 *dbg = Some(Vec::with_capacity(SAMPLE_RATE as usize * 3));
@@ -1454,29 +1481,31 @@ impl TranscriptionEngine for KyutaiEngine {
         // Process audio in MIMI_FRAME_SIZE-sample frames (80ms at 24kHz).
         // Soft context refresh + silence prefix are handled per-frame so a
         // mid-session KV clear can re-anchor before the next real samples.
-        for chunk in audio.chunks(MIMI_FRAME_SIZE) {
-            Self::maybe_refresh_before_frame(model)?;
-            if model.prefix_pending {
-                Self::feed_silence_prefix(model, &device, debug_enabled, &mut segments)?;
+        Self::transcription_call(model, |model, segments| {
+            for chunk in audio.chunks(MIMI_FRAME_SIZE) {
+                Self::maybe_refresh_before_frame(model)?;
+                if model.prefix_pending {
+                    Self::feed_silence_prefix(model, &device, debug_enabled, segments)?;
+                }
+
+                let padded;
+                let chunk_data = if chunk.len() < MIMI_FRAME_SIZE {
+                    padded = {
+                        let mut v = chunk.to_vec();
+                        v.resize(MIMI_FRAME_SIZE, 0.0);
+                        v
+                    };
+                    &padded[..]
+                } else {
+                    chunk
+                };
+
+                let asr_msgs = Self::step_pcm_single(model, &device, chunk_data, debug_enabled)?;
+                Self::consume_asr_msgs(model, &asr_msgs, debug_enabled, segments)?;
             }
 
-            let padded;
-            let chunk_data = if chunk.len() < MIMI_FRAME_SIZE {
-                padded = {
-                    let mut v = chunk.to_vec();
-                    v.resize(MIMI_FRAME_SIZE, 0.0);
-                    v
-                };
-                &padded[..]
-            } else {
-                chunk
-            };
-
-            let asr_msgs = Self::step_pcm_single(model, &device, chunk_data, debug_enabled)?;
-            Self::consume_asr_msgs(model, &asr_msgs, debug_enabled, &mut segments)?;
-        }
-
-        Ok(segments)
+            Ok(())
+        })
     }
 
     fn flush(&mut self) -> Result<Vec<TranscriptionSegment>, EngineError> {
@@ -1558,7 +1587,6 @@ impl TranscriptionEngine for KyutaiEngine {
         let debug_enabled = crate::debug::transcription_debug_enabled();
         let model = self.model.as_mut().ok_or(EngineError::NotInitialized)?;
         let device = model.device.clone();
-        let mut segments = Vec::new();
         model.integrity.ensure_ready()?;
 
         // Both lanes step together; cover whichever is longer (the mixer keeps
@@ -1568,21 +1596,23 @@ impl TranscriptionEngine for KyutaiEngine {
             .div_ceil(MIMI_FRAME_SIZE)
             .max(them.len().div_ceil(MIMI_FRAME_SIZE));
 
-        for f in 0..frame_count {
-            Self::maybe_refresh_before_frame(model)?;
-            if model.prefix_pending {
-                Self::feed_silence_prefix(model, &device, debug_enabled, &mut segments)?;
+        Self::transcription_call(model, |model, segments| {
+            for f in 0..frame_count {
+                Self::maybe_refresh_before_frame(model)?;
+                if model.prefix_pending {
+                    Self::feed_silence_prefix(model, &device, debug_enabled, segments)?;
+                }
+
+                let mut data = Vec::with_capacity(2 * MIMI_FRAME_SIZE);
+                data.extend_from_slice(&frame_at(me, f));
+                data.extend_from_slice(&frame_at(them, f));
+
+                let asr_msgs = Self::step_pcm_dual(model, &device, &data)?;
+                Self::consume_asr_msgs(model, &asr_msgs, debug_enabled, segments)?;
             }
 
-            let mut data = Vec::with_capacity(2 * MIMI_FRAME_SIZE);
-            data.extend_from_slice(&frame_at(me, f));
-            data.extend_from_slice(&frame_at(them, f));
-
-            let asr_msgs = Self::step_pcm_dual(model, &device, &data)?;
-            Self::consume_asr_msgs(model, &asr_msgs, debug_enabled, &mut segments)?;
-        }
-
-        Ok(segments)
+            Ok(())
+        })
     }
 
     fn audio_requirements(&self) -> AudioInputRequirements {
@@ -1625,6 +1655,18 @@ impl TranscriptionEngine for KyutaiEngine {
 
 #[cfg(test)]
 mod tests {
+    fn consume_test_call(
+        model: &mut BatchTestModel,
+        batch: &[moshi::asr::AsrMsg],
+        output: &mut Vec<TranscriptionSegment>,
+    ) -> Result<(), EngineError> {
+        output.extend(KyutaiEngine::transcription_call(
+            model,
+            |model, segments| KyutaiEngine::consume_asr_msgs(model, batch, false, segments),
+        )?);
+        Ok(())
+    }
+
     struct BatchTestModel {
         integrity: ModelIntegrity,
         completed_salvage: Vec<TranscriptionSegment>,
@@ -1781,8 +1823,7 @@ mod tests {
                         });
                     }
                     let mut segments = Vec::new();
-                    let result =
-                        KyutaiEngine::consume_asr_msgs(&mut model, &batch, false, &mut segments);
+                    let result = consume_test_call(&mut model, &batch, &mut segments);
                     if failed {
                         assert!(result.is_err());
                         assert!(segments.is_empty());
@@ -1841,7 +1882,7 @@ mod tests {
             },
         ];
         let mut segments = Vec::new();
-        assert!(KyutaiEngine::consume_asr_msgs(&mut model, &batch, false, &mut segments).is_err());
+        assert!(consume_test_call(&mut model, &batch, &mut segments).is_err());
         assert_eq!(model.resets, 1);
         assert!(segments.is_empty());
     }
@@ -1860,9 +1901,7 @@ mod tests {
                 },
             ];
             let mut segments = Vec::new();
-            assert!(
-                KyutaiEngine::consume_asr_msgs(&mut model, &batch, false, &mut segments).is_err()
-            );
+            assert!(consume_test_call(&mut model, &batch, &mut segments).is_err());
             assert_eq!(model.item_reset, partial);
             assert!(segments.is_empty()); // Explicit error API: no partial publication.
             let credited = model.timeline(0);
@@ -1872,10 +1911,7 @@ mod tests {
                 if model.integrity.ensure_ready().is_ok() {
                     forwards += 1;
                 }
-                assert!(
-                    KyutaiEngine::consume_asr_msgs(&mut model, &batch, false, &mut segments)
-                        .is_err()
-                );
+                assert!(consume_test_call(&mut model, &batch, &mut segments).is_err());
             }
             assert_eq!(forwards, 0);
             assert_eq!(model.resets, 1);
@@ -1939,9 +1975,7 @@ mod tests {
                 batch.push(e1_word(0, 58.56));
             }
             let mut output = Vec::new();
-            assert!(
-                KyutaiEngine::consume_asr_msgs(&mut model, &batch, false, &mut output).is_err()
-            );
+            assert!(consume_test_call(&mut model, &batch, &mut output).is_err());
             assert!(output.is_empty());
             let salvaged = KyutaiEngine::salvage_invalid_pending(&mut model).unwrap();
             assert_eq!(salvaged.len(), 1 + usize::from(unfinished_word));
@@ -1959,6 +1993,89 @@ mod tests {
             );
             assert!(model.integrity.ensure_ready().is_err());
             assert_eq!(model.resets, 1);
+        }
+    }
+
+    #[test]
+    fn pre_frame_soft_pause_failure_salvages_prior_frame_finals_once() {
+        let mut model = BatchTestModel::new(2, 0.0);
+        model.tracker.reset_all(); // First frame must not request a language reset.
+        model.fail_reset = true;
+        model.partial_mutation = true;
+        let mut forwards = 0;
+        let result = KyutaiEngine::transcription_call(&mut model, |model, segments| {
+            for frame in 0..3 {
+                model.integrity.ensure_ready()?;
+                if frame == 1 {
+                    assert_eq!(
+                        decide_refresh(738, 750, &[12, 0], &[false, false], 2, 6),
+                        RefreshDecision::Lane {
+                            batch_idx: 0,
+                            kind: RefreshKind::SoftPause
+                        }
+                    );
+                    let reset = model.reset_lane(0);
+                    KyutaiEngine::complete_reset(&mut model.integrity, reset)?;
+                }
+                forwards += 1;
+                KyutaiEngine::consume_asr_msgs(
+                    model,
+                    &[
+                        e1_word(0, 58.24),
+                        moshi::asr::AsrMsg::EndWord {
+                            stop_time: 58.32,
+                            batch_idx: 0,
+                        },
+                        e1_word(1, 58.56),
+                    ],
+                    false,
+                    segments,
+                )?;
+            }
+            Ok(())
+        });
+        assert!(
+            matches!(result, Err(EngineError::InferenceError(ref error)) if error == "E1 injected KV failure")
+        );
+        assert_eq!(forwards, 1);
+        assert!(model.item_reset);
+        let salvaged = KyutaiEngine::salvage_invalid_pending(&mut model).unwrap();
+        assert_eq!(salvaged.len(), 2);
+        assert!(salvaged.iter().all(|segment| segment.is_final
+            && segment.text == "bonjour"
+            && segment.language.as_deref() == Some("fr")));
+        assert_eq!(salvaged[0].speaker, Some(Speaker::Me));
+        assert!((salvaged[0].start_time - 107.04).abs() < 1e-8);
+        assert!((salvaged[0].end_time - 107.12).abs() < 1e-8);
+        assert_eq!(salvaged[1].speaker, Some(Speaker::Them));
+        assert!((salvaged[1].start_time - 107.36).abs() < 1e-8);
+        assert_eq!(salvaged[1].end_time, salvaged[1].start_time);
+        assert!(
+            KyutaiEngine::salvage_invalid_pending(&mut model)
+                .unwrap()
+                .is_empty()
+        );
+        assert!(model.integrity.ensure_ready().is_err());
+        assert_eq!(model.resets, 1);
+    }
+
+    #[test]
+    fn lane_reset_failure_invalidates_without_masking_original_error() {
+        for partial in [false, true] {
+            let mut integrity = ModelIntegrity::Ready;
+            KyutaiEngine::complete_reset(&mut integrity, Ok(())).unwrap();
+            assert!(integrity.ensure_ready().is_ok());
+            let message = format!("ASR lane reset: injected mutation={partial}");
+            let error = KyutaiEngine::complete_reset(
+                &mut integrity,
+                Err(EngineError::InferenceError(message.clone())),
+            )
+            .unwrap_err();
+            assert!(matches!(error, EngineError::InferenceError(actual) if actual == message));
+            assert!(integrity.ensure_ready().is_err());
+            // A later successful reset is not a reconstruction.
+            KyutaiEngine::complete_reset(&mut integrity, Ok(())).unwrap();
+            assert!(integrity.ensure_ready().is_err());
         }
     }
 
