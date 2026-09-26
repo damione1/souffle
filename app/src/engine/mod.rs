@@ -212,6 +212,12 @@ pub trait TranscriptionEngine {
         language: Option<&str>,
     ) -> Result<Vec<TranscriptionSegment>, EngineError>;
     fn flush(&mut self) -> Result<Vec<TranscriptionSegment>, EngineError>;
+    /// Stop-only salvage after a failed flush. Returns already decoded words,
+    /// never performs inference or repairs state, and consumes them once.
+    /// The caller must retain/report the flush error separately.
+    fn salvage_pending_after_flush_error(&mut self) -> Vec<TranscriptionSegment> {
+        Vec::new()
+    }
     fn reset_state(&mut self) -> Result<(), EngineError>;
     /// Reset the engine's internal state mid-session without rewinding the
     /// transcript: the timeline carries over so words after the reset keep
