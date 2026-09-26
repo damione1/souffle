@@ -309,6 +309,47 @@ struct PendingWord {
     speaker: Option<Speaker>,
 }
 
+// Private instrumentation seam: the production batch loop can be exercised
+// without constructing a multi-GB Moshi State or a SentencePiece tokenizer.
+// The test implementation delegates timeline and pending-word operations to
+// the same production primitives; it only substitutes decoding and KV reset.
+trait AsrBatchModel {
+    fn batch_size(&self) -> usize;
+    fn decode(&self, tokens: &[u32]) -> String;
+    fn map_time(&mut self, raw: f64, lane: usize) -> (f64, f64);
+    fn on_word(&mut self, text: &str, lane: usize) -> bool;
+    fn reset_lane(&mut self, lane: usize) -> Result<(), EngineError>;
+    fn words(&mut self) -> (&mut Vec<Option<PendingWord>>, &mut Vec<PendingWord>);
+    fn note_vad(&mut self, prs: &[Vec<f32>]);
+}
+
+impl AsrBatchModel for LoadedModel {
+    fn batch_size(&self) -> usize {
+        self.state.batch_size()
+    }
+    fn decode(&self, tokens: &[u32]) -> String {
+        self.text_tokenizer
+            .decode_piece_ids(tokens)
+            .unwrap_or_default()
+    }
+    fn map_time(&mut self, raw: f64, lane: usize) -> (f64, f64) {
+        let mapped = KyutaiEngine::word_start_time(self, raw, lane);
+        (mapped, KyutaiEngine::monotonic_time(self, lane, mapped))
+    }
+    fn on_word(&mut self, text: &str, lane: usize) -> bool {
+        self.language_tracker.on_word(text, lane)
+    }
+    fn reset_lane(&mut self, lane: usize) -> Result<(), EngineError> {
+        KyutaiEngine::refresh_lane(self, lane, RefreshKind::LanguageMismatch)
+    }
+    fn words(&mut self) -> (&mut Vec<Option<PendingWord>>, &mut Vec<PendingWord>) {
+        (&mut self.pending_words, &mut self.orphaned_words)
+    }
+    fn note_vad(&mut self, prs: &[Vec<f32>]) {
+        KyutaiEngine::note_vad_pause(self, prs);
+    }
+}
+
 /// Kyutai STT engine implementation.
 /// Uses moshi crate for Mimi audio codec + decoder-only transformer.
 /// Streaming: feed 1920-sample (80ms @ 24kHz) chunks, get words back.
@@ -501,6 +542,10 @@ impl KyutaiEngine {
                 "Lane timestamp regressed; clamping to keep the transcript monotone"
             );
         }
+        Self::clamp_time(floor, raw)
+    }
+
+    fn clamp_time(floor: &mut f64, raw: f64) -> f64 {
         let clamped = raw.max(*floor);
         *floor = clamped;
         clamped
@@ -916,15 +961,18 @@ impl KyutaiEngine {
         Ok(asr_msgs)
     }
 
-    fn consume_asr_msgs(
-        model: &mut LoadedModel,
+    fn consume_asr_msgs<M: AsrBatchModel>(
+        model: &mut M,
         asr_msgs: &[moshi::asr::AsrMsg],
         debug_enabled: bool,
         segments: &mut Vec<TranscriptionSegment>,
     ) {
-        Self::drain_orphans(&mut model.orphaned_words, segments);
+        let (_, orphans) = model.words();
+        Self::drain_orphans(orphans, segments);
         let frame_num = FRAME_COUNT.load(Ordering::Relaxed).saturating_sub(1);
-        let diarized = model.state.batch_size() == 2;
+        let diarized = model.batch_size() == 2;
+        // Every message belongs to the input epoch, including its EndWord.
+        let mut requested_resets = Vec::new();
 
         if debug_enabled && (frame_num < 20 || frame_num.is_multiple_of(50)) {
             let mut words = 0;
@@ -961,10 +1009,7 @@ impl KyutaiEngine {
                     start_time,
                     batch_idx,
                 } => {
-                    let text = model
-                        .text_tokenizer
-                        .decode_piece_ids(tokens)
-                        .unwrap_or_default();
+                    let text = model.decode(tokens);
                     if debug_enabled {
                         debug!(target: crate::logging::TRANSCRIPT_TARGET, tokens = ?tokens, text = ?text, t = format!("{start_time:.2}"), "WORD emitted");
                     }
@@ -972,19 +1017,14 @@ impl KyutaiEngine {
                         continue;
                     }
                     let language = detect_word(&text).map(|code| code.as_str().to_string());
-                    // Mapped before the mismatch reset below: this word's moshi
-                    // clock belongs to the epoch that reset is about to close.
-                    let raw_start = Self::word_start_time(model, *start_time, *batch_idx);
-                    let start_time = Self::monotonic_time(model, *batch_idx, raw_start);
+                    // Keep the input epoch until every message is mapped.
+                    let (_, start_time) = model.map_time(*start_time, *batch_idx);
                     // SOU-060: `on_word` only requests a KV wipe when Auto
                     // inferred a prior (model lock-in). Explicit Fr/En still
                     // labels the segment above and never wipes a healthy lane.
-                    let mismatch_reset = model.language_tracker.on_word(&text, *batch_idx);
-                    if mismatch_reset
-                        && let Err(e) =
-                            Self::refresh_lane(model, *batch_idx, RefreshKind::LanguageMismatch)
-                    {
-                        warn!(batch_idx, "Language mismatch lane reset failed: {e}");
+                    let mismatch_reset = model.on_word(&text, *batch_idx);
+                    if mismatch_reset && !requested_resets.contains(batch_idx) {
+                        requested_resets.push(*batch_idx);
                     }
                     let speaker = if diarized {
                         Some(if *batch_idx == 0 {
@@ -995,9 +1035,10 @@ impl KyutaiEngine {
                     } else {
                         None
                     };
+                    let (pending, orphans) = model.words();
                     Self::open_word(
-                        &mut model.pending_words,
-                        &mut model.orphaned_words,
+                        pending,
+                        orphans,
                         *batch_idx,
                         PendingWord {
                             text,
@@ -1012,16 +1053,22 @@ impl KyutaiEngine {
                     stop_time,
                     batch_idx,
                 } => {
-                    let raw_end = Self::word_start_time(model, *stop_time, *batch_idx);
-                    let end_time = Self::monotonic_time(model, *batch_idx, raw_end);
-                    Self::emit_pending(&mut model.pending_words, *batch_idx, end_time, segments);
+                    let (_, end_time) = model.map_time(*stop_time, *batch_idx);
+                    let (pending, _) = model.words();
+                    Self::emit_pending(pending, *batch_idx, end_time, segments);
                 }
                 moshi::asr::AsrMsg::Step { prs, .. } => {
-                    Self::note_vad_pause(model, prs);
+                    model.note_vad(prs);
                 }
             }
         }
-        Self::drain_orphans(&mut model.orphaned_words, segments);
+        for lane in requested_resets {
+            if let Err(e) = model.reset_lane(lane) {
+                warn!(lane, "Language mismatch lane reset failed: {e}");
+            }
+        }
+        let (_, orphans) = model.words();
+        Self::drain_orphans(orphans, segments);
     }
 
     fn context_window_stats(&self) -> Option<super::ContextWindowStats> {
@@ -1468,6 +1515,202 @@ impl TranscriptionEngine for KyutaiEngine {
 
 #[cfg(test)]
 mod tests {
+    struct BatchTestModel {
+        origins: Vec<f64>,
+        offsets: Vec<f64>,
+        frames: Vec<usize>,
+        floors: Vec<f64>,
+        pending: Vec<Option<PendingWord>>,
+        orphans: Vec<PendingWord>,
+        tracker: LanguageTracker,
+        resets: usize,
+        fail_reset: bool,
+    }
+
+    impl BatchTestModel {
+        fn timeline(&self, lane: usize) -> (f64, f64, usize, f64) {
+            (
+                self.origins[lane],
+                self.offsets[lane],
+                self.frames[lane],
+                self.floors[lane],
+            )
+        }
+        fn new(lanes: usize, prefix: f64) -> Self {
+            let mut tracker = LanguageTracker::new(lanes, MeetingTranscriptionLanguage::Auto);
+            // Establish English lock-in and stop one mismatch short of the
+            // real LID threshold. No forced reset request in the test seam.
+            for lane in 0..lanes {
+                for _ in 0..20 {
+                    assert!(!tracker.on_word("the", lane));
+                }
+                for _ in 0..2 {
+                    assert!(!tracker.on_word("bonjour", lane));
+                }
+            }
+            Self {
+                origins: vec![48.80; lanes],
+                offsets: vec![prefix; lanes],
+                frames: vec![738; lanes],
+                floors: vec![0.0; lanes],
+                pending: vec![None; lanes],
+                orphans: Vec::new(),
+                tracker,
+                resets: 0,
+                fail_reset: false,
+            }
+        }
+    }
+
+    impl AsrBatchModel for BatchTestModel {
+        fn batch_size(&self) -> usize {
+            self.origins.len()
+        }
+        fn decode(&self, tokens: &[u32]) -> String {
+            tokens.iter().map(|t| char::from_u32(*t).unwrap()).collect()
+        }
+        fn map_time(&mut self, raw: f64, lane: usize) -> (f64, f64) {
+            let mapped =
+                KyutaiEngine::word_start_time_raw(raw, self.offsets[lane], self.origins[lane]);
+            (
+                mapped,
+                KyutaiEngine::clamp_time(&mut self.floors[lane], mapped),
+            )
+        }
+        fn on_word(&mut self, text: &str, lane: usize) -> bool {
+            self.tracker.on_word(text, lane)
+        }
+        fn reset_lane(&mut self, lane: usize) -> Result<(), EngineError> {
+            self.resets += 1;
+            KyutaiEngine::credit_lane_epoch(
+                &mut self.origins,
+                &mut self.offsets,
+                &mut self.frames,
+                lane,
+            );
+            if self.fail_reset {
+                return Err(EngineError::InferenceError("E1 injected KV failure".into()));
+            }
+            self.tracker.reset_lane(lane);
+            if let Some(word) = self.pending[lane].take() {
+                self.orphans.push(word);
+            }
+            Ok(())
+        }
+        fn words(&mut self) -> (&mut Vec<Option<PendingWord>>, &mut Vec<PendingWord>) {
+            (&mut self.pending, &mut self.orphans)
+        }
+        fn note_vad(&mut self, _prs: &[Vec<f32>]) {}
+    }
+
+    fn e1_word(lane: usize, raw: f64) -> moshi::asr::AsrMsg {
+        moshi::asr::AsrMsg::Word {
+            tokens: "bonjour".chars().map(u32::from).collect(),
+            start_time: raw,
+            batch_idx: lane,
+        }
+    }
+
+    #[test]
+    fn batch_epoch_reset_preserves_all_message_times() {
+        let mut model = BatchTestModel::new(2, 0.0);
+        let other = model.timeline(1);
+        let batch = vec![
+            e1_word(0, 58.56),
+            moshi::asr::AsrMsg::EndWord {
+                stop_time: 58.56,
+                batch_idx: 0,
+            },
+        ];
+        let mut segments = Vec::new();
+        KyutaiEngine::consume_asr_msgs(&mut model, &batch, false, &mut segments);
+        assert_eq!(segments.len(), 2);
+        assert!(
+            (segments[1].end_time - 107.36).abs() < 1e-8,
+            "end={}",
+            segments[1].end_time
+        );
+        assert_eq!(model.timeline(1), other);
+        assert_eq!(model.resets, 1);
+        let (raw, mapped) = model.map_time(0.88, 0);
+        assert_eq!(raw, mapped, "no clamp after reset");
+    }
+    #[test]
+    fn batch_epoch_matrix_covers_pending_lanes_and_reset_failures() {
+        fn near(actual: f64, expected: f64) {
+            assert!((actual - expected).abs() < 1e-8, "{actual} != {expected}");
+        }
+        // Prefix is distinct from decoder delay: the target 107.36 old-epoch
+        // timestamp uses raw 58.56 (738-6 frames), with a zero prefix.
+        for prefix in [0.0, 0.48] {
+            for word_only in [false, true] {
+                for failed in [false, true] {
+                    let mut model = BatchTestModel::new(2, prefix);
+                    model.fail_reset = failed;
+                    let other = model.timeline(1);
+                    let mut batch = vec![e1_word(0, 58.56)];
+                    if !word_only {
+                        batch.push(moshi::asr::AsrMsg::EndWord {
+                            stop_time: 58.56,
+                            batch_idx: 0,
+                        });
+                    }
+                    let mut segments = Vec::new();
+                    KyutaiEngine::consume_asr_msgs(&mut model, &batch, false, &mut segments);
+                    near(model.origins[0], 107.84 - prefix);
+                    near(segments[0].start_time, 107.36 - prefix);
+                    if !word_only {
+                        near(segments.last().unwrap().end_time, 107.36 - prefix);
+                    }
+                    assert_eq!(model.timeline(1), other);
+                    assert_eq!(model.resets, 1);
+                    assert_eq!(
+                        segments.iter().filter(|s| s.is_final).count(),
+                        usize::from(!word_only || !failed)
+                    );
+                    let (raw, delivered) = model.map_time(0.88, 0);
+                    near(raw, 108.72 - prefix);
+                    near(delivered, raw);
+                }
+            }
+        }
+        // Separate lanes can each request one reset in the same batch.
+        let mut model = BatchTestModel::new(2, 0.0);
+        let batch = vec![
+            e1_word(0, 58.56),
+            e1_word(1, 58.56),
+            moshi::asr::AsrMsg::EndWord {
+                stop_time: 58.56,
+                batch_idx: 0,
+            },
+            moshi::asr::AsrMsg::EndWord {
+                stop_time: 58.56,
+                batch_idx: 1,
+            },
+        ];
+        let mut segments = Vec::new();
+        KyutaiEngine::consume_asr_msgs(&mut model, &batch, false, &mut segments);
+        assert_eq!(model.resets, 2);
+        assert_eq!(segments.iter().filter(|s| s.is_final).count(), 2);
+        // A failed reset leaves the LID mismatch active. The next Word in the
+        // same batch requests it again: experimental ordering coalesces the
+        // two lane/kind requests without double-finalizing either word.
+        let mut model = BatchTestModel::new(1, 0.0);
+        model.fail_reset = true;
+        let batch = vec![
+            e1_word(0, 58.24),
+            e1_word(0, 58.56),
+            moshi::asr::AsrMsg::EndWord {
+                stop_time: 58.64,
+                batch_idx: 0,
+            },
+        ];
+        let mut segments = Vec::new();
+        KyutaiEngine::consume_asr_msgs(&mut model, &batch, false, &mut segments);
+        assert_eq!(model.resets, 1);
+        assert_eq!(segments.iter().filter(|s| s.is_final).count(), 2);
+    }
+
     use super::*;
 
     #[test]
