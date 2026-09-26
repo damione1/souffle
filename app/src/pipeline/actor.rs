@@ -1297,8 +1297,12 @@ fn ingest_message(mode: &mut dyn SessionMode, message: AudioMessage) {
 
 impl SessionMode for SingleMode {
     fn ingest_pair(&mut self, me: Vec<f32>, them: Vec<f32>) {
-        self.buffer.extend(me);
-        self.buffer.extend(them);
+        // Same additive/clipped mix as MeetingMixer. Missing suffix samples
+        // are silence: simultaneous lanes occupy max(len), never len + len.
+        self.buffer.extend((0..me.len().max(them.len())).map(|i| {
+            (me.get(i).copied().unwrap_or(0.0) + them.get(i).copied().unwrap_or(0.0))
+                .clamp(-1.0, 1.0)
+        }));
     }
 
     fn ingest(&mut self, chunk: AudioChunk) {
@@ -2764,6 +2768,27 @@ mod tests {
             "Expected flush segment 'flushed', got: {:?}",
             segments.iter().map(|s| &s.text).collect::<Vec<_>>()
         );
+    }
+
+    #[test]
+    fn single_mode_pair_mixes_aligned_samples_without_stretching_time() {
+        for (me, them, expected) in [
+            (vec![0.2, 0.4], vec![0.3, -0.1], vec![0.5, 0.3]),
+            (vec![0.2], vec![0.3, 0.7], vec![0.5, 0.7]),
+            (vec![0.2, 0.7], vec![0.3], vec![0.5, 0.7]),
+            (vec![], vec![0.7], vec![0.7]),
+            (vec![0.7], vec![], vec![0.7]),
+            (vec![0.8, -0.8], vec![0.8, -0.8], vec![1.0, -1.0]),
+            (vec![], vec![], vec![]),
+        ] {
+            let chain = crate::filter::AudioFilterChain::new(vec![]);
+            let mut mode = SingleMode::new(chain, 0, 0, 24000);
+            mode.ingest_pair(me, them);
+            assert_eq!(mode.buffer.len(), expected.len());
+            for (actual, wanted) in mode.buffer.iter().zip(expected) {
+                assert!((*actual - wanted).abs() < 1e-6);
+            }
+        }
     }
 
     #[test]

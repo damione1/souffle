@@ -259,6 +259,8 @@ fn has_extra_heads_tensor(tensor_names: impl IntoIterator<Item = impl AsRef<str>
 /// Loaded model components — kept together so they can be used by the inference loop
 struct LoadedModel {
     integrity: ModelIntegrity,
+    /// Completed outputs from a failed call, retained only until stop salvage.
+    completed_salvage: Vec<TranscriptionSegment>,
     state: moshi::asr::State,
     text_tokenizer: sentencepiece::SentencePieceProcessor,
     config: KyutaiConfig,
@@ -338,6 +340,7 @@ struct PendingWord {
 // the same production primitives; it only substitutes decoding and KV reset.
 trait AsrBatchModel {
     fn integrity(&mut self) -> &mut ModelIntegrity;
+    fn completed_salvage(&mut self) -> &mut Vec<TranscriptionSegment>;
     fn batch_size(&self) -> usize;
     fn decode(&self, tokens: &[u32]) -> String;
     fn map_time(&mut self, raw: f64, lane: usize) -> (f64, f64);
@@ -350,6 +353,9 @@ trait AsrBatchModel {
 impl AsrBatchModel for LoadedModel {
     fn integrity(&mut self) -> &mut ModelIntegrity {
         &mut self.integrity
+    }
+    fn completed_salvage(&mut self) -> &mut Vec<TranscriptionSegment> {
+        &mut self.completed_salvage
     }
     fn batch_size(&self) -> usize {
         self.state.batch_size()
@@ -477,6 +483,7 @@ impl KyutaiEngine {
         let state = Self::build_state(&device, &model_path, &config, batch_size, has_extra_heads)?;
         Ok(LoadedModel {
             integrity: ModelIntegrity::Ready,
+            completed_salvage: Vec::new(),
             state,
             text_tokenizer,
             config,
@@ -711,7 +718,7 @@ impl KyutaiEngine {
         // No State access: these starts were mapped in their original epoch.
         // Without a trustworthy EndWord, close at start rather than inventing
         // a duration from a partially reset model's clock. Keep invalidity.
-        let mut segments = Vec::new();
+        let mut segments = std::mem::take(model.completed_salvage());
         let (pending, orphans) = model.words();
         Self::drain_orphans(orphans, &mut segments);
         for word in pending.iter_mut().filter_map(Option::take) {
@@ -1143,14 +1150,19 @@ impl KyutaiEngine {
             if let Err(e) = model.reset_lane(lane) {
                 *model.integrity() = ModelIntegrity::Invalid;
                 // Engine API returns Result, not partial segments + error.
-                // Explicitly discard this call's mapped outputs rather than
-                // silently publishing a subset of a failed inference call.
+                // Keep completed finals for stop-only salvage, including those
+                // from earlier frames of this failed call. Previews are not
+                // retained: pending/orphan metadata will supply their finals.
+                let completed = segments.iter().filter(|segment| segment.is_final).count();
                 warn!(
                     lane,
-                    discarded_segments = segments.len(),
-                    "ASR reset failed; invalidating model and discarding this call's outputs: {e}"
+                    completed_segments = completed,
+                    discarded_previews = segments.len() - completed,
+                    "ASR reset failed; invalidating model and retaining completed outputs for stop salvage: {e}"
                 );
-                segments.clear();
+                model
+                    .completed_salvage()
+                    .extend(segments.drain(..).filter(|segment| segment.is_final));
                 return Err(e);
             }
         }
@@ -1615,6 +1627,7 @@ impl TranscriptionEngine for KyutaiEngine {
 mod tests {
     struct BatchTestModel {
         integrity: ModelIntegrity,
+        completed_salvage: Vec<TranscriptionSegment>,
         partial_mutation: bool,
         item_reset: bool,
         origins: Vec<f64>,
@@ -1651,6 +1664,7 @@ mod tests {
             }
             Self {
                 integrity: ModelIntegrity::Ready,
+                completed_salvage: Vec::new(),
                 partial_mutation: false,
                 item_reset: false,
                 origins: vec![48.80; lanes],
@@ -1669,6 +1683,9 @@ mod tests {
     impl AsrBatchModel for BatchTestModel {
         fn integrity(&mut self) -> &mut ModelIntegrity {
             &mut self.integrity
+        }
+        fn completed_salvage(&mut self) -> &mut Vec<TranscriptionSegment> {
+            &mut self.completed_salvage
         }
         fn batch_size(&self) -> usize {
             self.origins.len()
@@ -1904,6 +1921,45 @@ mod tests {
         assert!(model.integrity.ensure_ready().is_err());
         assert_eq!([model.timeline(0), model.timeline(1)], timeline);
         assert_eq!(model.resets, 0);
+    }
+
+    #[test]
+    fn failed_reset_salvages_completed_batch_finals_once_without_duplicates() {
+        for unfinished_word in [false, true] {
+            let mut model = BatchTestModel::new(1, 0.0);
+            model.fail_reset = true;
+            let mut batch = vec![
+                e1_word(0, 58.24),
+                moshi::asr::AsrMsg::EndWord {
+                    stop_time: 58.32,
+                    batch_idx: 0,
+                },
+            ];
+            if unfinished_word {
+                batch.push(e1_word(0, 58.56));
+            }
+            let mut output = Vec::new();
+            assert!(
+                KyutaiEngine::consume_asr_msgs(&mut model, &batch, false, &mut output).is_err()
+            );
+            assert!(output.is_empty());
+            let salvaged = KyutaiEngine::salvage_invalid_pending(&mut model).unwrap();
+            assert_eq!(salvaged.len(), 1 + usize::from(unfinished_word));
+            assert!(salvaged.iter().all(|segment| segment.is_final));
+            assert!((salvaged[0].start_time - 107.04).abs() < 1e-8);
+            assert!((salvaged[0].end_time - 107.12).abs() < 1e-8);
+            if unfinished_word {
+                assert!((salvaged[1].start_time - 107.36).abs() < 1e-8);
+                assert_eq!(salvaged[1].end_time, salvaged[1].start_time);
+            }
+            assert!(
+                KyutaiEngine::salvage_invalid_pending(&mut model)
+                    .unwrap()
+                    .is_empty()
+            );
+            assert!(model.integrity.ensure_ready().is_err());
+            assert_eq!(model.resets, 1);
+        }
     }
 
     use super::*;
