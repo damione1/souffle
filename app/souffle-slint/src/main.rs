@@ -11,6 +11,7 @@ mod data_ui;
 mod ia_ui;
 mod lists_ui;
 mod markdown;
+mod mic_stall_ui;
 mod microphone_list;
 mod model_ui;
 mod onboarding_flags;
@@ -6744,6 +6745,7 @@ fn main() {
         settings_io.clone(),
         settings_drafts.clone(),
     );
+    let _mic_stall_timer = wire_mic_stall_banner(&window, handle.clone(), settings_drafts.clone());
     wire_callbacks(
         &window,
         handle.clone(),
@@ -6884,6 +6886,59 @@ fn main() {
     // snapshot is projected, and closing it hides rather than destroys it.
     // Keep the native tray/shortcut process alive across both intervals.
     slint::run_event_loop_until_quit().expect("event loop failed");
+}
+
+/// SOU-126 AC5: name a microphone stuck inside CoreAudio and offer to
+/// relaunch. The capture thread only publishes a snapshot, so poll it like
+/// the system-audio verdict; the returned timer must be kept alive.
+///
+/// "Restart" goes through the same flush barrier and recording
+/// finalization as Quit, after arranging for the bundle to be reopened once
+/// this process is gone (`native::relaunch`).
+fn wire_mic_stall_banner(
+    window: &MainWindow,
+    handle: AppHandle,
+    settings_drafts: Rc<settings_drafts::SettingsDraftController>,
+) -> slint::Timer {
+    let banner = Rc::new(RefCell::new(mic_stall_ui::MicStallBanner::default()));
+
+    let dismiss_banner = Rc::clone(&banner);
+    let weak = window.as_weak();
+    window.on_mic_stall_dismissed(move || {
+        let notice = souffle_lib::commands::get_mic_stall_notice();
+        let mut banner = dismiss_banner.borrow_mut();
+        banner.dismiss(notice.as_ref());
+        if let Some(window) = weak.upgrade() {
+            banner.project(&window, notice.as_ref());
+        }
+    });
+
+    window.on_mic_stall_restart_requested(move || {
+        let handle = handle.clone();
+        let restart: Rc<dyn Fn()> = Rc::new(move || {
+            if let Err(e) = souffle_lib::native::relaunch::relaunch_after_exit() {
+                // Quitting anyway: the user asked to leave this process, and
+                // reopening by hand frees the device just the same.
+                eprintln!("Could not schedule the relaunch: {e}");
+            }
+            quit_after_finalizing_recording(&handle);
+        });
+        settings_drafts.flush_before_exit(restart);
+    });
+
+    let timer = slint::Timer::default();
+    let weak = window.as_weak();
+    timer.start(
+        slint::TimerMode::Repeated,
+        Duration::from_millis(500),
+        move || {
+            if let Some(window) = weak.upgrade() {
+                let notice = souffle_lib::commands::get_mic_stall_notice();
+                banner.borrow_mut().project(&window, notice.as_ref());
+            }
+        },
+    );
+    timer
 }
 
 /// How long a quit waits for an active recording to finish saving. A

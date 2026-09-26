@@ -1,10 +1,11 @@
 import { ActionHero } from "components/action_hero.slint";
 import { SearchField } from "components/search_field.slint";
 import { StatusBanner } from "components/status_banner.slint";
+import { MicStallBanner } from "components/mic_stall_banner.slint";
 import { TimelineSection, TimelineDayGroup, UpcomingEvent } from "components/timeline_section.slint";
 import { FilterChip } from "components/filter_chip.slint";
 import { DictationRecovery } from "components/dictation_recovery.slint";
-import { TimelineFilter, TimelineKind, AccessState } from "types.slint";
+import { TimelineFilter, TimelineKind, AccessState, MicStall } from "types.slint";
 
 // Port of components/HomeView.svelte's idle branch. The hero, search, and
 // filter chips stay put; only the calendar + timeline list scrolls.
@@ -16,6 +17,11 @@ export component IdleView inherits Rectangle {
     in property <string> transcription-status-message;
     in-out property <string> dictation-recovery-text;
     in property <string> meeting-status-message;
+    // `Option<MicStallNotice>` split across the boundary; written together
+    // by `mic_stall_ui::MicStallBanner::project`.
+    in property <bool> mic-stall-visible: false;
+    in property <MicStall> mic-stall-kind;
+    in property <string> mic-stall-device;
     in property <[TimelineDayGroup]> timeline-groups;
     in property <bool> timeline-is-empty: true;
     in property <bool> timeline-has-matches: true;
@@ -33,6 +39,8 @@ export component IdleView inherits Rectangle {
     callback copy-dictation-recovery();
     callback discard-dictation-recovery();
     callback dismiss-meeting-status();
+    callback mic-stall-restart-requested();
+    callback mic-stall-dismissed();
     callback timeline-item-opened(TimelineKind, string);
     callback timeline-item-removed(TimelineKind, string);
     callback timeline-item-copy-requested(string);
@@ -86,6 +94,13 @@ export component IdleView inherits Rectangle {
             vertical-stretch: 0;
             message: root.translate-error(root.transcription-status-message);
             dismissed => { root.dismiss-transcription-status(); }
+        }
+        if root.mic-stall-visible: MicStallBanner {
+            vertical-stretch: 0;
+            kind: root.mic-stall-kind;
+            device: root.mic-stall-device;
+            restart-requested => { root.mic-stall-restart-requested(); }
+            dismissed => { root.mic-stall-dismissed(); }
         }
         if root.dictation-recovery-text != "": DictationRecovery {
             text <=> root.dictation-recovery-text;

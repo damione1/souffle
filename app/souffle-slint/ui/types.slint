@@ -13,6 +13,11 @@ export enum RecordingMode { idle, dictation, meeting }
 // warning a healthy meeting used to show.
 export enum LiveSystemAudio { pending, active, unavailable }
 
+// Why a microphone is reported as stuck inside CoreAudio (SOU-126), from
+// souffle_lib's `MicStallKind`. Absence is a separate `bool` on the Window,
+// never a variant here.
+export enum MicStall { timed-out, parked, busy }
+
 // Mirrors souffle_lib::engine::Speaker at the compiled UI boundary.
 export enum SpeakerRole { me, them }
 
