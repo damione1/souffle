@@ -52,12 +52,20 @@ jobs:
       # tree catches that, so run the suites here as well as locally.
       - run: cargo fmt --manifest-path app/Cargo.toml --all -- --check
       - run: cargo clippy --manifest-path app/Cargo.toml --workspace --all-targets -- -D warnings
-      # Silero's two ort tests have hung here indefinitely: whichever thread
-      # wins the `Once` in `ensure_ort_initialized` can stall inside
-      # `ort::init_from`, and every other thread then blocks on that `Once`
-      # with no timeout. Fail the step instead of holding the runner.
-      - run: cargo test --manifest-path app/Cargo.toml --workspace
+      # Silero's two ort tests have hung here (SOU-132). The tests now share a
+      # single bounded ort init and fail by name after 30 s; the watchdog is
+      # the next net: past 5 min it saves `sample` stacks of the test binaries
+      # as an artifact before killing them. The 15 min cap stays as the last
+      # net. Compile first so neither deadline counts build time.
+      - run: cargo test --manifest-path app/Cargo.toml --workspace --no-run
+      - run: ./scripts/ci/cargo-test-watchdog.sh 300 "${RUNNER_TEMP}/cargo-test-samples" -- --manifest-path app/Cargo.toml --workspace
         timeout-minutes: 15
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cargo-test-samples
+          path: ${{ runner.temp }}/cargo-test-samples
+          if-no-files-found: ignore
       # The catalogue gate extracts the @tr() calls before validating both PO
       # files. Keep the extractor aligned with the Slint compiler in Cargo.lock.
       - run: cargo install slint-tr-extractor --version 1.17.1 --locked
