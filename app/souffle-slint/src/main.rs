@@ -474,6 +474,24 @@ fn export_format_from_slint(format: MeetingExportFormat) -> souffle_lib::export:
     }
 }
 
+/// How long after its last recording session stopped a meeting still offers
+/// "Resume": long enough to pick up a meeting stopped too early, short
+/// enough that an old meeting does not grow an unrelated tail.
+const MEETING_RESUME_WINDOW_SECS: i64 = 60 * 60;
+
+/// Whether the detail view offers to resume this meeting. An interrupted
+/// meeting (no `ended_at`) always can; a stopped one can for
+/// [`MEETING_RESUME_WINDOW_SECS`] after it stopped.
+fn meeting_can_resume(
+    ended_at: Option<chrono::DateTime<chrono::Utc>>,
+    now: chrono::DateTime<chrono::Utc>,
+) -> bool {
+    match ended_at {
+        None => true,
+        Some(ended) => now.signed_duration_since(ended).num_seconds() <= MEETING_RESUME_WINDOW_SECS,
+    }
+}
+
 /// Loads a meeting and pushes it into MeetingDetail's properties - mirrors
 /// `controller.svelte.ts`'s `openMeeting`/`loadMeeting` effect.
 fn populate_meeting_detail(window: &MainWindow, meeting: &MeetingTranscript) {
@@ -481,7 +499,7 @@ fn populate_meeting_detail(window: &MainWindow, meeting: &MeetingTranscript) {
     window.set_meeting_detail_title(meeting.title.clone().into());
     window.set_meeting_detail_meta(meeting_meta(meeting));
     window.set_meeting_detail_model_label(meeting.transcription_profile.model_label.clone().into());
-    window.set_meeting_detail_can_resume(meeting.ended_at.is_none());
+    window.set_meeting_detail_can_resume(meeting_can_resume(meeting.ended_at, chrono::Utc::now()));
     window.set_meeting_detail_resume_error("".into());
     window.set_meeting_detail_delete_error("".into());
     window.set_meeting_detail_summary_generation_error("".into());
@@ -3787,37 +3805,57 @@ fn wire_callbacks(
     let weak_resume = window.as_weak();
     let handle_resume = tauri_handle.clone();
     let live_state_res = live_state.clone();
+    let pending_stop_resume = Arc::clone(&pending_stop);
     window.on_meeting_detail_resume(move || {
-        if let Some(window) = weak_resume.upgrade() {
-            window.set_meeting_detail_resume_error("".into());
-            let id = window.get_active_meeting_id().to_string();
-            let state = handle_resume.clone();
-            let live_state = live_state_res.clone();
-            let channel = live_segment_channel(weak_resume.clone(), live_state.clone());
-            let weak_for_done = weak_resume.clone();
-            souffle_lib::async_runtime::spawn(async move {
-                match souffle_lib::commands::resume_meeting_recording(state.clone(), id, channel)
-                    .await
-                {
+        let Some(window) = weak_resume.upgrade() else {
+            return;
+        };
+        if window.get_recording_mode() != RecordingMode::Idle {
+            return;
+        }
+        window.set_meeting_detail_resume_error("".into());
+        let id = window.get_active_meeting_id().to_string();
+        let state = handle_resume.clone();
+        // The detail view may have stayed open past the resume window:
+        // re-check against the stored end before resuming.
+        let expired = state
+            .db
+            .load_meeting(&id)
+            .is_ok_and(|m| !meeting_can_resume(m.ended_at, chrono::Utc::now()));
+        if expired {
+            window.set_meeting_detail_can_resume(false);
+            return;
+        }
+        // Same path as a new meeting (SOU-258): the recording view shows on
+        // the click, and a failed resume returns to the detail with its
+        // error.
+        show_recording_starting(
+            &window,
+            &live_state_res,
+            RecordingMode::Meeting,
+            &pending_stop_resume,
+        );
+        let channel = live_segment_channel(weak_resume.clone(), live_state_res.clone());
+        let weak = weak_resume.clone();
+        let pending_stop = Arc::clone(&pending_stop_resume);
+        souffle_lib::async_runtime::spawn(async move {
+            let result =
+                souffle_lib::commands::resume_meeting_recording(state.clone(), id, channel).await;
+            if let Err(e) = weak.upgrade_in_event_loop(move |window| {
+                match settle_recording_start(&window, result) {
                     Ok(()) => {
-                        let state_for_accum = state.clone();
-                        let _ = slint::invoke_from_event_loop(move || {
-                            if let Some(w) = weak_for_done.upgrade() {
-                                anchor_live_elapsed_offset(&w, &state_for_accum);
-                            }
-                        });
+                        anchor_live_elapsed_offset(&window, &state);
+                        replay_pending_stop(&window, &pending_stop);
                     }
                     Err(e) => {
-                        eprintln!("Failed to resume meeting: {:?}", e);
-                        let _ = slint::invoke_from_event_loop(move || {
-                            if let Some(w) = weak_for_done.upgrade() {
-                                w.set_meeting_detail_resume_error(e.into());
-                            }
-                        });
+                        eprintln!("Failed to resume meeting: {e:?}");
+                        window.set_meeting_detail_resume_error(e.into());
                     }
                 }
-            });
-        }
+            }) {
+                eprintln!("upgrade_in_event_loop failed (meeting resume): {e}");
+            }
+        });
     });
 
     let weak_sum = window.as_weak();
@@ -6888,8 +6926,8 @@ mod tests {
         wire_summary_template_edit_callbacks,
     };
     use super::{
-        LiveTranscript, LiveTranscriptState, RecordingMode, ShortcutField, replay_pending_stop,
-        settle_recording_start, show_recording_starting,
+        LiveTranscript, LiveTranscriptState, RecordingMode, ShortcutField, meeting_can_resume,
+        replay_pending_stop, settle_recording_start, show_recording_starting,
     };
     use crate::model_ui;
     use crate::settings_drafts::SettingsDraftController;
@@ -6914,6 +6952,20 @@ mod tests {
     fn test_window() -> MainWindow {
         let _ = slint::platform::set_platform(Box::new(TestPlatform));
         MainWindow::new().unwrap()
+    }
+
+    #[test]
+    fn a_meeting_can_be_resumed_for_an_hour_after_it_stopped() {
+        let now = chrono::Utc::now();
+        let minutes_ago = |m| Some(now - chrono::Duration::minutes(m));
+
+        // Interrupted (never stopped): always resumable.
+        assert!(meeting_can_resume(None, now));
+        assert!(meeting_can_resume(minutes_ago(0), now));
+        assert!(meeting_can_resume(minutes_ago(59), now));
+        assert!(meeting_can_resume(minutes_ago(60), now));
+        assert!(!meeting_can_resume(minutes_ago(61), now));
+        assert!(!meeting_can_resume(minutes_ago(24 * 60), now));
     }
 
     #[test]
