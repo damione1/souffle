@@ -653,6 +653,10 @@ private final class PillPanel {
         p.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.statusWindow)))
         p.backgroundColor = .clear
         p.isOpaque = false
+        // The HUD draws white text on a .hudWindow blur. Pin it dark so the
+        // in-app Light theme (NSApp pinned to Aqua) cannot turn the blur
+        // white under white text.
+        p.appearance = NSAppearance(named: .darkAqua)
         p.hidesOnDeactivate = false
         p.animationBehavior = .none
         p.sharingType = captureExcluded ? .none : .readOnly
@@ -685,10 +689,18 @@ private final class PillPanel {
         guard let panel else { return }
         if visible {
             applyFrame(mode: currentMode, expanded: contentView?.isExpanded ?? false)
+            // orderFront does not lay out: without this the panel shows the
+            // subview frames of its previous size until the next resize.
+            contentView?.needsLayout = true
+            contentView?.layoutSubtreeIfNeeded()
+            panel.displayIfNeeded()
             panel.orderFrontRegardless()
         } else {
             sessionMaxHeight = kCompactHeight
-            lastAppliedSize = CGSize(width: kCompactWidth, height: kCompactHeight)
+            // lastAppliedSize keeps the hidden panel's real size. Resetting it
+            // here made the next applyFrame skip the resize after a meeting
+            // (dictation HUD shown at meeting size) and pin the top edge from
+            // a height the panel did not have.
             contentView?.setLiveText("", provisional: 0)
             panel.orderOut(nil)
         }
