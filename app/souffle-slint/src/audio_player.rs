@@ -32,6 +32,7 @@ use souffle_lib::audio::recorder::{
     waveform_peaks, waveform_source,
 };
 use souffle_lib::audio::resampler::Resampler;
+use souffle_lib::transcript::MeetingAudioSession;
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -41,6 +42,8 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 const WAVEFORM_BUCKETS: usize = 200;
 
 pub struct AudioPlayer {
+    /// On-disk recording session (`{session_index}.ogg`) this player holds.
+    session_index: usize,
     samples: Arc<Vec<f32>>,
     sample_rate: u32,
     position: Arc<AtomicUsize>,
@@ -68,10 +71,13 @@ impl AudioPlayer {
             .store(seek_index(fraction, self.samples.len()), Ordering::Relaxed);
     }
 
-    /// Seeks to an absolute position, e.g. a transcript paragraph's
-    /// `start_time`. Naive for a meeting with more than one recording
-    /// session (only the first session's audio is ever loaded, see
-    /// `load`'s doc comment) - correct for the common single-session case.
+    pub fn session_index(&self) -> usize {
+        self.session_index
+    }
+
+    /// Seeks to a position within this player's session, e.g. a transcript
+    /// paragraph's `start_time` once [`plan_paragraph_seek`] has picked this
+    /// session.
     pub fn seek_to_seconds(&self, seconds: f64) {
         let index = (seconds.max(0.0) * f64::from(self.sample_rate)) as usize;
         self.position
@@ -111,6 +117,51 @@ fn progress_from_index(index: usize, len: usize) -> f32 {
     index as f32 / len as f32
 }
 
+/// What a transcript paragraph click must do to the player (SOU-251).
+#[derive(Debug, Clone, PartialEq)]
+pub enum ParagraphSeek {
+    /// The paragraph's session is the one loaded (or it has no session of
+    /// its own): seek within the current player.
+    InLoaded { seconds: f64 },
+    /// The paragraph belongs to another recording session: load that
+    /// session's file, then seek within it.
+    LoadSession {
+        session_index: usize,
+        path: String,
+        seconds: f64,
+    },
+}
+
+/// Resolves a paragraph click (`recording_session_index` as carried by the
+/// transcript block, `-1` when no session was attributed; `start_time`
+/// relative to that session's own clock, which restarts near zero with
+/// every recording session) against the meeting's session files and the
+/// session currently loaded. Mirrors the retired Tauri
+/// `resolveAudioSeekTarget`/`buildPlayCommand`. A paragraph whose session
+/// has no audio file, or that carries no session, keeps the single-session
+/// behaviour: seek within whatever is loaded.
+pub fn plan_paragraph_seek(
+    sessions: &[MeetingAudioSession],
+    loaded_session: Option<usize>,
+    recording_session_index: i32,
+    start_time: f64,
+) -> ParagraphSeek {
+    let seconds = start_time.max(0.0);
+    let target = usize::try_from(recording_session_index)
+        .ok()
+        .and_then(|index| sessions.iter().find(|s| s.session_index == index));
+    match target {
+        Some(session) if loaded_session != Some(session.session_index) => {
+            ParagraphSeek::LoadSession {
+                session_index: session.session_index,
+                path: session.path.clone(),
+                seconds,
+            }
+        }
+        Some(_) | None => ParagraphSeek::InLoaded { seconds },
+    }
+}
+
 /// `load`'s error when `still_wanted` said no: not a failure to report.
 pub const LOAD_ABANDONED: &str = "audio load abandoned";
 
@@ -132,6 +183,7 @@ pub fn cached_summary(path: &Path) -> Option<WaveformSummary> {
 /// no extra latency, but playback only advances once `play()` is called -
 /// the callback outputs silence until then.
 pub fn load(
+    session_index: usize,
     path: &Path,
     still_wanted: impl Fn() -> bool,
 ) -> Result<(AudioPlayer, WaveformSummary), String> {
@@ -240,6 +292,7 @@ pub fn load(
 
     Ok((
         AudioPlayer {
+            session_index,
             samples,
             sample_rate: device_rate,
             position,
@@ -337,6 +390,74 @@ mod tests {
         assert!(commands.starts_with("M0 0.000h0.7v1.000h-0.7z"));
         assert!(commands.contains("M1 0.480h0.7v0.040h-0.7z"));
         assert!(waveform_commands(&[]).is_empty());
+    }
+
+    fn session(session_index: usize) -> MeetingAudioSession {
+        MeetingAudioSession {
+            session_index,
+            path: format!("/rec/{session_index}.ogg"),
+            duration_seconds: None,
+        }
+    }
+
+    #[test]
+    fn paragraph_of_a_resumed_session_loads_that_session_at_its_own_offset() {
+        let sessions = [session(0), session(1)];
+        assert_eq!(
+            plan_paragraph_seek(&sessions, Some(0), 1, 4.5),
+            ParagraphSeek::LoadSession {
+                session_index: 1,
+                path: "/rec/1.ogg".into(),
+                seconds: 4.5,
+            }
+        );
+        // Back to the first session from the second one.
+        assert_eq!(
+            plan_paragraph_seek(&sessions, Some(1), 0, 12.0),
+            ParagraphSeek::LoadSession {
+                session_index: 0,
+                path: "/rec/0.ogg".into(),
+                seconds: 12.0,
+            }
+        );
+    }
+
+    #[test]
+    fn paragraph_of_the_loaded_session_seeks_in_place() {
+        let sessions = [session(0), session(1)];
+        assert_eq!(
+            plan_paragraph_seek(&sessions, Some(1), 1, 3.0),
+            ParagraphSeek::InLoaded { seconds: 3.0 }
+        );
+        // Single-session meeting (SOU-245 path).
+        assert_eq!(
+            plan_paragraph_seek(&[session(0)], Some(0), 0, 4.0),
+            ParagraphSeek::InLoaded { seconds: 4.0 }
+        );
+    }
+
+    #[test]
+    fn paragraph_without_a_session_file_keeps_the_loaded_player() {
+        let sessions = [session(0), session(2)];
+        // No session attributed.
+        assert_eq!(
+            plan_paragraph_seek(&sessions, Some(0), -1, 7.0),
+            ParagraphSeek::InLoaded { seconds: 7.0 }
+        );
+        // Session 1 recorded without audio.
+        assert_eq!(
+            plan_paragraph_seek(&sessions, Some(0), 1, 7.0),
+            ParagraphSeek::InLoaded { seconds: 7.0 }
+        );
+        // Negative start times clamp to the session start.
+        assert_eq!(
+            plan_paragraph_seek(&sessions, Some(0), 2, -1.0),
+            ParagraphSeek::LoadSession {
+                session_index: 2,
+                path: "/rec/2.ogg".into(),
+                seconds: 0.0,
+            }
+        );
     }
 
     #[test]

@@ -630,7 +630,8 @@ export component MainWindow inherits Window {
         summary-available-model-ids: root.meeting-detail-summary-available-model-ids;
         summary-selected-model-id <=> root.meeting-detail-summary-selected-model-id;
         summary-selected-model-label <=> root.meeting-detail-summary-selected-model-label;
-        can-resume: root.meeting-detail-can-resume;
+        // Resuming appends to the transcript the summary is being built from.
+        can-resume: root.meeting-detail-can-resume && !root.meeting-detail-summary-is-generating;
         resume-error: root.meeting-detail-resume-error;
         delete-error: root.meeting-detail-delete-error;
         export-error: root.meeting-detail-export-error;
