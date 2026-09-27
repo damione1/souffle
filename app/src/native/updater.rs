@@ -155,7 +155,7 @@ pub async fn download_and_verify(
 
 /// The `.app` bundle currently running, derived from the executable path
 /// (`.../Foo.app/Contents/MacOS/exe` -> `.../Foo.app`).
-fn running_bundle_path() -> Result<PathBuf, String> {
+pub(crate) fn running_bundle_path() -> Result<PathBuf, String> {
     let exe = std::env::current_exe().map_err(|e| format!("Current executable path: {e}"))?;
     exe.ancestors()
         .find(|p| p.extension().is_some_and(|ext| ext == "app"))

@@ -1,8 +1,9 @@
 import { ScrollView } from "std-widgets.slint";
-import { RecordingMode, SpeakerRole, LiveSystemAudio } from "types.slint";
+import { RecordingMode, SpeakerRole, LiveSystemAudio, MicStall } from "types.slint";
 import { Theme } from "theme.slint";
 import { LucideIcon, IconSet } from "components/lucide_icon.slint";
 import { ThemedTextArea } from "components/themed_text_area.slint";
+import { MicStallBanner } from "components/mic_stall_banner.slint";
 import { TranscriptBlock, SpeakerLabels } from "components/transcript_section.slint";
 import { TranscriptWord, TranscriptWordFlow, DictionaryAliasPopover } from "components/transcript_words.slint";
 
@@ -30,6 +31,10 @@ export component RecordingView inherits Rectangle {
     // Live verdict on the meeting's system-audio leg (see LiveSystemAudio).
     in property <LiveSystemAudio> system-audio: LiveSystemAudio.pending;
     in property <bool> auto-paste: false;
+    // SOU-126: a meeting goes on without a stuck microphone; say which one.
+    in property <bool> mic-stall-visible: false;
+    in property <MicStall> mic-stall-kind;
+    in property <string> mic-stall-device;
     // SOU-258: the view mounts on the click, before the session exists (a
     // meeting's engine reset takes seconds). SOU-260: capture already runs
     // while this is true, so the clock counts from the click like the audio
@@ -43,6 +48,8 @@ export component RecordingView inherits Rectangle {
 
     callback stop-requested();
     callback notes-changed(string);
+    callback mic-stall-restart-requested();
+    callback mic-stall-dismissed();
     // (term, pronunciation) saved from a live word's alias popover - the
     // same handler as the post-meeting transcript's.
     callback alias-save-requested(string, string);
@@ -237,6 +244,14 @@ export component RecordingView inherits Rectangle {
                     }
                 }
             }
+        }
+
+        if root.mic-stall-visible: MicStallBanner {
+            vertical-stretch: 0;
+            kind: root.mic-stall-kind;
+            device: root.mic-stall-device;
+            restart-requested => { root.mic-stall-restart-requested(); }
+            dismissed => { root.mic-stall-dismissed(); }
         }
 
         if root.mode == RecordingMode.meeting && root.system-audio == LiveSystemAudio.unavailable: Rectangle {

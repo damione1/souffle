@@ -16,7 +16,7 @@ import { TimelineDayGroup, UpcomingEvent } from "components/timeline_section.sli
 import { TranscriptBlock } from "components/transcript_section.slint";
 import { TranscriptWord } from "components/transcript_words.slint";
 import { StructuredActionItem } from "components/summary_section.slint";
-import { RecordingMode, LiveSystemAudio, SpeakerRole, TimelineFilter, TimelineKind, NotesSaveState, ModelPhase, TranscriptionPhase, UpcomingPhase, SettingsTab, SettingsInteraction, AppTheme, AppLocale, PasteMethod, MeetingLanguage, LogLevel, AudioRetention, AccessState, PermissionKind, ShortcutField, SummaryProvider, AppleIntelligenceUnavailableReason, OnboardingStep, UpdatePhase, InstallBlockReason, MeetingExportFormat } from "types.slint";
+import { RecordingMode, LiveSystemAudio, MicStall, SpeakerRole, TimelineFilter, TimelineKind, NotesSaveState, ModelPhase, TranscriptionPhase, UpcomingPhase, SettingsTab, SettingsInteraction, AppTheme, AppLocale, PasteMethod, MeetingLanguage, LogLevel, AudioRetention, AccessState, PermissionKind, ShortcutField, SummaryProvider, AppleIntelligenceUnavailableReason, OnboardingStep, UpdatePhase, InstallBlockReason, MeetingExportFormat } from "types.slint";
 export { SettingsTab, SettingsInteraction, AppTheme, AppLocale, PasteMethod, MeetingLanguage, LogLevel, AudioRetention, AccessState, PermissionKind, ShortcutField, SummaryProvider, AppleIntelligenceUnavailableReason, SpeakerRole }
 import { Theme } from "theme.slint";
 // Re-exported (not just imported) so Slint's codegen generates a Rust
@@ -96,6 +96,13 @@ export component MainWindow inherits Window {
     // records (main.rs). Not derived from Settings: the Settings flags say
     // what was *asked for*, not whether the tap actually came up.
     in property <LiveSystemAudio> live-system-audio: LiveSystemAudio.pending;
+    // SOU-126 AC5: `Option<MicStallNotice>` split across the boundary, all
+    // three written together by `mic_stall_ui::MicStallBanner::project`.
+    in property <bool> mic-stall-visible: false;
+    in property <MicStall> mic-stall-kind;
+    in property <string> mic-stall-device;
+    callback mic-stall-restart-requested();
+    callback mic-stall-dismissed();
     in-out property <string> live-notes;
 
     // Non-empty while a completed meeting is open in MeetingDetail. Empty
@@ -566,6 +573,11 @@ export component MainWindow inherits Window {
         transcription-status-message: root.transcription-status-message;
         dictation-recovery-text <=> root.dictation-recovery-text;
         meeting-status-message: root.meeting-status-message;
+        mic-stall-visible: root.mic-stall-visible;
+        mic-stall-kind: root.mic-stall-kind;
+        mic-stall-device: root.mic-stall-device;
+        mic-stall-restart-requested => { root.mic-stall-restart-requested(); }
+        mic-stall-dismissed => { root.mic-stall-dismissed(); }
         timeline-groups: root.timeline-groups;
         timeline-is-empty: root.timeline-is-empty;
         timeline-has-matches: root.timeline-has-matches;
@@ -668,6 +680,11 @@ export component MainWindow inherits Window {
         notes <=> root.live-notes;
         system-audio: root.live-system-audio;
         auto-paste: root.settings-auto-paste;
+        mic-stall-visible: root.mic-stall-visible;
+        mic-stall-kind: root.mic-stall-kind;
+        mic-stall-device: root.mic-stall-device;
+        mic-stall-restart-requested => { root.mic-stall-restart-requested(); }
+        mic-stall-dismissed => { root.mic-stall-dismissed(); }
         stop-requested => { root.stop-requested(); }
         alias-save-requested(term, pronunciation) => { root.live-transcript-alias-save-requested(term, pronunciation); }
         

@@ -195,3 +195,10 @@ fn record_system_audio_wav(_seconds: u32) -> Result<String, String> {
 pub fn get_system_audio_status() -> Option<crate::app_events::SystemAudioStatus> {
     crate::audio::capture::system_audio_status()
 }
+
+/// The microphone that last stopped answering CoreAudio, until an open
+/// succeeds again on any device (SOU-126). The UI names it and offers to
+/// relaunch the app, the only sure way to free a device stuck in the HAL.
+pub fn get_mic_stall_notice() -> Option<crate::audio::capture::MicStallNotice> {
+    crate::audio::capture::mic_stall_notice()
+}

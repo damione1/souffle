@@ -12,6 +12,7 @@ pub mod appearance;
 pub mod bridge;
 pub mod dialog;
 pub mod notifications;
+pub mod relaunch;
 pub mod shortcuts;
 pub mod single_instance;
 pub mod updater;

@@ -140,6 +140,45 @@ pub fn discard_system_audio_status() {
     store_system_audio_status(None);
 }
 
+/// Why a microphone is reported as not answering CoreAudio. Every variant
+/// means the same thing to the user — this device is stuck, and only a
+/// relaunch of the app is sure to free it — but not the same sentence.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MicStallKind {
+    /// The open ran past `MIC_OPEN_TIMEOUT` just now.
+    TimedOut,
+    /// Not attempted: the device ran past the bound moments ago.
+    Parked,
+    /// Not attempted: the previous open of this device is still inside
+    /// CoreAudio (SOU-126).
+    Busy,
+}
+
+/// A microphone the capture thread gave up on, for the UI to name and offer
+/// a relaunch for. `device_name` is data (the device's display name), not a
+/// closed set.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MicStallNotice {
+    pub kind: MicStallKind,
+    pub device_name: String,
+}
+
+/// Last stall the capture thread hit, until an open succeeds on any device.
+/// Polled by the UI. The capture thread may already have exited after a
+/// stalled dictation start, so the snapshot outlives it on purpose.
+static MIC_STALL_NOTICE: Mutex<Option<MicStallNotice>> = Mutex::new(None);
+
+/// Snapshot of the stuck microphone, if any, for `commands::get_mic_stall_notice`.
+pub fn mic_stall_notice() -> Option<MicStallNotice> {
+    MIC_STALL_NOTICE.lock().ok().and_then(|guard| guard.clone())
+}
+
+fn store_mic_stall_notice(notice: Option<MicStallNotice>) {
+    if let Ok(mut guard) = MIC_STALL_NOTICE.lock() {
+        *guard = notice;
+    }
+}
+
 /// Record whether the system-audio leg of a meeting is live, for a UI that
 /// queries after the fact (`get_system_audio_status`). Every path that gives
 /// up on system audio goes through here, including the ones that decide it
@@ -433,6 +472,16 @@ const MIC_OPEN_TIMEOUT: Duration = Duration::from_secs(8);
 /// clear it, because CoreAudio emits one every time this app's own tap
 /// retry creates or destroys an aggregate.
 const MIC_OPEN_RETRY_INTERVAL: Duration = Duration::from_secs(30);
+
+/// What asked `check_mic_health` to look.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MicCheckTrigger {
+    /// The periodic `MIC_CHECK_INTERVAL` tick.
+    Tick,
+    /// A route event: a device picked, the policy changed, a device came or
+    /// went (`refresh_input_route`).
+    RouteEvent,
+}
 
 /// Decision for one mic-loss episode in `check_mic_health`, given how many
 /// rebuilds have failed in a row, whether the session has another audio
@@ -748,6 +797,41 @@ fn mic_open_is_parked(timed_out: Option<&(String, Instant)>, device_name: &str) 
         .is_some_and(|(parked, at)| parked == device_name && at.elapsed() < MIC_OPEN_RETRY_INTERVAL)
 }
 
+/// An open still inside CoreAudio, and the device it targeted. The device
+/// name is the same key as the park (`mic_open_timed_out`).
+struct PendingMicOpen<T> {
+    device_name: String,
+    open: PendingOpen<T>,
+}
+
+/// Whether an open of `device_name` must be refused because a previous open
+/// *of that same device* has not come back from CoreAudio (SOU-126). An open
+/// stuck on another device does not block this one: at worst one stuck
+/// `mic-open` thread is left per device tried, a trade-off accepted so that
+/// switching to a working input never needs a relaunch. If `coreaudiod` is
+/// wedged as a whole, each device tried may leave one; none is killed.
+fn mic_open_is_busy<T>(
+    pending: Option<&PendingMicOpen<T>>,
+    orphans: &[PendingMicOpen<T>],
+    device_name: &str,
+) -> bool {
+    pending
+        .into_iter()
+        .chain(orphans)
+        .any(|p| p.device_name == device_name && p.open.is_running())
+}
+
+/// What the UI is told about an open that did not yield a stream. A refusal
+/// by cpal is not a stall: the device answered, and a retry may work.
+fn mic_stall_kind(error: &MicOpenError) -> Option<MicStallKind> {
+    match error {
+        MicOpenError::Failed(_) => None,
+        MicOpenError::TimedOut(_) => Some(MicStallKind::TimedOut),
+        MicOpenError::Parked => Some(MicStallKind::Parked),
+        MicOpenError::Busy => Some(MicStallKind::Busy),
+    }
+}
+
 fn log_mic_open_timeout(device_name: &str, elapsed: Duration) {
     warn!(
         device = device_name,
@@ -985,6 +1069,91 @@ mod mic_open_tests {
                 );
             }
         }
+    }
+
+    /// A worker that stays inside "CoreAudio" until `release` is dropped or
+    /// sent to, handed back as a pending open of `device_name`.
+    fn stuck_open(device_name: &str) -> (PendingMicOpen<u32>, std::sync::mpsc::Sender<()>) {
+        let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
+        let (pending, opened) = open_with_timeout(
+            Duration::from_millis(20),
+            move |_abandoned| {
+                let _ = release_rx.recv_timeout(Duration::from_secs(5));
+                Ok(OPENED)
+            },
+            |_| {},
+        );
+        assert!(matches!(opened, Err(MicOpenError::TimedOut(_))));
+        let open = pending.expect("a spawned worker must be handed back");
+        (
+            PendingMicOpen {
+                device_name: device_name.to_string(),
+                open,
+            },
+            release_tx,
+        )
+    }
+
+    fn wait_finished(pending: &PendingMicOpen<u32>) {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while pending.open.is_running() {
+            assert!(
+                Instant::now() < deadline,
+                "worker must finish once released"
+            );
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+
+    /// SOU-126 AC1/AC2: a stuck open refuses its own device only.
+    #[test]
+    fn a_stuck_open_is_busy_for_its_device_and_not_for_another() {
+        let (pending, release) = stuck_open("Dock Mic");
+        assert!(mic_open_is_busy(Some(&pending), &[], "Dock Mic"));
+        assert!(!mic_open_is_busy(Some(&pending), &[], "AirPods"));
+
+        let _ = release.send(());
+        wait_finished(&pending);
+        assert!(
+            !mic_open_is_busy(Some(&pending), &[], "Dock Mic"),
+            "an open that came back guards nothing"
+        );
+    }
+
+    /// An abandoned open left behind by a switch to another device keeps
+    /// its own device Busy, and only that one.
+    #[test]
+    fn an_orphaned_open_still_refuses_its_device() {
+        let (mut orphan, _release) = stuck_open("Dock Mic");
+        let _ = orphan.open.abandon();
+        let (current, _release_current) = stuck_open("AirPods");
+        let orphans = [orphan];
+
+        assert!(mic_open_is_busy(Some(&current), &orphans, "Dock Mic"));
+        assert!(mic_open_is_busy(Some(&current), &orphans, "AirPods"));
+        assert!(!mic_open_is_busy(
+            Some(&current),
+            &orphans,
+            "MacBook Pro Microphone"
+        ));
+        assert!(!mic_open_is_busy::<u32>(None, &[], "Dock Mic"));
+    }
+
+    #[test]
+    fn only_a_device_that_does_not_answer_is_reported_as_stalled() {
+        assert_eq!(mic_stall_kind(&MicOpenError::Failed("gone".into())), None);
+        assert_eq!(
+            mic_stall_kind(&MicOpenError::TimedOut(Duration::from_secs(8))),
+            Some(MicStallKind::TimedOut)
+        );
+        assert_eq!(
+            mic_stall_kind(&MicOpenError::Parked),
+            Some(MicStallKind::Parked)
+        );
+        assert_eq!(
+            mic_stall_kind(&MicOpenError::Busy),
+            Some(MicStallKind::Busy)
+        );
     }
 
     fn adoption_of(session: u64) -> AdoptionContext<'static> {
@@ -2072,11 +2241,20 @@ pub struct AudioCapture {
     /// bound to burn (the app's own tap churn emits those events).
     mic_open_timed_out: Option<(String, Instant)>,
     /// The `mic-open` worker of the last attempt, once the caller stopped
-    /// waiting for it. A new open is refused while it runs, so a wedged
-    /// device cannot stack one stuck thread and one AUHAL per retry; on a
-    /// meeting it is also where the stream comes from when the device
-    /// finally answers.
-    mic_open_pending: Option<PendingOpen<Stream>>,
+    /// waiting for it. A new open *of the same device* is refused while it
+    /// runs, so a wedged device cannot stack one stuck thread and one AUHAL
+    /// per retry; on a meeting it is also where the stream comes from when
+    /// the device finally answers.
+    mic_open_pending: Option<PendingMicOpen<Stream>>,
+    /// Abandoned opens still inside CoreAudio, left behind when an open of
+    /// another device started. Nothing is waited for from them any more;
+    /// they are kept only so a new open of their device stays `Busy`, and
+    /// dropped as soon as their worker returns.
+    mic_open_orphans: Vec<PendingMicOpen<Stream>>,
+    /// The stall the current `start` hit, if any. Tells a device that is not
+    /// answering from one that refused outright, for the device this start
+    /// targeted only: a stuck open on another device says nothing about it.
+    start_stall: Option<MicStallKind>,
     /// Everything needed to put a late stream to work, set when a meeting
     /// gave up waiting for one. Absent on the dictation path, which has
     /// nothing to adopt into and ends the session instead.
@@ -2156,6 +2334,8 @@ impl AudioCapture {
                     route_attempt_uid: None,
                     mic_open_timed_out: None,
                     mic_open_pending: None,
+                    mic_open_orphans: Vec::new(),
+                    start_stall: None,
                     mic_open_adoption: None,
                     stream_failed: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                     last_mic_check: Instant::now(),
@@ -2198,7 +2378,7 @@ impl AudioCapture {
                                 }
                                 if capture.last_mic_check.elapsed() >= MIC_CHECK_INTERVAL {
                                     capture.last_mic_check = Instant::now();
-                                    if capture.check_mic_health() {
+                                    if capture.check_mic_health(MicCheckTrigger::Tick) {
                                         tracing::error!(
                                             "Microphone unrecoverable; ending session to keep the app alive"
                                         );
@@ -2375,31 +2555,46 @@ impl AudioCapture {
     /// device that just ran past it (parked for `MIC_OPEN_RETRY_INTERVAL`),
     /// and one whose previous open has not come back from CoreAudio yet.
     /// Either would cost this thread — and the meeting mixer it drives —
-    /// the whole bound for an answer already known.
+    /// the whole bound for an answer already known. Both are keyed by
+    /// device: an open stuck on another input never blocks this one.
     fn open_mic_stream<F>(&mut self, device_name: &str, build: F) -> Result<Stream, MicOpenError>
     where
         F: FnOnce(&AtomicBool) -> Result<Stream, String> + Send + 'static,
     {
-        if self
-            .mic_open_pending
-            .as_ref()
-            .is_some_and(PendingOpen::is_running)
-        {
-            return Err(MicOpenError::Busy);
-        }
-        if self.mic_open_pending.is_some() {
-            // Finished between the last poll and here: drain before forget,
-            // same reason as `reap_pending_mic_open`.
-            let delivered = self
-                .mic_open_pending
-                .as_mut()
-                .and_then(PendingOpen::abandon);
-            self.mic_open_pending = None;
-            self.mic_open_adoption = None;
-            if let Some(stream) = delivered {
-                release_late_mic_stream(stream, "a new open is starting");
+        let opened = self.open_mic_stream_unreported(device_name, build);
+        match &opened {
+            Ok(_) => self.clear_mic_stall(),
+            Err(error) => {
+                if let Some(kind) = mic_stall_kind(error) {
+                    self.note_mic_stall(kind, device_name);
+                }
             }
         }
+        opened
+    }
+
+    fn open_mic_stream_unreported<F>(
+        &mut self,
+        device_name: &str,
+        build: F,
+    ) -> Result<Stream, MicOpenError>
+    where
+        F: FnOnce(&AtomicBool) -> Result<Stream, String> + Send + 'static,
+    {
+        // Not `reap_pending_mic_open`: this runs mid-start, where a late
+        // stream must be released, never adopted into the session being
+        // rebuilt.
+        self.mic_open_orphans.retain(|p| p.open.is_running());
+        if mic_open_is_busy(
+            self.mic_open_pending.as_ref(),
+            &self.mic_open_orphans,
+            device_name,
+        ) {
+            return Err(MicOpenError::Busy);
+        }
+        // An open of another device still out: nothing will be adopted from
+        // it any more, but it stays on record so its own device stays Busy.
+        self.orphan_pending_mic_open("an open of another device is starting");
         if mic_open_is_parked(self.mic_open_timed_out.as_ref(), device_name) {
             return Err(MicOpenError::Parked);
         }
@@ -2414,7 +2609,10 @@ impl AudioCapture {
         // Kept, not abandoned: the caller decides. A meeting waits for it on
         // its own clock (`poll_pending_mic_open`); everything else abandons
         // it right away.
-        self.mic_open_pending = pending;
+        self.mic_open_pending = pending.map(|open| PendingMicOpen {
+            device_name: device_name.to_string(),
+            open,
+        });
 
         match &opened {
             Ok(_) => self.mic_open_timed_out = None,
@@ -2425,6 +2623,64 @@ impl AudioCapture {
             Err(MicOpenError::Failed(_) | MicOpenError::Parked | MicOpenError::Busy) => {}
         }
         opened
+    }
+
+    /// Record a stall of this start's target, and tell the UI (SOU-126 AC5).
+    fn note_mic_stall(&mut self, kind: MicStallKind, device_name: &str) {
+        self.start_stall = Some(kind);
+        store_mic_stall_notice(Some(MicStallNotice {
+            kind,
+            device_name: device_name.to_string(),
+        }));
+    }
+
+    /// A microphone opened: whatever the UI was told about a stuck one no
+    /// longer describes the session.
+    fn clear_mic_stall(&mut self) {
+        self.start_stall = None;
+        store_mic_stall_notice(None);
+    }
+
+    /// Name of the input `find_device` resolved to: the catalogue name for
+    /// its UID, else the UID itself. The same key the park and the Busy
+    /// guard use.
+    fn resolved_device_identity(
+        device: &Device,
+        known_devices: &[AudioInputDevice],
+    ) -> (Option<String>, String) {
+        // `id()` is a UID property read; `name()`/`description()` would open
+        // AudioUnits.
+        let uid = cpal_device_uid(device);
+        let name = uid
+            .as_deref()
+            .and_then(|uid| {
+                known_devices
+                    .iter()
+                    .find(|d| d.uid == uid)
+                    .map(|d| d.name.clone())
+            })
+            .or_else(|| uid.clone())
+            .unwrap_or_else(|| "Unknown".into());
+        (uid, name)
+    }
+
+    /// Whether this start targets a device whose previous open is still
+    /// inside CoreAudio. Resolves the target only when an open is out at
+    /// all, so the common path does not enumerate twice. A target that
+    /// cannot be resolved here is left to the normal path to report.
+    fn start_target_is_busy(&self) -> Option<String> {
+        if self.mic_open_pending.is_none() && self.mic_open_orphans.is_empty() {
+            return None;
+        }
+        let known_devices = list_input_devices_impl();
+        let device = self.find_device(&known_devices).ok()?;
+        let (_, device_name) = Self::resolved_device_identity(&device, &known_devices);
+        mic_open_is_busy(
+            self.mic_open_pending.as_ref(),
+            &self.mic_open_orphans,
+            &device_name,
+        )
+        .then_some(device_name)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -2452,19 +2708,17 @@ impl AudioCapture {
             self.mic_open_timed_out = None;
             self.abandon_pending_mic_open();
         }
+        self.start_stall = None;
         // Refused here rather than in `open_mic_stream`: everything between
         // this point and the open touches the device that is not answering
-        // — two `list_input_devices_impl`, `find_device`, and a
-        // `preferred_config` that instantiates and disposes an AUHAL twice —
+        // — `preferred_config` instantiates and disposes an AUHAL twice —
         // and the meeting path reopens the capture gate before it, which a
-        // stream still out on the previous open must not slip through. None
-        // of it can change the answer while that open is still running.
+        // stream still out on the previous open must not slip through. The
+        // refusal is keyed by device (SOU-126), so the target is resolved
+        // first; only when an open is out, since resolving means enumerating.
         self.reap_pending_mic_open();
-        if self
-            .mic_open_pending
-            .as_ref()
-            .is_some_and(PendingOpen::is_running)
-        {
+        if let Some(device_name) = self.start_target_is_busy() {
+            self.note_mic_stall(MicStallKind::Busy, &device_name);
             return Err(MicOpenError::Busy.to_string());
         }
         // Ensure any previous callback stops emitting immediately. The
@@ -2517,19 +2771,8 @@ impl AudioCapture {
         let device = self.find_device(&known_devices)?;
 
         // Track the UID cpal actually opened, not just what resolve_input
-        // picked: find_device may fall back to the OS default. `id()` is a
-        // UID property read; `name()`/`description()` would open AudioUnits.
-        let opened_uid = cpal_device_uid(&device);
-        let device_name = opened_uid
-            .as_deref()
-            .and_then(|uid| {
-                known_devices
-                    .iter()
-                    .find(|d| d.uid == uid)
-                    .map(|d| d.name.clone())
-            })
-            .or_else(|| opened_uid.clone())
-            .unwrap_or_else(|| "Unknown".into());
+        // picked: find_device may fall back to the OS default.
+        let (opened_uid, device_name) = Self::resolved_device_identity(&device, &known_devices);
         self.mic_device_uid = opened_uid.clone();
         self.mic_device_object_id = opened_uid.as_deref().and_then(current_mic_object_id);
         info!("Using input device: {device_name}");
@@ -3003,7 +3246,7 @@ impl AudioCapture {
     /// thread exits. Returns `false` in every other case, including a
     /// meeting session that lost its mic but keeps retrying while the
     /// system-audio leg still captures the other participants.
-    fn check_mic_health(&mut self) -> bool {
+    fn check_mic_health(&mut self, trigger: MicCheckTrigger) -> bool {
         let Some(params) = self.active_params.clone() else {
             return false;
         };
@@ -3012,16 +3255,28 @@ impl AudioCapture {
         // rebuild decision: the session has a microphone again and there is
         // nothing to rebuild.
         self.poll_pending_mic_open();
+        self.mic_open_orphans.retain(|p| p.open.is_running());
 
-        // Still inside CoreAudio from a timed-out open: rebuilding would
-        // only hit `Busy` and climb the mic-loss ladder to a false
-        // "Microphone lost" while system audio keeps working. Wait.
-        if self
-            .mic_open_pending
-            .as_ref()
-            .is_some_and(PendingOpen::is_running)
-        {
-            return false;
+        // The session's device is still inside CoreAudio from a timed-out
+        // open: rebuilding it would only hit `Busy` and climb the mic-loss
+        // ladder to a false "Microphone lost" while system audio keeps
+        // working. Wait — unless a route event now resolves to another
+        // input, which is not blocked by it (SOU-126). The periodic tick
+        // does not enumerate for that, the wedged device being one of those
+        // it would have to ask.
+        let session_open_out = self.mic_device_name.as_deref().is_some_and(|name| {
+            mic_open_is_busy(self.mic_open_pending.as_ref(), &self.mic_open_orphans, name)
+        });
+        if session_open_out {
+            match trigger {
+                MicCheckTrigger::Tick => return false,
+                MicCheckTrigger::RouteEvent => {
+                    let resolved = self.resolved_input_uid(&list_input_devices_impl());
+                    if resolved.is_none() || resolved == self.mic_device_uid {
+                        return false;
+                    }
+                }
+            }
         }
 
         let failed = self
@@ -3160,7 +3415,7 @@ impl AudioCapture {
         // input is not delayed by it.
         if self.active_params.is_some() {
             self.last_mic_check = Instant::now();
-            if self.check_mic_health() {
+            if self.check_mic_health(MicCheckTrigger::RouteEvent) {
                 tracing::error!(
                     "Microphone unrecoverable after input route change; ending session"
                 );
@@ -3455,17 +3710,26 @@ impl AudioCapture {
     /// wedged device would otherwise each spend a fresh bound and leave a
     /// fresh AUHAL behind.
     fn abandon_pending_mic_open(&mut self) {
-        let delivered = self
-            .mic_open_pending
-            .as_mut()
-            .and_then(PendingOpen::abandon);
-        if let Some(stream) = delivered {
+        self.orphan_pending_mic_open("the session stopped waiting for it");
+    }
+
+    /// Abandon the current open and, while its worker still runs, keep it
+    /// among the orphans keyed by its device. Drains before forgetting, same
+    /// reason as `reap_pending_mic_open`: a stream delivered in between would
+    /// otherwise drop without its `pause()`.
+    fn orphan_pending_mic_open(&mut self, why: &str) {
+        let Some(mut pending) = self.mic_open_pending.take() else {
+            return;
+        };
+        self.mic_open_adoption = None;
+        if let Some(stream) = pending.open.abandon() {
             // It answered between the last look and now, so the worker will
             // not release it.
-            release_late_mic_stream(stream, "the session stopped waiting for it");
+            release_late_mic_stream(stream, why);
         }
-        self.mic_open_adoption = None;
-        self.reap_pending_mic_open();
+        if pending.open.is_running() {
+            self.mic_open_orphans.push(pending);
+        }
     }
 
     /// Drop a worker that has come back. Keeping a finished one only hides
@@ -3476,17 +3740,18 @@ impl AudioCapture {
     /// would otherwise be dropped with the receiver and never `pause()`d —
     /// the cpal 0.15 `StreamInner` leak, and a missed adoption.
     fn reap_pending_mic_open(&mut self) {
+        self.mic_open_orphans.retain(|p| p.open.is_running());
         let finished = self
             .mic_open_pending
             .as_ref()
-            .is_some_and(|pending| !pending.is_running());
+            .is_some_and(|pending| !pending.open.is_running());
         if !finished {
             return;
         }
         let delivered = self
             .mic_open_pending
             .as_mut()
-            .and_then(PendingOpen::abandon);
+            .and_then(|pending| pending.open.abandon());
         self.mic_open_pending = None;
         // Prefer install when the meeting is still waiting on this open;
         // release when the world moved on (route change rebuild, etc.).
@@ -3514,7 +3779,7 @@ impl AudioCapture {
     /// stream from pushing frames minutes out of place and shifting the
     /// diarized lanes apart.
     fn poll_pending_mic_open(&mut self) {
-        let Some(pending) = &self.mic_open_pending else {
+        let Some(PendingMicOpen { open: pending, .. }) = &self.mic_open_pending else {
             return;
         };
         let elapsed_ms = pending.elapsed().as_millis() as u64;
@@ -3585,6 +3850,7 @@ impl AudioCapture {
             .store(unix_now_ms(), Ordering::Relaxed);
         self.active_session_id
             .store(adoption.session_id, Ordering::Release);
+        self.clear_mic_stall();
         info!(
             elapsed_ms,
             "Microphone opened after the meeting gave up waiting; mic leg restored"
@@ -3592,16 +3858,13 @@ impl AudioCapture {
         true
     }
 
-    /// Whether the last open ran past the bound or was refused because the
-    /// previous one still has not come back. Read right after a failed
-    /// `start` to tell a device that is not answering from a device that
-    /// refused outright (which is worth a retry).
+    /// Whether the open of this start's device ran past the bound, or was
+    /// refused because that device has not answered a previous one. Read
+    /// right after a failed `start` to tell a device that is not answering
+    /// from a device that refused outright (which is worth a retry). An open
+    /// stuck on another device does not count (SOU-126).
     fn mic_open_stalled(&self) -> bool {
-        self.mic_open_timed_out.is_some()
-            || self
-                .mic_open_pending
-                .as_ref()
-                .is_some_and(PendingOpen::is_running)
+        self.start_stall.is_some()
     }
 
     /// End a session that never started, carrying the real reason. Unlike

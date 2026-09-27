@@ -2867,3 +2867,19 @@ msgid ""
 "Quand l'overlay est affiché, l'exclure des captures d'écran, des "
 "enregistrements et des partages d'écran."
 msgstr "Quand l'overlay est affiché, l'exclure des captures d'écran, des enregistrements et des partages d'écran."
+
+msgctxt "MicStallBanner"
+msgid "Le micro « {} » ne répond toujours pas : sa dernière ouverture est encore bloquée dans macOS. Choisissez un autre micro, ou redémarrez Soufflé pour le réutiliser."
+msgstr "Le micro « {} » ne répond toujours pas : sa dernière ouverture est encore bloquée dans macOS. Choisissez un autre micro, ou redémarrez Soufflé pour le réutiliser."
+
+msgctxt "MicStallBanner"
+msgid "Le micro « {} » ne répond pas ; Soufflé réessaiera bientôt. Choisissez un autre micro, ou redémarrez Soufflé."
+msgstr "Le micro « {} » ne répond pas ; Soufflé réessaiera bientôt. Choisissez un autre micro, ou redémarrez Soufflé."
+
+msgctxt "MicStallBanner"
+msgid "Le micro « {} » n’a pas répondu à temps. Choisissez un autre micro, ou redémarrez Soufflé s’il reste bloqué."
+msgstr "Le micro « {} » n’a pas répondu à temps. Choisissez un autre micro, ou redémarrez Soufflé s’il reste bloqué."
+
+msgctxt "MicStallBanner"
+msgid "Redémarrer Soufflé"
+msgstr "Redémarrer Soufflé"

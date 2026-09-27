@@ -1,0 +1,22 @@
+import { StatusBanner } from "status_banner.slint";
+import { MicStall } from "../types.slint";
+
+// SOU-126 AC5: a microphone stuck inside CoreAudio, named, with the one
+// remedy that is sure to work. The house `StatusBanner` with its action
+// button; the sentence per `MicStall` variant lives here once, so the Home
+// and the recording screens say it the same way.
+export component MicStallBanner inherits StatusBanner {
+    in property <MicStall> kind;
+    in property <string> device;
+
+    callback restart-requested();
+
+    message: root.kind == MicStall.busy
+        ? @tr("Le micro « {} » ne répond toujours pas : sa dernière ouverture est encore bloquée dans macOS. Choisissez un autre micro, ou redémarrez Soufflé pour le réutiliser.", root.device)
+        : root.kind == MicStall.parked
+        ? @tr("Le micro « {} » ne répond pas ; Soufflé réessaiera bientôt. Choisissez un autre micro, ou redémarrez Soufflé.", root.device)
+        // MicStall.timed-out
+        : @tr("Le micro « {} » n’a pas répondu à temps. Choisissez un autre micro, ou redémarrez Soufflé s’il reste bloqué.", root.device);
+    action-label: @tr("Redémarrer Soufflé");
+    action-triggered => { root.restart-requested(); }
+}
