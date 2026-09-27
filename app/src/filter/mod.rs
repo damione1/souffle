@@ -223,7 +223,6 @@ mod tests {
     /// version mismatches (e.g. ort api-24 vs an older bundled runtime).
     /// Skips when the bundled resources are not present (e.g. bare CI).
     #[test]
-    #[ignore = "flaky/blocking on the CI runner - see SOU-186 AC11, approved live by Damien 2026-09-16"]
     fn silero_vad_runs_against_bundled_ort_dylib() {
         let Some(model_path) = resolve_vad_model_path() else {
             eprintln!("skipping: silero_vad_v4.onnx not found");
@@ -233,6 +232,9 @@ mod tests {
             eprintln!("skipping: libonnxruntime.dylib not found");
             return;
         }
+        // Single, bounded ort init for every Silero test (SOU-132): ort's own
+        // lazy init must never race `ensure_ort_initialized` on another thread.
+        crate::ort_runtime::ensure_ort_initialized_for_test();
 
         let config = PipelineConfig {
             vad_enabled: true,
@@ -255,7 +257,6 @@ mod tests {
     /// must be fed. Overwriting with the last 30 ms (SOU-067) returned
     /// silence once hangover expired inside the same call.
     #[test]
-    #[ignore = "flaky/blocking on the CI runner - see SOU-186 AC11, approved live by Damien 2026-09-16"]
     fn silero_mixed_block_feeds_when_speech_is_not_last_frame() {
         let Some(model_path) = resolve_vad_model_path() else {
             eprintln!("skipping: silero_vad_v4.onnx not found");
@@ -265,6 +266,9 @@ mod tests {
             eprintln!("skipping: libonnxruntime.dylib not found");
             return;
         }
+        // Single, bounded ort init for every Silero test (SOU-132): ort's own
+        // lazy init must never race `ensure_ort_initialized` on another thread.
+        crate::ort_runtime::ensure_ort_initialized_for_test();
 
         let mut vad = match audio_vad::SileroVadFilter::new(&model_path, 16_000) {
             Ok(v) => v,

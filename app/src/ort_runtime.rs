@@ -55,3 +55,101 @@ pub fn ensure_ort_initialized() {
         }
     });
 }
+
+/// How long a test waits for [`ensure_ort_initialized`] before failing. A
+/// healthy load takes well under a second; the CI hang (SOU-132) never
+/// returns, so anything past this is reported as a stalled initialization.
+#[cfg(test)]
+pub(crate) const TEST_ORT_INIT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Test-only entry point: every test that builds an ort session goes through
+/// here, so the bundled dylib is loaded by the single `Once` above and never
+/// by ort's own lazy init racing it on another test thread (SOU-132).
+///
+/// Panics, naming the step, when the initialization does not return within
+/// [`TEST_ORT_INIT_TIMEOUT`], instead of holding the test runner forever.
+#[cfg(test)]
+pub(crate) fn ensure_ort_initialized_for_test() {
+    if let Err(stalled) = run_within(
+        "ort_runtime::ensure_ort_initialized (ort::init_from bundled libonnxruntime.dylib)",
+        TEST_ORT_INIT_TIMEOUT,
+        ensure_ort_initialized,
+    ) {
+        panic!("{stalled}");
+    }
+}
+
+/// A step that did not return within its deadline.
+#[cfg(test)]
+#[derive(Debug)]
+pub(crate) struct StepTimedOut {
+    pub step: &'static str,
+    pub timeout: std::time::Duration,
+}
+
+#[cfg(test)]
+impl std::fmt::Display for StepTimedOut {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{} did not return within {:?} (stalled initialization, see SOU-132)",
+            self.step, self.timeout
+        )
+    }
+}
+
+/// Run `f` on a helper thread and wait at most `timeout` for it. On timeout
+/// the helper thread is left detached (it cannot be cancelled); the caller
+/// gets an error naming `step`.
+#[cfg(test)]
+pub(crate) fn run_within<T, F>(
+    step: &'static str,
+    timeout: std::time::Duration,
+    f: F,
+) -> Result<T, StepTimedOut>
+where
+    T: Send + 'static,
+    F: FnOnce() -> T + Send + 'static,
+{
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::Builder::new()
+        .name(format!("bounded: {step}"))
+        .spawn(move || {
+            // The receiver is gone once the caller timed out; nothing to report.
+            let _ = tx.send(f());
+        })
+        .expect("spawn bounded step thread");
+    match rx.recv_timeout(timeout) {
+        Ok(value) => Ok(value),
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => Err(StepTimedOut { step, timeout }),
+        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+            panic!("{step} panicked before returning")
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[test]
+    fn run_within_returns_the_value_of_a_step_that_finishes() {
+        let value = run_within("quick step", Duration::from_secs(5), || 42)
+            .expect("quick step must finish");
+        assert_eq!(value, 42);
+    }
+
+    #[test]
+    fn run_within_names_the_step_that_stalls() {
+        // The step blocks until `release` is dropped, i.e. after the deadline.
+        let (release, blocked) = std::sync::mpsc::channel::<()>();
+        let stalled = run_within("stuck init", Duration::from_millis(50), move || {
+            let _ = blocked.recv();
+        })
+        .expect_err("a step that never returns must time out");
+        drop(release);
+        assert_eq!(stalled.step, "stuck init");
+        assert!(stalled.to_string().contains("stuck init did not return"));
+    }
+}
