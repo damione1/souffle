@@ -39,6 +39,7 @@ const CALENDAR_REMINDER_MINUTES_KEY: &str = "calendar_reminder_minutes";
 const CALENDAR_AUTOSTART_ENABLED_KEY: &str = "calendar_autostart_enabled";
 const FEEDBACK_SOUNDS_ENABLED_KEY: &str = "feedback_sounds_enabled";
 const PILL_HIDDEN_KEY: &str = "pill_hidden";
+const PILL_HIDDEN_IN_CAPTURES_KEY: &str = "pill_hidden_in_captures";
 const FEEDBACK_SOUNDS_VOLUME_KEY: &str = "feedback_sounds_volume";
 const MODEL_UNLOAD_TIMEOUT_MINUTES_KEY: &str = "model_unload_timeout_minutes";
 const AUTO_UPDATE_CHECK_ENABLED_KEY: &str = "auto_update_check_enabled";
@@ -204,6 +205,9 @@ pub struct AppSettings {
     pub feedback_sounds_enabled: bool,
     /// When true, the floating recording HUD is not shown.
     pub pill_hidden: bool,
+    /// When true, the HUD (while shown) is excluded from screenshots, screen
+    /// recordings and screen sharing. Independent of `pill_hidden`.
+    pub pill_hidden_in_captures: bool,
     /// Feedback sound volume (0-100).
     pub feedback_sounds_volume: u32,
     /// Unload the transcription model after this many idle minutes to
@@ -346,6 +350,7 @@ impl Default for AppSettings {
             auto_update_check_enabled: true,
             feedback_sounds_enabled: true,
             pill_hidden: false,
+            pill_hidden_in_captures: true,
             feedback_sounds_volume: 70,
             model_unload_timeout_minutes: 60,
             meeting_autostop_enabled: true,
@@ -507,6 +512,11 @@ impl AppSettings {
         }
         if let Some(pill_hidden) = read_json_setting::<bool>(db, PILL_HIDDEN_KEY)? {
             settings.pill_hidden = pill_hidden;
+        }
+        if let Some(pill_hidden_in_captures) =
+            read_json_setting::<bool>(db, PILL_HIDDEN_IN_CAPTURES_KEY)?
+        {
+            settings.pill_hidden_in_captures = pill_hidden_in_captures;
         }
         if let Some(feedback_sounds_volume) =
             read_json_setting::<u32>(db, FEEDBACK_SOUNDS_VOLUME_KEY)?
@@ -1006,6 +1016,11 @@ impl AppSettings {
             )?;
             write_json_setting_in_transaction(
                 transaction,
+                PILL_HIDDEN_IN_CAPTURES_KEY,
+                &normalized.pill_hidden_in_captures,
+            )?;
+            write_json_setting_in_transaction(
+                transaction,
                 FEEDBACK_SOUNDS_VOLUME_KEY,
                 &normalized.feedback_sounds_volume,
             )?;
@@ -1409,6 +1424,7 @@ mod tests {
             calendar_autostart_enabled: true,
             feedback_sounds_enabled: false,
             pill_hidden: true,
+            pill_hidden_in_captures: false,
             feedback_sounds_volume: 40,
             model_unload_timeout_minutes: 15,
             meeting_autostop_enabled: false,
@@ -1435,6 +1451,34 @@ mod tests {
         assert_eq!(loaded, expected);
         #[cfg(target_os = "macos")]
         assert!(!loaded.input_priority.known.is_empty());
+    }
+
+    #[test]
+    fn hud_activation_and_capture_exclusion_persist_independently() {
+        let (db, _dir) = test_db();
+        let defaults = AppSettings::default();
+        assert!(!defaults.pill_hidden, "the HUD is on by default");
+        assert!(
+            defaults.pill_hidden_in_captures,
+            "the HUD stays out of screen captures by default"
+        );
+
+        for (pill_hidden, pill_hidden_in_captures) in
+            [(false, false), (false, true), (true, false), (true, true)]
+        {
+            AppSettings {
+                pill_hidden,
+                pill_hidden_in_captures,
+                ..AppSettings::default()
+            }
+            .save(&db)
+            .expect("save settings");
+            let loaded = AppSettings::load(&db).expect("load settings");
+            assert_eq!(
+                (loaded.pill_hidden, loaded.pill_hidden_in_captures),
+                (pill_hidden, pill_hidden_in_captures)
+            );
+        }
     }
 
     #[test]

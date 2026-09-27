@@ -48,6 +48,7 @@ export component SettingsView inherits Rectangle {
     in property <int> paste-delay-min;
     in property <int> paste-delay-max;
     in property <bool> pill-hidden;
+    in property <bool> pill-hidden-in-captures;
     in property <bool> feedback-sounds-enabled;
     in property <int> feedback-sounds-volume;
     in property <int> feedback-sounds-volume-min;
@@ -203,6 +204,7 @@ export component SettingsView inherits Rectangle {
     callback paste-method-changed(PasteMethod);
     callback paste-delay-changed(int);
     callback pill-hidden-changed(bool);
+    callback pill-hidden-in-captures-changed(bool);
     callback feedback-sounds-enabled-changed(bool);
     callback feedback-sounds-volume-changed(int);
     callback shortcut-record-requested(ShortcutField);
@@ -569,12 +571,14 @@ export component SettingsView inherits Rectangle {
                             shortcut-error: root.shortcut-error;
                             native-tap-warning-visible: root.native-tap-warning-visible;
                             pill-hidden: root.pill-hidden;
+                            pill-hidden-in-captures: root.pill-hidden-in-captures;
                             theme-changed(value) => { root.theme-changed(value); }
                             locale-changed(value) => { root.locale-changed(value); }
                             auto-paste-changed(value) => { root.auto-paste-changed(value); }
                             paste-method-changed(value) => { root.paste-method-changed(value); }
                             paste-delay-changed(value) => { root.paste-delay-changed(value); }
                             pill-hidden-changed(value) => { root.pill-hidden-changed(value); }
+                            pill-hidden-in-captures-changed(value) => { root.pill-hidden-in-captures-changed(value); }
                             shortcut-record-requested(field) => { root.shortcut-record-requested(field); }
                             shortcut-captured(field, text, ctrl, shift, alt, meta) => { root.shortcut-captured(field, text, ctrl, shift, alt, meta); }
                             shortcut-released(field, text, ctrl, shift, alt, meta) => { root.shortcut-released(field, text, ctrl, shift, alt, meta); }

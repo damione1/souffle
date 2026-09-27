@@ -34,6 +34,7 @@ pub fn populate(window: &MainWindow, settings: &AppSettings) {
     window.set_settings_dictation_learn_from_edit(settings.dictation_learn_from_edit);
     window.set_settings_paste_delay_ms(settings.paste_delay_ms as i32);
     window.set_settings_pill_hidden(settings.pill_hidden);
+    window.set_settings_pill_hidden_in_captures(settings.pill_hidden_in_captures);
     window.set_settings_feedback_sounds_enabled(settings.feedback_sounds_enabled);
     window.set_settings_feedback_sounds_volume(settings.feedback_sounds_volume as i32);
 

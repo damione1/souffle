@@ -184,6 +184,7 @@ export component MainWindow inherits Window {
     in property <int> settings-paste-delay-min;
     in property <int> settings-paste-delay-max;
     in property <bool> settings-pill-hidden;
+    in property <bool> settings-pill-hidden-in-captures;
     in property <bool> settings-feedback-sounds-enabled;
     in property <int> settings-feedback-sounds-volume;
     in property <int> settings-feedback-sounds-volume-min;
@@ -348,6 +349,7 @@ export component MainWindow inherits Window {
     callback settings-paste-method-changed(PasteMethod);
     callback settings-paste-delay-changed(int);
     callback settings-pill-hidden-changed(bool);
+    callback settings-pill-hidden-in-captures-changed(bool);
     callback settings-feedback-sounds-enabled-changed(bool);
     callback settings-feedback-sounds-volume-changed(int);
     callback settings-shortcut-record-requested(ShortcutField);
@@ -701,6 +703,7 @@ export component MainWindow inherits Window {
         paste-delay-min: root.settings-paste-delay-min;
         paste-delay-max: root.settings-paste-delay-max;
         pill-hidden: root.settings-pill-hidden;
+        pill-hidden-in-captures: root.settings-pill-hidden-in-captures;
         feedback-sounds-enabled: root.settings-feedback-sounds-enabled;
         feedback-sounds-volume: root.settings-feedback-sounds-volume;
         feedback-sounds-volume-min: root.settings-feedback-sounds-volume-min;
@@ -853,6 +856,7 @@ export component MainWindow inherits Window {
         paste-method-changed(value) => { root.settings-paste-method-changed(value); }
         paste-delay-changed(value) => { root.settings-instrument-input(SettingsInteraction.number); root.settings-paste-delay-changed(value); }
         pill-hidden-changed(value) => { root.settings-pill-hidden-changed(value); }
+        pill-hidden-in-captures-changed(value) => { root.settings-pill-hidden-in-captures-changed(value); }
         feedback-sounds-enabled-changed(value) => { root.settings-feedback-sounds-enabled-changed(value); }
         feedback-sounds-volume-changed(value) => { root.settings-feedback-sounds-volume-changed(value); }
         shortcut-record-requested(field) => { root.settings-shortcut-record-requested(field); }

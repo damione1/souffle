@@ -202,6 +202,7 @@ fn apply_settings_effects(
             allow_bluetooth_mic: settings.allow_bluetooth_mic,
         });
     crate::pill::set_hidden(settings.pill_hidden);
+    crate::pill::set_hidden_in_captures(settings.pill_hidden_in_captures);
     // A locale change must relabel the tray menu immediately. Hide/show of
     // the recording overlay is applied on the same pass.
     if let Ok(machine) = state.current_machine_state() {
