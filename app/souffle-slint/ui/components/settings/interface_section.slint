@@ -95,6 +95,7 @@ export component InterfaceSection inherits VerticalLayout {
     in property <string> shortcut-error;
     in property <bool> native-tap-warning-visible;
     in property <bool> pill-hidden;
+    in property <bool> pill-hidden-in-captures;
 
     callback theme-changed(AppTheme);
     callback locale-changed(AppLocale);
@@ -102,6 +103,7 @@ export component InterfaceSection inherits VerticalLayout {
     callback paste-method-changed(PasteMethod);
     callback paste-delay-changed(int);
     callback pill-hidden-changed(bool);
+    callback pill-hidden-in-captures-changed(bool);
     callback shortcut-record-requested(ShortcutField);
     callback shortcut-captured(ShortcutField, string, bool, bool, bool, bool);
     callback shortcut-released(ShortcutField, string, bool, bool, bool, bool);
@@ -290,6 +292,18 @@ export component InterfaceSection inherits VerticalLayout {
                 control-label: @tr("Masquer l'overlay d'enregistrement");
                 checked: root.pill-hidden;
                 toggled(new) => { root.pill-hidden-changed(new); }
+            }
+        }
+
+        SettingsField {
+            label: @tr("Masquer l'overlay dans les captures d'écran");
+            description: @tr("Quand l'overlay est affiché, l'exclure des captures d'écran, des enregistrements et des partages d'écran.");
+
+            ThemedSwitch {
+                control-label: @tr("Masquer l'overlay dans les captures d'écran");
+                enabled: !root.pill-hidden;
+                checked: root.pill-hidden-in-captures;
+                toggled(new) => { root.pill-hidden-in-captures-changed(new); }
             }
         }
 

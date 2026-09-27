@@ -2857,3 +2857,13 @@ msgstr "Démarrage…"
 msgctxt "AudioPlayerSection"
 msgid "Chargement de l'audio…"
 msgstr "Chargement de l'audio…"
+
+msgctxt "InterfaceSection"
+msgid "Masquer l'overlay dans les captures d'écran"
+msgstr "Masquer l'overlay dans les captures d'écran"
+
+msgctxt "InterfaceSection"
+msgid ""
+"Quand l'overlay est affiché, l'exclure des captures d'écran, des "
+"enregistrements et des partages d'écran."
+msgstr "Quand l'overlay est affiché, l'exclure des captures d'écran, des enregistrements et des partages d'écran."

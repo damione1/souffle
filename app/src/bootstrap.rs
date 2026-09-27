@@ -134,7 +134,11 @@ pub fn bootstrap() -> Arc<AppState> {
             if let Err(e) = logging::set_level(app_settings.log_level) {
                 warn!("Failed to apply log level: {e}");
             }
-            crate::pill::restore_from_db(&state.db, app_settings.pill_hidden);
+            crate::pill::restore_from_db(
+                &state.db,
+                app_settings.pill_hidden,
+                app_settings.pill_hidden_in_captures,
+            );
             state
                 .engine_actor
                 .set_unload_timeout(app_settings.model_unload_timeout_minutes);

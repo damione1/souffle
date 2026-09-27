@@ -4570,6 +4570,19 @@ fn wire_callbacks(
     });
 
     let weak = window.as_weak();
+    let settings_io_for_pill_hidden_in_captures = settings_io.clone();
+    window.on_settings_pill_hidden_in_captures_changed(move |hidden| {
+        save_settings_field(
+            &settings_io_for_pill_hidden_in_captures,
+            souffle_lib::commands::SettingsSaveLane::General,
+            move |settings| settings.pill_hidden_in_captures = hidden,
+        );
+        if let Some(window) = weak.upgrade() {
+            window.set_settings_pill_hidden_in_captures(hidden);
+        }
+    });
+
+    let weak = window.as_weak();
     let settings_io_for_feedback_enabled = settings_io.clone();
     window.on_settings_feedback_sounds_enabled_changed(move |enabled| {
         save_settings_field(

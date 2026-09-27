@@ -25,6 +25,11 @@ void pill_panel_create(void);
 /// `visible = 0` calls `orderOut:`. Safe from any thread.
 void pill_panel_set_visible(int visible);
 
+/// Exclude the panel from screenshots, screen recordings and screen sharing
+/// (`excluded = 1`, `NSWindowSharingNone`) or include it (`excluded = 0`,
+/// `NSWindowSharingReadOnly`). Independent of visibility. Safe from any thread.
+void pill_panel_set_capture_excluded(int excluded);
+
 // ---------------------------------------------------------------------------
 // Content
 // ---------------------------------------------------------------------------

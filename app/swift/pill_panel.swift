@@ -625,6 +625,9 @@ private final class PillPanel {
     private var currentStopLabel = "Stop recording"
     private var currentA11yLabel = "Dictation in progress"
     private var sessionMaxHeight: CGFloat = kCompactHeight
+    /// Whether the panel is kept out of screen captures / sharing. Stored so
+    /// a value pushed before `create()` still applies.
+    private var captureExcluded = true
 
     private init() {}
 
@@ -652,7 +655,7 @@ private final class PillPanel {
         p.isOpaque = false
         p.hidesOnDeactivate = false
         p.animationBehavior = .none
-        p.sharingType = .none
+        p.sharingType = captureExcluded ? .none : .readOnly
         p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
         p.orderOut(nil)
 
@@ -689,6 +692,11 @@ private final class PillPanel {
             contentView?.setLiveText("", provisional: 0)
             panel.orderOut(nil)
         }
+    }
+
+    func setCaptureExcluded(_ excluded: Bool) {
+        captureExcluded = excluded
+        panel?.sharingType = excluded ? .none : .readOnly
     }
 
     private func targetSize(mode: PillMode, expanded: Bool) -> CGSize {
@@ -829,6 +837,11 @@ public func pill_panel_create() {
 @_cdecl("pill_panel_set_visible")
 public func pill_panel_set_visible(_ visible: Int32) {
     onMain { PillPanel.shared.setVisible(visible != 0) }
+}
+
+@_cdecl("pill_panel_set_capture_excluded")
+public func pill_panel_set_capture_excluded(_ excluded: Int32) {
+    onMain { PillPanel.shared.setCaptureExcluded(excluded != 0) }
 }
 
 @_cdecl("pill_panel_set_mode")

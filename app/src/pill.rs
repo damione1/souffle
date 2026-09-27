@@ -48,6 +48,7 @@ type PillStopCallback = unsafe extern "C" fn(recording_mode: i32);
 unsafe extern "C" {
     fn pill_panel_create();
     fn pill_panel_set_visible(visible: i32);
+    fn pill_panel_set_capture_excluded(excluded: i32);
     fn pill_panel_set_mode(
         mode: i32,
         title: *const std::ffi::c_char,
@@ -65,6 +66,8 @@ unsafe extern "C" {
 unsafe fn pill_panel_create() {}
 #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
 unsafe fn pill_panel_set_visible(_visible: i32) {}
+#[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+unsafe fn pill_panel_set_capture_excluded(_excluded: i32) {}
 #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
 unsafe fn pill_panel_set_mode(
     _mode: i32,
@@ -102,6 +105,10 @@ static HOLD: Mutex<Option<PillHoldKind>> = Mutex::new(None);
 static LAST_RECORDING: AtomicBool = AtomicBool::new(false);
 
 static PILL_HIDDEN: AtomicBool = AtomicBool::new(false);
+/// Whether the HUD is excluded from screen captures / sharing. Independent of
+/// `PILL_HIDDEN`: one decides whether the HUD shows at all, the other whether
+/// a shown HUD appears in a capture.
+static PILL_HIDDEN_IN_CAPTURES: AtomicBool = AtomicBool::new(true);
 static CURRENT_RMS_BITS: std::sync::atomic::AtomicU32 =
     std::sync::atomic::AtomicU32::new(0.0f32.to_bits());
 
@@ -215,6 +222,19 @@ pub fn set_hidden(hidden: bool) {
 
 fn is_hidden() -> bool {
     PILL_HIDDEN.load(Ordering::SeqCst)
+}
+
+/// Exclude (or include) the HUD from screenshots, screen recordings and
+/// screen sharing. Applied to the native panel immediately.
+pub fn set_hidden_in_captures(hidden: bool) {
+    PILL_HIDDEN_IN_CAPTURES.store(hidden, Ordering::SeqCst);
+    // SAFETY: Swift hops to the main thread internally.
+    unsafe { pill_panel_set_capture_excluded(i32::from(hidden)) };
+}
+
+#[cfg(test)]
+fn is_hidden_in_captures() -> bool {
+    PILL_HIDDEN_IN_CAPTURES.load(Ordering::SeqCst)
 }
 
 fn set_hold_state(kind: PillHoldKind) {
@@ -443,8 +463,9 @@ pub fn live_text_tail(text: &str, max_chars: usize) -> String {
 // Position persistence
 // ---------------------------------------------------------------------------
 
-pub(crate) fn restore_from_db(db: &Database, hidden: bool) {
+pub(crate) fn restore_from_db(db: &Database, hidden: bool, hidden_in_captures: bool) {
     set_hidden(hidden);
+    set_hidden_in_captures(hidden_in_captures);
     match db.get_setting(PILL_POSITION_KEY) {
         Ok(Some(raw)) => {
             if let Ok((x, y)) = serde_json::from_str::<(f64, f64)>(&raw) {
@@ -619,16 +640,42 @@ mod tests {
 
     #[test]
     fn restore_from_db_loads_a_saved_origin_and_hide_flag() {
+        let _guard = hold_test_guard();
         store_custom_origin(None);
         set_hidden(false);
         let (db, _dir) = crate::test_helpers::fixtures::test_db();
         db.set_setting(crate::settings::PILL_POSITION_KEY, "[100.5,200.25]")
             .unwrap();
-        restore_from_db(&db, true);
+        restore_from_db(&db, true, true);
         assert!(is_hidden());
         assert_eq!(custom_origin(), Some((100.5, 200.25)));
         set_hidden(false);
         store_custom_origin(None);
+    }
+
+    #[test]
+    fn hud_activation_and_capture_exclusion_are_independent() {
+        let _guard = hold_test_guard();
+        let (db, _dir) = crate::test_helpers::fixtures::test_db();
+
+        // HUD on, but shown in captures: it must still be shown.
+        restore_from_db(&db, false, false);
+        assert!(!is_hidden());
+        assert!(!is_hidden_in_captures());
+        assert!(should_show_pill(true, false, is_hidden()));
+
+        // HUD on and excluded from captures: still shown on screen.
+        set_hidden_in_captures(true);
+        assert!(!is_hidden());
+        assert!(should_show_pill(true, false, is_hidden()));
+
+        // HUD off: the capture preference survives untouched.
+        set_hidden(true);
+        assert!(is_hidden_in_captures());
+        assert!(!should_show_pill(true, false, is_hidden()));
+
+        set_hidden(false);
+        set_hidden_in_captures(true);
     }
 
     #[test]
