@@ -1,7 +1,7 @@
 use std::fs::File;
 use std::path::Path;
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use candle_core::{Device, Tensor};
 use tracing::{debug, info, trace, warn};
@@ -54,8 +54,37 @@ fn frame_at(buf: &[f32], f: usize) -> Vec<f32> {
 
 /// Debug frame counter — reset per session for clean logging
 static FRAME_COUNT: AtomicU64 = AtomicU64::new(0);
-/// Debug audio buffer — captures first 3s of each session for offline analysis
+/// Debug audio buffer — captures the first 3s of each session for offline analysis
 static DEBUG_SAMPLES: Mutex<Option<Vec<f32>>> = Mutex::new(None);
+/// Set once the session's debug WAV has been taken for writing, so the capture
+/// runs once per session instead of refilling and rewriting every 3s.
+static DEBUG_WAV_WRITTEN: AtomicBool = AtomicBool::new(false);
+/// Length of the per-session debug capture, in samples.
+const DEBUG_CAPTURE_SAMPLES: usize = SAMPLE_RATE as usize * 3;
+
+/// Feeds one engine chunk into the per-session debug capture. Returns the
+/// captured samples exactly once, when the window is full; the slot is then
+/// dropped and `written` stays set until the next session resets it.
+fn take_full_debug_capture(
+    slot: &mut Option<Vec<f32>>,
+    written: &AtomicBool,
+    session_start: bool,
+    audio: &[f32],
+) -> Option<Vec<f32>> {
+    if written.load(Ordering::Relaxed) {
+        return None;
+    }
+    if slot.is_none() && session_start {
+        *slot = Some(Vec::with_capacity(DEBUG_CAPTURE_SAMPLES));
+    }
+    let buf = slot.as_mut()?;
+    if buf.len() < DEBUG_CAPTURE_SAMPLES {
+        buf.extend_from_slice(audio);
+        return None;
+    }
+    written.store(true, Ordering::Relaxed);
+    slot.take()
+}
 
 /// Kyutai STT model configuration, deserialized from config.json
 #[derive(Debug, serde::Deserialize)]
@@ -363,6 +392,7 @@ impl LoadedModel {
         if let Ok(mut dbg) = DEBUG_SAMPLES.lock() {
             *dbg = None;
         }
+        DEBUG_WAV_WRITTEN.store(false, Ordering::Relaxed);
     }
 }
 
@@ -1509,35 +1539,31 @@ impl TranscriptionEngine for KyutaiEngine {
 
         model.integrity.ensure_ready()?;
 
-        // Debug: save first 3s of audio per session to WAV for offline analysis
+        // Debug: save the first 3s of audio of each session to WAV, once
         if debug_enabled {
             let Ok(mut dbg) = DEBUG_SAMPLES.lock() else {
                 return Ok(Vec::new());
             };
-            if dbg.is_none() && FRAME_COUNT.load(Ordering::Relaxed) == 0 {
-                *dbg = Some(Vec::with_capacity(SAMPLE_RATE as usize * 3));
-            }
-            if let Some(ref mut buf) = *dbg {
-                if buf.len() < SAMPLE_RATE as usize * 3 {
-                    buf.extend_from_slice(audio);
-                } else if !buf.is_empty() {
-                    let path = crate::constants::app_data_dir().join("debug_engine_input.wav");
-                    if let Ok(mut w) = hound::WavWriter::create(
-                        &path,
-                        hound::WavSpec {
-                            channels: 1,
-                            sample_rate: SAMPLE_RATE,
-                            bits_per_sample: 32,
-                            sample_format: hound::SampleFormat::Float,
-                        },
-                    ) {
-                        for &s in buf.iter() {
-                            let _ = w.write_sample(s);
-                        }
-                        let _ = w.finalize();
-                        debug!(path = %path.display(), "Saved engine input audio");
+            let session_start = FRAME_COUNT.load(Ordering::Relaxed) == 0;
+            if let Some(buf) =
+                take_full_debug_capture(&mut dbg, &DEBUG_WAV_WRITTEN, session_start, audio)
+            {
+                drop(dbg);
+                let path = crate::constants::app_data_dir().join("debug_engine_input.wav");
+                if let Ok(mut w) = hound::WavWriter::create(
+                    &path,
+                    hound::WavSpec {
+                        channels: 1,
+                        sample_rate: SAMPLE_RATE,
+                        bits_per_sample: 32,
+                        sample_format: hound::SampleFormat::Float,
+                    },
+                ) {
+                    for &s in buf.iter() {
+                        let _ = w.write_sample(s);
                     }
-                    buf.clear();
+                    let _ = w.finalize();
+                    debug!(path = %path.display(), "Saved engine input audio");
                 }
             }
         }
@@ -1738,6 +1764,46 @@ impl TranscriptionEngine for KyutaiEngine {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn debug_capture_is_taken_once_per_session() {
+        let written = AtomicBool::new(false);
+        let mut slot = None;
+        let chunk = vec![0.25f32; MIMI_FRAME_SIZE];
+        let mut taken = Vec::new();
+        // 60 s of engine chunks: only the first 3 s window may come out.
+        for i in 0..(SAMPLE_RATE as usize * 60 / MIMI_FRAME_SIZE) {
+            if let Some(buf) = take_full_debug_capture(&mut slot, &written, i == 0, &chunk) {
+                taken.push(buf);
+            }
+        }
+        assert_eq!(taken.len(), 1);
+        assert!(taken[0].len() >= DEBUG_CAPTURE_SAMPLES);
+        assert!(taken[0].len() < DEBUG_CAPTURE_SAMPLES + MIMI_FRAME_SIZE);
+        assert!(
+            slot.is_none(),
+            "the capture buffer is released after the write"
+        );
+
+        // A new session clears the flag and captures again.
+        written.store(false, Ordering::Relaxed);
+        let mut again = 0;
+        for i in 0..(SAMPLE_RATE as usize * 10 / MIMI_FRAME_SIZE) {
+            if take_full_debug_capture(&mut slot, &written, i == 0, &chunk).is_some() {
+                again += 1;
+            }
+        }
+        assert_eq!(again, 1);
+    }
+
+    #[test]
+    fn debug_capture_waits_for_session_start() {
+        let written = AtomicBool::new(false);
+        let mut slot = None;
+        let chunk = vec![0.0f32; MIMI_FRAME_SIZE];
+        assert!(take_full_debug_capture(&mut slot, &written, false, &chunk).is_none());
+        assert!(slot.is_none());
+    }
+
     fn consume_test_call(
         model: &mut BatchTestModel,
         batch: &[moshi::asr::AsrMsg],
