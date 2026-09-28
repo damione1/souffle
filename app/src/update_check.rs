@@ -228,7 +228,7 @@ pub mod scheduler {
             interval.tick().await;
 
             let db = state.db.clone();
-            let settings = match AppSettings::load(&db) {
+            let settings = match AppSettings::load_read_only(&db) {
                 Ok(settings) => settings,
                 Err(e) => {
                     warn!("Update check: settings load failed: {e}");

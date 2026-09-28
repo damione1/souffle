@@ -125,6 +125,11 @@ pub fn register_shortcuts(
             ShortcutRegistrationTarget::None | ShortcutRegistrationTarget::Plugin => None,
         };
     }
+    crate::modifier_shortcut::store_native_keycodes(
+        (toggle_target == ShortcutRegistrationTarget::Native).then_some(shortcuts.toggle.as_str()),
+        (ptt_target == ShortcutRegistrationTarget::Native)
+            .then_some(shortcuts.push_to_talk.as_str()),
+    );
     state
         .toggle_armed
         .store(false, std::sync::atomic::Ordering::SeqCst);

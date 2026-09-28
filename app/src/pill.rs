@@ -271,15 +271,13 @@ fn store_custom_origin(origin: Option<(f64, f64)>) {
     }
 }
 
-#[cfg(test)]
 fn custom_origin() -> Option<(f64, f64)> {
     CUSTOM_ORIGIN.lock().ok().and_then(|guard| *guard)
 }
 
-fn locale_is_french(state: &AppState) -> bool {
-    crate::settings::AppSettings::load(&state.db)
-        .map(|settings| settings.locale.starts_with("fr"))
-        .unwrap_or(false)
+/// The shared UI locale flag (SOU-285): no settings read per sync.
+fn locale_is_french() -> bool {
+    crate::settings::ui_locale_is_french()
 }
 
 fn mode_title(mode: PillPanelMode, fr: bool) -> &'static str {
@@ -363,7 +361,7 @@ pub fn sync(state: &AppState, machine: &AppStateMachine) {
     let plan = plan_sync(was_shown, show);
 
     if plan.apply_mode {
-        apply_mode(sync_mode(machine), locale_is_french(state));
+        apply_mode(sync_mode(machine), locale_is_french());
     }
 
     if plan.reset_on_hide {
@@ -511,11 +509,21 @@ pub(crate) fn restore_from_db(db: &Database, hidden: bool, hidden_in_captures: b
     }
 }
 
+/// Whether the panel moved since the origin last stored (SOU-285): hiding
+/// the HUD without dragging it must not rewrite the same row (and fsync the
+/// WAL) on every transition.
+fn origin_changed(stored: Option<(f64, f64)>, current: (f64, f64)) -> bool {
+    stored != Some(current)
+}
+
 fn persist_position(state: &AppState) {
     let mut x: f64 = 0.0;
     let mut y: f64 = 0.0;
     let has_origin = unsafe { pill_panel_get_origin(&mut x, &mut y) } != 0;
     if !has_origin {
+        return;
+    }
+    if !origin_changed(custom_origin(), (x, y)) {
         return;
     }
     store_custom_origin(Some((x, y)));
@@ -733,6 +741,14 @@ mod tests {
         assert_eq!(custom_origin(), Some((100.5, 200.25)));
         set_hidden(false);
         store_custom_origin(None);
+    }
+
+    /// SOU-285 AC4: an unmoved HUD is not written back on every hide.
+    #[test]
+    fn origin_changed_only_when_the_panel_moved() {
+        assert!(origin_changed(None, (10.0, 20.0)), "first origin is new");
+        assert!(!origin_changed(Some((10.0, 20.0)), (10.0, 20.0)));
+        assert!(origin_changed(Some((10.0, 20.0)), (10.0, 21.0)));
     }
 
     #[test]
