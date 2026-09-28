@@ -7099,6 +7099,15 @@ fn wire_window_activity(
             permissions.sync_activity();
         }
     });
+    // SOU-284: back on screen after a close (`show_main_window`, or AppKit
+    // re-showing it on a Dock click): reload the audio parked on close.
+    // An occlusion alone parks nothing, so its end is a no-op here.
+    let weak = window.as_weak();
+    activity.subscribe(move |visible| {
+        if visible && let Some(window) = weak.upgrade() {
+            restore_meeting_audio_on_show(&window);
+        }
+    });
 
     let weak_activity = Rc::downgrade(activity);
     let weak_permissions = Rc::downgrade(permissions);
@@ -7125,7 +7134,6 @@ pub(crate) fn show_main_window(window: &MainWindow) -> Result<(), slint::Platfor
     let shown = window.show();
     if shown.is_ok() {
         set_main_window_visible(true);
-        restore_meeting_audio_on_show(window);
     }
     shown
 }
