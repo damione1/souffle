@@ -6,9 +6,10 @@
 //! the only in-process signal that carries a fresh answer. System audio is
 //! read through TCC's `TCCAccessPreflight` SPI and asked for by mounting the
 //! tap. Accessibility (needed for the synthesized Cmd+V paste and for the
-//! native single-key shortcut tap) has its own cheap check
-//! (`AXIsProcessTrusted`), and is granted only via System Settings, so its
-//! "request" just opens the relevant pane.
+//! native single-key shortcut tap) is read through the same SPI, because
+//! `AXIsProcessTrusted` answers from a cache that can miss a grant
+//! (SOU-298), and is granted only via System Settings: its "request" raises
+//! macOS's alert, or opens the pane once macOS no longer shows it.
 //!
 //! Input Monitoring is deliberately absent. An active `CGEventTap` is
 //! authorized by Accessibility, which subsumes the listen right, so the
@@ -92,8 +93,8 @@ pub struct RepairAccessibilityResult {
 /// Cheap, non-prompting snapshot for the initial onboarding render. No
 /// entry in it opens a device **or raises a TCC dialog**: every capability
 /// answers from a status API (`authorizationStatus`, `TCCAccessPreflight`,
-/// `AXIsProcessTrusted`, EventKit). Privacy claim: boot and the 600 ms poll
-/// never call `TCCAccessRequest` / `requestAccess` / a tap mount.
+/// EventKit). Privacy claim: boot and the 600 ms poll never call
+/// `TCCAccessRequest` / `requestAccess` / a tap mount.
 pub fn snapshot() -> PermissionStatus {
     PermissionStatus {
         microphone: microphone_snapshot_state(
@@ -280,13 +281,19 @@ fn prompt_then_open_settings(prompt: impl FnOnce(), wait: impl FnOnce(), open: i
 
 // --- Accessibility (synthesized Cmd+V paste) ---
 
+/// Whether this process is trusted for Accessibility, read live from TCC.
+///
+/// `AXIsProcessTrusted` answers from a per-process HIServices cache that is
+/// refreshed only by the `com.apple.accessibility.api` distributed
+/// notification. On the first toggle in System Settings (the one that asks
+/// for Touch ID or a password) that notification arrives before tccd
+/// commits the grant, so the cache refills with the old "denied" and nothing
+/// invalidates it again: the row stays "To be granted" and paste is refused
+/// until the user toggles off and on (SOU-298). `TCCAccessPreflight` is an
+/// XPC round trip on every call, so it cannot go stale.
 #[cfg(target_os = "macos")]
 pub fn accessibility_granted() -> bool {
-    #[link(name = "ApplicationServices", kind = "framework")]
-    unsafe extern "C" {
-        fn AXIsProcessTrusted() -> bool;
-    }
-    unsafe { AXIsProcessTrusted() }
+    accessibility_trust(accessibility_preflight(), ax_is_process_trusted)
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -295,8 +302,60 @@ pub fn accessibility_granted() -> bool {
 }
 
 #[cfg(target_os = "macos")]
+fn ax_is_process_trusted() -> bool {
+    #[link(name = "ApplicationServices", kind = "framework")]
+    unsafe extern "C" {
+        fn AXIsProcessTrusted() -> bool;
+    }
+    unsafe { AXIsProcessTrusted() }
+}
+
+fn accessibility_preflight() -> Option<PermState> {
+    tcc_preflight("kTCCServiceAccessibility")
+}
+
+/// A TCC verdict wins over the cached AX answer. `AXIsProcessTrusted` is
+/// only consulted when TCC has nothing to say: the SPI is missing, or no
+/// record exists yet (it can still be trusted through a profile).
+fn accessibility_trust(preflight: Option<PermState>, ax_trusted: impl FnOnce() -> bool) -> bool {
+    match preflight {
+        Some(PermState::Granted) => true,
+        Some(PermState::Denied) => false,
+        _ => ax_trusted(),
+    }
+}
+
+/// Whether Grant must open the Accessibility pane itself, given TCC's answer
+/// *before* the prompt. With no record yet, the prompt raises macOS's own
+/// "would like to control this Mac" alert, whose "Open System Settings"
+/// button already opens the pane: opening it too put the alert and the pane
+/// on screen at once (SOU-298). Once a record exists macOS no longer shows
+/// the alert, so the pane is the only way forward. Without the SPI the old
+/// prompt-then-open path stays.
+fn accessibility_grant_opens_pane(before_prompt: Option<PermState>) -> bool {
+    before_prompt != Some(PermState::Unknown)
+}
+
+/// Always prompt: it registers this binary with Launch Services and
+/// creates the TCC row, so the pane lists this build ready to toggle
+/// (SOU-116 AC5). Then open the pane only when macOS showed no alert.
+fn request_accessibility_with(
+    before_prompt: Option<PermState>,
+    prompt: impl FnOnce(),
+    wait: impl FnOnce(),
+    open: impl FnOnce(),
+) {
+    if accessibility_grant_opens_pane(before_prompt) {
+        prompt_then_open_settings(prompt, wait, open);
+    } else {
+        prompt();
+    }
+}
+
+#[cfg(target_os = "macos")]
 fn open_accessibility_settings() {
-    prompt_then_open_settings(
+    request_accessibility_with(
+        accessibility_preflight(),
         || {
             on_main(|| {
                 let _ = accessibility_trusted_with_prompt_now(true);
@@ -844,6 +903,59 @@ mod tests {
             ["prompt", "wait", "open"],
             "System Settings must not open in the same turn as the TCC insert"
         );
+    }
+
+    // SOU-298: the TCC verdict beats the cached AX answer, which can keep a
+    // stale "denied" after the first System Settings toggle.
+    #[test]
+    fn accessibility_trust_prefers_the_live_tcc_verdict() {
+        let ax_calls = Cell::new(0);
+        let ax = |value: bool| {
+            let calls = &ax_calls;
+            move || {
+                calls.set(calls.get() + 1);
+                value
+            }
+        };
+        assert!(accessibility_trust(Some(PermState::Granted), ax(false)));
+        assert!(!accessibility_trust(Some(PermState::Denied), ax(true)));
+        assert_eq!(
+            ax_calls.get(),
+            0,
+            "a TCC verdict must not read the AX cache"
+        );
+
+        assert!(accessibility_trust(None, ax(true)));
+        assert!(!accessibility_trust(None, ax(false)));
+        assert!(accessibility_trust(Some(PermState::Unknown), ax(true)));
+        assert!(!accessibility_trust(Some(PermState::Unknown), ax(false)));
+        assert_eq!(ax_calls.get(), 4);
+    }
+
+    // SOU-298: with no TCC record, macOS's own alert carries the "Open
+    // System Settings" button, so Grant must not open the pane on top of
+    // it. Every other state keeps the prompt-then-open path (SOU-116 AC5).
+    #[test]
+    fn grant_opens_the_pane_only_when_macos_shows_no_alert() {
+        use std::cell::RefCell;
+        let run = |before: Option<PermState>| {
+            let order = RefCell::new(Vec::new());
+            request_accessibility_with(
+                before,
+                || order.borrow_mut().push("prompt"),
+                || order.borrow_mut().push("wait"),
+                || order.borrow_mut().push("open"),
+            );
+            order.into_inner()
+        };
+        assert_eq!(run(Some(PermState::Unknown)), ["prompt"]);
+        for before in [Some(PermState::Denied), Some(PermState::Granted), None] {
+            assert_eq!(
+                run(before),
+                ["prompt", "wait", "open"],
+                "before = {before:?}"
+            );
+        }
     }
 
     #[test]
