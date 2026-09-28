@@ -1902,6 +1902,7 @@ fn show_recording_starting(
     live_state: &LiveTranscriptState,
     mode: RecordingMode,
     pending_stop: &AtomicBool,
+    autosave: LiveNotesAutosave,
 ) {
     pending_stop.store(false, Ordering::Release);
     window.set_recording_stop_pending(false);
@@ -1912,6 +1913,8 @@ fn show_recording_starting(
     }
     window.set_recording_starting(true);
     window.set_recording_mode(mode);
+    window.set_audio_level(0.0);
+    arm_recording_timers(window, autosave);
 }
 
 /// Ends the "Starting…" state: a failed start goes back to where the user
@@ -1921,9 +1924,159 @@ fn settle_recording_start(window: &MainWindow, result: Result<(), String>) -> Re
     window.set_recording_starting(false);
     if result.is_err() {
         window.set_recording_stop_pending(false);
-        window.set_recording_mode(RecordingMode::Idle);
+        set_recording_idle(window);
     }
     result
+}
+
+/// SOU-281: the three polls that only mean something while a recording is
+/// on screen - the RecordingView level meter, the live "Audio système"
+/// label and the live meeting notes autosave. They used to run for the
+/// whole life of the process, waking the main thread ~20 times a second at
+/// rest. Held together so they start and stop as one unit; fields are only
+/// kept alive, never read.
+struct RecordingTimers {
+    _audio_level: slint::Timer,
+    _system_audio: slint::Timer,
+    _live_notes: slint::Timer,
+}
+
+/// Saves the live notes of the meeting being recorded, given the last
+/// `(meeting_id, notes)` pair saved; the only part of the recording timers
+/// that needs the backend (see [`live_notes_autosave`]).
+type LiveNotesAutosave = Box<dyn Fn(&MainWindow, &RefCell<Option<(String, String)>>)>;
+
+thread_local! {
+    // The UI-thread slot of the recording timers. Every path back to Idle
+    // runs in an `upgrade_in_event_loop` closure, which must be `Send` and so
+    // cannot carry an `Rc` slot; the timers are UI-thread only anyway.
+    static RECORDING_TIMERS: RefCell<Option<RecordingTimers>> = const { RefCell::new(None) };
+}
+
+fn recording_timers_armed() -> bool {
+    RECORDING_TIMERS.with(|slot| slot.borrow().is_some())
+}
+
+/// Starts the recording timers, unless they already run.
+fn arm_recording_timers(window: &MainWindow, autosave: LiveNotesAutosave) {
+    if recording_timers_armed() {
+        return;
+    }
+    let timers = start_recording_timers(window, autosave);
+    RECORDING_TIMERS.with(|slot| *slot.borrow_mut() = Some(timers));
+}
+
+/// Every return of the UI to Idle goes through here, so the recording
+/// timers stop with the recording. Never called from one of those timers'
+/// own callbacks (a `slint::Timer` must not be dropped from inside itself).
+fn set_recording_idle(window: &MainWindow) {
+    window.set_recording_mode(RecordingMode::Idle);
+    let timers = RECORDING_TIMERS.with(|slot| slot.borrow_mut().take());
+    drop(timers);
+    window.set_live_system_audio(LiveSystemAudio::Pending);
+    window.set_audio_level(0.0);
+}
+
+fn start_recording_timers(window: &MainWindow, autosave: LiveNotesAutosave) -> RecordingTimers {
+    // Capture publishes its normalized RMS at ~15 Hz. Polling the lock-free
+    // value on Slint's event loop keeps rendering single-threaded while the
+    // native pill and the main window display the exact same signal.
+    let audio_level = slint::Timer::default();
+    let weak = window.as_weak();
+    audio_level.start(
+        slint::TimerMode::Repeated,
+        Duration::from_millis(66),
+        move || {
+            if let Some(window) = weak.upgrade() {
+                window.set_audio_level(souffle_lib::pill::current_rms());
+            }
+        },
+    );
+
+    // The live "Audio système" label and the mic-only banner of a meeting
+    // being recorded. The capture thread only publishes a snapshot (the
+    // Tauri UI read the same one through `get_system_audio_status` after a
+    // reload), so poll it while a meeting records. This used to be
+    // `settings-system-audio-supported && settings-capture-system-audio`,
+    // i.e. what Settings asked for, not what the tap did - and the first flag
+    // is only filled in once the Settings panel has been opened, so a meeting
+    // started straight from Home always claimed system audio was unavailable.
+    let system_audio = slint::Timer::default();
+    let weak = window.as_weak();
+    system_audio.start(
+        slint::TimerMode::Repeated,
+        Duration::from_millis(500),
+        move || {
+            let Some(window) = weak.upgrade() else {
+                return;
+            };
+            let live = match window.get_recording_mode() {
+                RecordingMode::Meeting if window.get_recording_starting() => {
+                    LiveSystemAudio::Pending
+                }
+                RecordingMode::Meeting => {
+                    live_system_audio(souffle_lib::commands::get_system_audio_status().as_ref())
+                }
+                RecordingMode::Idle | RecordingMode::Dictation => LiveSystemAudio::Pending,
+            };
+            window.set_live_system_audio(live);
+        },
+    );
+
+    // A fresh "last saved" per recording: dropping the timers forgets it.
+    let saved_live_notes: RefCell<Option<(String, String)>> = RefCell::new(None);
+    let live_notes = slint::Timer::default();
+    let weak = window.as_weak();
+    live_notes.start(slint::TimerMode::Repeated, NOTES_DEBOUNCE, move || {
+        if let Some(window) = weak.upgrade() {
+            autosave(&window, &saved_live_notes);
+        }
+    });
+
+    RecordingTimers {
+        _audio_level: audio_level,
+        _system_audio: system_audio,
+        _live_notes: live_notes,
+    }
+}
+
+/// The live meeting notes autosave: saves the notes field whenever it
+/// differs from what was last saved for the meeting being recorded.
+fn live_notes_autosave(handle: AppHandle) -> LiveNotesAutosave {
+    Box::new(move |window, saved_live_notes| {
+        let meeting_id = match handle.current_machine_state() {
+            Ok(souffle_lib::state_machine::AppStateMachine::RecordingMeeting {
+                meeting_id,
+                ..
+            }) => Some(meeting_id),
+            Ok(souffle_lib::state_machine::AppStateMachine::Idle)
+            | Ok(souffle_lib::state_machine::AppStateMachine::Downloading { .. })
+            | Ok(souffle_lib::state_machine::AppStateMachine::Downloaded { .. })
+            | Ok(souffle_lib::state_machine::AppStateMachine::Loading { .. })
+            | Ok(souffle_lib::state_machine::AppStateMachine::Ready { .. })
+            | Ok(souffle_lib::state_machine::AppStateMachine::RecordingDictation { .. })
+            | Ok(souffle_lib::state_machine::AppStateMachine::Stopping { .. })
+            | Ok(souffle_lib::state_machine::AppStateMachine::Unloading { .. })
+            | Ok(souffle_lib::state_machine::AppStateMachine::Error { .. })
+            | Err(_) => None,
+        };
+        let Some(meeting_id) = meeting_id else {
+            *saved_live_notes.borrow_mut() = None;
+            return;
+        };
+        let notes = window.get_live_notes().to_string();
+        if saved_live_notes.borrow().as_ref() == Some(&(meeting_id.clone(), notes.clone())) {
+            return;
+        }
+        match souffle_lib::commands::save_meeting_notes(
+            Arc::clone(&handle),
+            meeting_id.clone(),
+            Some(notes.clone()),
+        ) {
+            Ok(()) => *saved_live_notes.borrow_mut() = Some((meeting_id, notes)),
+            Err(error) => eprintln!("Failed to autosave live meeting notes: {error}"),
+        }
+    })
 }
 
 /// A stop that arrived during the start (e.g. a push-to-talk key released
@@ -3392,53 +3545,6 @@ fn wire_callbacks(
     let transcript_timer: Rc<RefCell<Option<slint::Timer>>> = Rc::new(RefCell::new(None));
     let upcoming_cache: Rc<RefCell<Vec<CalendarEvent>>> = Rc::new(RefCell::new(Vec::new()));
     let upcoming_timer: Rc<RefCell<Option<slint::Timer>>> = Rc::new(RefCell::new(None));
-    let saved_live_notes: Rc<RefCell<Option<(String, String)>>> = Rc::new(RefCell::new(None));
-    let live_notes_timer: Rc<RefCell<Option<slint::Timer>>> = Rc::new(RefCell::new(None));
-
-    let timer = slint::Timer::default();
-    let weak_for_notes = window.as_weak();
-    let handle_for_notes = tauri_handle.clone();
-    let saved_live_notes_for_timer = saved_live_notes.clone();
-    timer.start(slint::TimerMode::Repeated, NOTES_DEBOUNCE, move || {
-        let Some(window) = weak_for_notes.upgrade() else {
-            return;
-        };
-        let meeting_id = match handle_for_notes.current_machine_state() {
-            Ok(souffle_lib::state_machine::AppStateMachine::RecordingMeeting {
-                meeting_id,
-                ..
-            }) => Some(meeting_id),
-            Ok(souffle_lib::state_machine::AppStateMachine::Idle)
-            | Ok(souffle_lib::state_machine::AppStateMachine::Downloading { .. })
-            | Ok(souffle_lib::state_machine::AppStateMachine::Downloaded { .. })
-            | Ok(souffle_lib::state_machine::AppStateMachine::Loading { .. })
-            | Ok(souffle_lib::state_machine::AppStateMachine::Ready { .. })
-            | Ok(souffle_lib::state_machine::AppStateMachine::RecordingDictation { .. })
-            | Ok(souffle_lib::state_machine::AppStateMachine::Stopping { .. })
-            | Ok(souffle_lib::state_machine::AppStateMachine::Unloading { .. })
-            | Ok(souffle_lib::state_machine::AppStateMachine::Error { .. })
-            | Err(_) => None,
-        };
-        let Some(meeting_id) = meeting_id else {
-            *saved_live_notes_for_timer.borrow_mut() = None;
-            return;
-        };
-        let notes = window.get_live_notes().to_string();
-        if saved_live_notes_for_timer.borrow().as_ref()
-            == Some(&(meeting_id.clone(), notes.clone()))
-        {
-            return;
-        }
-        match souffle_lib::commands::save_meeting_notes(
-            Arc::clone(&handle_for_notes),
-            meeting_id.clone(),
-            Some(notes.clone()),
-        ) {
-            Ok(()) => *saved_live_notes_for_timer.borrow_mut() = Some((meeting_id, notes)),
-            Err(error) => eprintln!("Failed to autosave live meeting notes: {error}"),
-        }
-    });
-    *live_notes_timer.borrow_mut() = Some(timer);
 
     // SOU-258: a stop (PTT release, tray, shortcut) that lands while a start
     // is still in flight is replayed once the start settles, not dropped.
@@ -3460,6 +3566,7 @@ fn wire_callbacks(
             &live_state_dict,
             RecordingMode::Dictation,
             &pending_stop_dict,
+            live_notes_autosave(handle.clone()),
         );
         let weak = weak.clone();
         let handle = handle.clone();
@@ -3494,6 +3601,7 @@ fn wire_callbacks(
             &live_state_req,
             RecordingMode::Meeting,
             &pending_stop_meeting,
+            live_notes_autosave(handle.clone()),
         );
         let weak = weak.clone();
         let handle = handle.clone();
@@ -3520,12 +3628,10 @@ fn wire_callbacks(
     let weak = window.as_weak();
     let handle = tauri_handle.clone();
     let stop_in_flight_for_request = Arc::clone(&stop_in_flight);
-    let live_notes_timer_keepalive = live_notes_timer.clone();
     let value_stop = live_state.clone();
     let pending_stop_for_request = Arc::clone(&pending_stop);
     let handle_for_stop_request = tauri_handle.clone();
     window.on_stop_requested(move || {
-        let _ = &live_notes_timer_keepalive;
         // The session does not exist yet: stopping now would fail and
         // leave the start to complete into a recording nobody asked for.
         // Capture is already running (SOU-260), so it stops here, at the
@@ -3585,7 +3691,7 @@ fn wire_callbacks(
                         // were just looking at it live.
                         Ok(meeting_id) => {
                             window.set_live_notes("".into());
-                            window.set_recording_mode(RecordingMode::Idle);
+                            set_recording_idle(&window);
                             window.invoke_timeline_item_opened(
                                 TimelineKind::Meeting,
                                 meeting_id.into(),
@@ -3593,7 +3699,7 @@ fn wire_callbacks(
                         }
                         Err(e) => {
                             eprintln!("Failed to stop meeting: {e}");
-                            window.set_recording_mode(RecordingMode::Idle);
+                            set_recording_idle(&window);
                             window.set_meeting_status_message(e.into());
                             refresh_timeline(&window, &handle_for_refresh);
                         }
@@ -3642,7 +3748,7 @@ fn wire_callbacks(
                             }
                         }
                     }
-                    window.set_recording_mode(RecordingMode::Idle);
+                    set_recording_idle(&window);
                     refresh_timeline(&window, &handle_for_refresh);
                 }) {
                     eprintln!("upgrade_in_event_loop failed (stop dictation): {e}");
@@ -3683,7 +3789,7 @@ fn wire_callbacks(
                     }
                     DictationTranscriptDisposition::RetainForRecovery => {}
                 }
-                window.set_recording_mode(RecordingMode::Idle);
+                set_recording_idle(&window);
                 match result {
                     Ok(()) => window.set_transcription_status_message("".into()),
                     Err(error) => {
@@ -3835,6 +3941,7 @@ fn wire_callbacks(
             &live_state_res,
             RecordingMode::Meeting,
             &pending_stop_resume,
+            live_notes_autosave(state.clone()),
         );
         let channel = live_segment_channel(weak_resume.clone(), live_state_res.clone());
         let weak = weak_resume.clone();
@@ -4193,6 +4300,7 @@ fn wire_callbacks(
             &live_state_cal,
             RecordingMode::Meeting,
             &pending_stop_cal,
+            live_notes_autosave(handle.clone()),
         );
         let weak = weak.clone();
         let handle = handle.clone();
@@ -6579,6 +6687,14 @@ fn dispatch_native_action(
             let _ = window.show();
         }
         NativeAction::Quit => window.invoke_settings_quit_requested(),
+        NativeAction::MicStallChanged => MIC_STALL_BANNER.with(|slot| {
+            if let Some(banner) = slot.borrow().as_ref() {
+                banner.borrow_mut().project(
+                    window,
+                    souffle_lib::commands::get_mic_stall_notice().as_ref(),
+                );
+            }
+        }),
         NativeAction::UpdateAvailable {
             latest_version,
             release_notes,
@@ -6745,7 +6861,8 @@ fn main() {
         settings_io.clone(),
         settings_drafts.clone(),
     );
-    let _mic_stall_timer = wire_mic_stall_banner(&window, handle.clone(), settings_drafts.clone());
+    let mic_stall_banner = wire_mic_stall_banner(&window, handle.clone(), settings_drafts.clone());
+    MIC_STALL_BANNER.with(|slot| *slot.borrow_mut() = Some(mic_stall_banner));
     wire_callbacks(
         &window,
         handle.clone(),
@@ -6837,60 +6954,26 @@ fn main() {
         }
     });
 
-    // Capture publishes its normalized RMS at ~15 Hz. Polling the lock-free
-    // value on Slint's event loop keeps rendering single-threaded while the
-    // native pill and the main window display the exact same signal.
-    let audio_level_timer = slint::Timer::default();
-    let weak = window.as_weak();
-    audio_level_timer.start(
-        slint::TimerMode::Repeated,
-        Duration::from_millis(66),
-        move || {
-            if let Some(window) = weak.upgrade() {
-                window.set_audio_level(souffle_lib::pill::current_rms());
-            }
-        },
-    );
-
-    // The live "Audio système" label and the mic-only banner of a meeting
-    // being recorded. The capture thread only publishes a snapshot (the
-    // Tauri UI read the same one through `get_system_audio_status` after a
-    // reload), so poll it while a meeting records. This used to be
-    // `settings-system-audio-supported && settings-capture-system-audio`,
-    // i.e. what Settings asked for, not what the tap did - and the first flag
-    // is only filled in once the Settings panel has been opened, so a meeting
-    // started straight from Home always claimed system audio was unavailable.
-    let system_audio_timer = slint::Timer::default();
-    let weak = window.as_weak();
-    system_audio_timer.start(
-        slint::TimerMode::Repeated,
-        Duration::from_millis(500),
-        move || {
-            let Some(window) = weak.upgrade() else {
-                return;
-            };
-            let live = match window.get_recording_mode() {
-                RecordingMode::Meeting if window.get_recording_starting() => {
-                    LiveSystemAudio::Pending
-                }
-                RecordingMode::Meeting => {
-                    live_system_audio(souffle_lib::commands::get_system_audio_status().as_ref())
-                }
-                RecordingMode::Idle | RecordingMode::Dictation => LiveSystemAudio::Pending,
-            };
-            window.set_live_system_audio(live);
-        },
-    );
-
     // The first window is deliberately shown only after the async startup
     // snapshot is projected, and closing it hides rather than destroys it.
     // Keep the native tray/shortcut process alive across both intervals.
     slint::run_event_loop_until_quit().expect("event loop failed");
 }
 
+thread_local! {
+    // The banner `dispatch_native_action` projects on each
+    // `NativeAction::MicStallChanged`. Set once in `main()` before the event
+    // loop runs, so no action is dispatched before it exists.
+    static MIC_STALL_BANNER: RefCell<Option<Rc<RefCell<mic_stall_ui::MicStallBanner>>>> =
+        const { RefCell::new(None) };
+}
+
 /// SOU-126 AC5: name a microphone stuck inside CoreAudio and offer to
-/// relaunch. The capture thread only publishes a snapshot, so poll it like
-/// the system-audio verdict; the returned timer must be kept alive.
+/// relaunch. The capture thread publishes a snapshot and dispatches
+/// `NativeAction::MicStallChanged` whenever it records or clears one
+/// (SOU-281: pushed, not polled - a stall is written by a failed open, while
+/// the UI is already back to Idle). The snapshot is projected once here for
+/// whatever was recorded before the window existed.
 ///
 /// "Restart" goes through the same flush barrier and recording
 /// finalization as Quit, after arranging for the bundle to be reopened once
@@ -6899,7 +6982,7 @@ fn wire_mic_stall_banner(
     window: &MainWindow,
     handle: AppHandle,
     settings_drafts: Rc<settings_drafts::SettingsDraftController>,
-) -> slint::Timer {
+) -> Rc<RefCell<mic_stall_ui::MicStallBanner>> {
     let banner = Rc::new(RefCell::new(mic_stall_ui::MicStallBanner::default()));
 
     let dismiss_banner = Rc::clone(&banner);
@@ -6926,19 +7009,11 @@ fn wire_mic_stall_banner(
         settings_drafts.flush_before_exit(restart);
     });
 
-    let timer = slint::Timer::default();
-    let weak = window.as_weak();
-    timer.start(
-        slint::TimerMode::Repeated,
-        Duration::from_millis(500),
-        move || {
-            if let Some(window) = weak.upgrade() {
-                let notice = souffle_lib::commands::get_mic_stall_notice();
-                banner.borrow_mut().project(&window, notice.as_ref());
-            }
-        },
+    banner.borrow_mut().project(
+        window,
+        souffle_lib::commands::get_mic_stall_notice().as_ref(),
     );
-    timer
+    banner
 }
 
 /// How long a quit waits for an active recording to finish saving. A
@@ -6981,8 +7056,9 @@ mod tests {
         wire_summary_template_edit_callbacks,
     };
     use super::{
-        LiveTranscript, LiveTranscriptState, RecordingMode, ShortcutField, meeting_can_resume,
-        replay_pending_stop, settle_recording_start, show_recording_starting,
+        LiveNotesAutosave, LiveSystemAudio, LiveTranscript, LiveTranscriptState, RecordingMode,
+        ShortcutField, meeting_can_resume, recording_timers_armed, replay_pending_stop,
+        set_recording_idle, settle_recording_start, show_recording_starting,
     };
     use crate::model_ui;
     use crate::settings_drafts::SettingsDraftController;
@@ -7073,7 +7149,13 @@ mod tests {
         window.set_live_elapsed_offset_seconds(42);
         window.set_recording_stop_pending(true);
 
-        show_recording_starting(&window, &live_state, RecordingMode::Meeting, &pending_stop);
+        show_recording_starting(
+            &window,
+            &live_state,
+            RecordingMode::Meeting,
+            &pending_stop,
+            no_autosave(),
+        );
 
         assert_eq!(window.get_recording_mode(), RecordingMode::Meeting);
         assert!(window.get_recording_starting());
@@ -7095,6 +7177,7 @@ mod tests {
             &live_state,
             RecordingMode::Dictation,
             &pending_stop,
+            no_autosave(),
         );
         // A Stop clicked during the start dims the button (SOU-258)...
         window.set_recording_stop_pending(true);
@@ -7112,10 +7195,59 @@ mod tests {
             &live_state,
             RecordingMode::Dictation,
             &pending_stop,
+            no_autosave(),
         );
         assert_eq!(settle_recording_start(&window, Ok(())), Ok(()));
         assert_eq!(window.get_recording_mode(), RecordingMode::Dictation);
         assert!(!window.get_recording_starting());
+    }
+
+    fn no_autosave() -> LiveNotesAutosave {
+        Box::new(|_, _| {})
+    }
+
+    // SOU-281 AC1/AC2: the level meter, system-audio label and notes
+    // autosave timers exist only between a start and the return to Idle,
+    // failed start included, and the Idle view keeps no stale level/label.
+    #[test]
+    fn recording_timers_run_only_while_a_recording_is_on_screen() {
+        let window = test_window();
+        let live_state: LiveTranscriptState = Arc::new(Mutex::new(LiveTranscript::new()));
+        let pending_stop = std::sync::atomic::AtomicBool::new(false);
+        assert!(!recording_timers_armed());
+
+        window.set_audio_level(0.7);
+        show_recording_starting(
+            &window,
+            &live_state,
+            RecordingMode::Meeting,
+            &pending_stop,
+            no_autosave(),
+        );
+        assert!(recording_timers_armed());
+        // A new recording's meter starts from silence, not the last level.
+        assert_eq!(window.get_audio_level(), 0.0);
+
+        assert!(settle_recording_start(&window, Err("Model not loaded".into())).is_err());
+        assert!(!recording_timers_armed());
+
+        show_recording_starting(
+            &window,
+            &live_state,
+            RecordingMode::Meeting,
+            &pending_stop,
+            no_autosave(),
+        );
+        assert_eq!(settle_recording_start(&window, Ok(())), Ok(()));
+        assert!(recording_timers_armed());
+        window.set_audio_level(0.4);
+        window.set_live_system_audio(LiveSystemAudio::Active);
+
+        set_recording_idle(&window);
+        assert!(!recording_timers_armed());
+        assert_eq!(window.get_recording_mode(), RecordingMode::Idle);
+        assert_eq!(window.get_audio_level(), 0.0);
+        assert_eq!(window.get_live_system_audio(), LiveSystemAudio::Pending);
     }
 
     // A push-to-talk release (or tray Stop) during the start is replayed

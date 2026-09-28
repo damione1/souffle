@@ -47,6 +47,10 @@ pub enum NativeAction {
     ShowMainWindow,
     /// Flush recoverable Settings drafts before terminating the process.
     Quit,
+    /// The capture thread recorded or cleared a stuck microphone (SOU-126
+    /// AC5). The UI re-reads `commands::get_mic_stall_notice` once, instead
+    /// of polling it (SOU-281).
+    MicStallChanged,
     /// A newer GitHub release was found by the background scheduler.
     UpdateAvailable {
         latest_version: String,
@@ -88,6 +92,11 @@ mod tests {
 
         dispatch(NativeAction::Quit);
 
-        assert_eq!(rx.recv().expect("quit action"), NativeAction::Quit);
+        // The sink is process-wide: other tests' capture code may dispatch
+        // `MicStallChanged` into it meanwhile (SOU-281), so skip those.
+        let received =
+            std::iter::from_fn(|| rx.recv_timeout(std::time::Duration::from_secs(5)).ok())
+                .find(|action| *action == NativeAction::Quit);
+        assert_eq!(received, Some(NativeAction::Quit));
     }
 }

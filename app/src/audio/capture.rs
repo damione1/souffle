@@ -164,7 +164,7 @@ pub struct MicStallNotice {
 }
 
 /// Last stall the capture thread hit, until an open succeeds on any device.
-/// Polled by the UI. The capture thread may already have exited after a
+/// Read by the UI on each `NativeAction::MicStallChanged`. The capture thread may already have exited after a
 /// stalled dictation start, so the snapshot outlives it on purpose.
 static MIC_STALL_NOTICE: Mutex<Option<MicStallNotice>> = Mutex::new(None);
 
@@ -2632,6 +2632,7 @@ impl AudioCapture {
             kind,
             device_name: device_name.to_string(),
         }));
+        crate::native::bridge::dispatch(crate::native::bridge::NativeAction::MicStallChanged);
     }
 
     /// A microphone opened: whatever the UI was told about a stuck one no
@@ -2639,6 +2640,7 @@ impl AudioCapture {
     fn clear_mic_stall(&mut self) {
         self.start_stall = None;
         store_mic_stall_notice(None);
+        crate::native::bridge::dispatch(crate::native::bridge::NativeAction::MicStallChanged);
     }
 
     /// Name of the input `find_device` resolved to: the catalogue name for
