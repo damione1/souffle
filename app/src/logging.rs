@@ -63,8 +63,16 @@ pub fn log_dir() -> std::path::PathBuf {
     crate::constants::app_data_dir().join("logs")
 }
 
+/// Whether a stderr layer is worth installing: an attached terminal, or an
+/// explicit `SOUFFLE_LOG` run. The bundled app's stderr is `/dev/null`, where a
+/// second fmt layer only formats every event twice for nobody.
+fn stderr_logging_wanted(stderr_is_terminal: bool, souffle_log_set: bool) -> bool {
+    stderr_is_terminal || souffle_log_set
+}
+
 /// Initialize logging to a rolling file under the app data dir (and stderr for
-/// terminal runs). `default_level` is applied unless `SOUFFLE_LOG` overrides it.
+/// terminal or `SOUFFLE_LOG` runs). `default_level` is applied unless
+/// `SOUFFLE_LOG` overrides it.
 pub fn init(default_level: LogLevel) {
     let filter = EnvFilter::try_from_env("SOUFFLE_LOG")
         .unwrap_or_else(|_| EnvFilter::new(default_level.filter_directive()));
@@ -89,9 +97,14 @@ pub fn init(default_level: LogLevel) {
         fmt::layer().with_ansi(false).with_writer(writer)
     });
 
+    let to_stderr = stderr_logging_wanted(
+        std::io::IsTerminal::is_terminal(&std::io::stderr()),
+        std::env::var_os("SOUFFLE_LOG").is_some(),
+    );
+
     let _ = tracing_subscriber::registry()
         .with(filter_layer)
-        .with(fmt::layer().with_writer(std::io::stderr))
+        .with(to_stderr.then(|| fmt::layer().with_writer(std::io::stderr)))
         .with(file_layer)
         .try_init();
 }
@@ -115,6 +128,14 @@ mod tests {
     fn filter_directive_scopes_souffle_only() {
         assert_eq!(LogLevel::Info.filter_directive(), "souffle=info,warn");
         assert_eq!(LogLevel::Debug.filter_directive(), "souffle=debug,warn");
+    }
+
+    #[test]
+    fn stderr_layer_only_for_terminal_or_souffle_log() {
+        assert!(!stderr_logging_wanted(false, false));
+        assert!(stderr_logging_wanted(true, false));
+        assert!(stderr_logging_wanted(false, true));
+        assert!(stderr_logging_wanted(true, true));
     }
 
     #[test]
