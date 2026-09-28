@@ -596,7 +596,12 @@ impl EngineActor {
                     }
                     // Pre-warm AFTER the stop reply above so stop latency is
                     // unchanged; the caller is already unblocked by now.
-                    if ran {
+                    // Skip it when a command is already queued (typically the
+                    // next StartSession, pressed right after stop): that
+                    // command must not wait behind the pre-warm, and a start
+                    // resets the state through its own path anyway since
+                    // `state_fresh_for` is still `None` here.
+                    if ran && self.cmd_rx.is_empty() {
                         self.prewarm_single_stream();
                     }
                     if self.engine.is_some() {
@@ -829,7 +834,8 @@ impl EngineActor {
 
         // The idle pre-warm (see `prewarm_single_stream`) keeps the engine
         // state reset for dictation between sessions; skip the reset here
-        // (a full model rebuild for Kyutai, on the order of seconds) when
+        // (a soft KV clear for Kyutai, but a full model rebuild on the order
+        // of seconds when the lane count changes) when
         // the requested mode already matches what's pre-warmed. A diarized
         // meeting start always pays the reset: `prewarm_single_stream` only
         // ever leaves the engine fresh for single-stream (batch size 1), so
@@ -3811,6 +3817,60 @@ mod tests {
             ),
             "post-session pre-warm resets back to single-stream"
         );
+    }
+
+    #[test]
+    fn queued_start_after_stop_skips_the_idle_prewarm() {
+        let mock = MockEngine::new();
+        let reset_count = mock.reset_state_count_handle();
+        let (actor, audio_tx) = spawn_with_mock(mock);
+
+        actor
+            .start_session(1, session_config(), Box::new(|_| {}))
+            .expect("start dictation");
+        assert_eq!(reset_count.load(Ordering::SeqCst), 0);
+
+        // Let the session consume its EndOfStream first, so the stop below
+        // finishes on the first command check instead of waiting for EOS
+        // (a waiting session would answer the queued start "busy").
+        audio_tx.send(end_of_stream(1)).unwrap();
+        assert!(
+            wait_for(|| audio_tx.is_empty(), Duration::from_secs(2)),
+            "session should drain its EndOfStream"
+        );
+
+        // Stop and the next start are both queued before the actor handles
+        // the stop, like a hotkey pressed right after the previous dictation.
+        let (stop_reply, stop_rx) =
+            crossbeam_channel::bounded::<Result<super::SessionSummary, String>>(1);
+        actor
+            .cmd_tx
+            .send(super::EngineCommand::StopSession { reply: stop_reply })
+            .unwrap();
+        let diarized_cfg = SessionConfig {
+            diarize: true,
+            ..session_config()
+        };
+        let pending = actor
+            .begin_session(2, diarized_cfg, Box::new(|_| {}))
+            .expect("queue diarized start");
+        stop_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("stop reply")
+            .expect("stop ok");
+        pending
+            .wait(Duration::from_secs(2))
+            .expect("diarized start");
+
+        // Only the start's own reset ran: the pre-warm (which would have
+        // been a second reset here) must not delay a start already queued.
+        assert_eq!(
+            reset_count.load(Ordering::SeqCst),
+            1,
+            "a queued start must not wait behind the idle pre-warm"
+        );
+        audio_tx.send(end_of_stream(2)).unwrap();
+        actor.stop_session(Duration::from_secs(2)).expect("stop 2");
     }
 
     // Driving the stall-recovery ladder end to end through `run_session_loop`
