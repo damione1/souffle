@@ -1,8 +1,9 @@
 //! The "microphone not responding" banner (SOU-126 AC5): which stuck device
 //! to name, why, and whether the user already dismissed it.
 //!
-//! The capture thread only publishes a snapshot
-//! (`souffle_lib::commands::get_mic_stall_notice`), so the window polls it;
+//! The capture thread publishes a snapshot
+//! (`souffle_lib::commands::get_mic_stall_notice`) and dispatches
+//! `NativeAction::MicStallChanged` on each change, when the window re-reads it;
 //! this module turns that snapshot into the Window's `mic-stall-*` pair,
 //! which only [`MicStallBanner::project`] writes.
 
