@@ -28,7 +28,12 @@ workspace = true
 # SOU-223: floor raised to 1.18 - FlexboxLayout (used by the transcript's
 # per-word click rendering, see transcript_section.slint) only became a
 # stable builtin in 1.18.1; 1.17.x fails to compile it.
-slint = { version = "1.18", features = ["unstable-winit-030", "renderer-skia", "gettext"] }
+# SOU-289: default features off. The defaults also compiled in the FemtoVG
+# and software renderers and Slint's own system tray, none of which run:
+# main.rs forces `renderer_name("skia")` and the tray is the `tray-icon`
+# crate in souffle_lib::native. `accessibility` (VoiceOver) and
+# `compat-1-18` are kept explicitly.
+slint = { version = "1.18", default-features = false, features = ["std", "compat-1-18", "backend-winit", "renderer-skia", "accessibility", "gettext", "unstable-winit-030"] }
 souffle_lib = { path = "..", package = "souffle" }
 # SOU-137: the paragraph grouper and its pause threshold, declared once for
 # the export, the summary, this UI and the MCP sidecar.
@@ -49,7 +54,6 @@ arboard = "3.6"
 # SOU-188: new custom summary-template/dictionary-entry/snippet ids, same
 # crate/version the main `souffle` crate already uses (src/state.rs).
 uuid = { version = "1", features = ["v4"] }
-slint-build = "1.18"
 
 [build-dependencies]
 lucide-slint = "1.46.0"
@@ -61,3 +65,7 @@ tempfile = "3"
 # meeting transcript really gets laid out at a usable height. Already in the
 # tree through slint's backend selector; same version as `slint`.
 i-slint-backend-testing = "1.18"
+# SOU-289: the headless UI tests render through `MinimalSoftwareWindow`.
+# Dev-only: the resolver keeps this feature out of the shipped binary, which
+# stays Skia-only (see [dependencies]).
+slint = { version = "1.18", default-features = false, features = ["renderer-software"] }
