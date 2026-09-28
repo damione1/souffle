@@ -313,18 +313,33 @@ mod tests {
 
     #[test]
     fn handshake_timeout_drains_and_bounds_stderr_before_reaping_child() {
+        // The child writes its stderr, then drops a marker. Waiting for the
+        // marker before the handshake starts means the stderr is already in
+        // the pipe (32 KiB fits in the pipe buffer): on a loaded machine the
+        // child used to be killed by the 100 ms timeout before it had run.
+        let dir = tempfile::tempdir().unwrap();
+        let marker = dir.path().join("stderr-written");
         let child = Command::new("sh")
             .arg("-c")
-            .arg("yes x | head -c 32768 >&2; printf partial; sleep 30")
+            .arg(r#"yes x | head -c 32768 >&2; touch "$1"; printf partial; sleep 30"#)
+            .arg("sh")
+            .arg(&marker)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
             .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !marker.exists() {
+            assert!(Instant::now() < deadline, "child never wrote its stderr");
+            std::thread::sleep(Duration::from_millis(10));
+        }
         let started = Instant::now();
 
         let error = run_handshake(child, Duration::from_millis(100)).unwrap_err();
 
+        // Bounded well below the child's `sleep 30`, which keeps the stderr
+        // pipe open after `sh` is killed.
         assert!(started.elapsed() < Duration::from_secs(2));
         assert!(error.starts_with("Timed out waiting for the sidecar to respond"));
         assert!(error.contains('x'));
