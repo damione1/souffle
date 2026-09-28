@@ -51,6 +51,10 @@ pub enum NativeAction {
     /// AC5). The UI re-reads `commands::get_mic_stall_notice` once, instead
     /// of polling it (SOU-281).
     MicStallChanged,
+    /// The Mac woke from sleep (SOU-295). The UI checks
+    /// `commands::peek_sleep_paused_meeting` and resumes the meeting the
+    /// sleep stopped, the port of the Svelte-era `SystemWokeUp` event.
+    SystemWokeUp,
     /// A newer GitHub release was found by the background scheduler.
     UpdateAvailable {
         latest_version: String,

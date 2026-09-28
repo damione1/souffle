@@ -16,7 +16,7 @@ import { TimelineDayGroup, UpcomingEvent } from "components/timeline_section.sli
 import { TranscriptBlock } from "components/transcript_section.slint";
 import { TranscriptWord } from "components/transcript_words.slint";
 import { StructuredActionItem } from "components/summary_section.slint";
-import { RecordingMode, LiveSystemAudio, MicStall, MeetingIdleBanner, SpeakerRole, TimelineFilter, TimelineKind, NotesSaveState, ModelPhase, TranscriptionPhase, UpcomingPhase, SettingsTab, SettingsInteraction, AppTheme, AppLocale, PasteMethod, MeetingLanguage, LogLevel, AudioRetention, AccessState, PermissionKind, ShortcutField, SummaryProvider, AppleIntelligenceUnavailableReason, OnboardingStep, UpdatePhase, InstallBlockReason, MeetingExportFormat } from "types.slint";
+import { RecordingMode, LiveSystemAudio, MicStall, MeetingIdleBanner, WakeResumeNotice,SpeakerRole, TimelineFilter, TimelineKind, NotesSaveState, ModelPhase, TranscriptionPhase, UpcomingPhase, SettingsTab, SettingsInteraction, AppTheme, AppLocale, PasteMethod, MeetingLanguage, LogLevel, AudioRetention, AccessState, PermissionKind, ShortcutField, SummaryProvider, AppleIntelligenceUnavailableReason, OnboardingStep, UpdatePhase, InstallBlockReason, MeetingExportFormat } from "types.slint";
 export { SettingsTab, SettingsInteraction, AppTheme, AppLocale, PasteMethod, MeetingLanguage, LogLevel, AudioRetention, AccessState, PermissionKind, ShortcutField, SummaryProvider, AppleIntelligenceUnavailableReason, SpeakerRole }
 import { Theme } from "theme.slint";
 // Re-exported (not just imported) so Slint's codegen generates a Rust
@@ -112,6 +112,10 @@ export component MainWindow inherits Window {
     in property <MeetingIdleBanner> meeting-idle-banner: MeetingIdleBanner.hidden;
     in property <int> meeting-idle-minutes: 0;
     callback meeting-idle-keep-recording();
+    // SOU-295: written by `wake_resume_ui`; shown by the recording view
+    // (resumed) or the meeting detail (interrupted).
+    in property <WakeResumeNotice> wake-resume-notice: WakeResumeNotice.hidden;
+    callback wake-resume-notice-dismissed();
     in-out property <string> live-notes;
 
     // Non-empty while a completed meeting is open in MeetingDetail. Empty
@@ -675,6 +679,8 @@ export component MainWindow inherits Window {
         // Resuming appends to the transcript the summary is being built from.
         can-resume: root.meeting-detail-can-resume && !root.meeting-detail-summary-is-generating;
         resume-error: root.meeting-detail-resume-error;
+        wake-resume-notice: root.wake-resume-notice;
+        wake-resume-notice-dismissed => { root.wake-resume-notice-dismissed(); }
         delete-error: root.meeting-detail-delete-error;
         export-error: root.meeting-detail-export-error;
         audio-export-error: root.meeting-detail-audio-export-error;
@@ -719,6 +725,8 @@ export component MainWindow inherits Window {
         meeting-idle-banner: root.meeting-idle-banner;
         meeting-idle-minutes: root.meeting-idle-minutes;
         meeting-idle-keep-recording => { root.meeting-idle-keep-recording(); }
+        wake-resume-notice: root.wake-resume-notice;
+        wake-resume-notice-dismissed => { root.wake-resume-notice-dismissed(); }
         stop-requested => { root.stop-requested(); }
         alias-save-requested(term, pronunciation) => { root.live-transcript-alias-save-requested(term, pronunciation); }
         

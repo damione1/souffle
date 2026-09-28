@@ -24,6 +24,11 @@ export enum MicStall { timed-out, parked, busy }
 // meeting is being stopped.
 export enum MeetingIdleBanner { hidden, silence, max-duration }
 
+// The transient message after the Mac woke from sleep (SOU-295), written by
+// main.rs's `wake_resume_ui`: the meeting the sleep stopped was resumed, or
+// could not be and waits for the detail's Resume button.
+export enum WakeResumeNotice { hidden, resumed, interrupted }
+
 // Mirrors souffle_lib::engine::Speaker at the compiled UI boundary.
 export enum SpeakerRole { me, them }
 

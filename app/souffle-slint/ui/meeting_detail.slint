@@ -1,4 +1,5 @@
-import { NotesSaveState, MeetingExportFormat } from "types.slint";
+import { NotesSaveState, MeetingExportFormat, WakeResumeNotice } from "types.slint";
+import { StatusBanner } from "components/status_banner.slint";
 import { ThemedLineEdit } from "components/themed_line_edit.slint";
 import { AudioPlayerSection } from "components/audio_player_section.slint";
 import { TranscriptSection, TranscriptBlock } from "components/transcript_section.slint";
@@ -123,6 +124,9 @@ export component MeetingDetail inherits Rectangle {
     in-out property <string> summary-selected-model-label;
     in property <bool> can-resume: true;
     in property <string> resume-error;
+    // SOU-295: only `interrupted` is shown here (the recording view shows
+    // the other).
+    in property <WakeResumeNotice> wake-resume-notice: WakeResumeNotice.hidden;
     // Why the last delete failed; empty otherwise. On success Rust closes
     // the view, so there is no success state to show here.
     in property <string> delete-error;
@@ -131,6 +135,7 @@ export component MeetingDetail inherits Rectangle {
 
     callback back-requested();
     callback resume-requested();
+    callback wake-resume-notice-dismissed();
     callback summarize-requested();
     callback copy-summary-requested();
     // Confirmed by the user through the inline two-step row below.
@@ -660,6 +665,12 @@ export component MeetingDetail inherits Rectangle {
             height: 1px;
             vertical-stretch: 0;
             background: Theme.surface-4;
+        }
+
+        if root.wake-resume-notice == WakeResumeNotice.interrupted: StatusBanner {
+            vertical-stretch: 0;
+            message: @tr("La mise en veille a interrompu cette réunion. Reprenez l'enregistrement pour continuer.");
+            dismissed => { root.wake-resume-notice-dismissed(); }
         }
 
         // Single scroll region (SOU-243 AC1): everything from Notes down is

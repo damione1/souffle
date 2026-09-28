@@ -2895,3 +2895,13 @@ msgstr "Stop now"
 msgctxt "RecordingView"
 msgid "Continuer l'enregistrement"
 msgstr "Keep recording"
+
+msgctxt "RecordingView"
+msgid "Enregistrement repris après la mise en veille."
+msgstr "Recording resumed after sleep."
+
+msgctxt "MeetingDetail"
+msgid ""
+"La mise en veille a interrompu cette réunion. Reprenez l'enregistrement pour "
+"continuer."
+msgstr "Sleep interrupted this meeting. Resume recording to continue."

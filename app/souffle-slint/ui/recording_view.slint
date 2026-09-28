@@ -1,10 +1,11 @@
 import { ScrollView } from "std-widgets.slint";
-import { RecordingMode, SpeakerRole, LiveSystemAudio, MicStall, MeetingIdleBanner } from "types.slint";
+import { RecordingMode, SpeakerRole, LiveSystemAudio, MicStall, MeetingIdleBanner, WakeResumeNotice } from "types.slint";
 import { Theme } from "theme.slint";
 import { LucideIcon, IconSet } from "components/lucide_icon.slint";
 import { ThemedTextArea } from "components/themed_text_area.slint";
 import { ThemedButton, ThemedButtonKind } from "components/themed_button.slint";
 import { MicStallBanner } from "components/mic_stall_banner.slint";
+import { StatusBanner } from "components/status_banner.slint";
 import { TranscriptBlock, SpeakerLabels } from "components/transcript_section.slint";
 import { TranscriptWord, TranscriptWordFlow, DictionaryAliasPopover } from "components/transcript_words.slint";
 
@@ -52,8 +53,11 @@ export component RecordingView inherits Rectangle {
     // is the silence so far, rounded, at least 1.
     in property <MeetingIdleBanner> meeting-idle-banner: MeetingIdleBanner.hidden;
     in property <int> meeting-idle-minutes: 0;
+    // SOU-295: only `resumed` is shown here (the detail shows the other).
+    in property <WakeResumeNotice> wake-resume-notice: WakeResumeNotice.hidden;
 
     callback stop-requested();
+    callback wake-resume-notice-dismissed();
     callback notes-changed(string);
     callback mic-stall-restart-requested();
     callback mic-stall-dismissed();
@@ -271,6 +275,12 @@ export component RecordingView inherits Rectangle {
             device: root.mic-stall-device;
             restart-requested => { root.mic-stall-restart-requested(); }
             dismissed => { root.mic-stall-dismissed(); }
+        }
+
+        if root.mode == RecordingMode.meeting && root.wake-resume-notice == WakeResumeNotice.resumed: StatusBanner {
+            vertical-stretch: 0;
+            message: @tr("Enregistrement repris après la mise en veille.");
+            dismissed => { root.wake-resume-notice-dismissed(); }
         }
 
         if root.mode == RecordingMode.meeting && root.system-audio == LiveSystemAudio.unavailable: Rectangle {
