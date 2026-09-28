@@ -6,7 +6,6 @@ import { StatusBanner } from "components/status_banner.slint";
 import { AppLocale, ModelPhase, OnboardingStep, PermissionKind } from "types.slint";
 import { Theme } from "theme.slint";
 import { ThemedButton, ThemedButtonKind } from "components/themed_button.slint";
-import { ThemedSwitch } from "components/themed_switch.slint";
 
 // Port of OnboardingView.svelte (+ PermissionsStep.svelte inlined as the
 // first step). Model download and shortcut capture reuse the same Rust
@@ -46,7 +45,6 @@ export component OnboardingView inherits Rectangle {
     in property <string> toggle-shortcut-label;
     in property <bool> shortcut-recording;
     in property <string> shortcut-error;
-    in property <bool> auto-paste;
     in property <bool> accessibility-granted;
 
     in property <bool> busy;
@@ -64,7 +62,6 @@ export component OnboardingView inherits Rectangle {
     callback shortcut-released(string, bool, bool, bool, bool);
     callback shortcut-cleared();
     callback shortcut-cancelled();
-    callback auto-paste-changed(bool);
     callback review-accessibility-requested();
     callback back-requested();
     callback continue-requested();
@@ -330,35 +327,6 @@ export component OnboardingView inherits Rectangle {
                         color: Theme.danger;
                         font-size: 12px;
                         wrap: word-wrap;
-                    }
-
-                    HorizontalLayout {
-                        alignment: space-between;
-                        spacing: 16px;
-                        VerticalLayout {
-                            spacing: 2px;
-                            horizontal-stretch: 1;
-                            Text {
-                                text: @tr("Coller automatiquement le texte transcrit");
-                                font-size: 13px;
-                                color: Theme.text-primary;
-                            }
-                            Text {
-                                text: @tr("À l'arrêt, colle la transcription dans l'app que vous utilisiez. Nécessite Accessibilité.");
-                                font-size: 12px;
-                                color: Theme.text-muted;
-                                wrap: word-wrap;
-                            }
-                        }
-                        VerticalLayout {
-                            alignment: start;
-                            horizontal-stretch: 0;
-                            ThemedSwitch {
-                                control-label: @tr("Coller automatiquement le texte transcrit");
-                                checked: root.auto-paste;
-                                toggled(new) => { root.auto-paste-changed(new); }
-                            }
-                        }
                     }
 
                     if !root.accessibility-granted: Rectangle {

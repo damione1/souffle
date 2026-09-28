@@ -2595,7 +2595,6 @@ struct OnboardingState {
     selected_model_index: Option<usize>,
     toggle_shortcut: String,
     pending_modifier: Option<String>,
-    auto_paste: bool,
 }
 
 fn project_startup_settings(
@@ -2611,7 +2610,6 @@ fn project_startup_settings(
     select_app_locale(locale);
     let mut onboarding = onboarding.borrow_mut();
     onboarding.selected_device = settings.audio_device.clone().unwrap_or_default();
-    onboarding.auto_paste = settings.auto_paste;
     dark
 }
 
@@ -2671,7 +2669,6 @@ fn initialize_onboarding(
     guard.recovery_only = startup.setup_flags.setup_done;
     guard.devices = startup.devices.clone();
     guard.selected_device = startup.settings.audio_device.clone().unwrap_or_default();
-    guard.auto_paste = startup.settings.auto_paste;
     guard.model_options = model_ui::list_available_model_options(&startup.catalog);
     guard.selected_model_index = guard.model_options.iter().position(|option| {
         option.engine_id == startup.catalog.selected_engine_id
@@ -2790,7 +2787,6 @@ fn show_onboarding_step(
             window.set_onboarding_toggle_shortcut_label(
                 format_shortcut_label(&guard.toggle_shortcut).into(),
             );
-            window.set_onboarding_auto_paste(guard.auto_paste);
             window.set_onboarding_accessibility_granted(
                 permissions.status().accessibility == PermState::Granted,
             );
@@ -2961,15 +2957,6 @@ fn wire_onboarding_callbacks(
         }
     });
 
-    let weak_for_auto_paste = window.as_weak();
-    let ob_for_auto_paste = ob.clone();
-    window.on_onboarding_auto_paste_changed(move |enabled| {
-        ob_for_auto_paste.borrow_mut().auto_paste = enabled;
-        if let Some(window) = weak_for_auto_paste.upgrade() {
-            window.set_onboarding_auto_paste(enabled);
-        }
-    });
-
     let permissions_for_accessibility_review = permissions.clone();
     window.on_onboarding_review_accessibility_requested(move || {
         permissions_for_accessibility_review.open_settings(DomainPermissionKind::Accessibility);
@@ -3129,10 +3116,7 @@ fn wire_onboarding_callbacks(
                 );
             }
             OnboardingStep::Shortcut => {
-                let (auto_paste, recovery_only) = {
-                    let guard = ob_for_continue.borrow();
-                    (guard.auto_paste, guard.recovery_only)
-                };
+                let recovery_only = ob_for_continue.borrow().recovery_only;
                 window.set_onboarding_busy(true);
                 window.set_onboarding_continue_enabled(false);
                 let completion_weak = weak.clone();
@@ -3140,7 +3124,11 @@ fn wire_onboarding_callbacks(
                 settings_io_for_continue.submit(
                     souffle_lib::commands::SettingsSaveLane::Autostart,
                     move |settings| {
-                        settings.auto_paste = auto_paste;
+                        settings.auto_paste = onboarding_flags::decide_auto_paste_on_finish(
+                            recovery_only,
+                            settings.auto_paste,
+                            souffle_lib::permissions::accessibility_granted(),
+                        );
                         settings.autostart_enabled = onboarding_flags::decide_autostart_on_finish(
                             recovery_only,
                             settings.autostart_enabled,
@@ -7680,7 +7668,6 @@ mod tests {
             theme: souffle_lib::settings::Theme::Light,
             locale: "fr".into(),
             audio_device: Some("mic-1".into()),
-            auto_paste: true,
             calendar_integration_enabled: true,
             ..AppSettings::default()
         };
@@ -7694,7 +7681,6 @@ mod tests {
         // the window property is set later by settings_ui::populate()
         let onboarding = onboarding.borrow();
         assert_eq!(onboarding.selected_device, "mic-1");
-        assert!(onboarding.auto_paste);
     }
 
     #[test]

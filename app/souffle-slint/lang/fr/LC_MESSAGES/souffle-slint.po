@@ -336,11 +336,6 @@ msgid ""
 msgstr ""
 "Cliquez sur le raccourci, puis appuyez sur les touches voulues. Échap annule."
 
-#: app/souffle-slint/ui/onboarding_view.slint:342
-msgctxt "OnboardingView"
-msgid "Coller automatiquement le texte transcrit"
-msgstr "Coller automatiquement le texte transcrit"
-
 #: app/souffle-slint/ui/onboarding_view.slint:347
 msgctxt "OnboardingView"
 msgid ""
