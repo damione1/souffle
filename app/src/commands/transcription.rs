@@ -1254,12 +1254,12 @@ pub fn handle_system_will_sleep(state: &Arc<AppState>) {
 }
 
 /// Called from the `NSWorkspace` did-wake observer on the main thread.
-/// `peek_sleep_paused_meeting` lets a caller check on demand whether a
-/// meeting needs a resume offer; nothing currently polls it proactively on
-/// wake (the Svelte-era "SystemWokeUp -> offer resume" banner has no Slint
-/// equivalent yet — pre-existing gap, not introduced by this ticket).
+/// Just tells the UI (SOU-295): resuming a paused meeting needs the UI's
+/// segment channel, so the backend cannot resume on its own. The UI then
+/// reads `peek_sleep_paused_meeting`.
 pub fn handle_system_did_wake() {
     info!("System woke up");
+    crate::native::bridge::dispatch(crate::native::bridge::NativeAction::SystemWokeUp);
 }
 
 /// Return the meeting id paused by the system-sleep handler, if any, without

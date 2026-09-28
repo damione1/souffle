@@ -8,9 +8,11 @@ slint::include_modules!();
 mod audio_player;
 mod audio_ui;
 mod data_ui;
+mod edit_learning;
 mod ia_ui;
 mod lists_ui;
 mod markdown;
+mod meeting_idle_ui;
 mod mic_stall_ui;
 mod microphone_list;
 mod model_ui;
@@ -28,6 +30,7 @@ mod summary;
 mod timeline;
 mod transcript;
 mod update_ui;
+mod wake_resume_ui;
 
 use settings_values::SettingsCache;
 use slint::Model;
@@ -474,25 +477,40 @@ const MEETING_RESUME_WINDOW_SECS: i64 = 60 * 60;
 
 /// Whether the detail view offers to resume this meeting. An interrupted
 /// meeting (no `ended_at`) always can; a stopped one can for
-/// [`MEETING_RESUME_WINDOW_SECS`] after it stopped.
+/// [`MEETING_RESUME_WINDOW_SECS`] after it stopped, or for as long as it is
+/// the meeting the Mac's sleep stopped (SOU-295: however long the sleep).
 fn meeting_can_resume(
     ended_at: Option<chrono::DateTime<chrono::Utc>>,
     now: chrono::DateTime<chrono::Utc>,
+    stopped_by_sleep: bool,
 ) -> bool {
+    if stopped_by_sleep {
+        return true;
+    }
     match ended_at {
         None => true,
         Some(ended) => now.signed_duration_since(ended).num_seconds() <= MEETING_RESUME_WINDOW_SECS,
     }
 }
 
+/// Whether `meeting_id` is the meeting the Mac's sleep stopped and nothing
+/// resumed or dismissed since (SOU-295).
+fn stopped_by_sleep(handle: &AppHandle, meeting_id: &str) -> bool {
+    handle.peek_sleep_paused_meeting().as_deref() == Some(meeting_id)
+}
+
 /// Loads a meeting and pushes it into MeetingDetail's properties - mirrors
 /// `controller.svelte.ts`'s `openMeeting`/`loadMeeting` effect.
-fn populate_meeting_detail(window: &MainWindow, meeting: &MeetingTranscript) {
+fn populate_meeting_detail(window: &MainWindow, handle: &AppHandle, meeting: &MeetingTranscript) {
     window.set_active_meeting_id(meeting.id.clone().into());
     window.set_meeting_detail_title(meeting.title.clone().into());
     window.set_meeting_detail_meta(meeting_meta(meeting));
     window.set_meeting_detail_model_label(meeting.transcription_profile.model_label.clone().into());
-    window.set_meeting_detail_can_resume(meeting_can_resume(meeting.ended_at, chrono::Utc::now()));
+    window.set_meeting_detail_can_resume(meeting_can_resume(
+        meeting.ended_at,
+        chrono::Utc::now(),
+        stopped_by_sleep(handle, &meeting.id),
+    ));
     window.set_meeting_detail_resume_error("".into());
     window.set_meeting_detail_delete_error("".into());
     window.set_meeting_detail_summary_generation_error("".into());
@@ -1817,7 +1835,7 @@ fn open_meeting_detail(
     let state = Arc::clone(handle);
     match souffle_lib::commands::get_meeting(state, meeting_id.to_string()) {
         Ok(meeting) => {
-            populate_meeting_detail(window, &meeting);
+            populate_meeting_detail(window, handle, &meeting);
             load_meeting_audio(window, &meeting.id, player, progress_timer, weak.clone());
             load_meeting_transcript_window(window, &meeting, transcript_state);
             load_meeting_summary_models(weak.clone(), handle.clone());
@@ -1980,16 +1998,17 @@ fn settle_recording_start(window: &MainWindow, result: Result<(), String>) -> Re
     result
 }
 
-/// SOU-281: the three polls that only mean something while a recording is
-/// on screen - the RecordingView level meter, the live "Audio système"
-/// label and the live meeting notes autosave. They used to run for the
-/// whole life of the process, waking the main thread ~20 times a second at
-/// rest. Held together so they start and stop as one unit; fields are only
-/// kept alive, never read.
+/// SOU-281: the polls that only mean something while a recording is on
+/// screen - the RecordingView level meter, the live "Audio système" label,
+/// the live meeting notes autosave and (SOU-294) the meeting auto-stop. They
+/// used to run for the whole life of the process, waking the main thread ~20
+/// times a second at rest. Held together so they start and stop as one
+/// unit; fields are only kept alive, never read.
 struct RecordingTimers {
     _audio_level: slint::Timer,
     _system_audio: slint::Timer,
     _live_notes: slint::Timer,
+    _meeting_idle: slint::Timer,
 }
 
 /// Saves the live notes of the meeting being recorded, given the last
@@ -2034,6 +2053,8 @@ fn set_recording_idle(window: &MainWindow) {
     drop(timers);
     window.set_live_system_audio(LiveSystemAudio::Pending);
     window.set_audio_level(0.0);
+    meeting_idle_ui::reset(window);
+    wake_resume_ui::recording_ended(window);
 }
 
 fn start_recording_timers(window: &MainWindow, autosave: LiveNotesAutosave) -> RecordingTimers {
@@ -2096,10 +2117,25 @@ fn start_recording_timers(window: &MainWindow, autosave: LiveNotesAutosave) -> R
         }
     });
 
+    // SOU-294: the meeting auto-stop, on the live idle signal the actor
+    // publishes (re-signaled every 30 s at most, so 1 s is plenty).
+    let meeting_idle = slint::Timer::default();
+    let weak = window.as_weak();
+    meeting_idle.start(
+        slint::TimerMode::Repeated,
+        Duration::from_secs(1),
+        move || {
+            if let Some(window) = weak.upgrade() {
+                meeting_idle_ui::poll(&window);
+            }
+        },
+    );
+
     RecordingTimers {
         _audio_level: audio_level,
         _system_audio: system_audio,
         _live_notes: live_notes,
+        _meeting_idle: meeting_idle,
     }
 }
 
@@ -2377,6 +2413,7 @@ async fn start_dictation(
     weak: slint::Weak<MainWindow>,
     live_state: LiveTranscriptState,
 ) -> Result<(), String> {
+    edit_learning::cancel_pending();
     ensure_model_ready(&handle).await?;
     // Off the UI thread (SOU-258): the engine start (~250 ms of VAD setup,
     // more on a cold engine) used to run inside `block_on` on the main
@@ -2528,38 +2565,16 @@ async fn finalize_dictation(
     let entry_id =
         souffle_lib::commands::add_dictation_entry(Arc::clone(&handle), raw_text.clone())?;
     let settings = souffle_lib::commands::get_settings(Arc::clone(&handle))?;
-    // The Polishing pill only makes sense when a polish actually runs:
-    // polish_dictation returns immediately (skipped) when the setting is
-    // off, which would otherwise flash the pill for nothing.
-    if settings.dictation_polish_enabled {
-        let _ = souffle_lib::commands::pill_hold(
-            Arc::clone(&handle),
-            souffle_lib::app_events::PillHoldKind::Polishing,
-        );
-    }
-    let polished = match tokio::time::timeout(
-        Duration::from_secs(25),
-        souffle_lib::commands::polish_dictation(Arc::clone(&handle), raw_text.clone(), focused_app),
-    )
-    .await
-    {
-        Ok(Ok(result)) => result.text.trim().to_string(),
-        Ok(Err(error)) => {
-            eprintln!("Dictation polish failed; using raw text: {error}");
-            raw_text.clone()
-        }
-        Err(_) => {
-            eprintln!("Dictation polish timed out; using raw text");
-            raw_text.clone()
-        }
-    };
-    if settings.dictation_polish_enabled {
-        let _ = souffle_lib::commands::pill_release(Arc::clone(&handle));
-    }
-    let final_text = if polished.is_empty() {
-        raw_text.clone()
-    } else {
-        polished
+    // Voice snippet: a registered trigger at the start of the raw transcript
+    // pastes its expansion as-is and skips the polish. An unreadable snippet
+    // store must not block the dictation from finishing.
+    let snippets = souffle_lib::commands::list_snippets(Arc::clone(&handle)).unwrap_or_else(|e| {
+        eprintln!("Failed to load snippets: {e}");
+        Vec::new()
+    });
+    let final_text = match souffle_lib::db::snippets::apply_snippet(&raw_text, &snippets) {
+        Some(expanded) => expanded,
+        None => polish_dictation_text(&handle, &settings, &raw_text, focused_app.clone()).await,
     };
     if final_text != raw_text {
         souffle_lib::commands::update_dictation_entry(
@@ -2584,10 +2599,63 @@ async fn finalize_dictation(
                 )),
             };
         }
+        edit_learning::schedule(
+            handle,
+            settings.dictation_learn_from_edit,
+            final_text,
+            focused_app,
+        );
     } else {
         souffle_lib::commands::copy_text(final_text)?;
     }
     Ok(())
+}
+
+/// Run the optional LLM polish over `raw_text`, falling back to the raw text
+/// on failure, timeout or an empty result.
+async fn polish_dictation_text(
+    handle: &AppHandle,
+    settings: &AppSettings,
+    raw_text: &str,
+    focused_app: Option<String>,
+) -> String {
+    // The Polishing pill only makes sense when a polish actually runs:
+    // polish_dictation returns immediately (skipped) when the setting is
+    // off, which would otherwise flash the pill for nothing.
+    if settings.dictation_polish_enabled {
+        let _ = souffle_lib::commands::pill_hold(
+            Arc::clone(handle),
+            souffle_lib::app_events::PillHoldKind::Polishing,
+        );
+    }
+    let polished = match tokio::time::timeout(
+        Duration::from_secs(25),
+        souffle_lib::commands::polish_dictation(
+            Arc::clone(handle),
+            raw_text.to_string(),
+            focused_app,
+        ),
+    )
+    .await
+    {
+        Ok(Ok(result)) => result.text.trim().to_string(),
+        Ok(Err(error)) => {
+            eprintln!("Dictation polish failed; using raw text: {error}");
+            String::new()
+        }
+        Err(_) => {
+            eprintln!("Dictation polish timed out; using raw text");
+            String::new()
+        }
+    };
+    if settings.dictation_polish_enabled {
+        let _ = souffle_lib::commands::pill_release(Arc::clone(handle));
+    }
+    if polished.is_empty() {
+        raw_text.to_string()
+    } else {
+        polished
+    }
 }
 
 /// All mutable state the onboarding wizard needs across its 4 steps, in one
@@ -3675,6 +3743,20 @@ fn wire_callbacks(
         });
     });
 
+    let weak = window.as_weak();
+    window.on_meeting_idle_keep_recording(move || {
+        if let Some(window) = weak.upgrade() {
+            meeting_idle_ui::keep_recording(&window);
+        }
+    });
+
+    let weak = window.as_weak();
+    window.on_wake_resume_notice_dismissed(move || {
+        if let Some(window) = weak.upgrade() {
+            wake_resume_ui::dismiss_notice(&window);
+        }
+    });
+
     let stop_in_flight = Arc::new(AtomicBool::new(false));
     let weak = window.as_weak();
     let handle = tauri_handle.clone();
@@ -3927,6 +4009,8 @@ fn wire_callbacks(
     let transcript_state_for_back = transcript_state.clone();
     window.on_meeting_detail_back(move || {
         if let Some(window) = weak.upgrade() {
+            let id = window.get_active_meeting_id().to_string();
+            wake_resume_ui::detail_closed(&window, &handle, &id);
             window.set_active_meeting_id("".into());
             // Port of HomeView.svelte's `$effect` that refreshes whenever
             // `showMeetingDetail` goes false - stopping a meeting lands the
@@ -3959,8 +4043,12 @@ fn wire_callbacks(
         }
         // Release the decoded audio before the files go away.
         stop_audio_player(&player_for_delete, &progress_timer_for_delete);
-        match souffle_lib::commands::delete_meeting(Arc::clone(&handle), id) {
+        match souffle_lib::commands::delete_meeting(Arc::clone(&handle), id.clone()) {
             Ok(()) => {
+                wake_resume_ui::detail_closed(&window, &handle, &id);
+                if stopped_by_sleep(&handle, &id) {
+                    handle.clear_sleep_paused_meeting();
+                }
                 stop_transcript_window(&transcript_state_for_delete);
                 window.set_meeting_detail_delete_error("".into());
                 window.set_active_meeting_id("".into());
@@ -3995,12 +4083,18 @@ fn wire_callbacks(
         window.set_meeting_detail_resume_error("".into());
         let id = window.get_active_meeting_id().to_string();
         let state = handle_resume.clone();
+        wake_resume_ui::resume_requested(&window, &id);
         // The detail view may have stayed open past the resume window:
-        // re-check against the stored end before resuming.
-        let expired = state
-            .db
-            .load_meeting(&id)
-            .is_ok_and(|m| !meeting_can_resume(m.ended_at, chrono::Utc::now()));
+        // re-check against the stored end before resuming. A meeting the
+        // sleep stopped is exempt (SOU-295).
+        let meeting = state.db.load_meeting(&id);
+        let expired = meeting.as_ref().is_ok_and(|m| {
+            !meeting_can_resume(
+                m.ended_at,
+                chrono::Utc::now(),
+                stopped_by_sleep(&state, &id),
+            )
+        });
         if expired {
             window.set_meeting_detail_can_resume(false);
             return;
@@ -4015,13 +4109,30 @@ fn wire_callbacks(
             &pending_stop_resume,
             live_notes_autosave(state.clone()),
         );
+        // The live notes field starts from the meeting's notes: blank, the
+        // notes autosave would erase them from the resumed meeting.
+        if let Ok(meeting) = &meeting {
+            window.set_live_notes(meeting.notes.clone().unwrap_or_default().into());
+        }
         let channel = live_segment_channel(weak_resume.clone(), live_state_res.clone());
         let weak = weak_resume.clone();
         let pending_stop = Arc::clone(&pending_stop_resume);
         souffle_lib::async_runtime::spawn(async move {
-            let result =
-                souffle_lib::commands::resume_meeting_recording(state.clone(), id, channel).await;
+            // Like a new meeting, and like the Tauri resume: an unloaded
+            // model (e.g. unloaded while the Mac slept) is loaded first.
+            let result = match ensure_model_ready(&state).await {
+                Ok(()) => {
+                    souffle_lib::commands::resume_meeting_recording(
+                        state.clone(),
+                        id.clone(),
+                        channel,
+                    )
+                    .await
+                }
+                Err(e) => Err(e),
+            };
             if let Err(e) = weak.upgrade_in_event_loop(move |window| {
+                let resumed = result.is_ok();
                 match settle_recording_start(&window, result) {
                     Ok(()) => {
                         anchor_live_elapsed_offset(&window, &state);
@@ -4032,6 +4143,7 @@ fn wire_callbacks(
                         window.set_meeting_detail_resume_error(e.into());
                     }
                 }
+                wake_resume_ui::resume_settled(&window, &id, resumed);
             }) {
                 eprintln!("upgrade_in_event_loop failed (meeting resume): {e}");
             }
@@ -4087,7 +4199,7 @@ fn wire_callbacks(
                     match result {
                         Ok(_) => {
                             if let Ok(m) = state_for_done.db.load_meeting(&id) {
-                                populate_meeting_detail(&w, &m);
+                                populate_meeting_detail(&w, &state_for_done, &m);
                             }
                         }
                         // Its own property, not `generation_progress`: that one
@@ -6727,7 +6839,11 @@ fn dispatch_native_action(
     action: NativeAction,
 ) {
     match action {
-        NativeAction::RefreshRuntime => refresh_model_runtime(window.as_weak(), handle.clone()),
+        NativeAction::RefreshRuntime => {
+            refresh_model_runtime(window.as_weak(), handle.clone());
+            wake_resume_ui::state_changed(window, handle);
+        }
+        NativeAction::SystemWokeUp => wake_resume_ui::system_woke(window, handle),
         NativeAction::ToggleDictation => match window.get_recording_mode() {
             RecordingMode::Idle => window.invoke_dictate_requested(),
             RecordingMode::Dictation => window.invoke_stop_requested(),
@@ -7314,12 +7430,22 @@ mod tests {
         let minutes_ago = |m| Some(now - chrono::Duration::minutes(m));
 
         // Interrupted (never stopped): always resumable.
-        assert!(meeting_can_resume(None, now));
-        assert!(meeting_can_resume(minutes_ago(0), now));
-        assert!(meeting_can_resume(minutes_ago(59), now));
-        assert!(meeting_can_resume(minutes_ago(60), now));
-        assert!(!meeting_can_resume(minutes_ago(61), now));
-        assert!(!meeting_can_resume(minutes_ago(24 * 60), now));
+        assert!(meeting_can_resume(None, now, false));
+        assert!(meeting_can_resume(minutes_ago(0), now, false));
+        assert!(meeting_can_resume(minutes_ago(59), now, false));
+        assert!(meeting_can_resume(minutes_ago(60), now, false));
+        assert!(!meeting_can_resume(minutes_ago(61), now, false));
+        assert!(!meeting_can_resume(minutes_ago(24 * 60), now, false));
+    }
+
+    // SOU-295: a night asleep must not take away the resume of the meeting
+    // the sleep stopped.
+    #[test]
+    fn the_meeting_the_sleep_stopped_stays_resumable_past_the_hour() {
+        let now = chrono::Utc::now();
+        let overnight = Some(now - chrono::Duration::hours(9));
+        assert!(!meeting_can_resume(overnight, now, false));
+        assert!(meeting_can_resume(overnight, now, true));
     }
 
     #[test]

@@ -18,6 +18,17 @@ export enum LiveSystemAudio { pending, active, unavailable }
 // never a variant here.
 export enum MicStall { timed-out, parked, busy }
 
+// The "meeting seems to be over" banner of a meeting being recorded
+// (SOU-294), from souffle_lib's live meeting-idle signal: silence offers
+// "Stop now" / "Keep recording"; the max-duration guard only says the
+// meeting is being stopped.
+export enum MeetingIdleBanner { hidden, silence, max-duration }
+
+// The transient message after the Mac woke from sleep (SOU-295), written by
+// main.rs's `wake_resume_ui`: the meeting the sleep stopped was resumed, or
+// could not be and waits for the detail's Resume button.
+export enum WakeResumeNotice { hidden, resumed, interrupted }
+
 // Mirrors souffle_lib::engine::Speaker at the compiled UI boundary.
 export enum SpeakerRole { me, them }
 

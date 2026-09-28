@@ -33,7 +33,10 @@ use crate::state::AppState;
 
 use super::SegmentCallback;
 use super::health::{SessionHealth, StallAction, StallRecovery};
-use super::idle::{MeetingIdleConfig, MeetingIdleMonitor};
+use super::idle::{
+    MeetingIdleConfig, MeetingIdleMonitor, clear_live_meeting_idle, publish_live_meeting_idle,
+    publish_meeting_speech,
+};
 
 /// Creates engines ON the actor thread. Production uses `crate::engine::create_engine`;
 /// tests inject factories that produce mock engines.
@@ -971,7 +974,13 @@ impl EngineActor {
         );
 
         let mut audio = SessionAudio::new(&self.audio_rx, preroll);
-        run_session_loop(
+        // A meeting's idle state is its own: never show the last meeting's
+        // banner, nor keep one after this meeting ends.
+        let publishes_idle = idle_monitor.is_some();
+        if publishes_idle {
+            clear_live_meeting_idle();
+        }
+        let end = run_session_loop(
             &self.cmd_rx,
             &mut audio,
             engine.as_mut(),
@@ -984,7 +993,11 @@ impl EngineActor {
             mode.as_mut(),
             pending_unload_timeout,
             idle_monitor,
-        )
+        );
+        if publishes_idle {
+            clear_live_meeting_idle();
+        }
+        end
     }
 
     fn drain_audio_queue(&self) -> usize {
@@ -1719,12 +1732,17 @@ fn run_session_loop(
         }
 
         // Meeting-only: has the meeting probably ended (silence / max duration)?
+        // The recording view polls the published signal and stops the meeting
+        // (SOU-294); the OS notification only goes out on the first crossing.
         if let Some(monitor) = idle_monitor.as_mut()
             && let Some(signal) = monitor.tick(Instant::now())
-            && let Some(app) = app
-            && signal.first
         {
-            notify_meeting_idle(app, signal.reason);
+            publish_live_meeting_idle(signal);
+            if signal.first
+                && let Some(app) = app
+            {
+                notify_meeting_idle(app, signal.reason);
+            }
         }
 
         if last_heartbeat.elapsed() >= HEARTBEAT {
@@ -1917,8 +1935,9 @@ fn run_session_loop(
                                 segments_emitted += 1;
                                 if emit_filtered(engine, text_filters, seg, on_segment)
                                     && let Some(monitor) = idle_monitor.as_mut()
+                                    && monitor.note_segment(Instant::now())
                                 {
-                                    monitor.note_segment(Instant::now());
+                                    publish_meeting_speech();
                                 }
                             }
                         }
