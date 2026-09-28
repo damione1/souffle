@@ -104,6 +104,10 @@ static HOLD: Mutex<Option<PillHoldKind>> = Mutex::new(None);
 /// safety net only fires on a rising edge (idle → recording).
 static LAST_RECORDING: AtomicBool = AtomicBool::new(false);
 
+/// Whether the previous `sync` left the pill on screen. The panel starts
+/// ordered out, so `false` matches it before the first sync.
+static LAST_SHOWN: AtomicBool = AtomicBool::new(false);
+
 static PILL_HIDDEN: AtomicBool = AtomicBool::new(false);
 /// Whether the HUD is excluded from screen captures / sharing. Independent of
 /// `PILL_HIDDEN`: one decides whether the HUD shows at all, the other whether
@@ -355,9 +359,49 @@ pub fn sync(state: &AppState, machine: &AppStateMachine) {
     }
 
     let show = should_show_pill(recording, is_held(), is_hidden());
-    let fr = locale_is_french(state);
+    let was_shown = LAST_SHOWN.swap(show, Ordering::SeqCst);
+    let plan = plan_sync(was_shown, show);
 
-    let mode = if is_held() {
+    if plan.apply_mode {
+        apply_mode(sync_mode(machine), locale_is_french(state));
+    }
+
+    if plan.reset_on_hide {
+        persist_position(state);
+        if let Some(empty) = to_cstring("") {
+            unsafe { pill_panel_set_live_text(empty.as_ptr(), 0) };
+        }
+    }
+
+    if let Some(visible) = plan.set_visible {
+        unsafe { pill_panel_set_visible(i32::from(visible)) };
+    }
+}
+
+/// What one `sync` sends to the Swift panel (SOU-280). A hidden HUD gets
+/// no mode push (that re-armed its animations), and an idle transition
+/// while it stays hidden makes no FFI call at all.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct SyncPlan {
+    /// Push title/labels/mode: only while the pill is shown.
+    apply_mode: bool,
+    /// Save the position the user dragged it to and clear the live text:
+    /// only when the pill goes from shown to hidden.
+    reset_on_hide: bool,
+    /// Order the panel in or out: only when visibility changes.
+    set_visible: Option<bool>,
+}
+
+fn plan_sync(was_shown: bool, show: bool) -> SyncPlan {
+    SyncPlan {
+        apply_mode: show,
+        reset_on_hide: was_shown && !show,
+        set_visible: (was_shown != show).then_some(show),
+    }
+}
+
+fn sync_mode(machine: &AppStateMachine) -> PillPanelMode {
+    if is_held() {
         PillPanelMode::Polishing
     } else {
         match machine {
@@ -375,18 +419,7 @@ pub fn sync(state: &AppState, machine: &AppStateMachine) {
             | AppStateMachine::Unloading { .. }
             | AppStateMachine::Error { .. } => PillPanelMode::Dictation,
         }
-    };
-
-    apply_mode(mode, fr);
-
-    if !show {
-        persist_position(state);
-        if let Some(empty) = to_cstring("") {
-            unsafe { pill_panel_set_live_text(empty.as_ptr(), 0) };
-        }
     }
-
-    unsafe { pill_panel_set_visible(if show { 1 } else { 0 }) };
 }
 
 // ---------------------------------------------------------------------------
@@ -523,6 +556,55 @@ mod tests {
         assert!(
             !should_show_pill(true, true, true),
             "the hide option wins even while recording or held"
+        );
+    }
+
+    #[test]
+    fn an_idle_transition_with_the_pill_hidden_sends_nothing_to_swift() {
+        // SOU-280: Unload/UnloadComplete while the HUD is down used to push
+        // a mode (re-arming the 30 Hz waveform timer on the hidden panel),
+        // clear the live text and order the panel out again.
+        assert_eq!(
+            plan_sync(false, false),
+            SyncPlan {
+                apply_mode: false,
+                reset_on_hide: false,
+                set_visible: None,
+            }
+        );
+    }
+
+    #[test]
+    fn showing_the_pill_pushes_the_mode_then_orders_it_in() {
+        assert_eq!(
+            plan_sync(false, true),
+            SyncPlan {
+                apply_mode: true,
+                reset_on_hide: false,
+                set_visible: Some(true),
+            }
+        );
+        // Recording → polish hold: mode changes, panel already on screen.
+        assert_eq!(
+            plan_sync(true, true),
+            SyncPlan {
+                apply_mode: true,
+                reset_on_hide: false,
+                set_visible: None,
+            }
+        );
+    }
+
+    #[test]
+    fn hiding_the_pill_saves_its_position_once() {
+        assert_eq!(
+            plan_sync(true, false),
+            SyncPlan {
+                apply_mode: false,
+                reset_on_hide: true,
+                set_visible: Some(false),
+            },
+            "a drag during the dictation must still be persisted on hide"
         );
     }
 
