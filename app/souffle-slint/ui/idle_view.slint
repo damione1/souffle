@@ -1,3 +1,4 @@
+import { Theme } from "theme.slint";
 import { ActionHero } from "components/action_hero.slint";
 import { SearchField } from "components/search_field.slint";
 import { StatusBanner } from "components/status_banner.slint";
@@ -15,6 +16,10 @@ export component IdleView inherits Rectangle {
     in-out property <string> search-query;
     in property <TimelineFilter> kind-filter: TimelineFilter.all;
     in property <string> transcription-status-message;
+    // SOU-296: a stopped dictation whose text is still being polished.
+    // The recording view is already gone, so this line is what tells the
+    // user the app is working, not frozen.
+    in property <bool> dictation-finalizing: false;
     in-out property <string> dictation-recovery-text;
     in property <string> meeting-status-message;
     // `Option<MicStallNotice>` split across the boundary; written together
@@ -102,6 +107,12 @@ export component IdleView inherits Rectangle {
             restart-requested => { root.mic-stall-restart-requested(); }
             dismissed => { root.mic-stall-dismissed(); }
         }
+        if root.dictation-finalizing: Text {
+            vertical-stretch: 0;
+            text: @tr("Reformulation…");
+            font-size: 14px;
+            color: Theme.text-muted;
+        }
         if root.dictation-recovery-text != "": DictationRecovery {
             text <=> root.dictation-recovery-text;
             copy-requested => { root.copy-dictation-recovery(); }
@@ -117,7 +128,7 @@ export component IdleView inherits Rectangle {
             vertical-stretch: 0;
             dictation-shortcut: root.dictation-shortcut;
             model-ready: root.model-ready;
-            actions-enabled: root.dictation-recovery-text == "";
+            actions-enabled: root.dictation-recovery-text == "" && !root.dictation-finalizing;
             dictate-requested => { root.dictate-requested(); }
             meeting-requested => { root.meeting-requested(); }
         }
