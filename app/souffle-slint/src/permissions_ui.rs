@@ -10,7 +10,6 @@ use std::rc::{Rc, Weak};
 use std::time::Duration;
 
 use slint::ComponentHandle;
-use slint::winit_030::{EventResult, WinitWindowAccessor, winit};
 use souffle_lib::permissions::{PermState, PermissionKind, PermissionStatus};
 
 use crate::{MainWindow, onboarding_ui};
@@ -77,6 +76,19 @@ impl PermissionViewState {
     }
 }
 
+/// Whether a permission surface is on screen, so the TCC poll should run.
+/// SOU-282: gated on the window being visible (not closed, not fully
+/// covered), deliberately not on focus - the user grants a permission in
+/// System Settings while this window stays visible but unfocused, and the
+/// row must update within one poll.
+fn poll_surface_active(
+    settings_open: bool,
+    onboarding_on_permissions: bool,
+    window_visible: bool,
+) -> bool {
+    (settings_open || onboarding_on_permissions) && window_visible
+}
+
 pub(crate) struct PermissionController {
     window: slint::Weak<MainWindow>,
     state: RefCell<PermissionViewState>,
@@ -92,10 +104,14 @@ pub(crate) struct PermissionController {
     cooldown_active: Cell<bool>,
     observation_revision: Cell<u64>,
     applied_revision: Cell<u64>,
+    /// SOU-282: the main window's visibility, shared with
+    /// `WindowActivity` in main.rs. A Settings panel left open behind a
+    /// closed or fully covered window must not keep polling TCC.
+    window_visible: Rc<Cell<bool>>,
 }
 
 impl PermissionController {
-    pub(crate) fn new(window: &MainWindow) -> Rc<Self> {
+    pub(crate) fn new(window: &MainWindow, window_visible: Rc<Cell<bool>>) -> Rc<Self> {
         Rc::new(Self {
             window: window.as_weak(),
             state: RefCell::new(PermissionViewState::default()),
@@ -107,19 +123,8 @@ impl PermissionController {
             cooldown_active: Cell::new(false),
             observation_revision: Cell::new(0),
             applied_revision: Cell::new(0),
+            window_visible,
         })
-    }
-
-    pub(crate) fn wire_foreground_refresh(self: &Rc<Self>, window: &MainWindow) {
-        let controller = Rc::downgrade(self);
-        window.window().on_winit_window_event(move |_, event| {
-            if matches!(event, winit::event::WindowEvent::Focused(true))
-                && let Some(controller) = controller.upgrade()
-            {
-                controller.refresh();
-            }
-            EventResult::Propagate
-        });
     }
 
     pub(crate) fn status(&self) -> PermissionStatus {
@@ -138,9 +143,12 @@ impl PermissionController {
 
     fn surface_active(&self) -> bool {
         self.window.upgrade().is_some_and(|window| {
-            window.get_settings_open()
-                || (window.get_onboarding_open()
-                    && window.get_onboarding_step() == crate::OnboardingStep::Permissions)
+            poll_surface_active(
+                window.get_settings_open(),
+                window.get_onboarding_open()
+                    && window.get_onboarding_step() == crate::OnboardingStep::Permissions,
+                self.window_visible.get(),
+            )
         })
     }
 
@@ -343,6 +351,29 @@ mod tests {
             accessibility: state,
             calendar: state,
         }
+    }
+
+    #[test]
+    fn poll_stops_while_the_window_is_hidden_and_resumes_on_show() {
+        // Settings open, window visible: polls. Window closed or covered:
+        // stops. Reopened: starts again (a Start refreshes immediately).
+        let mut lifecycle = PollLifecycle::default();
+        assert_eq!(
+            lifecycle.update(poll_surface_active(true, false, true)),
+            PollTransition::Start
+        );
+        assert_eq!(
+            lifecycle.update(poll_surface_active(true, false, false)),
+            PollTransition::Stop
+        );
+        assert_eq!(lifecycle.timer_count(), 0);
+        assert_eq!(
+            lifecycle.update(poll_surface_active(true, false, true)),
+            PollTransition::Start
+        );
+        assert!(poll_surface_active(false, true, true));
+        assert!(!poll_surface_active(false, true, false));
+        assert!(!poll_surface_active(false, false, true));
     }
 
     #[test]
