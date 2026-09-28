@@ -2528,38 +2528,16 @@ async fn finalize_dictation(
     let entry_id =
         souffle_lib::commands::add_dictation_entry(Arc::clone(&handle), raw_text.clone())?;
     let settings = souffle_lib::commands::get_settings(Arc::clone(&handle))?;
-    // The Polishing pill only makes sense when a polish actually runs:
-    // polish_dictation returns immediately (skipped) when the setting is
-    // off, which would otherwise flash the pill for nothing.
-    if settings.dictation_polish_enabled {
-        let _ = souffle_lib::commands::pill_hold(
-            Arc::clone(&handle),
-            souffle_lib::app_events::PillHoldKind::Polishing,
-        );
-    }
-    let polished = match tokio::time::timeout(
-        Duration::from_secs(25),
-        souffle_lib::commands::polish_dictation(Arc::clone(&handle), raw_text.clone(), focused_app),
-    )
-    .await
-    {
-        Ok(Ok(result)) => result.text.trim().to_string(),
-        Ok(Err(error)) => {
-            eprintln!("Dictation polish failed; using raw text: {error}");
-            raw_text.clone()
-        }
-        Err(_) => {
-            eprintln!("Dictation polish timed out; using raw text");
-            raw_text.clone()
-        }
-    };
-    if settings.dictation_polish_enabled {
-        let _ = souffle_lib::commands::pill_release(Arc::clone(&handle));
-    }
-    let final_text = if polished.is_empty() {
-        raw_text.clone()
-    } else {
-        polished
+    // Voice snippet: a registered trigger at the start of the raw transcript
+    // pastes its expansion as-is and skips the polish. An unreadable snippet
+    // store must not block the dictation from finishing.
+    let snippets = souffle_lib::commands::list_snippets(Arc::clone(&handle)).unwrap_or_else(|e| {
+        eprintln!("Failed to load snippets: {e}");
+        Vec::new()
+    });
+    let final_text = match souffle_lib::db::snippets::apply_snippet(&raw_text, &snippets) {
+        Some(expanded) => expanded,
+        None => polish_dictation_text(&handle, &settings, &raw_text, focused_app).await,
     };
     if final_text != raw_text {
         souffle_lib::commands::update_dictation_entry(
@@ -2588,6 +2566,53 @@ async fn finalize_dictation(
         souffle_lib::commands::copy_text(final_text)?;
     }
     Ok(())
+}
+
+/// Run the optional LLM polish over `raw_text`, falling back to the raw text
+/// on failure, timeout or an empty result.
+async fn polish_dictation_text(
+    handle: &AppHandle,
+    settings: &AppSettings,
+    raw_text: &str,
+    focused_app: Option<String>,
+) -> String {
+    // The Polishing pill only makes sense when a polish actually runs:
+    // polish_dictation returns immediately (skipped) when the setting is
+    // off, which would otherwise flash the pill for nothing.
+    if settings.dictation_polish_enabled {
+        let _ = souffle_lib::commands::pill_hold(
+            Arc::clone(handle),
+            souffle_lib::app_events::PillHoldKind::Polishing,
+        );
+    }
+    let polished = match tokio::time::timeout(
+        Duration::from_secs(25),
+        souffle_lib::commands::polish_dictation(
+            Arc::clone(handle),
+            raw_text.to_string(),
+            focused_app,
+        ),
+    )
+    .await
+    {
+        Ok(Ok(result)) => result.text.trim().to_string(),
+        Ok(Err(error)) => {
+            eprintln!("Dictation polish failed; using raw text: {error}");
+            String::new()
+        }
+        Err(_) => {
+            eprintln!("Dictation polish timed out; using raw text");
+            String::new()
+        }
+    };
+    if settings.dictation_polish_enabled {
+        let _ = souffle_lib::commands::pill_release(Arc::clone(handle));
+    }
+    if polished.is_empty() {
+        raw_text.to_string()
+    } else {
+        polished
+    }
 }
 
 /// All mutable state the onboarding wizard needs across its 4 steps, in one
