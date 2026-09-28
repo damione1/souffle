@@ -82,6 +82,7 @@ export component MainWindow inherits Window {
     in property <bool> recording-starting: false;
     // A stop that arrived during `recording-starting` and waits for it.
     in property <bool> recording-stop-pending: false;
+    in property <bool> dictation-finalizing: false;
     in-out property <string> live-text;
     in-out property <string> live-tentative;
     // `live-text` + `live-tentative` as words for the dictation view, the
@@ -597,6 +598,7 @@ export component MainWindow inherits Window {
         search-query <=> root.search-query;
         kind-filter: root.kind-filter;
         transcription-status-message: root.transcription-status-message;
+        dictation-finalizing: root.dictation-finalizing;
         dictation-recovery-text <=> root.dictation-recovery-text;
         meeting-status-message: root.meeting-status-message;
         mic-stall-visible: root.mic-stall-visible;

@@ -2883,3 +2883,8 @@ msgstr "Le micro « {} » n’a pas répondu à temps. Choisissez un autre micro
 msgctxt "MicStallBanner"
 msgid "Redémarrer Soufflé"
 msgstr "Redémarrer Soufflé"
+
+#: app/souffle-slint/ui/idle_view.slint
+msgctxt "IdleView"
+msgid "Reformulation…"
+msgstr "Reformulation…"

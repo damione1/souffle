@@ -52,7 +52,7 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::{
     Arc, Mutex,
-    atomic::{AtomicBool, AtomicU64, Ordering},
+    atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
 };
 use std::time::Duration;
 
@@ -2001,6 +2001,14 @@ fn arm_recording_timers(window: &MainWindow, autosave: LiveNotesAutosave) {
 /// Every return of the UI to Idle goes through here, so the recording
 /// timers stop with the recording. Never called from one of those timers'
 /// own callbacks (a `slint::Timer` must not be dropped from inside itself).
+/// SOU-296: dictations stopped but still being polished. A counter, not a
+/// flag: a second dictation can be stopped while the first one polishes.
+static DICTATIONS_FINALIZING: AtomicUsize = AtomicUsize::new(0);
+
+fn sync_dictation_finalizing(window: &MainWindow) {
+    window.set_dictation_finalizing(DICTATIONS_FINALIZING.load(Ordering::Acquire) > 0);
+}
+
 fn set_recording_idle(window: &MainWindow) {
     window.set_recording_mode(RecordingMode::Idle);
     let timers = RECORDING_TIMERS.with(|slot| slot.borrow_mut().take());
@@ -2483,22 +2491,6 @@ async fn read_live_dictation_text(weak: slint::Weak<MainWindow>) -> String {
             .unwrap_or_default()
     })
     .await
-}
-
-async fn end_dictation(
-    handle: AppHandle,
-    weak: slint::Weak<MainWindow>,
-    focused_app: Option<String>,
-    intent: DictationEndIntent,
-) -> Result<(), String> {
-    stop_dictation(handle.clone()).await?;
-    match intent {
-        DictationEndIntent::Finalize => {
-            let raw_text = read_live_dictation_text(weak).await;
-            finalize_dictation(handle, raw_text, focused_app).await
-        }
-        DictationEndIntent::Cancel => Ok(()),
-    }
 }
 
 /// Persist raw text before the optional network polish, then insert the final
@@ -3760,51 +3752,77 @@ fn wire_callbacks(
                     eprintln!("upgrade_in_event_loop failed (stop meeting): {e}");
                 }
             } else {
-                let result = end_dictation(
-                    handle,
-                    weak.clone(),
-                    focused_app,
-                    DictationEndIntent::Finalize,
-                )
-                .await;
+                // SOU-296: once the engine has stopped, the recording is
+                // over. The polish that follows can take several seconds, so
+                // the window leaves the recording view now instead of
+                // looking frozen on a recording that already ended.
+                let stopped = stop_dictation(handle.clone()).await;
+                let raw_text = match stopped {
+                    Ok(()) => read_live_dictation_text(weak.clone()).await,
+                    Err(_) => String::new(),
+                };
+                let finalizing = stopped.is_ok()
+                    && !raw_text.trim().is_empty()
+                    && souffle_lib::commands::get_settings(Arc::clone(&handle))
+                        .is_ok_and(|settings| settings.dictation_polish_enabled);
+                if finalizing {
+                    DICTATIONS_FINALIZING.fetch_add(1, Ordering::AcqRel);
+                }
+                let stop_failed = stopped.is_err();
+                let live_state = live_state_for_closure.clone();
+                let refresh_handle = handle_for_refresh.clone();
                 if let Err(e) = weak.upgrade_in_event_loop(move |window| {
                     let disposition = dictation_transcript_disposition(
                         DictationEndIntent::Finalize,
-                        result.is_ok(),
+                        stopped.is_ok(),
                     );
-                    match result {
-                        Ok(()) => {
-                            window.set_transcription_status_message("".into());
-                        }
+                    match stopped {
+                        Ok(()) => window.set_transcription_status_message("".into()),
                         Err(e) => {
-                            eprintln!("Failed to finalize dictation: {e}");
+                            eprintln!("Failed to stop dictation: {e}");
                             window.set_transcription_status_message(e.into());
-                            // Keep live-text intact: IdleView exposes it in an
-                            // editable recovery card until copy/discard.
                         }
                     }
-                    match disposition {
-                        DictationTranscriptDisposition::Clear => {
-                            let val = live_state_for_closure.clone();
-                            clear_live_transcript(&window, &val);
-                        }
-                        DictationTranscriptDisposition::RetainForRecovery => {
-                            let recovery = merge_recovery_text(
-                                &window.get_dictation_recovery_text(),
-                                &window.get_live_text(),
-                            );
-                            window.set_dictation_recovery_text(recovery.into());
-                            {
-                                let val = live_state_for_closure.clone();
-                                clear_live_transcript(&window, &val);
-                            }
-                        }
+                    if disposition == DictationTranscriptDisposition::RetainForRecovery {
+                        // IdleView keeps what was heard in an editable
+                        // recovery card until copy/discard.
+                        let recovery = merge_recovery_text(
+                            &window.get_dictation_recovery_text(),
+                            &window.get_live_text(),
+                        );
+                        window.set_dictation_recovery_text(recovery.into());
                     }
+                    clear_live_transcript(&window, &live_state);
                     set_recording_idle(&window);
-                    refresh_timeline(&window, &handle_for_refresh);
+                    sync_dictation_finalizing(&window);
+                    refresh_timeline(&window, &refresh_handle);
                 }) {
                     eprintln!("upgrade_in_event_loop failed (stop dictation): {e}");
                 }
+                // The next dictation may start and stop while this one is
+                // still being polished; its stop must not be swallowed.
+                stop_in_flight.store(false, Ordering::Release);
+                if stop_failed {
+                    return;
+                }
+                let result = finalize_dictation(handle, raw_text.clone(), focused_app).await;
+                if finalizing {
+                    DICTATIONS_FINALIZING.fetch_sub(1, Ordering::AcqRel);
+                }
+                if let Err(e) = weak.upgrade_in_event_loop(move |window| {
+                    sync_dictation_finalizing(&window);
+                    if let Err(e) = result {
+                        eprintln!("Failed to finalize dictation: {e}");
+                        window.set_transcription_status_message(e.into());
+                        let recovery =
+                            merge_recovery_text(&window.get_dictation_recovery_text(), &raw_text);
+                        window.set_dictation_recovery_text(recovery.into());
+                    }
+                    refresh_timeline(&window, &handle_for_refresh);
+                }) {
+                    eprintln!("upgrade_in_event_loop failed (finalize dictation): {e}");
+                }
+                return;
             }
             stop_in_flight.store(false, Ordering::Release);
         });
@@ -3831,8 +3849,7 @@ fn wire_callbacks(
         let stop_in_flight = Arc::clone(&stop_in_flight_for_cancel);
         let live_state_for_closure = value_cancel.clone();
         souffle_lib::async_runtime::spawn(async move {
-            let result =
-                end_dictation(handle, weak.clone(), None, DictationEndIntent::Cancel).await;
+            let result = stop_dictation(handle).await;
             if let Err(error) = weak.upgrade_in_event_loop(move |window| {
                 match dictation_transcript_disposition(DictationEndIntent::Cancel, result.is_ok()) {
                     DictationTranscriptDisposition::Clear => {
@@ -7252,9 +7269,10 @@ mod tests {
         wire_summary_template_edit_callbacks,
     };
     use super::{
-        LiveNotesAutosave, LiveSystemAudio, LiveTranscript, LiveTranscriptState, RecordingMode,
-        ShortcutField, WindowActivity, meeting_can_resume, recording_timers_armed,
-        replay_pending_stop, set_recording_idle, settle_recording_start, show_recording_starting,
+        DICTATIONS_FINALIZING, LiveNotesAutosave, LiveSystemAudio, LiveTranscript,
+        LiveTranscriptState, RecordingMode, ShortcutField, WindowActivity, meeting_can_resume,
+        recording_timers_armed, replay_pending_stop, set_recording_idle, settle_recording_start,
+        show_recording_starting, sync_dictation_finalizing,
     };
     use crate::model_ui;
     use crate::settings_drafts::SettingsDraftController;
@@ -7265,6 +7283,7 @@ mod tests {
     use souffle_lib::settings::{AppSettings, ShortcutSettings};
     use std::cell::{Cell, RefCell};
     use std::rc::Rc;
+    use std::sync::atomic::Ordering;
     use std::sync::{Arc, Mutex};
     use std::time::{Duration, Instant};
 
@@ -7332,6 +7351,27 @@ mod tests {
         assert_eq!(committed.push_to_talk, "Alt+Space");
         assert_eq!(persisted.borrow().as_ref(), Some(&committed));
         assert_eq!(cache.borrow().as_ref(), Some(&committed));
+    }
+
+    // SOU-296: the idle view shows "Reformulation…" while at least one
+    // stopped dictation is still being polished, and only then.
+    #[test]
+    fn the_idle_view_shows_finalizing_until_the_last_polish_ends() {
+        let window = test_window();
+        let before = DICTATIONS_FINALIZING.load(Ordering::Acquire);
+        assert_eq!(before, 0);
+
+        DICTATIONS_FINALIZING.fetch_add(2, Ordering::AcqRel);
+        sync_dictation_finalizing(&window);
+        assert!(window.get_dictation_finalizing());
+
+        DICTATIONS_FINALIZING.fetch_sub(1, Ordering::AcqRel);
+        sync_dictation_finalizing(&window);
+        assert!(window.get_dictation_finalizing());
+
+        DICTATIONS_FINALIZING.fetch_sub(1, Ordering::AcqRel);
+        sync_dictation_finalizing(&window);
+        assert!(!window.get_dictation_finalizing());
     }
 
     // SOU-258 AC1/AC3: the recording view is up on the click, in its
