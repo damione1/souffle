@@ -8,7 +8,7 @@ pub use actor::{
     EngineActorHandle, EngineCommand, EngineFactory, EngineInfo, PendingSessionStart,
     SessionConfig, SessionSummary,
 };
-pub use idle::MeetingIdleConfig;
+pub use idle::{LiveMeetingIdle, MeetingIdleConfig, live_meeting_idle};
 
 use crate::engine::TranscriptionSegment;
 

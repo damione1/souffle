@@ -12,6 +12,7 @@ mod edit_learning;
 mod ia_ui;
 mod lists_ui;
 mod markdown;
+mod meeting_idle_ui;
 mod mic_stall_ui;
 mod microphone_list;
 mod model_ui;
@@ -1981,16 +1982,17 @@ fn settle_recording_start(window: &MainWindow, result: Result<(), String>) -> Re
     result
 }
 
-/// SOU-281: the three polls that only mean something while a recording is
-/// on screen - the RecordingView level meter, the live "Audio système"
-/// label and the live meeting notes autosave. They used to run for the
-/// whole life of the process, waking the main thread ~20 times a second at
-/// rest. Held together so they start and stop as one unit; fields are only
-/// kept alive, never read.
+/// SOU-281: the polls that only mean something while a recording is on
+/// screen - the RecordingView level meter, the live "Audio système" label,
+/// the live meeting notes autosave and (SOU-294) the meeting auto-stop. They
+/// used to run for the whole life of the process, waking the main thread ~20
+/// times a second at rest. Held together so they start and stop as one
+/// unit; fields are only kept alive, never read.
 struct RecordingTimers {
     _audio_level: slint::Timer,
     _system_audio: slint::Timer,
     _live_notes: slint::Timer,
+    _meeting_idle: slint::Timer,
 }
 
 /// Saves the live notes of the meeting being recorded, given the last
@@ -2035,6 +2037,7 @@ fn set_recording_idle(window: &MainWindow) {
     drop(timers);
     window.set_live_system_audio(LiveSystemAudio::Pending);
     window.set_audio_level(0.0);
+    meeting_idle_ui::reset(window);
 }
 
 fn start_recording_timers(window: &MainWindow, autosave: LiveNotesAutosave) -> RecordingTimers {
@@ -2097,10 +2100,25 @@ fn start_recording_timers(window: &MainWindow, autosave: LiveNotesAutosave) -> R
         }
     });
 
+    // SOU-294: the meeting auto-stop, on the live idle signal the actor
+    // publishes (re-signaled every 30 s at most, so 1 s is plenty).
+    let meeting_idle = slint::Timer::default();
+    let weak = window.as_weak();
+    meeting_idle.start(
+        slint::TimerMode::Repeated,
+        Duration::from_secs(1),
+        move || {
+            if let Some(window) = weak.upgrade() {
+                meeting_idle_ui::poll(&window);
+            }
+        },
+    );
+
     RecordingTimers {
         _audio_level: audio_level,
         _system_audio: system_audio,
         _live_notes: live_notes,
+        _meeting_idle: meeting_idle,
     }
 }
 
@@ -3706,6 +3724,13 @@ fn wire_callbacks(
                 eprintln!("upgrade_in_event_loop failed (meeting): {e}");
             }
         });
+    });
+
+    let weak = window.as_weak();
+    window.on_meeting_idle_keep_recording(move || {
+        if let Some(window) = weak.upgrade() {
+            meeting_idle_ui::keep_recording(&window);
+        }
     });
 
     let stop_in_flight = Arc::new(AtomicBool::new(false));

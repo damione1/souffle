@@ -4,6 +4,8 @@
 //! Pure and unit-testable: all time math runs on `Instant`s passed in by the
 //! caller, so tests never sleep for real.
 
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use crate::app_events::MeetingIdleReason;
@@ -65,9 +67,11 @@ impl MeetingIdleMonitor {
 
     /// Record a segment with non-empty text: resets the silence clock and
     /// re-arms silence notifications for the next episode of silence.
-    pub fn note_segment(&mut self, now: Instant) {
+    /// Returns whether this ended a silence episode that had already been
+    /// signaled, i.e. whether the published live state must be cleared.
+    pub fn note_segment(&mut self, now: Instant) -> bool {
         self.last_activity = now;
-        self.silence_signaled_at = None;
+        self.silence_signaled_at.take().is_some()
     }
 
     /// Check both conditions against `now`. Max-duration takes priority when
@@ -130,6 +134,79 @@ impl MeetingIdleMonitor {
             first,
         })
     }
+}
+
+/// The latest idle signal of the meeting being recorded, as the recording
+/// view polls it (SOU-294). The Tauri actor emitted every signal to the
+/// webview, whose meeting controller showed the banner and stopped the
+/// meeting; the Slint shell listens to no events, so the actor publishes
+/// here instead and the UI thread reads it, like the system-audio status.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LiveMeetingIdle {
+    /// One id per idle episode, new at each first signal and unique for the
+    /// life of the process: "Keep recording" dismisses one episode, and
+    /// speech resuming (a new episode) shows the banner again.
+    pub episode: u64,
+    pub reason: MeetingIdleReason,
+    pub idle_seconds: u64,
+    pub threshold_seconds: u64,
+}
+
+static LIVE_MEETING_IDLE: Mutex<Option<LiveMeetingIdle>> = Mutex::new(None);
+static NEXT_IDLE_EPISODE: AtomicU64 = AtomicU64::new(1);
+
+/// What the recording view reads; `None` while speech is ongoing, or no
+/// meeting with auto-stop records.
+pub fn live_meeting_idle() -> Option<LiveMeetingIdle> {
+    LIVE_MEETING_IDLE.lock().ok().and_then(|guard| *guard)
+}
+
+/// Publish a signal from `MeetingIdleMonitor::tick`.
+pub(crate) fn publish_live_meeting_idle(signal: MeetingIdleSignal) {
+    if let Ok(mut guard) = LIVE_MEETING_IDLE.lock() {
+        *guard = Some(live_idle_after_signal(*guard, signal, || {
+            NEXT_IDLE_EPISODE.fetch_add(1, Ordering::Relaxed)
+        }));
+    }
+}
+
+/// Speech resumed after a signaled silence episode.
+pub(crate) fn publish_meeting_speech() {
+    if let Ok(mut guard) = LIVE_MEETING_IDLE.lock() {
+        *guard = live_idle_after_speech(*guard);
+    }
+}
+
+/// A meeting session starts or ends: nothing carries over.
+pub(crate) fn clear_live_meeting_idle() {
+    if let Ok(mut guard) = LIVE_MEETING_IDLE.lock() {
+        *guard = None;
+    }
+}
+
+/// A first signal opens a new episode; a re-signal of the same episode keeps
+/// its id and refreshes the elapsed time.
+fn live_idle_after_signal(
+    current: Option<LiveMeetingIdle>,
+    signal: MeetingIdleSignal,
+    fresh_episode: impl FnOnce() -> u64,
+) -> LiveMeetingIdle {
+    let episode = match current {
+        Some(current) if !signal.first => current.episode,
+        Some(_) | None => fresh_episode(),
+    };
+    LiveMeetingIdle {
+        episode,
+        reason: signal.reason,
+        idle_seconds: signal.idle_seconds,
+        threshold_seconds: signal.threshold_seconds,
+    }
+}
+
+/// Speech ends a silence episode, never the max-duration guard: the meeting
+/// is being stopped for that one, whatever is said meanwhile.
+fn live_idle_after_speech(current: Option<LiveMeetingIdle>) -> Option<LiveMeetingIdle> {
+    current.filter(|idle| idle.reason == MeetingIdleReason::MaxDuration)
 }
 
 #[cfg(test)]
@@ -254,8 +331,63 @@ mod tests {
     #[test]
     fn note_segment_before_any_silence_is_a_noop_for_threshold_math() {
         let (mut m, start) = monitor(Some(Duration::from_secs(60)), None);
-        m.note_segment(start + Duration::from_secs(10));
+        assert!(!m.note_segment(start + Duration::from_secs(10)));
         assert_eq!(m.tick(start + Duration::from_secs(40)), None);
         assert!(m.tick(start + Duration::from_secs(71)).is_some());
+    }
+
+    #[test]
+    fn note_segment_reports_the_end_of_a_signaled_silence_episode() {
+        let (mut m, start) = monitor(Some(Duration::from_secs(60)), None);
+        assert!(m.tick(start + Duration::from_secs(61)).is_some());
+        assert!(m.note_segment(start + Duration::from_secs(62)));
+        assert!(!m.note_segment(start + Duration::from_secs(63)));
+    }
+
+    fn signal(reason: MeetingIdleReason, idle_seconds: u64, first: bool) -> MeetingIdleSignal {
+        MeetingIdleSignal {
+            reason,
+            idle_seconds,
+            threshold_seconds: 600,
+            first,
+        }
+    }
+
+    #[test]
+    fn a_first_signal_opens_a_new_episode_and_a_resignal_keeps_it() {
+        let opened =
+            live_idle_after_signal(None, signal(MeetingIdleReason::Silence, 601, true), || 7);
+        assert_eq!(opened.episode, 7);
+        assert_eq!(opened.idle_seconds, 601);
+
+        let resignaled = live_idle_after_signal(
+            Some(opened),
+            signal(MeetingIdleReason::Silence, 631, false),
+            || panic!("a re-signal must not open an episode"),
+        );
+        assert_eq!(resignaled.episode, 7);
+        assert_eq!(resignaled.idle_seconds, 631);
+
+        let next = live_idle_after_signal(
+            Some(resignaled),
+            signal(MeetingIdleReason::Silence, 601, true),
+            || 8,
+        );
+        assert_eq!(next.episode, 8);
+    }
+
+    #[test]
+    fn speech_clears_silence_but_not_the_max_duration_guard() {
+        let silence =
+            live_idle_after_signal(None, signal(MeetingIdleReason::Silence, 601, true), || 1);
+        assert_eq!(live_idle_after_speech(Some(silence)), None);
+
+        let max = live_idle_after_signal(
+            None,
+            signal(MeetingIdleReason::MaxDuration, 14_400, true),
+            || 2,
+        );
+        assert_eq!(live_idle_after_speech(Some(max)), Some(max));
+        assert_eq!(live_idle_after_speech(None), None);
     }
 }

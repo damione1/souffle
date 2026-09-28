@@ -16,7 +16,7 @@ import { TimelineDayGroup, UpcomingEvent } from "components/timeline_section.sli
 import { TranscriptBlock } from "components/transcript_section.slint";
 import { TranscriptWord } from "components/transcript_words.slint";
 import { StructuredActionItem } from "components/summary_section.slint";
-import { RecordingMode, LiveSystemAudio, MicStall, SpeakerRole, TimelineFilter, TimelineKind, NotesSaveState, ModelPhase, TranscriptionPhase, UpcomingPhase, SettingsTab, SettingsInteraction, AppTheme, AppLocale, PasteMethod, MeetingLanguage, LogLevel, AudioRetention, AccessState, PermissionKind, ShortcutField, SummaryProvider, AppleIntelligenceUnavailableReason, OnboardingStep, UpdatePhase, InstallBlockReason, MeetingExportFormat } from "types.slint";
+import { RecordingMode, LiveSystemAudio, MicStall, MeetingIdleBanner, SpeakerRole, TimelineFilter, TimelineKind, NotesSaveState, ModelPhase, TranscriptionPhase, UpcomingPhase, SettingsTab, SettingsInteraction, AppTheme, AppLocale, PasteMethod, MeetingLanguage, LogLevel, AudioRetention, AccessState, PermissionKind, ShortcutField, SummaryProvider, AppleIntelligenceUnavailableReason, OnboardingStep, UpdatePhase, InstallBlockReason, MeetingExportFormat } from "types.slint";
 export { SettingsTab, SettingsInteraction, AppTheme, AppLocale, PasteMethod, MeetingLanguage, LogLevel, AudioRetention, AccessState, PermissionKind, ShortcutField, SummaryProvider, AppleIntelligenceUnavailableReason, SpeakerRole }
 import { Theme } from "theme.slint";
 // Re-exported (not just imported) so Slint's codegen generates a Rust
@@ -108,6 +108,10 @@ export component MainWindow inherits Window {
     in property <string> mic-stall-device;
     callback mic-stall-restart-requested();
     callback mic-stall-dismissed();
+    // SOU-294: written by `meeting_idle_ui` from the live meeting-idle poll.
+    in property <MeetingIdleBanner> meeting-idle-banner: MeetingIdleBanner.hidden;
+    in property <int> meeting-idle-minutes: 0;
+    callback meeting-idle-keep-recording();
     in-out property <string> live-notes;
 
     // Non-empty while a completed meeting is open in MeetingDetail. Empty
@@ -712,6 +716,9 @@ export component MainWindow inherits Window {
         mic-stall-device: root.mic-stall-device;
         mic-stall-restart-requested => { root.mic-stall-restart-requested(); }
         mic-stall-dismissed => { root.mic-stall-dismissed(); }
+        meeting-idle-banner: root.meeting-idle-banner;
+        meeting-idle-minutes: root.meeting-idle-minutes;
+        meeting-idle-keep-recording => { root.meeting-idle-keep-recording(); }
         stop-requested => { root.stop-requested(); }
         alias-save-requested(term, pronunciation) => { root.live-transcript-alias-save-requested(term, pronunciation); }
         

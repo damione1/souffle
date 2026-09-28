@@ -2878,3 +2878,20 @@ msgstr "Restart Soufflé"
 msgctxt "IdleView"
 msgid "Reformulation…"
 msgstr "Reformulating…"
+
+msgctxt "RecordingView"
+msgid "Durée maximale de la réunion atteinte. Arrêt de l'enregistrement."
+msgstr "Maximum meeting duration reached. Stopping the recording."
+
+msgctxt "RecordingView"
+msgid ""
+"Aucune parole détectée depuis {} min. L'enregistrement va bientôt s'arrêter."
+msgstr "No speech detected for {} min. Recording will stop soon."
+
+msgctxt "RecordingView"
+msgid "Arrêter maintenant"
+msgstr "Stop now"
+
+msgctxt "RecordingView"
+msgid "Continuer l'enregistrement"
+msgstr "Keep recording"
