@@ -1302,7 +1302,23 @@ fn load_transcription_model_state(
 /// Only this projection writes the main window's model phase. Opening Settings,
 /// startup and native transitions all read the same backend snapshot, including
 /// background loads and idle unloads. No poll timer or optimistic ready flag.
+/// Every state transition asks for a runtime refresh, and each refresh reads the
+/// status on its own blocking thread. Two transitions back to back (the idle
+/// unload does Unload then UnloadComplete) can finish out of order, and the
+/// stale "Unloading" read used to land last and freeze the header and the
+/// Dictate / Meeting buttons. Only the newest refresh may write the window.
+static MODEL_REFRESH_GENERATION: AtomicU64 = AtomicU64::new(0);
+
+fn begin_model_refresh() -> u64 {
+    MODEL_REFRESH_GENERATION.fetch_add(1, Ordering::AcqRel) + 1
+}
+
+fn is_latest_model_refresh(generation: u64) -> bool {
+    MODEL_REFRESH_GENERATION.load(Ordering::Acquire) == generation
+}
+
 fn refresh_model_runtime(weak: slint::Weak<MainWindow>, handle: AppHandle) {
+    let generation = begin_model_refresh();
     let worker_handle = handle.clone();
     let worker = souffle_lib::async_runtime::spawn_blocking(move || {
         let catalog = souffle_lib::commands::get_transcription_catalog(worker_handle.clone())?;
@@ -1317,6 +1333,9 @@ fn refresh_model_runtime(weak: slint::Weak<MainWindow>, handle: AppHandle) {
             .await
             .map_err(|error| format!("Failed to join model refresh worker: {error}"))
             .and_then(|result| result);
+        if !is_latest_model_refresh(generation) {
+            return;
+        }
         let Some(window) = weak.upgrade() else {
             return;
         };
@@ -7258,9 +7277,10 @@ mod tests {
     };
     use super::{
         DICTATIONS_FINALIZING, LiveNotesAutosave, LiveSystemAudio, LiveTranscript,
-        LiveTranscriptState, RecordingMode, ShortcutField, WindowActivity, meeting_can_resume,
-        recording_timers_armed, replay_pending_stop, set_recording_idle, settle_recording_start,
-        show_recording_starting, sync_dictation_finalizing,
+        LiveTranscriptState, RecordingMode, ShortcutField, WindowActivity, begin_model_refresh,
+        is_latest_model_refresh, meeting_can_resume, recording_timers_armed, replay_pending_stop,
+        set_recording_idle, settle_recording_start, show_recording_starting,
+        sync_dictation_finalizing,
     };
     use crate::model_ui;
     use crate::settings_drafts::SettingsDraftController;
@@ -7360,6 +7380,17 @@ mod tests {
         DICTATIONS_FINALIZING.fetch_sub(1, Ordering::AcqRel);
         sync_dictation_finalizing(&window);
         assert!(!window.get_dictation_finalizing());
+    }
+
+    // SOU-307: an older runtime refresh that finishes after a newer one must
+    // not write its stale phase (idle unload: Unloading read landing last).
+    #[test]
+    fn only_the_newest_model_refresh_may_write_the_window() {
+        let first = begin_model_refresh();
+        let second = begin_model_refresh();
+
+        assert!(!is_latest_model_refresh(first));
+        assert!(is_latest_model_refresh(second));
     }
 
     // SOU-258 AC1/AC3: the recording view is up on the click, in its
