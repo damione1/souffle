@@ -1229,6 +1229,39 @@ impl ShortcutSettings {
     }
 }
 
+/// Whether the UI locale is French, for the native tray menu and pill panel
+/// labels. Seeded at bootstrap and refreshed by the settings-save effects,
+/// so a state transition can relabel both without re-reading every setting
+/// from SQLite (SOU-285).
+static UI_LOCALE_FR: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Record the saved locale for [`ui_locale_is_french`].
+pub fn remember_ui_locale(locale: &str) {
+    UI_LOCALE_FR.store(
+        locale_is_french(locale),
+        std::sync::atomic::Ordering::Relaxed,
+    );
+}
+
+/// The locale last passed to [`remember_ui_locale`], as "is it French".
+pub fn ui_locale_is_french() -> bool {
+    UI_LOCALE_FR.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+fn locale_is_french(locale: &str) -> bool {
+    locale.starts_with("fr")
+}
+
+/// The calendar-integration toggle alone: one key read, no migration. The
+/// calendar scheduler checks this before anything else so a disabled
+/// integration costs a single SELECT per settings save (SOU-285).
+pub fn calendar_integration_enabled(db: &Database) -> Result<bool, String> {
+    Ok(
+        read_json_setting::<bool>(db, CALENDAR_INTEGRATION_ENABLED_KEY)?
+            .unwrap_or(AppSettings::default().calendar_integration_enabled),
+    )
+}
+
 fn conflicting_pair(left: &str, right: &str) -> bool {
     !left.is_empty() && left == right
 }
@@ -2138,5 +2171,29 @@ mod tests {
             options.feedback_sounds_volume_max,
             *super::FEEDBACK_SOUNDS_VOLUME_RANGE.end()
         );
+    }
+
+    /// SOU-285: the scheduler's one-key read agrees with the full snapshot,
+    /// including the default when the key was never written.
+    #[test]
+    fn calendar_integration_enabled_reads_the_single_key() {
+        let (db, _dir) = test_db();
+        assert!(!super::calendar_integration_enabled(&db).expect("default read"));
+        db.set_setting(super::CALENDAR_INTEGRATION_ENABLED_KEY, "true")
+            .expect("write toggle");
+        assert!(super::calendar_integration_enabled(&db).expect("enabled read"));
+        assert!(
+            AppSettings::load_read_only(&db)
+                .expect("snapshot")
+                .calendar_integration_enabled
+        );
+    }
+
+    #[test]
+    fn french_locale_detection() {
+        assert!(super::locale_is_french("fr"));
+        assert!(super::locale_is_french("fr-CA"));
+        assert!(!super::locale_is_french("en"));
+        assert!(!super::locale_is_french(""));
     }
 }

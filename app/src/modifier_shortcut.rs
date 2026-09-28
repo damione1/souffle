@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -78,6 +78,38 @@ pub(crate) fn shortcut_registration_target(shortcut: &str) -> ShortcutRegistrati
     } else {
         ShortcutRegistrationTarget::Plugin
     }
+}
+
+/// Sentinel for "no native binding" in the keycode atomics below. No
+/// keyboard event carries it.
+const NO_KEYCODE: i64 = i64::MIN;
+
+/// Keycodes of the native toggle and push-to-talk bindings, written by
+/// `native::shortcuts::register_shortcuts` next to the binding strings and
+/// read by the tap callback without taking a lock (SOU-285).
+static TOGGLE_KEYCODE: AtomicI64 = AtomicI64::new(NO_KEYCODE);
+static PTT_KEYCODE: AtomicI64 = AtomicI64::new(NO_KEYCODE);
+
+/// Publish the native bindings (`None` when the role is a combo or unset).
+pub(crate) fn store_native_keycodes(toggle: Option<&str>, ptt: Option<&str>) {
+    let code = |binding: Option<&str>| {
+        binding
+            .and_then(native_shortcut_keycode)
+            .unwrap_or(NO_KEYCODE)
+    };
+    TOGGLE_KEYCODE.store(code(toggle), Ordering::SeqCst);
+    PTT_KEYCODE.store(code(ptt), Ordering::SeqCst);
+}
+
+/// Whether `keycode` is the native toggle and/or push-to-talk key.
+fn native_keycode_matches(keycode: i64) -> (bool, bool) {
+    if keycode == NO_KEYCODE {
+        return (false, false);
+    }
+    (
+        TOGGLE_KEYCODE.load(Ordering::Relaxed) == keycode,
+        PTT_KEYCODE.load(Ordering::Relaxed) == keycode,
+    )
 }
 
 /// Mach port of the installed tap, for enable/disable from any thread.
@@ -220,38 +252,16 @@ fn install_and_run(state: Arc<AppState>) -> bool {
                 return CallbackResult::Keep;
             }
 
-            let toggle_shortcut = {
-                // A poisoned lock must not panic here: this runs inside the
-                // C callback of an active HID tap, in front of every
-                // keystroke on the machine.
-                let lock = state
-                    .modifier_toggle_shortcut
-                    .read()
-                    .unwrap_or_else(|e| e.into_inner());
-                lock.clone()
-            };
-            let ptt_shortcut = {
-                let lock = state
-                    .modifier_ptt_shortcut
-                    .read()
-                    .unwrap_or_else(|e| e.into_inner());
-                lock.clone()
-            };
-
+            // This runs inside the C callback of an active HID tap, in front
+            // of every keystroke on the machine: two atomic loads decide, no
+            // lock and no allocation (SOU-285).
             let keycode = event
                 .get_integer_value_field(core_graphics::event::EventField::KEYBOARD_EVENT_KEYCODE);
-            let flags = event.get_flags();
-
-            let matches_toggle = toggle_shortcut
-                .as_deref()
-                .is_some_and(|s| shortcut_matches_keycode(s, keycode));
-            let matches_ptt = ptt_shortcut
-                .as_deref()
-                .is_some_and(|s| shortcut_matches_keycode(s, keycode));
-
+            let (matches_toggle, matches_ptt) = native_keycode_matches(keycode);
             if !matches_toggle && !matches_ptt {
                 return CallbackResult::Keep;
             }
+            let flags = event.get_flags();
 
             if matches!(event_type, CGEventType::FlagsChanged) {
                 let is_pressed = match keycode {
@@ -358,26 +368,32 @@ fn dispatch_ptt_start(state: &AppState) {
 }
 
 /// macOS virtual keycodes for modifier-only PTT/Toggle and F5–F12 (SOU-032).
+/// Virtual keycode the tap sees for a native single-key binding.
+fn native_shortcut_keycode(shortcut: &str) -> Option<i64> {
+    Some(match shortcut {
+        "MetaLeft" => 55,
+        "MetaRight" => 54,
+        "ShiftLeft" => 56,
+        "ShiftRight" => 60,
+        "AltLeft" => 58,
+        "AltRight" => 61,
+        "ControlLeft" => 59,
+        "ControlRight" => 62,
+        "F5" => 96,
+        "F6" => 97,
+        "F7" => 98,
+        "F8" => 100,
+        "F9" => 101,
+        "F10" => 109,
+        "F11" => 103,
+        "F12" => 111,
+        _ => return None,
+    })
+}
+
+#[cfg(test)]
 fn shortcut_matches_keycode(shortcut: &str, keycode: i64) -> bool {
-    matches!(
-        (shortcut, keycode),
-        ("MetaLeft", 55)
-            | ("MetaRight", 54)
-            | ("ShiftLeft", 56)
-            | ("ShiftRight", 60)
-            | ("AltLeft", 58)
-            | ("AltRight", 61)
-            | ("ControlLeft", 59)
-            | ("ControlRight", 62)
-            | ("F5", 96)
-            | ("F6", 97)
-            | ("F7", 98)
-            | ("F8", 100)
-            | ("F9", 101)
-            | ("F10", 109)
-            | ("F11", 103)
-            | ("F12", 111)
-    )
+    native_shortcut_keycode(shortcut) == Some(keycode)
 }
 
 #[cfg(test)]
@@ -433,6 +449,19 @@ mod tests {
         assert!(shortcut_matches_keycode("MetaLeft", 55));
         assert!(shortcut_matches_keycode("ControlRight", 62));
         assert!(!shortcut_matches_keycode("ShiftLeft", 55));
+    }
+
+    /// SOU-285 AC5: the tap decides from the published keycodes alone.
+    #[test]
+    fn published_keycodes_drive_the_tap_match() {
+        use super::{native_keycode_matches, store_native_keycodes};
+        store_native_keycodes(Some("F5"), Some("ShiftRight"));
+        assert_eq!(native_keycode_matches(96), (true, false));
+        assert_eq!(native_keycode_matches(60), (false, true));
+        assert_eq!(native_keycode_matches(0), (false, false), "letter A");
+        store_native_keycodes(None, Some("CommandOrControl+Shift+Space"));
+        assert_eq!(native_keycode_matches(96), (false, false));
+        assert_eq!(native_keycode_matches(i64::MIN), (false, false));
     }
 
     #[test]

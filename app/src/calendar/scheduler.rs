@@ -17,20 +17,26 @@
 //! below is the one part of this that was ever actually reaching the user,
 //! and it still does. The banner/live-list UI itself is a pre-existing gap,
 //! not something this ticket removed.
+//!
+//! SOU-285: the task no longer ticks. With the integration off it parks on
+//! [`CALENDAR_CHANGED`] and does nothing until a settings save (or a wake
+//! from system sleep) signals it. With it on, it sleeps until the next
+//! moment something can become due (see [`next_wake`]), capped at
+//! [`MAX_SLEEP`], and an EventKit change notification wakes it early.
 
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
-use tokio::time::MissedTickBehavior;
+use tokio::sync::Notify;
 use tracing::warn;
 
 use crate::app_events::CalendarMeetingNudgeKind;
 use crate::audio::mic_capture_probe;
 use crate::calendar::{self, CalendarEvent};
 use crate::permissions::PermState;
-use crate::settings::AppSettings;
+use crate::settings::{self, AppSettings};
 use crate::state::AppState;
 
 /// One occurrence of a (possibly recurring) event: the event identifier is
@@ -40,35 +46,77 @@ type OccurrenceKey = (String, i64);
 /// How long after an event starts the auto-start nudge remains eligible.
 const AUTOSTART_WINDOW_MINUTES: u32 = 10;
 
+/// Longest sleep between two passes while the integration is on. A safety
+/// net for anything no notification reports (a wall-clock change, a missed
+/// EventKit notification).
+const MAX_SLEEP: chrono::Duration = chrono::Duration::minutes(15);
+
+/// While an event sits in its auto-start window, the mic-capture probe is
+/// re-read at this cadence (the old fixed tick), since nothing notifies when
+/// a meeting app opens the microphone.
+const AUTOSTART_RECHECK: chrono::Duration = chrono::Duration::seconds(60);
+
+/// Retry delay after a failed settings read or event fetch.
+const RETRY_AFTER_ERROR: Duration = Duration::from_secs(60);
+
+/// Wakes the scheduler: calendar settings saved, EventKit store changed, or
+/// the system woke from sleep. `notify_one` keeps a permit when the task is
+/// busy, so a signal raised mid-pass is not lost.
+static CALENDAR_CHANGED: Notify = Notify::const_new();
+
+/// Ask the scheduler to re-read its settings and re-fetch now.
+pub fn wake() {
+    CALENDAR_CHANGED.notify_one();
+}
+
 pub fn spawn(state: Arc<AppState>) {
     crate::async_runtime::spawn(run(state));
 }
 
+/// Sleep for `duration`, or less if [`wake`] is called.
+async fn sleep_or_wake(duration: Duration) {
+    tokio::select! {
+        _ = tokio::time::sleep(duration) => {}
+        _ = CALENDAR_CHANGED.notified() => {}
+    }
+}
+
 async fn run(state: Arc<AppState>) {
-    let mut interval = tokio::time::interval(Duration::from_secs(60));
-    interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
     let mut fired_reminders: HashSet<OccurrenceKey> = HashSet::new();
     let mut fired_autostart: HashSet<OccurrenceKey> = HashSet::new();
 
     loop {
-        interval.tick().await;
+        // One key first: a disabled integration must not cost a full
+        // settings read (let alone the migrating `AppSettings::load`, which
+        // enumerates CoreAudio devices).
+        match settings::calendar_integration_enabled(&state.db) {
+            Ok(true) => {}
+            Ok(false) => {
+                CALENDAR_CHANGED.notified().await;
+                continue;
+            }
+            Err(e) => {
+                warn!("Calendar scheduler: settings read failed: {e}");
+                sleep_or_wake(RETRY_AFTER_ERROR).await;
+                continue;
+            }
+        }
+        // Revoked mid-session (or not granted yet): go quiet until a
+        // settings save or the safety cap, instead of erroring every pass.
+        if calendar::authorization_state() != PermState::Granted {
+            sleep_or_wake(MAX_SLEEP.to_std().unwrap_or(RETRY_AFTER_ERROR)).await;
+            continue;
+        }
+        calendar::observe_store_changes(wake);
 
-        // Settings are re-read every tick so toggling the integration (or
-        // changing the lead time) needs no scheduler restart.
-        let settings = match AppSettings::load(&state.db) {
+        let settings = match AppSettings::load_read_only(&state.db) {
             Ok(settings) => settings,
             Err(e) => {
                 warn!("Calendar scheduler: settings load failed: {e}");
+                sleep_or_wake(RETRY_AFTER_ERROR).await;
                 continue;
             }
         };
-        if !settings.calendar_integration_enabled {
-            continue;
-        }
-        // Revoked mid-session: go quiet instead of erroring every minute.
-        if calendar::authorization_state() != PermState::Granted {
-            continue;
-        }
 
         let recording = state
             .current_machine_state()
@@ -84,10 +132,12 @@ async fn run(state: Arc<AppState>) {
             Ok(Ok(events)) => events,
             Ok(Err(e)) => {
                 warn!("Calendar scheduler: event fetch failed: {e}");
+                sleep_or_wake(RETRY_AFTER_ERROR).await;
                 continue;
             }
             Err(e) => {
                 warn!("Calendar scheduler: fetch task failed: {e}");
+                sleep_or_wake(RETRY_AFTER_ERROR).await;
                 continue;
             }
         };
@@ -118,7 +168,7 @@ async fn run(state: Arc<AppState>) {
             due_autostart_nudges(now, &events, &fired_autostart)
         };
         // The mic-capture read only happens with a nudge already pending, so
-        // an ordinary event costs nothing beyond the tick itself.
+        // an ordinary event costs nothing beyond the pass itself.
         if !due_autostart.is_empty() && meeting_app_is_capturing_mic().await {
             for event in due_autostart {
                 fired_autostart.insert((event.id.clone(), event.start.timestamp()));
@@ -130,7 +180,68 @@ async fn run(state: Arc<AppState>) {
                 );
             }
         }
+
+        let now = Utc::now();
+        let deadline = next_wake(
+            now,
+            &events,
+            WakeInputs {
+                reminder_minutes: settings.calendar_reminder_minutes,
+                autostart_enabled: settings.calendar_autostart_enabled,
+                day_end: calendar::local_day_end(),
+                fired_reminders: &fired_reminders,
+                fired_autostart: &fired_autostart,
+            },
+        );
+        sleep_or_wake(duration_until(now, deadline)).await;
     }
+}
+
+/// What [`next_wake`] needs beyond the clock and the fetched events.
+struct WakeInputs<'a> {
+    reminder_minutes: u32,
+    autostart_enabled: bool,
+    /// Next local midnight: "today's events" changes meaning there.
+    day_end: DateTime<Utc>,
+    fired_reminders: &'a HashSet<OccurrenceKey>,
+    fired_autostart: &'a HashSet<OccurrenceKey>,
+}
+
+/// The earliest instant at which a pass could have something to do: an
+/// unfired reminder window opening, an event starting (auto-start), a
+/// re-check of an event already in its auto-start window, local midnight,
+/// or the [`MAX_SLEEP`] cap, whichever comes first.
+fn next_wake(
+    now: DateTime<Utc>,
+    events: &[CalendarEvent],
+    inputs: WakeInputs<'_>,
+) -> DateTime<Utc> {
+    let reminder_lead = chrono::Duration::minutes(i64::from(inputs.reminder_minutes));
+    let autostart_window = chrono::Duration::minutes(i64::from(AUTOSTART_WINDOW_MINUTES));
+    let mut deadline = (now + MAX_SLEEP).min(inputs.day_end);
+
+    for event in events {
+        let key = (event.id.clone(), event.start.timestamp());
+        if event.start > now && !inputs.fired_reminders.contains(&key) {
+            let reminder_at = event.start - reminder_lead;
+            if reminder_at > now {
+                deadline = deadline.min(reminder_at);
+            }
+        }
+        if inputs.autostart_enabled && !inputs.fired_autostart.contains(&key) {
+            if event.start > now {
+                deadline = deadline.min(event.start);
+            } else if now - event.start <= autostart_window && now < event.end {
+                deadline = deadline.min(now + AUTOSTART_RECHECK);
+            }
+        }
+    }
+    deadline
+}
+
+/// `deadline - now` as a std duration, zero when already past.
+fn duration_until(now: DateTime<Utc>, deadline: DateTime<Utc>) -> Duration {
+    (deadline - now).to_std().unwrap_or(Duration::ZERO)
 }
 
 /// Whether anything is capturing the microphone right now. Runs on
@@ -303,6 +414,126 @@ mod tests {
         fired.insert(("a".to_string(), started.start.timestamp()));
         let due = due_autostart_nudges(now, &[started], &fired);
         assert!(due.is_empty());
+    }
+
+    fn inputs<'a>(
+        now: DateTime<Utc>,
+        autostart_enabled: bool,
+        fired_reminders: &'a HashSet<OccurrenceKey>,
+        fired_autostart: &'a HashSet<OccurrenceKey>,
+    ) -> WakeInputs<'a> {
+        WakeInputs {
+            reminder_minutes: 2,
+            autostart_enabled,
+            day_end: now + chrono::Duration::hours(12),
+            fired_reminders,
+            fired_autostart,
+        }
+    }
+
+    #[test]
+    fn next_wake_with_no_events_is_the_cap() {
+        let now = Utc::now();
+        let none = HashSet::new();
+        assert_eq!(
+            next_wake(now, &[], inputs(now, true, &none, &none)),
+            now + MAX_SLEEP
+        );
+    }
+
+    #[test]
+    fn next_wake_is_capped_by_local_midnight() {
+        let now = Utc::now();
+        let none = HashSet::new();
+        let mut wake_inputs = inputs(now, true, &none, &none);
+        wake_inputs.day_end = now + chrono::Duration::minutes(3);
+        assert_eq!(
+            next_wake(now, &[], wake_inputs),
+            now + chrono::Duration::minutes(3)
+        );
+    }
+
+    /// SOU-285 AC2: an event in 3 min with a 2 min lead wakes the task when
+    /// the reminder window opens, then at the start for auto-start.
+    #[test]
+    fn next_wake_targets_the_reminder_then_the_start() {
+        let now = Utc::now();
+        let none = HashSet::new();
+        let meeting = event("a", now + chrono::Duration::minutes(3));
+        assert_eq!(
+            next_wake(
+                now,
+                std::slice::from_ref(&meeting),
+                inputs(now, true, &none, &none)
+            ),
+            now + chrono::Duration::minutes(1)
+        );
+
+        let mut fired = HashSet::new();
+        fired.insert(("a".to_string(), meeting.start.timestamp()));
+        assert_eq!(
+            next_wake(
+                now,
+                std::slice::from_ref(&meeting),
+                inputs(now, true, &fired, &none)
+            ),
+            meeting.start
+        );
+        assert_eq!(
+            next_wake(
+                now,
+                std::slice::from_ref(&meeting),
+                inputs(now, false, &fired, &none)
+            ),
+            now + MAX_SLEEP,
+            "auto-start off: nothing to do at the start"
+        );
+    }
+
+    #[test]
+    fn next_wake_rechecks_an_event_in_its_autostart_window() {
+        let now = Utc::now();
+        let none = HashSet::new();
+        let started = event("a", now - chrono::Duration::minutes(2));
+        assert_eq!(
+            next_wake(
+                now,
+                std::slice::from_ref(&started),
+                inputs(now, true, &none, &none)
+            ),
+            now + AUTOSTART_RECHECK
+        );
+
+        let mut fired = HashSet::new();
+        fired.insert(("a".to_string(), started.start.timestamp()));
+        assert_eq!(
+            next_wake(
+                now,
+                std::slice::from_ref(&started),
+                inputs(now, true, &none, &fired)
+            ),
+            now + MAX_SLEEP,
+            "nudged already: no more re-checks"
+        );
+
+        let too_old = event("b", now - chrono::Duration::minutes(11));
+        assert_eq!(
+            next_wake(now, &[too_old], inputs(now, true, &none, &none)),
+            now + MAX_SLEEP
+        );
+    }
+
+    #[test]
+    fn duration_until_a_past_deadline_is_zero() {
+        let now = Utc::now();
+        assert_eq!(
+            duration_until(now, now - chrono::Duration::seconds(5)),
+            Duration::ZERO
+        );
+        assert_eq!(
+            duration_until(now, now + chrono::Duration::seconds(5)),
+            Duration::from_secs(5)
+        );
     }
 
     #[test]

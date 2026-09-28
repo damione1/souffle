@@ -40,20 +40,28 @@ fn decode_icon(bytes: &[u8]) -> Icon {
     Icon::from_rgba(img.into_raw(), width, height).expect("valid RGBA icon buffer")
 }
 
+/// Decoded once (SOU-285): each sync hands `set_icon` a clone of the RGBA
+/// buffer instead of re-decoding the PNG on the main thread.
+static IDLE_ICON: OnceLock<Icon> = OnceLock::new();
+static RECORDING_ICON: OnceLock<Icon> = OnceLock::new();
+
 /// Monochrome template icon (black + alpha — macOS recolors it).
 fn idle_icon() -> Icon {
-    decode_icon(include_bytes!("../icons/tray/trayTemplate.png"))
+    IDLE_ICON
+        .get_or_init(|| decode_icon(include_bytes!("../icons/tray/trayTemplate.png")))
+        .clone()
 }
 
 /// Colored recording variant (red dot) — rendered as-is, not as template.
 fn recording_icon() -> Icon {
-    decode_icon(include_bytes!("../icons/tray/tray-recording.png"))
+    RECORDING_ICON
+        .get_or_init(|| decode_icon(include_bytes!("../icons/tray/tray-recording.png")))
+        .clone()
 }
 
-fn is_french(state: &AppState) -> bool {
-    crate::settings::AppSettings::load(&state.db)
-        .map(|settings| settings.locale.starts_with("fr"))
-        .unwrap_or(false)
+/// The shared UI locale flag (SOU-285): no settings read per sync.
+fn is_french() -> bool {
+    crate::settings::ui_locale_is_french()
 }
 
 /// Whether "Copy Last Transcription" has anything to act on. Re-checked in
@@ -189,7 +197,7 @@ fn notify_copy_result(fr: bool, result: &Result<(), CopyOutcome>) {
 /// whose whole purpose is to recover from a bad paste (SOU-010) without
 /// opening the app.
 fn copy_last_transcription_to_clipboard(state: &AppState) {
-    let fr = is_french(state);
+    let fr = is_french();
     let entries = state.db.list_dictation_entries(1);
     if let Err(e) = &entries {
         warn!("Copy last transcription: dictation history read failed: {e}");
@@ -235,7 +243,7 @@ pub(crate) fn activate_app() {
 
 /// Set up the system tray with menu items.
 pub fn setup_tray(state: &Arc<AppState>) -> Result<(), Box<dyn std::error::Error>> {
-    let fr = is_french(state);
+    let fr = is_french();
 
     let toggle_dictation =
         MenuItem::with_id("toggle_dictation", label("start_dictation", fr), true, None);
@@ -379,7 +387,7 @@ pub fn sync(state: &AppState, machine: &AppStateMachine) {
     let Some(handles) = TRAY.get() else {
         return;
     };
-    let fr = is_french(state);
+    let fr = is_french();
 
     let dictating = matches!(machine, AppStateMachine::RecordingDictation { .. });
     let meeting = matches!(machine, AppStateMachine::RecordingMeeting { .. });

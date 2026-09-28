@@ -203,8 +203,12 @@ fn apply_settings_effects(
         });
     crate::pill::set_hidden(settings.pill_hidden);
     crate::pill::set_hidden_in_captures(settings.pill_hidden_in_captures);
+    // Toggling the calendar integration (or its lead time, or the selected
+    // calendars) takes effect now: the scheduler parks between passes.
+    crate::calendar::scheduler::wake();
     // A locale change must relabel the tray menu immediately. Hide/show of
     // the recording overlay is applied on the same pass.
+    crate::settings::remember_ui_locale(&settings.locale);
     if let Ok(machine) = state.current_machine_state() {
         crate::pill::sync(state, &machine);
         crate::tray::sync(state, &machine);

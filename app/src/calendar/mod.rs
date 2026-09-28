@@ -77,6 +77,12 @@ fn local_day_bounds(now: DateTime<Local>) -> (i64, i64) {
     )
 }
 
+/// The next local midnight, where the set of "today's events" rolls over.
+pub fn local_day_end() -> DateTime<Utc> {
+    let (_, end) = local_day_bounds(Local::now());
+    DateTime::from_timestamp(end, 0).unwrap_or_else(|| Utc::now() + ChronoDuration::days(1))
+}
+
 /// Strip a `mailto:` scheme from a participant URL, keeping only plausible
 /// email addresses.
 fn email_from_participant_url(url: &str) -> Option<String> {
@@ -273,6 +279,55 @@ mod macos {
         })
     }
 
+    /// Call `on_change` whenever the EventKit database changes (an event
+    /// created, moved or deleted in Calendar, a sync, or an access change).
+    /// Installs one observer for the life of the process; later calls are
+    /// no-ops. The store must stay alive for its change notifications to be
+    /// posted, so it is leaked together with the observer token.
+    pub fn observe_store_changes(on_change: impl Fn() + Send + Sync + 'static) {
+        use std::ptr::NonNull;
+        use std::sync::Once;
+
+        use objc2_event_kit::EKEventStoreChangedNotification;
+        use objc2_foundation::{NSNotification, NSNotificationCenter};
+
+        static INSTALLED: Once = Once::new();
+        INSTALLED.call_once(move || {
+            // Main thread: it has a run loop, and EKEventStore is !Send so
+            // it must be created where it will live.
+            crate::main_thread::on_main(move || {
+                crate::platform::with_autorelease_pool(|| {
+                    let store = unsafe { EKEventStore::new() };
+                    let store_object: &objc2::runtime::AnyObject = &store;
+                    let block = block2::RcBlock::new(move |_note: NonNull<NSNotification>| {
+                        on_change();
+                    });
+                    // SAFETY: the block takes one `NSNotification*` and
+                    // returns nothing, matching
+                    // `addObserverForName:object:queue:usingBlock:`; `name` is
+                    // Apple's documented EventKit constant, `object` is the
+                    // leaked store below, `queue` nil, all allowed by the API.
+                    //
+                    // Scoped to this one store, not `nil`: every pass (and the
+                    // Settings UI) creates short-lived stores, and a posting
+                    // from one of those must not wake the scheduler into
+                    // another fetch, which creates another store.
+                    let token = unsafe {
+                        NSNotificationCenter::defaultCenter()
+                            .addObserverForName_object_queue_usingBlock(
+                                Some(EKEventStoreChangedNotification),
+                                Some(store_object),
+                                None,
+                                &block,
+                            )
+                    };
+                    std::mem::forget(token);
+                    std::mem::forget(store);
+                });
+            });
+        });
+    }
+
     /// Timed events of the local day, sorted by start. `selected_calendar_ids`
     /// empty means all calendars. Recurring events arrive expanded into
     /// occurrences (that's what `eventsMatchingPredicate` does).
@@ -307,8 +362,8 @@ mod macos {
 
 #[cfg(target_os = "macos")]
 pub use macos::{
-    authorization_state, fetch_todays_events, list_calendars, open_calendar_settings,
-    request_access,
+    authorization_state, fetch_todays_events, list_calendars, observe_store_changes,
+    open_calendar_settings, request_access,
 };
 
 #[cfg(not(target_os = "macos"))]
@@ -323,6 +378,9 @@ pub fn request_access() -> PermState {
 
 #[cfg(not(target_os = "macos"))]
 pub fn open_calendar_settings() {}
+
+#[cfg(not(target_os = "macos"))]
+pub fn observe_store_changes(_on_change: impl Fn() + Send + Sync + 'static) {}
 
 #[cfg(not(target_os = "macos"))]
 pub fn list_calendars() -> Result<Vec<CalendarInfo>, String> {

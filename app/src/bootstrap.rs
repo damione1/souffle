@@ -130,6 +130,9 @@ pub fn bootstrap() -> Arc<AppState> {
 
     match settings::AppSettings::load(&state.db) {
         Ok(app_settings) => {
+            // Before the pill panel and tray exist, so their first sync
+            // already has the right language.
+            settings::remember_ui_locale(&app_settings.locale);
             debug::set_transcription_debug(app_settings.debug_transcription);
             if let Err(e) = logging::set_level(app_settings.log_level) {
                 warn!("Failed to apply log level: {e}");
@@ -170,7 +173,11 @@ pub fn bootstrap() -> Arc<AppState> {
     let will_sleep_state = Arc::clone(&state);
     power::install_sleep_observers(
         move || commands::handle_system_will_sleep(&will_sleep_state),
-        commands::handle_system_did_wake,
+        || {
+            commands::handle_system_did_wake();
+            // Timers do not advance during sleep; re-plan reminders now.
+            crate::calendar::scheduler::wake();
+        },
     );
 
     #[cfg(target_os = "macos")]
