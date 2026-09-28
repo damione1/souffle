@@ -39,8 +39,36 @@ private let kAccent = NSColor(red: 233 / 255, green: 174 / 255, blue: 85 / 255, 
     case polishing = 2
 }
 
+/// Cached "Reduce motion" preference (SOU-280). The waveform used to ask
+/// NSWorkspace 30×/s; the value only changes when the user flips the
+/// accessibility setting, which AppKit announces.
+private final class ReduceMotionPreference {
+    static let shared = ReduceMotionPreference()
+
+    private(set) var enabled: Bool
+    private var observer: NSObjectProtocol?
+    /// Called on the main queue once `enabled` has flipped, so the pill can
+    /// start or stop its animations mid-session.
+    var onChange: (() -> Void)?
+
+    private init() {
+        enabled = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        observer = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self else { return }
+            let now = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+            guard now != self.enabled else { return }
+            self.enabled = now
+            self.onChange?()
+        }
+    }
+}
+
 private func reduceMotionEnabled() -> Bool {
-    NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+    ReduceMotionPreference.shared.enabled
 }
 
 /// Hop to the main thread without deadlocking if we're already on it.
@@ -77,13 +105,16 @@ private func liveTextColumnWidth() -> CGFloat {
 /// Keep the last `maxLines` of wrapped text so the newest words stay on
 /// screen. NSTextField draws from the start of `stringValue` and would
 /// otherwise show the oldest five lines of a longer tail (SOU-122).
+/// Also returns how many wrapped lines the kept text takes, so the panel
+/// height does not need a second text measurement (SOU-280).
 private func lastWrappedLines(
     _ text: String,
     width: CGFloat,
     maxLines: Int,
     font: NSFont
-) -> String {
-    guard !text.isEmpty, width > 0, maxLines > 0 else { return text }
+) -> (text: String, lines: Int) {
+    guard !text.isEmpty else { return (text, 0) }
+    guard width > 0, maxLines > 0 else { return (text, 1) }
     let storage = NSTextStorage(string: text, attributes: [.font: font])
     let manager = NSLayoutManager()
     let container = NSTextContainer(size: NSSize(width: width, height: .greatestFiniteMagnitude))
@@ -92,7 +123,7 @@ private func lastWrappedLines(
     manager.addTextContainer(container)
     storage.addLayoutManager(manager)
     let glyphCount = manager.numberOfGlyphs
-    guard glyphCount > 0 else { return text }
+    guard glyphCount > 0 else { return (text, 1) }
     var starts: [Int] = []
     manager.enumerateLineFragments(
         forGlyphRange: NSRange(location: 0, length: glyphCount)
@@ -101,11 +132,11 @@ private func lastWrappedLines(
         let chars = manager.characterRange(forGlyphRange: glyphRange, actualGlyphRange: nil)
         starts.append(chars.location)
     }
-    guard starts.count > maxLines else { return text }
+    guard starts.count > maxLines else { return (text, max(1, starts.count)) }
     let from = starts[starts.count - maxLines]
     let ns = text as NSString
-    guard from < ns.length else { return text }
-    return ns.substring(from: from)
+    guard from < ns.length else { return (text, maxLines) }
+    return (ns.substring(from: from), maxLines)
 }
 
 // ---------------------------------------------------------------------------
@@ -181,6 +212,12 @@ private final class WaveformView: NSView {
     }
 
     private func tickAnimation() {
+        // Never redraw an ordered-out panel: AppKit still runs its display
+        // cycle, which was the whole idle CPU cost (SOU-280).
+        guard window?.isVisible == true else {
+            stopTick()
+            return
+        }
         if reduceMotionEnabled() {
             stopTick()
             applyRmsToBars()
@@ -251,6 +288,14 @@ private final class PillContentView: NSView {
     var stopLabel: String = "Stop recording"
     var a11yLabel: String = "Dictation in progress"
     private var chromeRadius: CGFloat = -1
+    /// Whether the panel is on screen. The waveform timer, the recording-dot
+    /// pulse and the spinner only run while it is (SOU-280): a hidden HUD
+    /// must cost nothing while the app waits for a shortcut.
+    private var panelVisible = false
+    /// Wrapped line count of the live tail, from `lastWrappedLines`.
+    private var liveLineCount = 0
+    private lazy var stopImageCompact = stopImage(pointSize: 9)
+    private lazy var stopImageFull = stopImage(pointSize: 11)
 
     override var isFlipped: Bool { true }
     override var isOpaque: Bool { false }
@@ -288,7 +333,12 @@ private final class PillContentView: NSView {
         recordingDot.layer?.cornerRadius = 5
         recordingDot.setAccessibilityElement(false)
         addSubview(recordingDot)
-        animateDot()
+
+        // One content view per process (PillPanel is a singleton), so a
+        // single hook is enough.
+        ReduceMotionPreference.shared.onChange = { [weak self] in
+            self?.reduceMotionDidChange()
+        }
 
         modeLabel.textColor = NSColor.white.withAlphaComponent(0.90)
         modeLabel.font = NSFont.systemFont(ofSize: 12, weight: .medium)
@@ -356,6 +406,64 @@ private final class PillContentView: NSView {
         recordingDot.layer?.add(pulse, forKey: "pulse")
     }
 
+    private func stopImage(pointSize: CGFloat) -> NSImage? {
+        let cfg = NSImage.SymbolConfiguration(pointSize: pointSize, weight: .regular)
+        return NSImage(systemSymbolName: "stop.fill", accessibilityDescription: nil)?
+            .withSymbolConfiguration(cfg)
+    }
+
+    /// Start or stop everything that animates. Call with `true` only after
+    /// the panel is ordered front, so the first waveform tick sees a
+    /// visible window.
+    func setPanelVisible(_ visible: Bool) {
+        panelVisible = visible
+        if visible {
+            startAnimationsForCurrentMode()
+        } else {
+            waveform.setActive(false)
+            recordingDot.layer?.removeAnimation(forKey: "pulse")
+            spinner.stopAnimation(nil)
+        }
+    }
+
+    /// Bring the waveform, the pulse and the spinner in line with the
+    /// current mode and the Reduce Motion preference, on a visible panel.
+    /// Also runs when Reduce Motion flips mid-session: before SOU-280 each
+    /// live-text push re-armed everything, which happened to pick the new
+    /// preference up within a word; now nothing else would.
+    private func startAnimationsForCurrentMode() {
+        waveform.setActive(currentMode == .dictation || currentMode == .meeting)
+        if reduceMotionEnabled() {
+            recordingDot.layer?.removeAnimation(forKey: "pulse")
+            recordingDot.layer?.opacity = 1
+        } else if !recordingDot.isHidden, recordingDot.layer?.animation(forKey: "pulse") == nil {
+            animateDot()
+        }
+        if currentMode == .polishing && !reduceMotionEnabled() {
+            spinner.startAnimation(nil)
+        } else {
+            spinner.stopAnimation(nil)
+        }
+    }
+
+    private func reduceMotionDidChange() {
+        guard panelVisible else { return }
+        startAnimationsForCurrentMode()
+    }
+
+    /// Chrome that depends on the compact meeting layout: corner radius,
+    /// title visibility and the Stop button size.
+    private func applyCompact(_ compact: Bool) {
+        applyChrome(radius: compact ? kCornerRadiusMeet : kCornerRadiusFull)
+        modeLabel.isHidden = compact
+        let btnSize: CGFloat = compact ? 24 : 27
+        stopButton.layer?.cornerRadius = btnSize / 2
+        let image = compact ? stopImageCompact : stopImageFull
+        if stopButton.image !== image {
+            stopButton.image = image
+        }
+    }
+
     func applyMode(_ mode: PillMode, title: String, stopLabel: String, a11yLabel: String, expanded: Bool) {
         currentMode = mode
         isExpanded = expanded
@@ -363,22 +471,23 @@ private final class PillContentView: NSView {
         self.a11yLabel = a11yLabel
 
         let compact = (mode == .meeting && !expanded)
-        applyChrome(radius: compact ? kCornerRadiusMeet : kCornerRadiusFull)
+        applyCompact(compact)
 
         recordingDot.isHidden = (mode == .polishing)
-        if !recordingDot.isHidden {
+        // Leave a running pulse alone: restarting it resets its phase.
+        if !recordingDot.isHidden, panelVisible,
+           recordingDot.layer?.animation(forKey: "pulse") == nil {
             animateDot()
         }
 
         modeLabel.stringValue = title
-        modeLabel.isHidden = compact
 
         let showWave = (mode == .dictation || mode == .meeting)
         waveform.setBarCount(mode == .meeting ? kMeetingWaveformBars : kDictationWaveformBars)
         waveform.isHidden = !showWave
-        waveform.setActive(showWave)
+        waveform.setActive(showWave && panelVisible)
         spinner.isHidden = (mode != .polishing)
-        if mode == .polishing {
+        if mode == .polishing && panelVisible {
             if reduceMotionEnabled() {
                 spinner.stopAnimation(nil)
             } else {
@@ -396,26 +505,28 @@ private final class PillContentView: NSView {
         setAccessibilityRole(.group)
         setAccessibilityLabel(a11yLabel)
 
-        let btnSize: CGFloat = compact ? 24 : 27
-        stopButton.layer?.cornerRadius = btnSize / 2
-        let imgCfg = NSImage.SymbolConfiguration(pointSize: compact ? 9 : 11, weight: .regular)
-        stopButton.image = NSImage(
-            systemSymbolName: "stop.fill",
-            accessibilityDescription: stopLabel
-        )?.withSymbolConfiguration(imgCfg)
+        needsLayout = true
+    }
 
+    /// The part of `applyMode` a live-text push can change. Leaves the
+    /// waveform, the pulse and the spinner untouched (SOU-280).
+    private func applyExpanded(_ expanded: Bool) {
+        isExpanded = expanded
+        liveLabel.isHidden = !expanded || currentMode != .dictation
+        applyCompact(currentMode == .meeting && !expanded)
         needsLayout = true
     }
 
     func setLiveText(_ text: String, provisional: Int) {
         let expanded = !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         let font = liveLabel.font ?? NSFont.systemFont(ofSize: kLiveFontSize)
-        let shown = lastWrappedLines(
+        let (shown, lines) = lastWrappedLines(
             text,
             width: liveTextColumnWidth(),
             maxLines: kMaxLiveLines,
             font: font
         )
+        liveLineCount = lines
         // The provisional words are the tail of `text`, and `shown` is a
         // suffix of it, so they are the tail of `shown` too.
         let length = (shown as NSString).length
@@ -440,8 +551,7 @@ private final class PillContentView: NSView {
             )
         }
         liveLabel.attributedStringValue = attributed
-        applyMode(currentMode, title: modeLabel.stringValue, stopLabel: stopLabel,
-                  a11yLabel: a11yLabel, expanded: expanded)
+        applyExpanded(expanded)
     }
 
     func pushRMS(_ level: Float) {
@@ -457,21 +567,14 @@ private final class PillContentView: NSView {
     }
 
     /// Wrapped-line height for the live tail. The string is already the last
-    /// kMaxLiveLines (see `setLiveText`); 2 pt slack so the last descender
-    /// is not clipped (SOU-122).
+    /// kMaxLiveLines (see `setLiveText`), wrapped at `liveTextColumnWidth()`
+    /// there; its line count is reused here instead of measuring the text a
+    /// second time. 2 pt slack so the last descender is not clipped (SOU-122).
     func liveTextHeight(forWidth width: CGFloat) -> CGFloat {
-        let text = liveLabel.stringValue
-        guard isExpanded, !text.isEmpty, width > 0 else { return 0 }
+        guard isExpanded, !liveLabel.stringValue.isEmpty, width > 0 else { return 0 }
         let font = liveLabel.font ?? NSFont.systemFont(ofSize: kLiveFontSize)
-        let para = NSMutableParagraphStyle()
-        para.lineBreakMode = .byWordWrapping
-        let bounds = (text as NSString).boundingRect(
-            with: NSSize(width: width, height: CGFloat.greatestFiniteMagnitude),
-            options: [.usesLineFragmentOrigin, .usesFontLeading],
-            attributes: [.font: font, .paragraphStyle: para]
-        )
         let lineH = ceil(font.ascender - font.descender + font.leading)
-        let lines = min(CGFloat(kMaxLiveLines), max(1, ceil(bounds.height / max(1, lineH))))
+        let lines = CGFloat(min(kMaxLiveLines, max(1, liveLineCount)))
         return lines * lineH + 2
     }
 
@@ -631,6 +734,10 @@ private final class PillPanel {
 
     private init() {}
 
+    deinit {
+        contentView?.setPanelVisible(false)
+    }
+
     func create() {
         guard panel == nil else { return }
 
@@ -695,8 +802,14 @@ private final class PillPanel {
             contentView?.layoutSubtreeIfNeeded()
             panel.displayIfNeeded()
             panel.orderFrontRegardless()
+            // After orderFront: the waveform tick stops itself on a window
+            // that is not visible yet (SOU-280).
+            contentView?.setPanelVisible(true)
         } else {
             sessionMaxHeight = kCompactHeight
+            // Stop the timer, pulse and spinner before anything else, so no
+            // animation survives on the ordered-out panel (SOU-280).
+            contentView?.setPanelVisible(false)
             // lastAppliedSize keeps the hidden panel's real size. Resetting it
             // here made the next applyFrame skip the resize after a meeting
             // (dictation HUD shown at meeting size) and pin the top edge from
