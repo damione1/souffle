@@ -23,9 +23,8 @@ use crate::{DictionaryRow, MainWindow, SnippetRow};
 use slint::{ComponentHandle, Model, VecModel};
 use souffle_lib::db::snippets::SnippetEntry;
 use souffle_lib::filter::DictionaryEntry;
-use std::cell::{Cell, RefCell};
+use std::cell::Cell;
 use std::rc::Rc;
-use std::time::Duration;
 
 // Row heights mirror the explicit delegate heights in
 // `components/settings/dictionary_section.slint` /
@@ -40,10 +39,8 @@ const SNIPPET_ERROR_ROW_HEIGHT_PX: f32 = 116.0;
 const SNIPPET_EDITING_ROW_HEIGHT_PX: f32 = 236.0;
 const SNIPPETS_VIEWPORT_HEIGHT_PX: f32 = 420.0;
 // Two viewport-heights of pre-mounted margin on each side, so ordinary
-// scrolling hits already-mounted rows and the 80ms re-window is invisible.
+// scrolling hits already-mounted rows and the re-window is invisible.
 const SETTINGS_LIST_SCROLL_MARGIN_FACTOR: f32 = 2.0;
-// Same poll cadence as the transcript's `start_transcript_scroll_timer`.
-const SETTINGS_LIST_SCROLL_POLL: Duration = Duration::from_millis(80);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct DictionaryAddDraft {
@@ -78,9 +75,6 @@ pub(crate) struct SettingsListModels {
     snippets_view: Rc<VecModel<SnippetRow>>,
     dictionary_mounted: Cell<(usize, usize)>,
     snippets_mounted: Cell<(usize, usize)>,
-    // Keeps the scroll-poll timer alive for the window's lifetime; the timer
-    // closure holds a `Weak<Self>` so there is no Rc cycle.
-    scroll_timer: RefCell<Option<slint::Timer>>,
 }
 
 impl SettingsListModels {
@@ -93,38 +87,31 @@ impl SettingsListModels {
             snippets_view: Rc::new(VecModel::default()),
             dictionary_mounted: Cell::new((usize::MAX, usize::MAX)),
             snippets_mounted: Cell::new((usize::MAX, usize::MAX)),
-            scroll_timer: RefCell::new(None),
         });
         window.set_settings_dictionary_entries(models.dictionary_view.clone().into());
         window.set_settings_snippets(models.snippets_view.clone().into());
 
-        // Same Rust-polls-Slint pattern as `start_transcript_scroll_timer`
-        // in `main.rs`: Slint's expression language can't do the windowing
-        // math, so Rust reads the Flickable scroll position back and pushes
-        // a new slice when it moved far enough. Gated on `settings-open`
-        // instead of started/stopped per view because Settings has no
-        // load/unload lifecycle hook the way MeetingDetail does.
+        // Slint's expression language can't do the windowing math, so Rust
+        // re-windows whenever the Flickable scroll position actually changes
+        // (SOU-283: `changed` handlers on the `*-scroll-top` properties in
+        // `main_window.slint`, coalesced once per event-loop iteration) -
+        // nothing runs while the list sits still or Settings is closed.
+        // A data replacement or first mount doesn't fire `changed`, which is
+        // why the `populate_*` paths below keep their forced re-window.
         let weak = window.as_weak();
         let models_weak = Rc::downgrade(&models);
-        let timer = slint::Timer::default();
-        timer.start(
-            slint::TimerMode::Repeated,
-            SETTINGS_LIST_SCROLL_POLL,
-            move || {
-                let Some(window) = weak.upgrade() else {
-                    return;
-                };
-                let Some(models) = models_weak.upgrade() else {
-                    return;
-                };
-                if !window.get_settings_open() {
-                    return;
-                }
+        window.on_settings_dictionary_scroll_changed(move |_| {
+            if let (Some(window), Some(models)) = (weak.upgrade(), models_weak.upgrade()) {
                 models.update_dictionary_window(&window, false);
+            }
+        });
+        let weak = window.as_weak();
+        let models_weak = Rc::downgrade(&models);
+        window.on_settings_snippets_scroll_changed(move |_| {
+            if let (Some(window), Some(models)) = (weak.upgrade(), models_weak.upgrade()) {
                 models.update_snippets_window(&window, false);
-            },
-        );
-        *models.scroll_timer.borrow_mut() = Some(timer);
+            }
+        });
         models
     }
 
@@ -372,6 +359,81 @@ pub(crate) fn submit_snippet_update(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use slint::platform::{Platform, WindowAdapter, software_renderer::MinimalSoftwareWindow};
+
+    struct TestPlatform;
+
+    impl Platform for TestPlatform {
+        fn create_window_adapter(&self) -> Result<Rc<dyn WindowAdapter>, slint::PlatformError> {
+            Ok(MinimalSoftwareWindow::new(Default::default()))
+        }
+    }
+
+    // SOU-283: the Settings lists re-window from the `changed` handlers on
+    // their `*-scroll-top` properties, not from a poll timer. Moving the
+    // scroll position and letting Slint run its change handlers (what the
+    // event loop does once per iteration) must mount a new slice; a
+    // repopulate still mounts the top slice on its own.
+    #[test]
+    fn settings_lists_rewindow_on_scroll_change_without_a_timer() {
+        let _ = slint::platform::set_platform(Box::new(TestPlatform));
+        let window = MainWindow::new().unwrap();
+        let models = SettingsListModels::install(&window);
+        let dictionary: Vec<DictionaryEntry> = (1..=500)
+            .map(|id| DictionaryEntry {
+                id,
+                term: format!("term {id}"),
+                pronunciation: None,
+                category: None,
+                created_at: String::new(),
+            })
+            .collect();
+        let snippets: Vec<SnippetEntry> = (1..=500)
+            .map(|id| SnippetEntry {
+                id,
+                trigger: format!("trigger {id}"),
+                expansion: format!("expansion {id}"),
+                created_at: String::new(),
+            })
+            .collect();
+        models.populate_dictionary(&dictionary);
+        models.populate_snippets(&snippets, None);
+
+        let first_dictionary_id = || models.dictionary_view.row_data(0).map(|row| row.id);
+        let first_snippet_id = || models.snippets_view.row_data(0).map(|row| row.id);
+        assert_eq!(first_dictionary_id(), Some(1));
+        assert_eq!(first_snippet_id(), Some(1));
+        assert_eq!(window.get_settings_dictionary_spacer_before(), 0.0);
+        assert_eq!(window.get_settings_snippets_spacer_before(), 0.0);
+
+        // Flickable content-y is negative going down: scroll both lists to
+        // the middle of their content.
+        window.set_settings_dictionary_scroll_top(-250.0 * DICTIONARY_ROW_HEIGHT_PX);
+        window.set_settings_snippets_scroll_top(-250.0 * SNIPPET_ROW_HEIGHT_PX);
+        slint::platform::update_timers_and_animations();
+
+        let dictionary_start = first_dictionary_id().expect("dictionary slice mounted");
+        let snippets_start = first_snippet_id().expect("snippets slice mounted");
+        assert!(
+            dictionary_start > 200 && dictionary_start <= 251,
+            "dictionary slice should start near row 250, got {dictionary_start}"
+        );
+        assert!(
+            snippets_start > 200 && snippets_start <= 251,
+            "snippets slice should start near row 250, got {snippets_start}"
+        );
+        assert!(window.get_settings_dictionary_spacer_before() > 0.0);
+        assert!(window.get_settings_snippets_spacer_before() > 0.0);
+        assert!(models.dictionary_view.row_count() < 50);
+        assert!(models.snippets_view.row_count() < 50);
+
+        // Back to the top re-windows again.
+        window.set_settings_dictionary_scroll_top(0.0);
+        window.set_settings_snippets_scroll_top(0.0);
+        slint::platform::update_timers_and_animations();
+        assert_eq!(first_dictionary_id(), Some(1));
+        assert_eq!(first_snippet_id(), Some(1));
+    }
 
     #[test]
     fn injected_dictionary_database_failures_return_every_field_and_deleted_id() {

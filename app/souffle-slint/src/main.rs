@@ -71,18 +71,10 @@ const NOTES_DEBOUNCE: Duration = Duration::from_millis(800);
 /// `TRANSCRIPT_SCROLL_MARGIN` on each side), not pixel-exact.
 const TRANSCRIPT_VIEWPORT_HEIGHT: f32 = 260.0;
 const TRANSCRIPT_SCROLL_MARGIN: f32 = 3.0 * TRANSCRIPT_VIEWPORT_HEIGHT;
-/// How often to re-check the transcript's scroll position and possibly
-/// mount a different slice (SOU-187 milestone 8b, AC15). Same idea as
-/// `start_audio_progress_timer`'s 150ms poll below, just faster since
-/// scrolling is more time-sensitive than a playback position label.
-const TRANSCRIPT_SCROLL_POLL: Duration = Duration::from_millis(80);
 
 /// Matches `DiagnosticsSettingsSection.svelte`'s `TAIL_LINES`/`POLL_MS`.
 const SETTINGS_LOG_TAIL_LINES: u32 = 80;
 const SETTINGS_LOG_POLL: Duration = Duration::from_millis(2000);
-/// Scroll re-window poll for the virtualized live log (SOU-224) - same
-/// rate and rationale as `TRANSCRIPT_SCROLL_POLL`.
-const SETTINGS_LOG_SCROLL_POLL: Duration = Duration::from_millis(80);
 const ARCHIVE_EXPORT_POLL: Duration = Duration::from_millis(150);
 
 /// Backing data for the virtualized transcript list: the full block list
@@ -606,16 +598,15 @@ fn load_meeting_summary_models(window_weak: slint::Weak<MainWindow>, state: Arc<
 }
 
 /// Sets `transcript_state` to `meeting`'s full block list + offsets, mounts
-/// the initial (scroll-top) slice, and (re)starts the scroll-poll timer
-/// that keeps the mounted slice matched to `scroll-top` while the meeting
-/// is open. Separate from `populate_meeting_detail` because it owns
-/// mutable shared state the header/notes population doesn't need.
+/// the initial (scroll-top) slice. Later slices follow the user's scroll
+/// through `MainWindow.transcript-scroll-changed` (SOU-283), which only
+/// fires when the Flickable actually moves. Separate from
+/// `populate_meeting_detail` because it owns mutable shared state the
+/// header/notes population doesn't need.
 fn load_meeting_transcript_window(
     window: &MainWindow,
     meeting: &MeetingTranscript,
     transcript_state: &Rc<RefCell<Option<TranscriptState>>>,
-    transcript_timer: &Rc<RefCell<Option<slint::Timer>>>,
-    weak: slint::Weak<MainWindow>,
 ) {
     let blocks =
         transcript::build_transcript_blocks(&meeting.segments, &meeting.recording_sessions);
@@ -628,17 +619,13 @@ fn load_meeting_transcript_window(
     });
     window.invoke_reset_meeting_detail_transcript_scroll();
     update_transcript_window(window, transcript_state, 0.0);
-    *transcript_timer.borrow_mut() = Some(start_transcript_scroll_timer(
-        weak,
-        transcript_state.clone(),
-    ));
 }
 
 /// Recomputes which slice of `transcript_state`'s blocks should be mounted
 /// for `scroll_top` (px scrolled down from the top) and pushes it into
 /// `MeetingDetail`'s properties, but only when the slice actually changed -
-/// rebuilding the Slint model on every poll tick even while stationary
-/// would be wasted work.
+/// small scroll steps inside the pre-mounted margin must not rebuild the
+/// Slint model.
 fn update_transcript_window(
     window: &MainWindow,
     transcript_state: &Rc<RefCell<Option<TranscriptState>>>,
@@ -674,42 +661,12 @@ fn update_transcript_window(
     eprintln!("transcript window: {mounted}/{total} blocks mounted (SOU-187 AC15)");
 }
 
-/// Repeatedly (80ms) reads the real Flickable scroll position out of
-/// `MeetingDetail` and re-windows the transcript if it moved - same
-/// Rust-polls-Slint pattern as `start_audio_progress_timer` below, needed
-/// because Slint's expression language can't do the offset/binary-search
-/// math `visible_window` does.
-fn start_transcript_scroll_timer(
-    weak: slint::Weak<MainWindow>,
-    transcript_state: Rc<RefCell<Option<TranscriptState>>>,
-) -> slint::Timer {
-    let timer = slint::Timer::default();
-    timer.start(
-        slint::TimerMode::Repeated,
-        TRANSCRIPT_SCROLL_POLL,
-        move || {
-            let Some(window) = weak.upgrade() else {
-                return;
-            };
-            // Flickable's content-y (and its `-px` mirror) is negative-going-
-            // down; scroll_top here is the usual positive "distance scrolled
-            // from the top".
-            let scroll_top = -window.get_meeting_detail_transcript_scroll_top_px();
-            update_transcript_window(&window, &transcript_state, scroll_top);
-        },
-    );
-    timer
-}
-
-/// Drops the transcript window state/timer - mirrors `stop_audio_player`.
+/// Drops the transcript window state - mirrors `stop_audio_player`.
 /// Called before loading a different meeting's transcript and when leaving
-/// MeetingDetail, so a stale huge block list never lingers in memory and
-/// the poll timer never fires against a slice that no longer applies.
-fn stop_transcript_window(
-    transcript_state: &Rc<RefCell<Option<TranscriptState>>>,
-    transcript_timer: &Rc<RefCell<Option<slint::Timer>>>,
-) {
-    *transcript_timer.borrow_mut() = None;
+/// MeetingDetail, so a stale huge block list never lingers in memory and a
+/// late scroll change never re-windows a slice that no longer applies
+/// (`update_transcript_window` is a no-op on `None`).
+fn stop_transcript_window(transcript_state: &Rc<RefCell<Option<TranscriptState>>>) {
     *transcript_state.borrow_mut() = None;
 }
 
@@ -853,15 +810,7 @@ fn refresh_settings_log_tail(
     .expect("slint event loop not running");
 }
 
-/// The two timers behind the live log module, held together so they start
-/// and stop as one unit: the 2s tail poll and the 80ms scroll re-window
-/// poll. Fields are only kept alive, never read.
-struct SettingsLogTimers {
-    _tail: slint::Timer,
-    _scroll: slint::Timer,
-}
-
-/// Starts or stops the live-log timers to match reality: they run only
+/// Starts or stops the live-log tail poll to match reality: it runs only
 /// while the Settings sheet is open AND the Système tab is the active one
 /// (SOU-224 AC5) - not for the whole life of the sheet, since the other
 /// five tabs are keep-alive and would otherwise relayout the log rows on
@@ -869,7 +818,7 @@ struct SettingsLogTimers {
 /// immediate refresh so the module is not blank for up to 2s.
 fn sync_settings_log_timers(
     window: &MainWindow,
-    timers: &Rc<RefCell<Option<SettingsLogTimers>>>,
+    timers: &Rc<RefCell<Option<slint::Timer>>>,
     settings_io: &Rc<settings_io::SettingsIoCoordinator>,
     log_state: &Rc<RefCell<settings_log::SettingsLogState>>,
 ) {
@@ -893,26 +842,7 @@ fn sync_settings_log_timers(
         };
         refresh_settings_log_tail(&window, tail_io.clone(), tail_state.clone());
     });
-    let weak = window.as_weak();
-    let scroll_state = log_state.clone();
-    let scroll = slint::Timer::default();
-    scroll.start(
-        slint::TimerMode::Repeated,
-        SETTINGS_LOG_SCROLL_POLL,
-        move || {
-            let Some(window) = weak.upgrade() else {
-                return;
-            };
-            // Flickable's content-y is negative-going-down, same as the
-            // transcript's scroll poll.
-            let scroll_top = -window.get_settings_log_scroll_top_px();
-            update_settings_log_window(&window, &scroll_state, scroll_top);
-        },
-    );
-    *slot = Some(SettingsLogTimers {
-        _tail: tail,
-        _scroll: scroll,
-    });
+    *slot = Some(tail);
 }
 
 fn spawn_settings_load_stage<T: Send + 'static>(
@@ -1752,23 +1682,16 @@ fn open_meeting_detail(
     player: &Rc<RefCell<Option<audio_player::AudioPlayer>>>,
     progress_timer: &Rc<RefCell<Option<slint::Timer>>>,
     transcript_state: &Rc<RefCell<Option<TranscriptState>>>,
-    transcript_timer: &Rc<RefCell<Option<slint::Timer>>>,
     weak: slint::Weak<MainWindow>,
 ) {
     stop_audio_player(player, progress_timer);
-    stop_transcript_window(transcript_state, transcript_timer);
+    stop_transcript_window(transcript_state);
     let state = Arc::clone(handle);
     match souffle_lib::commands::get_meeting(state, meeting_id.to_string()) {
         Ok(meeting) => {
             populate_meeting_detail(window, &meeting);
             load_meeting_audio(window, &meeting.id, player, progress_timer, weak.clone());
-            load_meeting_transcript_window(
-                window,
-                &meeting,
-                transcript_state,
-                transcript_timer,
-                weak.clone(),
-            );
+            load_meeting_transcript_window(window, &meeting, transcript_state);
             load_meeting_summary_models(weak.clone(), handle.clone());
         }
         Err(e) => eprintln!("Failed to load meeting {meeting_id}: {e}"),
@@ -3546,7 +3469,16 @@ fn wire_callbacks(
     let progress_timer: Rc<RefCell<Option<slint::Timer>>> = Rc::new(RefCell::new(None));
     // Same sharing pattern, for the virtualized transcript list (AC15).
     let transcript_state: Rc<RefCell<Option<TranscriptState>>> = Rc::new(RefCell::new(None));
-    let transcript_timer: Rc<RefCell<Option<slint::Timer>>> = Rc::new(RefCell::new(None));
+    // SOU-283: re-window on actual scroll changes instead of an 80ms poll.
+    // Flickable's content-y is negative-going-down; `update_transcript_window`
+    // takes the positive "distance scrolled from the top".
+    let weak = window.as_weak();
+    let transcript_state_for_scroll = transcript_state.clone();
+    window.on_transcript_scroll_changed(move |scroll_top_px| {
+        if let Some(window) = weak.upgrade() {
+            update_transcript_window(&window, &transcript_state_for_scroll, -scroll_top_px);
+        }
+    });
     let upcoming_cache: Rc<RefCell<Vec<CalendarEvent>>> = Rc::new(RefCell::new(Vec::new()));
     let upcoming_timer: Rc<RefCell<Option<slint::Timer>>> = Rc::new(RefCell::new(None));
 
@@ -3830,7 +3762,6 @@ fn wire_callbacks(
     let player_for_open = player.clone();
     let progress_timer_for_open = progress_timer.clone();
     let transcript_state_for_open = transcript_state.clone();
-    let transcript_timer_for_open = transcript_timer.clone();
     window.on_timeline_item_opened(move |kind, id| {
         if kind != TimelineKind::Meeting {
             return;
@@ -3845,7 +3776,6 @@ fn wire_callbacks(
             &player_for_open,
             &progress_timer_for_open,
             &transcript_state_for_open,
-            &transcript_timer_for_open,
             weak.clone(),
         );
     });
@@ -3855,7 +3785,6 @@ fn wire_callbacks(
     let player_for_back = player.clone();
     let progress_timer_for_back = progress_timer.clone();
     let transcript_state_for_back = transcript_state.clone();
-    let transcript_timer_for_back = transcript_timer.clone();
     window.on_meeting_detail_back(move || {
         if let Some(window) = weak.upgrade() {
             window.set_active_meeting_id("".into());
@@ -3869,7 +3798,7 @@ fn wire_callbacks(
             refresh_timeline(&window, &handle);
         }
         stop_audio_player(&player_for_back, &progress_timer_for_back);
-        stop_transcript_window(&transcript_state_for_back, &transcript_timer_for_back);
+        stop_transcript_window(&transcript_state_for_back);
     });
 
     // MeetingDetail.svelte's "Delete meeting" (controller `deleteMeeting`):
@@ -3880,7 +3809,6 @@ fn wire_callbacks(
     let player_for_delete = player.clone();
     let progress_timer_for_delete = progress_timer.clone();
     let transcript_state_for_delete = transcript_state.clone();
-    let transcript_timer_for_delete = transcript_timer.clone();
     window.on_meeting_detail_delete(move || {
         let Some(window) = weak.upgrade() else {
             return;
@@ -3893,7 +3821,7 @@ fn wire_callbacks(
         stop_audio_player(&player_for_delete, &progress_timer_for_delete);
         match souffle_lib::commands::delete_meeting(Arc::clone(&handle), id) {
             Ok(()) => {
-                stop_transcript_window(&transcript_state_for_delete, &transcript_timer_for_delete);
+                stop_transcript_window(&transcript_state_for_delete);
                 window.set_meeting_detail_delete_error("".into());
                 window.set_active_meeting_id("".into());
                 refresh_timeline(&window, &handle);
@@ -4359,12 +4287,22 @@ fn wire_callbacks(
     // `wire_update_dialogs` (SOU-226) so the updater's "Install and restart"
     // flushes through the same controller instance as quit, rather than a
     // second one that could drift out of sync.
-    let settings_log_timer: Rc<RefCell<Option<SettingsLogTimers>>> = Rc::new(RefCell::new(None));
+    let settings_log_timer: Rc<RefCell<Option<slint::Timer>>> = Rc::new(RefCell::new(None));
     // Full line list + window bookkeeping behind the virtualized live log
     // (SOU-224) - `MainWindow.settings-log-lines` only ever holds the
     // visible slice of this.
     let settings_log_state: Rc<RefCell<settings_log::SettingsLogState>> =
         Rc::new(RefCell::new(settings_log::SettingsLogState::default()));
+    // SOU-283: re-window the log on actual scroll changes, not an 80ms
+    // poll. Flickable's content-y is negative-going-down, same as the
+    // transcript's `transcript-scroll-changed`.
+    let weak_log_scroll = window.as_weak();
+    let log_state_for_scroll = settings_log_state.clone();
+    window.on_settings_log_scroll_changed(move |scroll_top_px| {
+        if let Some(window) = weak_log_scroll.upgrade() {
+            update_settings_log_window(&window, &log_state_for_scroll, -scroll_top_px);
+        }
+    });
     let settings_drafts_for_quit = settings_drafts.clone();
     let weak_quit = window.as_weak();
     let io_quit = settings_io.clone();

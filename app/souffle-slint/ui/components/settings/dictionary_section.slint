@@ -34,7 +34,7 @@ export component DictionarySection inherits VerticalLayout {
     in property <float> list-content-height: 0.0;
     in property <float> list-spacer-before: 0.0;
     in property <float> list-spacer-after: 0.0;
-    // Two-way bound up to `MainWindow` so `lists_ui.rs` can poll the real
+    // Two-way bound up to `MainWindow` so `lists_ui.rs` can react to the real
     // scroll position and decide the next slice.
     in-out property <length> list-scroll-top: 0px;
     in-out property <string> new-term-draft: "";
