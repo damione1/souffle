@@ -57,7 +57,9 @@ rubato = "0.16"
 hound = "3.5"
 uuid = { version = "1", features = ["v4"] }
 chrono = { version = "0.4", features = ["serde"] }
-tokio = { version = "1", features = ["full"] }
+# SOU-289: only what souffle_lib uses (runtime, channels/locks, timers,
+# `select!` and `#[tokio::test]`). reqwest and souffle-mcp declare their own.
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros"] }
 dirs-next = "2"
 libc = "0.2"
 clap = { version = "4", features = ["derive"] }
