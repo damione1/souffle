@@ -683,17 +683,114 @@ fn stop_audio_player(
     *player.borrow_mut() = None;
 }
 
+/// SOU-284: the open meeting's player, released while the window is closed
+/// (the decoded recording is ~11.5 MB per minute) and reloaded, paused at
+/// the same place, when it is shown again. Set once by `wire_callbacks`.
+struct MeetingAudioParking {
+    player: Rc<RefCell<Option<audio_player::AudioPlayer>>>,
+    progress_timer: Rc<RefCell<Option<slint::Timer>>>,
+    parked: RefCell<Option<audio_player::ParkedPosition>>,
+}
+
+/// Window closed (hidden): remember where the open meeting's player stood,
+/// then drop it - its buffer, output stream and progress timer. A load still
+/// in flight is abandoned and resumes from the first session's start.
+fn release_meeting_audio_on_hide(window: &MainWindow) {
+    let Some(parking) = MEETING_AUDIO_PARKING.with(|slot| slot.borrow().clone()) else {
+        return;
+    };
+    let meeting_id = window.get_active_meeting_id().to_string();
+    let loaded = parking
+        .player
+        .borrow()
+        .as_ref()
+        .map(|p| (p.session_index(), p.position_seconds()));
+    let (session_index, seconds) = match loaded {
+        Some(position) => position,
+        None if window.get_meeting_detail_audio_loading() => (0, 0.0),
+        None => return,
+    };
+    stop_audio_player(&parking.player, &parking.progress_timer);
+    if meeting_id.is_empty() {
+        return;
+    }
+    // It was maybe playing: the button reads Play again.
+    window.set_meeting_detail_audio_is_playing(false);
+    *parking.parked.borrow_mut() = Some(audio_player::ParkedPosition {
+        meeting_id,
+        session_index,
+        seconds,
+    });
+}
+
+/// Window shown: reload the player released by the last close, paused at
+/// its position, if that meeting is still the one open and nothing has
+/// loaded audio since (a meeting stopped from the pill while hidden opens
+/// its own detail and player).
+fn restore_meeting_audio_on_show(window: &MainWindow) {
+    let Some(parking) = MEETING_AUDIO_PARKING.with(|slot| slot.borrow().clone()) else {
+        return;
+    };
+    let Some(parked) = parking.parked.borrow_mut().take() else {
+        return;
+    };
+    if parking.player.borrow().is_some()
+        || window.get_meeting_detail_audio_loading()
+        || window.get_active_meeting_id().as_str() != parked.meeting_id
+    {
+        return;
+    }
+    let sessions = souffle_lib::commands::get_meeting_audio(parked.meeting_id.clone())
+        .inspect_err(|e| eprintln!("Failed to list meeting audio: {e}"))
+        .unwrap_or_default();
+    let Some((session_index, path, seconds)) = audio_player::plan_resume(&sessions, &parked) else {
+        reset_meeting_audio_labels(window);
+        window.set_meeting_detail_has_audio(false);
+        return;
+    };
+    load_session_audio(
+        window,
+        session_index,
+        std::path::PathBuf::from(path),
+        SessionAudioStart {
+            seconds,
+            play: false,
+        },
+        &parking.player,
+        &parking.progress_timer,
+        window.as_weak(),
+    );
+}
+
+/// Reflects the player's position/playing state into the window - what the
+/// progress tick does, and what a seek or pause does directly now that the
+/// tick only runs during playback (SOU-284).
+fn project_audio_position(window: &MainWindow, p: &audio_player::AudioPlayer) {
+    window.set_meeting_detail_audio_progress(p.progress());
+    window.set_meeting_detail_audio_position_label(
+        timeline::format_duration(p.position_seconds()).into(),
+    );
+    window.set_meeting_detail_audio_is_playing(p.is_playing());
+}
+
 /// Repeatedly (150ms) reflects the loaded player's real position/playing
 /// state into the window's properties - mirrors the `<audio>` element's
 /// `timeupdate` event that `MeetingAudioPlayerSection.svelte` listens to.
-/// Left running for as long as MeetingDetail with audio is open (not just
-/// while playing): simpler and safe (no self-drop from inside its own
-/// callback) at the cost of a harmless no-op tick every 150ms while paused.
+///
+/// SOU-284: runs only while playing. Started by the play paths (the
+/// play/pause button, a session load that resumes playback), stopped by
+/// pause, and by its own tick once the track has run out: `fill_buffer`
+/// can only clear `playing`, so the tick also calls `pause()` to stop the
+/// output unit. Stopping from inside the callback is fine; the `Timer`
+/// itself stays in `progress_timer` (never dropped from its own callback).
 fn start_audio_progress_timer(
     weak: slint::Weak<MainWindow>,
     player: Rc<RefCell<Option<audio_player::AudioPlayer>>>,
-) -> slint::Timer {
-    let timer = slint::Timer::default();
+    progress_timer: &Rc<RefCell<Option<slint::Timer>>>,
+) {
+    let timer_slot = Rc::downgrade(progress_timer);
+    let mut slot = progress_timer.borrow_mut();
+    let timer = slot.get_or_insert_with(slint::Timer::default);
     timer.start(
         slint::TimerMode::Repeated,
         Duration::from_millis(150),
@@ -705,14 +802,24 @@ fn start_audio_progress_timer(
             let Some(p) = guard.as_ref() else {
                 return;
             };
-            window.set_meeting_detail_audio_progress(p.progress());
-            window.set_meeting_detail_audio_position_label(
-                timeline::format_duration(p.position_seconds()).into(),
-            );
-            window.set_meeting_detail_audio_is_playing(p.is_playing());
+            if !p.is_playing() {
+                // End of track: stop the output unit too.
+                p.pause();
+                if let Some(slot) = timer_slot.upgrade()
+                    && let Some(timer) = slot.borrow().as_ref()
+                {
+                    timer.stop();
+                }
+            }
+            project_audio_position(&window, p);
         },
     );
-    timer
+}
+
+fn stop_audio_progress_timer(progress_timer: &Rc<RefCell<Option<slint::Timer>>>) {
+    if let Some(timer) = progress_timer.borrow().as_ref() {
+        timer.stop();
+    }
 }
 
 /// Pushes a freshly fetched log tail into the virtualized state + window
@@ -1647,14 +1754,12 @@ fn load_session_audio(
                 if start.play {
                     loaded.play();
                 }
-                window.set_meeting_detail_audio_progress(loaded.progress());
-                window.set_meeting_detail_audio_position_label(
-                    timeline::format_duration(loaded.position_seconds()).into(),
-                );
-                window.set_meeting_detail_audio_is_playing(loaded.is_playing());
+                project_audio_position(&window, &loaded);
+                let playing = loaded.is_playing();
                 *player.borrow_mut() = Some(loaded);
-                *progress_timer.borrow_mut() =
-                    Some(start_audio_progress_timer(weak.clone(), player.clone()));
+                if playing {
+                    start_audio_progress_timer(weak.clone(), player.clone(), &progress_timer);
+                }
             }
             Ok(Err(e)) => {
                 eprintln!("Failed to load meeting audio: {e}");
@@ -3467,6 +3572,13 @@ fn wire_callbacks(
     // time, for whichever meeting is currently open in MeetingDetail.
     let player: Rc<RefCell<Option<audio_player::AudioPlayer>>> = Rc::new(RefCell::new(None));
     let progress_timer: Rc<RefCell<Option<slint::Timer>>> = Rc::new(RefCell::new(None));
+    MEETING_AUDIO_PARKING.with(|slot| {
+        *slot.borrow_mut() = Some(Rc::new(MeetingAudioParking {
+            player: player.clone(),
+            progress_timer: progress_timer.clone(),
+            parked: RefCell::new(None),
+        }));
+    });
     // Same sharing pattern, for the virtualized transcript list (AC15).
     let transcript_state: Rc<RefCell<Option<TranscriptState>>> = Rc::new(RefCell::new(None));
     // SOU-283: re-window on actual scroll changes instead of an 80ms poll.
@@ -4044,6 +4156,7 @@ fn wire_callbacks(
 
     let weak = window.as_weak();
     let player_for_play = player.clone();
+    let progress_timer_for_play = progress_timer.clone();
     window.on_meeting_detail_audio_play_pause_requested(move || {
         let Some(window) = weak.upgrade() else {
             return;
@@ -4054,16 +4167,29 @@ fn wire_callbacks(
         };
         if p.is_playing() {
             p.pause();
+            stop_audio_progress_timer(&progress_timer_for_play);
         } else {
             p.play();
+            if p.is_playing() {
+                start_audio_progress_timer(
+                    weak.clone(),
+                    player_for_play.clone(),
+                    &progress_timer_for_play,
+                );
+            }
         }
-        window.set_meeting_detail_audio_is_playing(p.is_playing());
+        project_audio_position(&window, p);
     });
 
+    // SOU-284: no tick while paused, so a seek projects its own position.
+    let weak = window.as_weak();
     let player_for_seek = player.clone();
     window.on_meeting_detail_audio_seek_requested(move |fraction| {
         if let Some(p) = player_for_seek.borrow().as_ref() {
             p.seek_to(fraction);
+            if let Some(window) = weak.upgrade() {
+                project_audio_position(&window, p);
+            }
         }
     });
 
@@ -4093,6 +4219,7 @@ fn wire_callbacks(
             audio_player::ParagraphSeek::InLoaded { seconds } => {
                 if let Some(p) = player_for_paragraph.borrow().as_ref() {
                     p.seek_to_seconds(seconds);
+                    project_audio_position(&window, p);
                 }
             }
             audio_player::ParagraphSeek::LoadSession {
@@ -6776,6 +6903,10 @@ fn main() {
         if let Some(w) = weak_close.upgrade() {
             capture_and_submit_window_geometry(&w, &io_close);
         }
+        // SOU-284: release the open meeting's decoded audio and output.
+        if let Some(w) = weak_close.upgrade() {
+            release_meeting_audio_on_hide(&w);
+        }
         // SOU-282: hidden, so the waveform tick and the permission poll stop.
         set_main_window_visible(false);
         slint::CloseRequestResponse::HideWindow
@@ -6994,6 +7125,7 @@ pub(crate) fn show_main_window(window: &MainWindow) -> Result<(), slint::Platfor
     let shown = window.show();
     if shown.is_ok() {
         set_main_window_visible(true);
+        restore_meeting_audio_on_show(window);
     }
     shown
 }
@@ -7009,6 +7141,10 @@ thread_local! {
     // Set once in `main()` by `wire_window_activity`, before the first
     // `show_main_window`.
     static WINDOW_ACTIVITY: RefCell<Option<Rc<WindowActivity>>> = const { RefCell::new(None) };
+    // SOU-284: set once by `wire_callbacks`, before the first
+    // `show_main_window`.
+    static MEETING_AUDIO_PARKING: RefCell<Option<Rc<MeetingAudioParking>>> =
+        const { RefCell::new(None) };
     // The banner `dispatch_native_action` projects on each
     // `NativeAction::MicStallChanged`. Set once in `main()` before the event
     // loop runs, so no action is dispatched before it exists.

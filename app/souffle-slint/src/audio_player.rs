@@ -48,18 +48,32 @@ pub struct AudioPlayer {
     sample_rate: u32,
     position: Arc<AtomicUsize>,
     playing: Arc<AtomicBool>,
-    // Kept alive for as long as the player exists; dropping it stops the
-    // output stream. Never read directly after construction.
-    _stream: cpal::Stream,
+    /// Kept alive for as long as the player exists; dropping it closes the
+    /// output. SOU-284: only started (`AudioOutputUnitStart`) while playing,
+    /// so a paused or finished player keeps no CoreAudio IO thread awake.
+    stream: cpal::Stream,
 }
 
 impl AudioPlayer {
+    /// Starts playback and the output stream. UI thread only, never from
+    /// the output callback.
     pub fn play(&self) {
         self.playing.store(true, Ordering::Relaxed);
+        if let Err(e) = self.stream.play() {
+            eprintln!("Warning: audio output stream did not start: {e}");
+            self.playing.store(false, Ordering::Relaxed);
+        }
     }
 
+    /// Pauses playback and stops the output stream (`AudioOutputUnitStop`
+    /// on macOS). Also what ends a track that ran out: `fill_buffer` can
+    /// only flip `playing`, the stream itself is stopped from the UI thread
+    /// (see `start_audio_progress_timer` in `main.rs`).
     pub fn pause(&self) {
         self.playing.store(false, Ordering::Relaxed);
+        if let Err(e) = self.stream.pause() {
+            eprintln!("Warning: audio output stream did not stop: {e}");
+        }
     }
 
     pub fn is_playing(&self) -> bool {
@@ -162,6 +176,39 @@ pub fn plan_paragraph_seek(
     }
 }
 
+/// Where the open meeting's player stood when the window was closed and
+/// the player released (SOU-284), so showing the window again reloads it
+/// at the same place.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ParkedPosition {
+    pub meeting_id: String,
+    pub session_index: usize,
+    pub seconds: f64,
+}
+
+/// The session file and offset to reload for `parked`: the session it was
+/// released on (SOU-251: a resumed meeting has several), or the first
+/// session from its start if that file is gone. `None` when the meeting
+/// has no audio left.
+pub fn plan_resume(
+    sessions: &[MeetingAudioSession],
+    parked: &ParkedPosition,
+) -> Option<(usize, String, f64)> {
+    match sessions
+        .iter()
+        .find(|s| s.session_index == parked.session_index)
+    {
+        Some(session) => Some((
+            session.session_index,
+            session.path.clone(),
+            parked.seconds.max(0.0),
+        )),
+        None => sessions
+            .first()
+            .map(|session| (session.session_index, session.path.clone(), 0.0)),
+    }
+}
+
 /// `load`'s error when `still_wanted` said no: not a failure to report.
 pub const LOAD_ABANDONED: &str = "audio load abandoned";
 
@@ -179,9 +226,9 @@ pub fn cached_summary(path: &Path) -> Option<WaveformSummary> {
 /// next open. Slow (see the module doc): call it off the UI thread.
 /// `still_wanted` is asked between the expensive stages, so a load the user
 /// has already navigated away from stops early instead of burning a core.
-/// The stream is created and started immediately so the first `play()` has
-/// no extra latency, but playback only advances once `play()` is called -
-/// the callback outputs silence until then.
+/// The stream is created here but left stopped (SOU-284): cpal's CoreAudio
+/// backend starts the output unit as soon as it is built, so it is paused
+/// right away and only [`AudioPlayer::play`] starts it.
 pub fn load(
     session_index: usize,
     path: &Path,
@@ -286,9 +333,11 @@ pub fn load(
     }
     .map_err(|e| format!("Cr\u{e9}er le flux de sortie: {e}"))?;
 
+    // cpal 0.17 on macOS starts the output unit inside
+    // `build_output_stream`: stop it until the first `play()`.
     stream
-        .play()
-        .map_err(|e| format!("D\u{e9}marrer le flux de sortie: {e}"))?;
+        .pause()
+        .map_err(|e| format!("Arr\u{ea}ter le flux de sortie: {e}"))?;
 
     Ok((
         AudioPlayer {
@@ -297,7 +346,7 @@ pub fn load(
             sample_rate: device_rate,
             position,
             playing,
-            _stream: stream,
+            stream,
         },
         summary,
     ))
@@ -398,6 +447,37 @@ mod tests {
             path: format!("/rec/{session_index}.ogg"),
             duration_seconds: None,
         }
+    }
+
+    fn parked(session_index: usize, seconds: f64) -> ParkedPosition {
+        ParkedPosition {
+            meeting_id: "m".into(),
+            session_index,
+            seconds,
+        }
+    }
+
+    #[test]
+    fn resume_reloads_the_session_the_player_was_released_on() {
+        let sessions = [session(0), session(1)];
+        assert_eq!(
+            plan_resume(&sessions, &parked(1, 42.5)),
+            Some((1, "/rec/1.ogg".into(), 42.5))
+        );
+        assert_eq!(
+            plan_resume(&sessions, &parked(0, -3.0)),
+            Some((0, "/rec/0.ogg".into(), 0.0))
+        );
+    }
+
+    #[test]
+    fn resume_falls_back_to_the_first_session_from_its_start() {
+        let sessions = [session(0), session(1)];
+        assert_eq!(
+            plan_resume(&sessions, &parked(7, 42.5)),
+            Some((0, "/rec/0.ogg".into(), 0.0))
+        );
+        assert_eq!(plan_resume(&[], &parked(0, 1.0)), None);
     }
 
     #[test]
