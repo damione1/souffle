@@ -298,19 +298,25 @@ mod macos {
             crate::main_thread::on_main(move || {
                 crate::platform::with_autorelease_pool(|| {
                     let store = unsafe { EKEventStore::new() };
+                    let store_object: &objc2::runtime::AnyObject = &store;
                     let block = block2::RcBlock::new(move |_note: NonNull<NSNotification>| {
                         on_change();
                     });
                     // SAFETY: the block takes one `NSNotification*` and
                     // returns nothing, matching
                     // `addObserverForName:object:queue:usingBlock:`; `name` is
-                    // Apple's documented EventKit constant, `object`/`queue`
-                    // are nil, both allowed by the API.
+                    // Apple's documented EventKit constant, `object` is the
+                    // leaked store below, `queue` nil, all allowed by the API.
+                    //
+                    // Scoped to this one store, not `nil`: every pass (and the
+                    // Settings UI) creates short-lived stores, and a posting
+                    // from one of those must not wake the scheduler into
+                    // another fetch, which creates another store.
                     let token = unsafe {
                         NSNotificationCenter::defaultCenter()
                             .addObserverForName_object_queue_usingBlock(
                                 Some(EKEventStoreChangedNotification),
-                                None,
+                                Some(store_object),
                                 None,
                                 &block,
                             )
