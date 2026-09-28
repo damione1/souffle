@@ -47,6 +47,9 @@ private final class ReduceMotionPreference {
 
     private(set) var enabled: Bool
     private var observer: NSObjectProtocol?
+    /// Called on the main queue once `enabled` has flipped, so the pill can
+    /// start or stop its animations mid-session.
+    var onChange: (() -> Void)?
 
     private init() {
         enabled = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
@@ -55,7 +58,11 @@ private final class ReduceMotionPreference {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            self?.enabled = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+            guard let self else { return }
+            let now = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+            guard now != self.enabled else { return }
+            self.enabled = now
+            self.onChange?()
         }
     }
 }
@@ -327,6 +334,12 @@ private final class PillContentView: NSView {
         recordingDot.setAccessibilityElement(false)
         addSubview(recordingDot)
 
+        // One content view per process (PillPanel is a singleton), so a
+        // single hook is enough.
+        ReduceMotionPreference.shared.onChange = { [weak self] in
+            self?.reduceMotionDidChange()
+        }
+
         modeLabel.textColor = NSColor.white.withAlphaComponent(0.90)
         modeLabel.font = NSFont.systemFont(ofSize: 12, weight: .medium)
         modeLabel.isEditable = false
@@ -405,18 +418,37 @@ private final class PillContentView: NSView {
     func setPanelVisible(_ visible: Bool) {
         panelVisible = visible
         if visible {
-            waveform.setActive(currentMode == .dictation || currentMode == .meeting)
-            if !recordingDot.isHidden && recordingDot.layer?.animation(forKey: "pulse") == nil {
-                animateDot()
-            }
-            if currentMode == .polishing && !reduceMotionEnabled() {
-                spinner.startAnimation(nil)
-            }
+            startAnimationsForCurrentMode()
         } else {
             waveform.setActive(false)
             recordingDot.layer?.removeAnimation(forKey: "pulse")
             spinner.stopAnimation(nil)
         }
+    }
+
+    /// Bring the waveform, the pulse and the spinner in line with the
+    /// current mode and the Reduce Motion preference, on a visible panel.
+    /// Also runs when Reduce Motion flips mid-session: before SOU-280 each
+    /// live-text push re-armed everything, which happened to pick the new
+    /// preference up within a word; now nothing else would.
+    private func startAnimationsForCurrentMode() {
+        waveform.setActive(currentMode == .dictation || currentMode == .meeting)
+        if reduceMotionEnabled() {
+            recordingDot.layer?.removeAnimation(forKey: "pulse")
+            recordingDot.layer?.opacity = 1
+        } else if !recordingDot.isHidden, recordingDot.layer?.animation(forKey: "pulse") == nil {
+            animateDot()
+        }
+        if currentMode == .polishing && !reduceMotionEnabled() {
+            spinner.startAnimation(nil)
+        } else {
+            spinner.stopAnimation(nil)
+        }
+    }
+
+    private func reduceMotionDidChange() {
+        guard panelVisible else { return }
+        startAnimationsForCurrentMode()
     }
 
     /// Chrome that depends on the compact meeting layout: corner radius,
