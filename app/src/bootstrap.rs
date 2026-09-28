@@ -223,6 +223,16 @@ pub fn bootstrap() -> Arc<AppState> {
     crate::calendar::scheduler::spawn(Arc::clone(&state));
     crate::update_check::scheduler::spawn(Arc::clone(&state));
 
+    // Load the ONNX Runtime dylib off the critical path so the first
+    // dictation no longer pays the dlopen (SOU-286). Once-guarded: the engine
+    // actor's own call blocks on, then skips, this initialization.
+    if let Err(e) = std::thread::Builder::new()
+        .name("ort-warm".into())
+        .spawn(crate::ort_runtime::ensure_ort_initialized)
+    {
+        warn!("Failed to spawn ONNX Runtime warm-up thread: {e}");
+    }
+
     info!("Soufflé started");
     state
 }

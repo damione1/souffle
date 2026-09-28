@@ -1,4 +1,5 @@
 use std::path::Path;
+use std::sync::{Arc, Mutex};
 
 use tracing::debug;
 use vad_rs::Vad;
@@ -23,8 +24,22 @@ const HANGOVER_FRAMES: u32 = 15;
 /// Prevents single-frame noise spikes from being classified as speech.
 const ONSET_FRAMES: u32 = 2;
 
+/// A loaded Silero ONNX session shared across dictation sessions (SOU-286).
+/// Building one costs 190-290 ms (graph load + Level3 optimization), so the
+/// engine actor keeps it alive with the transcription model and hands a clone
+/// to each session's filter, which resets it before use.
+pub type SharedVadEngine = Arc<Mutex<Vad>>;
+
+/// Load the Silero ONNX model into a shareable engine. ONNX Runtime must
+/// already be initialized (`ort_runtime::ensure_ort_initialized`).
+pub fn load_engine(model_path: &Path) -> Result<SharedVadEngine, String> {
+    let engine = Vad::new(model_path, VAD_SAMPLE_RATE as usize)
+        .map_err(|e| format!("Silero VAD init: {e}"))?;
+    Ok(Arc::new(Mutex::new(engine)))
+}
+
 pub struct SileroVadFilter {
-    engine: Vad,
+    engine: SharedVadEngine,
     source_sample_rate: u32,
     buffer: Vec<f32>,
     hangover_remaining: u32,
@@ -33,18 +48,28 @@ pub struct SileroVadFilter {
 }
 
 impl SileroVadFilter {
+    #[cfg(test)]
     pub fn new(model_path: &Path, source_sample_rate: u32) -> Result<Self, String> {
-        let engine = Vad::new(model_path, VAD_SAMPLE_RATE as usize)
-            .map_err(|e| format!("Silero VAD init: {e}"))?;
+        Ok(Self::from_engine(
+            load_engine(model_path)?,
+            source_sample_rate,
+        ))
+    }
 
-        Ok(Self {
+    /// Wrap an already-loaded engine, possibly used by an earlier session.
+    /// The engine's recurrent state and every gate counter start from zero,
+    /// so the segmentation matches a freshly built filter.
+    pub fn from_engine(engine: SharedVadEngine, source_sample_rate: u32) -> Self {
+        let mut filter = Self {
             engine,
             source_sample_rate,
             buffer: Vec::new(),
             hangover_remaining: 0,
             onset_count: 0,
             in_speech: false,
-        })
+        };
+        filter.reset();
+        filter
     }
 
     /// Cheap 3:2 decimation from 24kHz to 16kHz (drop every 3rd sample).
@@ -62,7 +87,14 @@ impl SileroVadFilter {
     }
 
     fn process_frame(&mut self, frame: &[f32]) -> bool {
-        let is_voice = match self.engine.compute(frame) {
+        // Only the session's own actor thread touches the engine; the lock is
+        // uncontended. A poisoned lock still holds a usable engine.
+        let computed = self
+            .engine
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .compute(frame);
+        let is_voice = match computed {
             Ok(result) => {
                 let voice = result.prob >= SPEECH_THRESHOLD;
                 if crate::debug::transcription_debug_enabled() {
@@ -149,7 +181,14 @@ impl AudioFilter for SileroVadFilter {
         block_is_speech(already, [frame_speech])
     }
 
+    /// Full reset: Silero's LSTM state (h/c) plus the gate's buffer,
+    /// hangover and onset counters, so a reused engine carries nothing over
+    /// from the previous session (SOU-286).
     fn reset(&mut self) {
+        self.engine
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .reset();
         self.buffer.clear();
         self.hangover_remaining = 0;
         self.onset_count = 0;

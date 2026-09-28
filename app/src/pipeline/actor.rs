@@ -25,8 +25,8 @@ use crate::engine::{
     TranscriptionSegment,
 };
 use crate::filter::{
-    AudioFilterChain, DictionaryEntry, PipelineConfig, TextFilterChain, build_audio_filters,
-    build_text_filters, session_terms::SessionCorrection,
+    AudioFilterChain, DictionaryEntry, PipelineConfig, SharedVadEngine, TextFilterChain,
+    build_audio_filters, build_text_filters, load_vad_engine, session_terms::SessionCorrection,
 };
 use crate::platform::with_autorelease_pool;
 use crate::state::AppState;
@@ -216,6 +216,7 @@ impl EngineActorHandle {
                     idle_since: None,
                     state_fresh_for: None,
                     engine_info: actor_engine_info,
+                    vad_engine: None,
                 }
                 .run();
             })
@@ -422,6 +423,11 @@ struct EngineActor {
     state_fresh_for: Option<bool>,
     /// Shared with [`EngineActorHandle::loaded_engine_info`].
     engine_info: Arc<Mutex<Option<EngineInfo>>>,
+    /// Silero VAD session kept across dictations, keyed by the model path
+    /// and source sample rate it was built for (SOU-286). Rebuilding it cost
+    /// 190-290 ms per dictation; it is released with the model so an
+    /// auto-unload still returns its memory.
+    vad_engine: Option<(PathBuf, u32, SharedVadEngine)>,
 }
 
 /// Mutable filter state for an active session; rebuilt when live corrections arrive.
@@ -645,9 +651,42 @@ impl EngineActor {
             }
             drop(engine);
         }
+        self.vad_engine = None;
         self.idle_since = None;
         self.state_fresh_for = None;
         self.publish_engine_info(None);
+    }
+
+    /// Silero engine for a single-stream session: the cached one when it was
+    /// built for the same model path and sample rate, otherwise a newly
+    /// loaded one that replaces the cache. `None` when VAD is off or the load
+    /// failed (the filter chain then retries and logs on its own).
+    fn shared_vad_engine(
+        &mut self,
+        config: &PipelineConfig,
+        sample_rate: u32,
+    ) -> Option<SharedVadEngine> {
+        if !config.vad_enabled {
+            return None;
+        }
+        let model_path = config.vad_model_path.as_ref()?;
+        if let Some((cached_path, cached_rate, engine)) = &self.vad_engine
+            && cached_path == model_path
+            && *cached_rate == sample_rate
+        {
+            return Some(Arc::clone(engine));
+        }
+        self.vad_engine = None;
+        match load_vad_engine(model_path) {
+            Ok(engine) => {
+                self.vad_engine = Some((model_path.clone(), sample_rate, Arc::clone(&engine)));
+                Some(engine)
+            }
+            Err(e) => {
+                warn!("Failed to load shared Silero VAD engine: {e}");
+                None
+            }
+        }
     }
 
     fn publish_engine_info(&self, info: Option<EngineInfo>) {
@@ -848,6 +887,15 @@ impl EngineActor {
         let idle_monitor = config
             .idle_config
             .map(|idle_config| MeetingIdleMonitor::new(idle_config, Instant::now()));
+        // Resolved before borrowing the engine: it may load and cache the
+        // Silero session on `self`. Diarized mode runs without Silero.
+        // The "Audio filter chain built" timer covers that load too.
+        let filters_start = Instant::now();
+        let shared_vad = if diarize {
+            None
+        } else {
+            self.shared_vad_engine(&config.pipeline_config, sample_rate)
+        };
         let engine = self.engine.as_mut().expect("engine present: checked above");
 
         // No Silero VAD in diarized mode: the two lanes must step together
@@ -856,8 +904,8 @@ impl EngineActor {
         let mut mode: Box<dyn SessionMode> = if diarize {
             Box::new(DiarizedMode::new())
         } else {
-            let filters_start = Instant::now();
-            let audio_filters = build_audio_filters(&config.pipeline_config, sample_rate);
+            let audio_filters =
+                build_audio_filters(&config.pipeline_config, sample_rate, shared_vad);
             info!(
                 session_id,
                 duration_ms = filters_start.elapsed().as_millis(),
