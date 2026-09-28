@@ -8,6 +8,7 @@ slint::include_modules!();
 mod audio_player;
 mod audio_ui;
 mod data_ui;
+mod edit_learning;
 mod ia_ui;
 mod lists_ui;
 mod markdown;
@@ -2377,6 +2378,7 @@ async fn start_dictation(
     weak: slint::Weak<MainWindow>,
     live_state: LiveTranscriptState,
 ) -> Result<(), String> {
+    edit_learning::cancel_pending();
     ensure_model_ready(&handle).await?;
     // Off the UI thread (SOU-258): the engine start (~250 ms of VAD setup,
     // more on a cold engine) used to run inside `block_on` on the main
@@ -2537,7 +2539,7 @@ async fn finalize_dictation(
     });
     let final_text = match souffle_lib::db::snippets::apply_snippet(&raw_text, &snippets) {
         Some(expanded) => expanded,
-        None => polish_dictation_text(&handle, &settings, &raw_text, focused_app).await,
+        None => polish_dictation_text(&handle, &settings, &raw_text, focused_app.clone()).await,
     };
     if final_text != raw_text {
         souffle_lib::commands::update_dictation_entry(
@@ -2562,6 +2564,12 @@ async fn finalize_dictation(
                 )),
             };
         }
+        edit_learning::schedule(
+            handle,
+            settings.dictation_learn_from_edit,
+            final_text,
+            focused_app,
+        );
     } else {
         souffle_lib::commands::copy_text(final_text)?;
     }
