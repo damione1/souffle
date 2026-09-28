@@ -596,7 +596,12 @@ impl EngineActor {
                     }
                     // Pre-warm AFTER the stop reply above so stop latency is
                     // unchanged; the caller is already unblocked by now.
-                    if ran {
+                    // Skip it when a command is already queued (typically the
+                    // next StartSession, pressed right after stop): that
+                    // command must not wait behind the pre-warm, and a start
+                    // resets the state through its own path anyway since
+                    // `state_fresh_for` is still `None` here.
+                    if ran && self.cmd_rx.is_empty() {
                         self.prewarm_single_stream();
                     }
                     if self.engine.is_some() {
@@ -829,7 +834,8 @@ impl EngineActor {
 
         // The idle pre-warm (see `prewarm_single_stream`) keeps the engine
         // state reset for dictation between sessions; skip the reset here
-        // (a full model rebuild for Kyutai, on the order of seconds) when
+        // (a soft KV clear for Kyutai, but a full model rebuild on the order
+        // of seconds when the lane count changes) when
         // the requested mode already matches what's pre-warmed. A diarized
         // meeting start always pays the reset: `prewarm_single_stream` only
         // ever leaves the engine fresh for single-stream (batch size 1), so

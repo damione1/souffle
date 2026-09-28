@@ -447,3 +447,221 @@ fn soft_only_full_fixture() {
     assert_eq!(soft_only_verdict(&summary, pcm.len()), Ok(()));
     engine.unload_model().unwrap();
 }
+
+/// Kyutai weights for the session-reset checks: `SOUFFLE_VERIFY_MODEL` when
+/// set, otherwise the app's own downloaded Kyutai model directory.
+fn session_reset_model_dir() -> PathBuf {
+    if let Some(dir) = std::env::var_os("SOUFFLE_VERIFY_MODEL") {
+        return PathBuf::from(dir);
+    }
+    let profile = crate::engine::resolve_transcription_profile(
+        Some(crate::engine::KYUTAI_ENGINE_ID),
+        Some(crate::engine::KYUTAI_MODEL_ID),
+        Some(crate::engine::CANDLE_BACKEND_ID),
+    )
+    .unwrap();
+    assert!(
+        crate::models::model_exists(&profile),
+        "Kyutai model missing. Download it in the app or set SOUFFLE_VERIFY_MODEL."
+    );
+    crate::models::model_dir(&profile)
+}
+
+/// A 24 kHz mono clip with speech from its first seconds (SOU-184 fixture).
+fn session_reset_clip() -> Vec<f32> {
+    let path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("fixtures/audio/sou-184/ecorp-q4-close.wav");
+    let mut reader = hound::WavReader::open(&path).unwrap();
+    assert_eq!(reader.spec().sample_rate, SAMPLE_RATE);
+    assert_eq!(reader.spec().channels, 1);
+    reader
+        .samples::<i16>()
+        .map(|s| s.unwrap() as f32 / i16::MAX as f32)
+        .collect()
+}
+
+/// One dictation session through production transcribe/flush; finals only.
+fn session_finals(engine: &mut KyutaiEngine, pcm: &[f32]) -> Vec<TranscriptionSegment> {
+    let mut segments = Vec::new();
+    for chunk in pcm.chunks(MIMI_FRAME_SIZE) {
+        segments.extend(engine.transcribe(chunk, None).unwrap());
+    }
+    segments.extend(engine.flush().unwrap());
+    segments.retain(|segment| segment.is_final);
+    segments
+}
+
+#[test]
+#[ignore = "loads the real Kyutai model; one Metal job at a time"]
+fn back_to_back_sessions_match_a_fresh_engine() {
+    crate::debug::set_transcription_debug(false);
+    let pcm = session_reset_clip();
+    let mut engine = KyutaiEngine::new();
+    engine.load_model(&session_reset_model_dir()).unwrap();
+    let device = engine.model.as_ref().unwrap().device.clone();
+
+    // Session 1 runs on the freshly loaded engine: the reference.
+    let fresh = session_finals(&mut engine, &pcm);
+    assert!(!fresh.is_empty(), "fresh engine produced no final segment");
+    assert!(
+        fresh[0].start_time < 5.0,
+        "clip speech starts within seconds, first word at {:.2}",
+        fresh[0].start_time
+    );
+    let texts = |segments: &[TranscriptionSegment]| {
+        segments
+            .iter()
+            .map(|segment| segment.text.clone())
+            .collect::<Vec<_>>()
+    };
+
+    for session in 2..=3 {
+        let started = std::time::Instant::now();
+        engine.reset_state().unwrap();
+        let reset_ms = started.elapsed().as_millis();
+        assert!(
+            engine.model.as_ref().unwrap().device.same_device(&device),
+            "session {session}: a same-lane reset must not rebuild the Metal device"
+        );
+        let again = session_finals(&mut engine, &pcm);
+        assert_eq!(
+            texts(&again),
+            texts(&fresh),
+            "session {session}: text must match a fresh engine"
+        );
+        // The timeline restarts at zero: the first word lands where it did on
+        // the fresh engine, not after the previous session's audio.
+        assert!(
+            (again[0].start_time - fresh[0].start_time).abs() < 1e-6,
+            "session {session}: first word at {:.3}, fresh engine at {:.3}",
+            again[0].start_time,
+            fresh[0].start_time
+        );
+        for (index, (observed, reference)) in again.iter().zip(&fresh).enumerate() {
+            assert!(
+                (observed.start_time - reference.start_time).abs() < 1e-6
+                    && (observed.end_time - reference.end_time).abs() < 1e-6,
+                "session {session}: segment {index} {:?} timed {:.3}-{:.3}, fresh {:.3}-{:.3}",
+                observed.text,
+                observed.start_time,
+                observed.end_time,
+                reference.start_time,
+                reference.end_time
+            );
+        }
+        assert!(
+            again
+                .windows(2)
+                .all(|pair| pair[1].start_time >= pair[0].start_time),
+            "session {session}: start times must be monotone"
+        );
+        println!(
+            "session {session}: soft reset {reset_ms} ms, {} finals identical to fresh",
+            again.len()
+        );
+    }
+    engine.unload_model().unwrap();
+}
+
+#[test]
+#[ignore = "loads the real Kyutai model; one Metal job at a time"]
+fn reset_session_bookkeeping_restores_fresh_values_and_lane_changes_rebuild() {
+    crate::debug::set_transcription_debug(false);
+    let mut engine = KyutaiEngine::new();
+    engine.load_model(&session_reset_model_dir()).unwrap();
+    // Some real decoding so the moshi state and word buffers are dirty.
+    let pcm = session_reset_clip();
+    for chunk in pcm[..SAMPLE_RATE as usize * 8].chunks(MIMI_FRAME_SIZE) {
+        engine.transcribe(chunk, None).unwrap();
+    }
+
+    let assert_fresh = |model: &LoadedModel, lanes: usize| {
+        assert!(model.integrity.ensure_ready().is_ok());
+        assert!(model.completed_salvage.is_empty());
+        assert!(model.prefix_pending);
+        assert_eq!(model.time_offset_seconds, vec![0.0; lanes]);
+        assert_eq!(model.epoch_origin_seconds, vec![0.0; lanes]);
+        assert_eq!(model.frames_since_lane_reset, vec![0; lanes]);
+        assert_eq!(model.pause_refresh_consumed, vec![false; lanes]);
+        assert_eq!(model.last_emitted_start, vec![0.0; lanes]);
+        assert_eq!(model.frames_since_refresh, 0);
+        assert_eq!(model.refresh_count, 0);
+        assert_eq!(model.vad_pause_streak, vec![0; lanes]);
+        assert_eq!(model.pending_words.len(), lanes);
+        assert!(model.pending_words.iter().all(Option::is_none));
+        assert!(model.orphaned_words.is_empty());
+        assert_eq!(FRAME_COUNT.load(Ordering::Relaxed), 0);
+        assert!(DEBUG_SAMPLES.lock().unwrap().is_none());
+    };
+
+    {
+        let model = engine.model.as_mut().unwrap();
+        model.integrity = ModelIntegrity::Invalid;
+        model.completed_salvage.push(TranscriptionSegment {
+            text: "salvaged".into(),
+            start_time: 1.0,
+            end_time: 1.5,
+            is_final: true,
+            language: None,
+            confidence: None,
+            speaker: None,
+        });
+        model.prefix_pending = false;
+        model.time_offset_seconds = vec![0.4];
+        model.epoch_origin_seconds = vec![12.0];
+        model.frames_since_lane_reset = vec![90];
+        model.pause_refresh_consumed = vec![true];
+        model.last_emitted_start = vec![7.5];
+        model.frames_since_refresh = 100;
+        model.refresh_count = 3;
+        model.vad_pause_streak = vec![4];
+        let word = PendingWord {
+            text: "pending".into(),
+            start_time: 7.5,
+            language: None,
+            speaker: None,
+        };
+        model.pending_words = vec![Some(word.clone())];
+        model.orphaned_words = vec![word];
+        FRAME_COUNT.store(42, Ordering::Relaxed);
+        *DEBUG_SAMPLES.lock().unwrap() = Some(vec![0.1]);
+
+        model.reset_session_bookkeeping(1, MeetingTranscriptionLanguage::Auto);
+        assert_fresh(model, 1);
+    }
+
+    // Dictation -> diarized meeting: two lanes need a new State, hence a
+    // full rebuild on a new Metal device, with bookkeeping sized for both.
+    let device = engine.model.as_ref().unwrap().device.clone();
+    engine.set_diarization(true);
+    engine.reset_state().unwrap();
+    let model = engine.model.as_ref().unwrap();
+    assert_eq!(model.state.batch_size(), 2);
+    assert!(!model.device.same_device(&device));
+    assert_fresh(model, 2);
+
+    // Same lane count again: soft reset, device kept.
+    let device = model.device.clone();
+    engine.reset_state().unwrap();
+    let model = engine.model.as_ref().unwrap();
+    assert_eq!(model.state.batch_size(), 2);
+    assert!(model.device.same_device(&device));
+    assert_fresh(model, 2);
+
+    // An invalidated model never takes the soft path.
+    engine.model.as_mut().unwrap().integrity = ModelIntegrity::Invalid;
+    engine.reset_state().unwrap();
+    let model = engine.model.as_ref().unwrap();
+    assert!(!model.device.same_device(&device));
+    assert_fresh(model, 2);
+
+    // And back to dictation: rebuilt to a single lane.
+    let device = model.device.clone();
+    engine.set_diarization(false);
+    engine.reset_state().unwrap();
+    let model = engine.model.as_ref().unwrap();
+    assert_eq!(model.state.batch_size(), 1);
+    assert!(!model.device.same_device(&device));
+    assert_fresh(model, 1);
+    engine.unload_model().unwrap();
+}

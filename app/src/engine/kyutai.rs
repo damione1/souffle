@@ -307,6 +307,65 @@ struct LoadedModel {
     orphaned_words: Vec<PendingWord>,
 }
 
+impl LoadedModel {
+    /// Return every per-session counter, timeline and word buffer to the
+    /// values a freshly built model starts with, sized for `lanes` batch
+    /// lanes. Leaves the moshi `State` alone: callers pair this with
+    /// `State::reset()` (soft session reset) or a freshly built `State`.
+    ///
+    /// The destructuring below is deliberately exhaustive (no `..`): a new
+    /// `LoadedModel` field fails to compile here until someone decides
+    /// whether a session boundary must reset it.
+    fn reset_session_bookkeeping(
+        &mut self,
+        lanes: usize,
+        meeting_language_prior: MeetingTranscriptionLanguage,
+    ) {
+        let LoadedModel {
+            integrity,
+            completed_salvage,
+            state: _,
+            text_tokenizer: _,
+            config: _,
+            device: _,
+            model_path: _,
+            prefix_pending,
+            time_offset_seconds,
+            epoch_origin_seconds,
+            frames_since_lane_reset,
+            pause_refresh_consumed,
+            last_emitted_start,
+            frames_since_refresh,
+            refresh_count,
+            vad_pause_streak,
+            has_extra_heads: _,
+            language_tracker,
+            pending_words,
+            orphaned_words,
+        } = self;
+        *integrity = ModelIntegrity::Ready;
+        completed_salvage.clear();
+        *prefix_pending = true;
+        *time_offset_seconds = vec![0.0; lanes];
+        *epoch_origin_seconds = vec![0.0; lanes];
+        *frames_since_lane_reset = vec![0; lanes];
+        *pause_refresh_consumed = vec![false; lanes];
+        *last_emitted_start = vec![0.0; lanes];
+        *frames_since_refresh = 0;
+        *refresh_count = 0;
+        *vad_pause_streak = vec![0; lanes];
+        language_tracker.resize(lanes, meeting_language_prior);
+        language_tracker.reset_all();
+        *pending_words = vec![None; lanes];
+        orphaned_words.clear();
+
+        FRAME_COUNT.store(0, Ordering::Relaxed);
+        if let Ok(mut dbg) = DEBUG_SAMPLES.lock() {
+            *dbg = None;
+        }
+    }
+}
+
 #[derive(Default)]
 enum ModelIntegrity {
     #[default]
@@ -1218,17 +1277,41 @@ impl KyutaiEngine {
     }
 
     /// Reset the ASR state for a new recording session.
-    /// Full rebuild of Mimi + LM + State from disk because moshi's
-    /// State::reset() does NOT reset model_step_idx, causing RoPE
-    /// positional encoding to start at the wrong offset with empty KV caches.
     ///
-    /// Mid-session freezes should use soft `refresh_loaded` instead; this
-    /// full rebuild remains for session boundaries and diarize mode changes.
-    /// A genuinely new session should start its timeline at zero, so this
-    /// does not carry the old model's timeline over.
+    /// When the loaded state already has the lane count this session needs
+    /// (1 for dictation, 2 when diarizing) and is not invalidated, this is a
+    /// soft reset: moshi `State::reset()` empties the LM and Mimi KV caches
+    /// and every lane's `ItemState`, then the session bookkeeping goes back
+    /// to its fresh values. No Metal device, Mimi or LM weights are rebuilt.
+    /// RoPE positions come from the KV cache length, which that reset
+    /// empties; moshi's `model_step_idx` is not reset but only feeds the
+    /// `AsrMsg::Step` counter, never a position or a timestamp. This is the
+    /// same KV clear `refresh_loaded` already relies on mid-session.
+    ///
+    /// A lane-count change (dictation <-> diarized meeting), an invalidated
+    /// model, or a failed soft reset takes the full rebuild of Mimi + LM +
+    /// State from disk instead. Either way a genuinely new session starts
+    /// its timeline at zero; the old model's timeline is not carried over.
     pub fn reset_state(&mut self) -> Result<(), EngineError> {
+        let lanes = self.batch_size();
+        let meeting_language_prior = self.meeting_language_prior;
+        if let Some(model) = self.model.as_mut()
+            && model.state.batch_size() == lanes
+            && model.integrity.ensure_ready().is_ok()
+        {
+            match model.state.reset() {
+                Ok(()) => {
+                    model.reset_session_bookkeeping(lanes, meeting_language_prior);
+                    info!(lanes, "ASR state soft-reset for new session");
+                    return Ok(());
+                }
+                Err(e) => {
+                    warn!("Soft ASR state reset failed, rebuilding the model: {e}");
+                }
+            }
+        }
         self.rebuild_model(false)?;
-        info!("ASR state rebuilt for new session");
+        info!(lanes, "ASR state rebuilt for new session");
         Ok(())
     }
 
@@ -1245,8 +1328,9 @@ impl KyutaiEngine {
         Ok(())
     }
 
-    /// Shared teardown-and-rebuild for `reset_state` and
-    /// `reset_state_preserving_timeline`. Teardown and rebuild use separate
+    /// Shared teardown-and-rebuild for `reset_state_preserving_timeline` and
+    /// the `reset_state` fallback (lane-count change, invalidated model,
+    /// failed soft reset). Teardown and rebuild use separate
     /// autorelease pools so stale Metal objects are drained before a fresh
     /// device/model is created. Everything but the timeline (KV state,
     /// `frames_since_refresh`, `refresh_count`, `vad_pause_streak`,
@@ -1255,11 +1339,6 @@ impl KyutaiEngine {
     /// Stall recovery also carries the pause-episode markers so rebuilding
     /// during silence cannot re-arm a pause refresh without resumed speech.
     fn rebuild_model(&mut self, preserve_timeline: bool) -> Result<(), EngineError> {
-        FRAME_COUNT.store(0, Ordering::Relaxed);
-        if let Ok(mut dbg) = DEBUG_SAMPLES.lock() {
-            *dbg = None;
-        }
-
         {
             let loaded = self.model.as_ref().ok_or(EngineError::NotInitialized)?;
             Self::synchronize_device(&loaded.device, "Metal sync before reset")?;
@@ -1314,6 +1393,10 @@ impl KyutaiEngine {
                 meeting_language_prior,
             )
         })?;
+        // The rebuilt model is already fresh from `build_loaded_model`; this
+        // also clears the process-wide debug counters, so one function
+        // defines what a session boundary resets.
+        rebuilt.reset_session_bookkeeping(batch_size, meeting_language_prior);
 
         if let Some((epoch_origin_seconds, last_emitted_start)) = carried_timeline {
             // The rebuilt model's vectors are sized from `batch_size`, so a
