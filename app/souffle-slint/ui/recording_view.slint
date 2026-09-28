@@ -27,6 +27,8 @@ export component RecordingView inherits Rectangle {
     // recording started - anchors the free-running timer (AC6).
     in property <int> live-elapsed-offset-seconds: 0;
     in property <float> audio-level: 0.0;
+    // SOU-282: see main_window.slint; stops the waveform tick when hidden.
+    in property <bool> window-visible: true;
     in-out property <string> notes;
     // Live verdict on the meeting's system-audio leg (see LiveSystemAudio).
     in property <LiveSystemAudio> system-audio: LiveSystemAudio.pending;
@@ -137,8 +139,10 @@ export component RecordingView inherits Rectangle {
             // Waveform.svelte (variant "pill") parity: 48 bars of 3px with a
             // 2px gap, centred in the space between the badge and the clock,
             // always moving (two travelling sines) and pushed up by the live
-            // audio level. `animation-tick()` redraws every frame, which is
-            // fine here: this view only exists while recording.
+            // audio level. SOU-282: driven by a 33 ms Timer (~30 fps, the
+            // pill's rate) instead of `animation-tick()`, which redrew the
+            // whole window at the display rate (60-120 Hz) and kept waking
+            // it while occluded. The timer stops while the window is hidden.
             waveform := Rectangle {
                 horizontal-stretch: 1;
                 height: 38px;
@@ -148,11 +152,20 @@ export component RecordingView inherits Rectangle {
                 property <length> bar-width: 3px;
                 property <length> bar-gap: 2px;
                 property <length> bars-height: 32px;
-                property <float> t: animation-tick() / 1ms;
-                // The level arrives at ~15 Hz; ease between samples like the
-                // canvas did (bars += (target - bars) * 0.3 per frame).
-                property <float> level: root.audio-level;
-                animate level { duration: 120ms; easing: ease-out; }
+                // Milliseconds of animation time, advanced by the tick below.
+                property <float> t: 0;
+                // The level arrives at ~15 Hz; ease towards it in the tick like
+                // the canvas did (bars += (target - bars) * 0.3 per frame).
+                property <float> level: 0;
+
+                Timer {
+                    interval: 33ms;
+                    running: root.mode != RecordingMode.idle && root.window-visible;
+                    triggered => {
+                        waveform.level += (root.audio-level - waveform.level) * 0.3;
+                        waveform.t += 33;
+                    }
+                }
 
                 for i in self.bar-count: Rectangle {
                     // Same curve as the Svelte canvas: level + per-bar ripple,

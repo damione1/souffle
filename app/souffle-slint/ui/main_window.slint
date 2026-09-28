@@ -92,6 +92,10 @@ export component MainWindow inherits Window {
     in property <bool> live-transcript-empty: true;
     in property <int> live-elapsed-offset-seconds: 0;
     in property <float> audio-level: 0.0;
+    // SOU-282: false while the window is closed or fully covered (winit
+    // `Occluded`, close/show in main.rs). Gates the waveform tick so a hidden
+    // window is never redrawn.
+    in property <bool> window-visible: true;
     // Polled from souffle_lib's live system-audio snapshot while a meeting
     // records (main.rs). Not derived from Settings: the Settings flags say
     // what was *asked for*, not whether the tap actually came up.
@@ -677,6 +681,7 @@ export component MainWindow inherits Window {
         live-transcript-empty: root.live-transcript-empty;
         live-elapsed-offset-seconds: root.live-elapsed-offset-seconds;
         audio-level: root.audio-level;
+        window-visible: root.window-visible;
         notes <=> root.live-notes;
         system-audio: root.live-system-audio;
         auto-paste: root.settings-auto-paste;

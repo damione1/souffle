@@ -534,7 +534,7 @@ impl SettingsDraftController {
                 QuitCompletion::RetainAndShow => {
                     if let Some(window) = controller.window.upgrade() {
                         window.set_settings_open(true);
-                        let _ = window.show();
+                        let _ = crate::show_main_window(&window);
                     }
                 }
             }

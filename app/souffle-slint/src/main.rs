@@ -1987,7 +1987,11 @@ fn start_recording_timers(window: &MainWindow, autosave: LiveNotesAutosave) -> R
         slint::TimerMode::Repeated,
         Duration::from_millis(66),
         move || {
-            if let Some(window) = weak.upgrade() {
+            // SOU-282: a hidden window's tree is never dirtied at 15 Hz; the
+            // first tick after it shows again catches the level up.
+            if let Some(window) = weak.upgrade()
+                && window.get_window_visible()
+            {
                 window.set_audio_level(souffle_lib::pill::current_rms());
             }
         },
@@ -6618,7 +6622,7 @@ fn finish_startup_presentation(window: &MainWindow, gate: &StartupPresentationGa
         Some(AppView::Settings) => {}
         None => {}
     }
-    window.show().expect("failed to show Slint window");
+    show_main_window(window).expect("failed to show Slint window");
 }
 
 /// Handles a [`souffle_lib::native::bridge::NativeAction`] on the Slint main
@@ -6684,7 +6688,7 @@ fn dispatch_native_action(
             if !startup_gate.dispatch_or_defer(None) {
                 return;
             }
-            let _ = window.show();
+            let _ = show_main_window(window);
         }
         NativeAction::Quit => window.invoke_settings_quit_requested(),
         NativeAction::MicStallChanged => MIC_STALL_BANNER.with(|slot| {
@@ -6827,16 +6831,20 @@ fn main() {
 
     let live_state: LiveTranscriptState = Arc::new(Mutex::new(LiveTranscript::new()));
 
+    let window_activity = WindowActivity::new();
     let weak_close = window.as_weak();
     let io_close = settings_io.clone();
     window.window().on_close_requested(move || {
         if let Some(w) = weak_close.upgrade() {
             capture_and_submit_window_geometry(&w, &io_close);
         }
+        // SOU-282: hidden, so the waveform tick and the permission poll stop.
+        set_main_window_visible(false);
         slint::CloseRequestResponse::HideWindow
     });
-    let permissions = permissions_ui::PermissionController::new(&window);
-    permissions.wire_foreground_refresh(&window);
+    let permissions =
+        permissions_ui::PermissionController::new(&window, window_activity.visible_cell());
+    wire_window_activity(&window, &window_activity, &permissions);
 
     refresh_timeline(&window, &handle);
     let onboarding_state = wire_onboarding_callbacks(
@@ -6960,7 +6968,109 @@ fn main() {
     slint::run_event_loop_until_quit().expect("event loop failed");
 }
 
+type VisibilityListener = Box<dyn Fn(bool)>;
+
+/// SOU-282: whether the main window is on screen - not closed (hidden by
+/// `on_close_requested`) and not fully covered (winit `Occluded`). Drives the
+/// `window-visible` property (the waveform tick) and the permission poll.
+/// `visible` is the same cell the permission controller reads.
+struct WindowActivity {
+    visible: Rc<Cell<bool>>,
+    listeners: RefCell<Vec<VisibilityListener>>,
+}
+
+impl WindowActivity {
+    fn new() -> Rc<Self> {
+        Rc::new(Self {
+            visible: Rc::new(Cell::new(true)),
+            listeners: RefCell::new(Vec::new()),
+        })
+    }
+
+    fn visible_cell(&self) -> Rc<Cell<bool>> {
+        Rc::clone(&self.visible)
+    }
+
+    fn subscribe(&self, listener: impl Fn(bool) + 'static) {
+        self.listeners.borrow_mut().push(Box::new(listener));
+    }
+
+    /// Records a visibility change and notifies every listener; a repeat of
+    /// the current value (winit re-sending `Occluded`, a `show()` of a window
+    /// already shown) notifies nobody.
+    fn set_visible(&self, visible: bool) {
+        if self.visible.replace(visible) == visible {
+            return;
+        }
+        for listener in self.listeners.borrow().iter() {
+            listener(visible);
+        }
+    }
+}
+
+/// Wires the single winit window-event handler (Slint keeps only one):
+/// `Occluded` updates the visibility, `Focused(true)` refreshes the
+/// permission rows as soon as the user comes back from System Settings.
+fn wire_window_activity(
+    window: &MainWindow,
+    activity: &Rc<WindowActivity>,
+    permissions: &Rc<permissions_ui::PermissionController>,
+) {
+    use slint::winit_030::{EventResult, WinitWindowAccessor, winit::event::WindowEvent};
+
+    let weak = window.as_weak();
+    activity.subscribe(move |visible| {
+        if let Some(window) = weak.upgrade() {
+            window.set_window_visible(visible);
+        }
+    });
+    let weak_permissions = Rc::downgrade(permissions);
+    activity.subscribe(move |_| {
+        if let Some(permissions) = weak_permissions.upgrade() {
+            permissions.sync_activity();
+        }
+    });
+
+    let weak_activity = Rc::downgrade(activity);
+    let weak_permissions = Rc::downgrade(permissions);
+    window.window().on_winit_window_event(move |_, event| {
+        if let WindowEvent::Occluded(occluded) = event
+            && let Some(activity) = weak_activity.upgrade()
+        {
+            activity.set_visible(!occluded);
+        }
+        if matches!(event, WindowEvent::Focused(true))
+            && let Some(permissions) = weak_permissions.upgrade()
+        {
+            permissions.refresh();
+        }
+        EventResult::Propagate
+    });
+    WINDOW_ACTIVITY.with(|slot| *slot.borrow_mut() = Some(Rc::clone(activity)));
+}
+
+/// Shows the main window and marks it visible: winit does not reliably send
+/// `Occluded(false)` when a hidden window comes back. Every `window.show()`
+/// goes through here.
+pub(crate) fn show_main_window(window: &MainWindow) -> Result<(), slint::PlatformError> {
+    let shown = window.show();
+    if shown.is_ok() {
+        set_main_window_visible(true);
+    }
+    shown
+}
+
+fn set_main_window_visible(visible: bool) {
+    let activity = WINDOW_ACTIVITY.with(|slot| slot.borrow().clone());
+    if let Some(activity) = activity {
+        activity.set_visible(visible);
+    }
+}
+
 thread_local! {
+    // Set once in `main()` by `wire_window_activity`, before the first
+    // `show_main_window`.
+    static WINDOW_ACTIVITY: RefCell<Option<Rc<WindowActivity>>> = const { RefCell::new(None) };
     // The banner `dispatch_native_action` projects on each
     // `NativeAction::MicStallChanged`. Set once in `main()` before the event
     // loop runs, so no action is dispatched before it exists.
@@ -7057,8 +7167,8 @@ mod tests {
     };
     use super::{
         LiveNotesAutosave, LiveSystemAudio, LiveTranscript, LiveTranscriptState, RecordingMode,
-        ShortcutField, meeting_can_resume, recording_timers_armed, replay_pending_stop,
-        set_recording_idle, settle_recording_start, show_recording_starting,
+        ShortcutField, WindowActivity, meeting_can_resume, recording_timers_armed,
+        replay_pending_stop, set_recording_idle, settle_recording_start, show_recording_starting,
     };
     use crate::model_ui;
     use crate::settings_drafts::SettingsDraftController;
@@ -7248,6 +7358,28 @@ mod tests {
         assert_eq!(window.get_recording_mode(), RecordingMode::Idle);
         assert_eq!(window.get_audio_level(), 0.0);
         assert_eq!(window.get_live_system_audio(), LiveSystemAudio::Pending);
+    }
+
+    // SOU-282: listeners (the `window-visible` property, the permission
+    // poll) hear each real visibility change once; repeats of the current
+    // value - winit re-sending `Occluded`, a show of a shown window - are
+    // dropped. The shared cell follows every change.
+    #[test]
+    fn window_activity_notifies_only_real_visibility_changes() {
+        let activity = WindowActivity::new();
+        let cell = activity.visible_cell();
+        let seen = Rc::new(RefCell::new(Vec::new()));
+        let sink = Rc::clone(&seen);
+        activity.subscribe(move |visible| sink.borrow_mut().push(visible));
+
+        assert!(cell.get());
+        activity.set_visible(true);
+        activity.set_visible(false);
+        activity.set_visible(false);
+        assert!(!cell.get());
+        activity.set_visible(true);
+        assert!(cell.get());
+        assert_eq!(*seen.borrow(), vec![false, true]);
     }
 
     // A push-to-talk release (or tray Stop) during the start is replayed
