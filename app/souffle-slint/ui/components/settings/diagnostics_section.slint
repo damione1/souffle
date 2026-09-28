@@ -24,7 +24,7 @@ export component DiagnosticsSection inherits VerticalLayout {
     // TranscriptSection's spacers.
     in property <float> log-spacer-before: 0.0;
     in property <float> log-spacer-after: 0.0;
-    // Two-way bound up to MainWindow so main.rs can poll the real scroll
+    // Two-way bound up to MainWindow so main.rs can react to the real scroll
     // position and decide the next slice.
     in-out property <length> log-scroll-top: 0px;
     in property <bool> copying-diagnostics: false;

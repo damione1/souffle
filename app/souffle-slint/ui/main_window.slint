@@ -136,10 +136,18 @@ export component MainWindow inherits Window {
     // Flickable inside TranscriptSection (see that component's doc comment
     // on `scroll-top`) - internal plumbing only, not read directly by Rust.
     in-out property <length> meeting-detail-transcript-scroll-top: 0px;
-    // What `main.rs` actually polls on a timer to decide the next visible
-    // slice (AC15): the same value as above, converted to a plain float so
-    // Rust doesn't need Slint's internal `length`-wrapping type.
+    // The same value as above, converted to a plain float so Rust doesn't
+    // need Slint's internal `length`-wrapping type.
     out property <float> meeting-detail-transcript-scroll-top-px: root.meeting-detail-transcript-scroll-top / 1px;
+    // SOU-283: `main.rs` re-windows the transcript (AC15) only when the
+    // scroll position actually moves, instead of polling it on a timer.
+    // Change handlers run once per event-loop iteration, so a fast flick
+    // is naturally coalesced. Not fired on first mount or data replacement:
+    // Rust mounts the initial slice itself.
+    callback transcript-scroll-changed(float);
+    changed meeting-detail-transcript-scroll-top => {
+        root.transcript-scroll-changed(self.meeting-detail-transcript-scroll-top / 1px);
+    }
     // MeetingDetail's own single-page scroll (SOU-243) - no Rust polling
     // needed (unlike the transcript above, it isn't virtualized), just
     // reset on navigation like meeting-detail-transcript-scroll-top below.
@@ -183,9 +191,14 @@ export component MainWindow inherits Window {
     in property <float> settings-log-spacer-before: 0.0;
     in property <float> settings-log-spacer-after: 0.0;
     in-out property <length> settings-log-scroll-top: 0px;
-    // What `main.rs` polls to decide the next visible slice - same
-    // float-conversion trick as `meeting-detail-transcript-scroll-top-px`.
+    // Same float-conversion trick as `meeting-detail-transcript-scroll-top-px`.
     out property <float> settings-log-scroll-top-px: root.settings-log-scroll-top / 1px;
+    // SOU-283: `main.rs` re-windows the log slice on actual scroll changes,
+    // same as `transcript-scroll-changed`.
+    callback settings-log-scroll-changed(float);
+    changed settings-log-scroll-top => {
+        root.settings-log-scroll-changed(self.settings-log-scroll-top / 1px);
+    }
     in property <bool> settings-copying-diagnostics;
     in property <AppTheme> settings-theme;
     in property <AppLocale> settings-locale;
@@ -312,7 +325,8 @@ export component MainWindow inherits Window {
     in property <bool> settings-dictation-learn-from-edit;
     // Windowed slice of the dictionary, not the full list (SOU-229) - same
     // spacer/scroll-mirror plumbing as `meeting-detail-transcript-*` above:
-    // `lists_ui.rs` polls the `-px` mirror and pushes the next slice.
+    // `lists_ui.rs` reads the `-px` mirror on `settings-dictionary-scroll-changed`
+    // (SOU-283) and pushes the next slice.
     in property <[DictionaryRow]> settings-dictionary-entries;
     in property <int> settings-dictionary-count: 0;
     in property <float> settings-dictionary-content-height: 0.0;
@@ -320,6 +334,10 @@ export component MainWindow inherits Window {
     in property <float> settings-dictionary-spacer-after: 0.0;
     in-out property <length> settings-dictionary-scroll-top: 0px;
     out property <float> settings-dictionary-scroll-top-px: root.settings-dictionary-scroll-top / 1px;
+    callback settings-dictionary-scroll-changed(float);
+    changed settings-dictionary-scroll-top => {
+        root.settings-dictionary-scroll-changed(self.settings-dictionary-scroll-top / 1px);
+    }
     in property <string> settings-dictionary-add-error;
     in property <int> settings-dictionary-delete-error-id;
     in property <string> settings-dictionary-delete-error;
@@ -334,6 +352,10 @@ export component MainWindow inherits Window {
     in property <float> settings-snippets-spacer-after: 0.0;
     in-out property <length> settings-snippets-scroll-top: 0px;
     out property <float> settings-snippets-scroll-top-px: root.settings-snippets-scroll-top / 1px;
+    callback settings-snippets-scroll-changed(float);
+    changed settings-snippets-scroll-top => {
+        root.settings-snippets-scroll-changed(self.settings-snippets-scroll-top / 1px);
+    }
     in property <string> settings-snippet-add-error;
     in property <int> settings-snippet-delete-error-id;
     in property <string> settings-snippet-delete-error;
