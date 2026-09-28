@@ -711,6 +711,10 @@ fn release_meeting_audio_on_hide(window: &MainWindow) {
         None => return,
     };
     stop_audio_player(&parking.player, &parking.progress_timer);
+    // An abandoned load returns before clearing its own flag (the generation
+    // moved on): clear it here, or the re-show would read it as a newer load
+    // in flight and never restore, leaving the spinner stuck.
+    window.set_meeting_detail_audio_loading(false);
     if meeting_id.is_empty() {
         return;
     }
