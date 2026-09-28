@@ -516,7 +516,6 @@ export component MainWindow inherits Window {
     in property <string> onboarding-toggle-shortcut-label;
     in-out property <bool> onboarding-shortcut-recording: false;
     in-out property <string> onboarding-shortcut-error: "";
-    in property <bool> onboarding-auto-paste;
     in property <bool> onboarding-accessibility-granted;
     in property <bool> onboarding-busy;
     in property <bool> onboarding-continue-enabled: true;
@@ -533,7 +532,6 @@ export component MainWindow inherits Window {
     callback onboarding-shortcut-released(string, bool, bool, bool, bool);
     callback onboarding-shortcut-cleared();
     callback onboarding-shortcut-cancelled();
-    callback onboarding-auto-paste-changed(bool);
     callback onboarding-review-accessibility-requested();
     callback onboarding-back-requested();
     callback onboarding-continue-requested();
@@ -997,7 +995,6 @@ export component MainWindow inherits Window {
         toggle-shortcut-label: root.onboarding-toggle-shortcut-label;
         shortcut-recording: root.onboarding-shortcut-recording;
         shortcut-error: root.onboarding-shortcut-error;
-        auto-paste: root.onboarding-auto-paste;
         accessibility-granted: root.onboarding-accessibility-granted;
         busy: root.onboarding-busy;
         continue-enabled: root.onboarding-continue-enabled;
@@ -1013,7 +1010,6 @@ export component MainWindow inherits Window {
         shortcut-released(text, ctrl, shift, alt, meta) => { root.onboarding-shortcut-released(text, ctrl, shift, alt, meta); }
         shortcut-cleared => { root.onboarding-shortcut-cleared(); }
         shortcut-cancelled => { root.onboarding-shortcut-cancelled(); }
-        auto-paste-changed(value) => { root.onboarding-auto-paste-changed(value); }
         review-accessibility-requested => { root.onboarding-review-accessibility-requested(); }
         back-requested => { root.onboarding-back-requested(); }
         continue-requested => { root.onboarding-continue-requested(); }

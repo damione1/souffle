@@ -341,11 +341,6 @@ msgid ""
 "Cliquez sur le raccourci, puis appuyez sur les touches voulues. Échap annule."
 msgstr "Click the shortcut, then press the keys you want. Escape cancels."
 
-#: app/souffle-slint/ui/onboarding_view.slint:342
-msgctxt "OnboardingView"
-msgid "Coller automatiquement le texte transcrit"
-msgstr "Automatically paste transcribed text"
-
 #: app/souffle-slint/ui/onboarding_view.slint:347
 msgctxt "OnboardingView"
 msgid ""

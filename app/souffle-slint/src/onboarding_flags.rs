@@ -72,6 +72,22 @@ pub fn decide_autostart_on_finish(recovery_only: bool, current: bool) -> bool {
     if recovery_only { current } else { true }
 }
 
+/// Auto-paste is what Soufflé is for, so a first setup turns it on, but only
+/// when Accessibility is granted: without it the paste cannot happen and the
+/// text goes to the history instead. The wizard no longer asks. A recovery
+/// pass (model step only) keeps what the user chose in Settings.
+pub fn decide_auto_paste_on_finish(
+    recovery_only: bool,
+    current: bool,
+    accessibility_granted: bool,
+) -> bool {
+    if recovery_only {
+        current
+    } else {
+        accessibility_granted
+    }
+}
+
 /// Which wizard pages this install still needs, in order. Never empty: a
 /// fully set-up install re-entering the wizard (model recovery) gets the
 /// model step alone.
@@ -185,5 +201,18 @@ mod tests {
     fn autostart_on_finish_keeps_current_value_during_recovery() {
         assert!(!decide_autostart_on_finish(true, false));
         assert!(decide_autostart_on_finish(true, true));
+    }
+
+    #[test]
+    fn auto_paste_on_finish_follows_accessibility_on_first_setup() {
+        assert!(decide_auto_paste_on_finish(false, false, true));
+        assert!(!decide_auto_paste_on_finish(false, false, false));
+        assert!(!decide_auto_paste_on_finish(false, true, false));
+    }
+
+    #[test]
+    fn auto_paste_on_finish_keeps_current_value_during_recovery() {
+        assert!(!decide_auto_paste_on_finish(true, false, true));
+        assert!(decide_auto_paste_on_finish(true, true, false));
     }
 }
