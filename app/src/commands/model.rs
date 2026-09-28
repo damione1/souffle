@@ -110,6 +110,16 @@ pub fn get_download_progress() -> Option<models::DownloadProgress> {
         .and_then(|guard| guard.clone())
 }
 
+/// Whether a progress report from `models::download_model` reaches the
+/// channel. Its per-file `Complete` for the last file already covers every
+/// file, yet it is sent before this command applies `DownloadComplete`: a UI
+/// treating it as "done" would start loading against a machine still in
+/// Downloading, then ignore the terminal event sent right after (SOU-297).
+/// The only globally complete report a channel sees is that terminal one.
+fn relay_inner_progress(progress: &models::DownloadProgress) -> bool {
+    !progress.is_globally_complete()
+}
+
 /// Download the selected transcription model.
 /// Progress is streamed back via the Channel API.
 pub fn download_model(
@@ -177,6 +187,9 @@ pub fn download_model(
         .name("model-download".into())
         .spawn(move || {
             let result = models::download_model(&profile, |progress| {
+                if !relay_inner_progress(&progress) {
+                    return;
+                }
                 record_download_progress(Some(&progress));
                 channel_clone.send(progress);
             });
@@ -393,6 +406,38 @@ mod tests {
             catalog.selected_backend_id,
             settings.transcription_backend_id
         );
+    }
+
+    fn progress(completed_files: u32, status: models::DownloadStatus) -> models::DownloadProgress {
+        models::DownloadProgress {
+            file: "tokenizer_en_fr_audio_8000.model".into(),
+            downloaded_bytes: 0,
+            total_bytes: None,
+            completed_files,
+            total_files: 4,
+            status,
+        }
+    }
+
+    // SOU-297: the last file's own `Complete` (4/4) reads as "download done"
+    // while the machine is still Downloading. Relaying it let the onboarding
+    // wizard consume its one load attempt against Downloading, then ignore
+    // the real terminal event.
+    #[test]
+    fn last_file_complete_is_not_relayed_before_download_complete() {
+        assert!(!relay_inner_progress(&progress(
+            4,
+            models::DownloadStatus::Complete
+        )));
+    }
+
+    #[test]
+    fn intermediate_progress_is_still_relayed() {
+        use models::DownloadStatus::{Complete, Downloading, Error, Starting};
+        assert!(relay_inner_progress(&progress(3, Complete)));
+        assert!(relay_inner_progress(&progress(3, Downloading)));
+        assert!(relay_inner_progress(&progress(1, Starting)));
+        assert!(relay_inner_progress(&progress(3, Error("x".into()))));
     }
 
     #[test]

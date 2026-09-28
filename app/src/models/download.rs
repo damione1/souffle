@@ -21,6 +21,16 @@ pub struct DownloadProgress {
     pub status: DownloadStatus,
 }
 
+impl DownloadProgress {
+    /// `Complete` covering every file: what a UI reads as "the download is
+    /// done, start loading".
+    pub fn is_globally_complete(&self) -> bool {
+        matches!(self.status, DownloadStatus::Complete)
+            && self.total_files > 0
+            && self.completed_files >= self.total_files
+    }
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DownloadStatus {

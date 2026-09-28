@@ -10,7 +10,7 @@ use souffle_lib::engine::{
     TranscriptionCatalog, TranscriptionModelDescriptor, TranscriptionProfileSelection,
     TranscriptionRuntimeBackendDescriptor, TranscriptionRuntimePhase,
 };
-use souffle_lib::models::{DownloadProgress, DownloadStatus};
+use souffle_lib::models::DownloadProgress;
 
 pub struct FlatModelOption {
     pub engine_id: String,
@@ -112,9 +112,7 @@ pub fn selected_profile(catalog: &TranscriptionCatalog) -> TranscriptionProfileS
 }
 
 pub fn download_is_globally_complete(progress: &DownloadProgress) -> bool {
-    matches!(progress.status, DownloadStatus::Complete)
-        && progress.total_files > 0
-        && progress.completed_files >= progress.total_files
+    progress.is_globally_complete()
 }
 
 impl From<TranscriptionRuntimePhase> for crate::TranscriptionPhase {
@@ -221,6 +219,7 @@ pub fn populate_options(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use souffle_lib::models::DownloadStatus;
 
     #[test]
     fn unload_timeout_label_round_trips() {
