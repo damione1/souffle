@@ -1,0 +1,26 @@
+import { SettingsField } from "settings_field.slint";
+import { SettingsGroup } from "settings_group.slint";
+import { ThemedButton } from "../themed_button.slint";
+
+// Port of PermissionsSettingsSection.svelte.
+export component PermissionsSection inherits VerticalLayout {
+    callback review-requested();
+
+    spacing: 22px;
+    alignment: start;
+
+    SettingsGroup {
+        title: @tr("PERMISSIONS");
+
+        SettingsField {
+            show-divider: false;
+            label: @tr("Permissions");
+            description: @tr("Revérifier les permissions macOS si le collage ou l'enregistrement cesse de fonctionner.");
+
+            ThemedButton {
+                text: @tr("Vérifier les permissions");
+                clicked => { root.review-requested(); }
+            }
+        }
+    }
+}

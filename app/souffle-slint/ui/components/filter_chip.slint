@@ -1,0 +1,67 @@
+import { Theme } from "../theme.slint";
+
+// A single-select filter chip - port of `.btn.btn-sm.btn-ghost` (default) /
+// `.btn-active` (selected) from `app.css`, the same recipe `ThemedButton`
+// uses for its `ghost`/`active` kinds, just at `.btn-sm` size (this one
+// doesn't reuse `ThemedButton` directly since it needs the smaller padding/
+// font and never has a `primary`/plain-`default` kind).
+//
+// Not `std-widgets`' `Button { checkable: true }`: a checkable Button
+// toggles its own internal checked state on click in addition to whatever
+// `checked:` binding it's given, so three of them driven by the same
+// "kind-filter" source of truth could all end up showing checked at once -
+// a checkbox-group look for what's meant to be a radio-button group (found
+// by Damien manually exercising the app). This component has no internal
+// toggle state at all: `selected` is purely a one-way reflection of the
+// caller's filter value.
+export component FilterChip inherits Rectangle {
+    in property <string> text;
+    in property <bool> selected: false;
+
+    callback clicked();
+
+    height: 26px;
+    border-radius: 4px;
+    border-width: key-focus.has-focus ? 2px : 0px;
+    border-color: Theme.accent;
+    background: root.selected ? Theme.text-primary : (area.pressed ? Theme.surface-3 : area.has-hover ? Theme.surface-2 : transparent);
+
+    accessible-role: button;
+    accessible-label: root.text;
+    accessible-checkable: true;
+    accessible-checked: root.selected;
+    accessible-action-default => { root.clicked(); }
+
+    forward-focus: key-focus;
+
+    key-focus := FocusScope {
+        key-pressed(event) => {
+            if event.text == Key.Return || event.text == Key.Space {
+                root.clicked();
+                return accept;
+            }
+            return reject;
+        }
+    }
+
+    area := TouchArea {
+        clicked => {
+            key-focus.focus();
+            root.clicked();
+        }
+    }
+
+    HorizontalLayout {
+        padding-left: 8px;
+        padding-right: 8px;
+        alignment: center;
+
+        Text {
+            text: root.text;
+            font-family: "Archivo Medium";
+            font-size: 12px;
+            color: root.selected ? Theme.canvas : (area.has-hover ? Theme.text-primary : Theme.text-muted);
+            vertical-alignment: center;
+        }
+    }
+}

@@ -1,0 +1,296 @@
+import { SettingsField } from "settings_field.slint";
+import { SettingsGroup } from "settings_group.slint";
+import { Theme } from "../../theme.slint";
+import { ThemedButton } from "../themed_button.slint";
+import { ThemedComboBox } from "../themed_combo.slint";
+import { AudioRetention } from "../../types.slint";
+
+component CodeBlock inherits Rectangle {
+    in property <string> body;
+
+    border-width: 1px;
+    border-color: Theme.border-soft;
+    border-radius: 6px;
+    background: Theme.input;
+    clip: true;
+    vertical-stretch: 0;
+
+    height: 88px;
+
+    Flickable {
+        x: 10px;
+        y: 10px;
+        width: parent.width - 20px;
+        height: parent.height - 20px;
+        content-width: self.width;
+
+        TextInput {
+            width: parent.width;
+            height: max(parent.height, self.preferred-height);
+            text: root.body;
+            font-family: "JetBrains Mono";
+            font-size: 11px;
+            color: Theme.text-muted;
+            wrap: word-wrap;
+            single-line: false;
+            read-only: true;
+            selection-background-color: Theme.accent.with-alpha(0.28);
+            accessible-label: @tr("Bloc de code sélectionnable");
+        }
+    }
+}
+
+// Port of DataSettingsSection.svelte. "Export archive" opens a native
+// macOS folder picker (osascript `choose folder`) rather than the
+// `@tauri-apps/plugin-dialog` the Svelte version uses - the ticket's own
+// out-of-scope note defers the native-dialog abstraction to SOU-191 and
+// allows consuming existing commands meanwhile. `export_archive` itself
+// runs the real export on a background thread and returns immediately;
+// this shell does not listen for the `ArchiveExportProgress` Tauri event,
+// so there is no live progress bar or completion toast here (documented
+// gap, not a placeholder - the export itself is real).
+export component DataSection inherits VerticalLayout {
+    in property <string> stats-line;
+    in property <string> recordings-line;
+    in property <AudioRetention> retention;
+    in property <bool> exporting;
+    in property <string> export-status;
+    in property <bool> export-status-is-error;
+    in property <string> mcp-binary-path;
+    in property <bool> mcp-exists;
+    in property <string> mcp-claude-desktop-snippet;
+    in property <string> mcp-claude-code-command;
+    in property <bool> testing-mcp;
+    in property <string> mcp-test-status;
+
+    callback retention-changed(AudioRetention);
+    callback export-requested();
+    callback reveal-requested();
+    callback copy-desktop-snippet-requested();
+    callback copy-code-command-requested();
+    callback test-mcp-requested();
+
+    pure function retention-label(value: AudioRetention) -> string {
+        if value == AudioRetention.keep-7d { return @tr("Conserver 7 jours"); }
+        if value == AudioRetention.keep-30d { return @tr("Conserver 30 jours"); }
+        if value == AudioRetention.keep-forever { return @tr("Conserver indéfiniment"); }
+        if value == AudioRetention.off { return @tr("Ne pas conserver"); }
+        return "";
+    }
+
+    spacing: 22px;
+    alignment: start;
+
+    SettingsGroup {
+        title: @tr("DONNÉES");
+
+    if root.stats-line != "": VerticalLayout {
+        padding-left: Theme.settings-inset;
+        padding-right: Theme.settings-inset;
+        padding-top: 12px;
+        Text {
+            text: root.stats-line;
+            font-size: 12px;
+            color: Theme.text-muted;
+            wrap: word-wrap;
+        }
+    }
+    if root.recordings-line != "": VerticalLayout {
+        padding-left: Theme.settings-inset;
+        padding-right: Theme.settings-inset;
+        padding-bottom: 4px;
+        Text {
+            text: root.recordings-line;
+            font-size: 12px;
+            color: Theme.text-muted;
+            wrap: word-wrap;
+        }
+    }
+
+    SettingsField {
+        show-divider: root.stats-line != "" || root.recordings-line != "";
+        label: @tr("Conservation audio des réunions");
+        description: @tr("Durée de conservation des enregistrements audio bruts.");
+
+        ThemedComboBox {
+            control-label: @tr("Conservation audio des réunions");
+            model: [
+                root.retention-label(AudioRetention.off),
+                root.retention-label(AudioRetention.keep-7d),
+                root.retention-label(AudioRetention.keep-30d),
+                root.retention-label(AudioRetention.keep-forever),
+            ];
+            current-value: root.retention-label(root.retention);
+            selected(value) => {
+                if value == root.retention-label(AudioRetention.keep-7d) { root.retention-changed(AudioRetention.keep-7d); }
+                if value == root.retention-label(AudioRetention.keep-30d) { root.retention-changed(AudioRetention.keep-30d); }
+                if value == root.retention-label(AudioRetention.keep-forever) { root.retention-changed(AudioRetention.keep-forever); }
+                if value == root.retention-label(AudioRetention.off) { root.retention-changed(AudioRetention.off); }
+            }
+        }
+    }
+
+    SettingsField {
+        label: @tr("Exporter les données");
+        description: @tr("Exporter réunions, dictées et journal dans un dossier.");
+
+        ThemedButton {
+            text: root.exporting ? @tr("Export en cours…") : @tr("Exporter…");
+            enabled: !root.exporting;
+            clicked => { root.export-requested(); }
+        }
+    }
+
+    SettingsField {
+        label: @tr("Afficher le dossier de données");
+
+        ThemedButton {
+            text: @tr("Afficher dans le Finder");
+            clicked => { root.reveal-requested(); }
+        }
+    }
+
+    if root.export-status != "": VerticalLayout {
+        padding-left: Theme.settings-inset;
+        padding-right: Theme.settings-inset;
+        padding-bottom: 12px;
+        Text {
+            text: root.export-status-is-error ? root.export-status : @tr("Export terminé vers {}" , root.export-status);
+            color: root.export-status-is-error ? Theme.danger : Theme.text-muted;
+            font-size: 11.5px;
+            wrap: word-wrap;
+        }
+    }
+    }
+
+    SettingsGroup {
+        title: @tr("SERVEUR MCP");
+
+        VerticalLayout {
+            padding-left: Theme.settings-inset;
+            padding-right: Theme.settings-inset;
+            padding-top: 15px;
+            padding-bottom: 8px;
+            Text {
+                text: @tr("Permet à Claude Desktop, Claude Code ou un autre client MCP de lire vos transcriptions et résumés. Tout reste sur ce Mac.");
+                font-size: 12px;
+                color: Theme.text-muted;
+                wrap: word-wrap;
+            }
+        }
+
+        VerticalLayout {
+            padding-left: Theme.settings-inset;
+            padding-right: Theme.settings-inset;
+            padding-top: 8px;
+            padding-bottom: 12px;
+            spacing: 8px;
+
+            Text {
+                text: @tr("Binaire sidecar");
+                font-size: 13.5px;
+                color: Theme.text-secondary;
+            }
+            CodeBlock {
+                body: root.mcp-binary-path;
+            }
+            if !root.mcp-exists: Text {
+                text: @tr("Binaire introuvable. Compilez souffle-mcp pour le développement local.");
+                color: Theme.warning;
+                font-size: 12px;
+                wrap: word-wrap;
+            }
+        }
+
+        Rectangle {
+            height: 1px;
+            background: Theme.border-soft;
+            vertical-stretch: 0;
+        }
+
+        VerticalLayout {
+            padding-left: Theme.settings-inset;
+            padding-right: Theme.settings-inset;
+            padding-top: 15px;
+            padding-bottom: 12px;
+            spacing: 8px;
+
+            HorizontalLayout {
+                spacing: 16px;
+                VerticalLayout {
+                    spacing: 2px;
+                    horizontal-stretch: 1;
+                    Text {
+                        text: @tr("Config Claude Desktop");
+                        font-size: 13.5px;
+                        color: Theme.text-secondary;
+                    }
+                    Text {
+                        text: @tr("À coller dans claude_desktop_config.json sous mcpServers.");
+                        font-size: 12px;
+                        color: Theme.text-muted;
+                        wrap: word-wrap;
+                    }
+                }
+                ThemedButton {
+                    text: @tr("Copier");
+                    clicked => { root.copy-desktop-snippet-requested(); }
+                }
+            }
+            CodeBlock {
+                body: root.mcp-claude-desktop-snippet;
+            }
+        }
+
+        Rectangle {
+            height: 1px;
+            background: Theme.border-soft;
+            vertical-stretch: 0;
+        }
+
+        VerticalLayout {
+            padding-left: Theme.settings-inset;
+            padding-right: Theme.settings-inset;
+            padding-top: 15px;
+            padding-bottom: 12px;
+            spacing: 8px;
+
+            HorizontalLayout {
+                spacing: 16px;
+                VerticalLayout {
+                    spacing: 2px;
+                    horizontal-stretch: 1;
+                    Text {
+                        text: @tr("Claude Code");
+                        font-size: 13.5px;
+                        color: Theme.text-secondary;
+                    }
+                    Text {
+                        text: @tr("À exécuter une fois dans un terminal pour enregistrer le serveur.");
+                        font-size: 12px;
+                        color: Theme.text-muted;
+                        wrap: word-wrap;
+                    }
+                }
+                ThemedButton {
+                    text: @tr("Copier");
+                    clicked => { root.copy-code-command-requested(); }
+                }
+            }
+            CodeBlock {
+                body: root.mcp-claude-code-command;
+            }
+        }
+
+        SettingsField {
+            label: @tr("Tester la connexion");
+            description: root.mcp-test-status;
+
+            ThemedButton {
+                text: root.testing-mcp ? @tr("Test en cours…") : @tr("Tester la connexion");
+                enabled: root.mcp-exists && !root.testing-mcp;
+                clicked => { root.test-mcp-requested(); }
+            }
+        }
+    }
+}

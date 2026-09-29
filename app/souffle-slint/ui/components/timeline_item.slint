@@ -1,0 +1,299 @@
+import { TimelineKind } from "../types.slint";
+import { Theme } from "../theme.slint";
+import { LucideIcon, IconSet } from "lucide_icon.slint";
+
+// Port of features/timeline/components/TimelineItem.svelte. Struct name
+// avoids "TimelineItem" itself: Slint generates a Rust type of the same
+// name, and that name is also the Svelte component's - kept distinct to
+// avoid confusing the two in Rust.
+export struct TimelineEntry {
+    kind: TimelineKind,
+    id: string,
+    title: string,
+    time-label: string,
+    duration-label: string,
+    has-summary: bool,
+    summary-is-stale: bool,
+}
+
+export component TimelineItemRow inherits Rectangle {
+    in property <TimelineEntry> entry;
+    in property <bool> is-live: false;
+    in property <bool> expanded: false;
+
+    // Driven by the parent list (`TimelineSection`), not owned locally: a
+    // plain `TouchArea` click doesn't grab keyboard focus in Slint, so a
+    // local `focus-lost`-based reset never fired when clicking a *different*
+    // row - only a single shared "which row is confirming" id one level up
+    // can be cleared by any other row's click. See `TimelineSection`'s
+    // `confirming-delete-id`.
+    in property <bool> confirming-delete: false;
+    callback opened();
+    callback removed();
+    callback copy-requested();
+    callback confirm-delete-requested();
+
+    property <bool> copied: false;
+    property <bool> is-dictation: root.entry.kind == TimelineKind.dictation;
+    // Confirm stays visible after the first click even if hover is lost
+    // (swapping the trash icon for the "Confirmer" label drops `has-hover`
+    // for a frame). Copy/delete TouchAreas are always present (copy is
+    // zero-width on meetings) so these `.has-hover` references are valid
+    // on every row.
+    property <bool> actions-visible: root.confirming-delete || row-area.has-hover || copy-area.has-hover || delete-area.has-hover;
+
+    Timer {
+        interval: 1500ms;
+        running: root.copied;
+        triggered => { root.copied = false; }
+    }
+
+    VerticalLayout {
+        alignment: start;
+
+        Rectangle {
+            height: 1px;
+            background: Theme.rule;
+        }
+
+        content := Rectangle {
+        // Reuses `actions-visible`: copy-area/delete-area sit on top of
+        // row-area, so hovering the action buttons alone does not also
+        // report `row-area.has-hover`, and the row highlight must track
+        // the same hover surface the action buttons use.
+        background: root.actions-visible ? Theme.surface-2 : transparent;
+
+        HorizontalLayout {
+            padding-top: 12px;
+            padding-bottom: 12px;
+            padding-left: 16px;
+            padding-right: 16px;
+            spacing: 8px;
+
+            row-area := TouchArea {
+                mouse-cursor: pointer;
+                accessible-role: button;
+                accessible-label: root.entry.title;
+                accessible-action-default => {
+                    root.opened();
+                }
+                clicked => {
+                    root.opened();
+                }
+
+                HorizontalLayout {
+                    spacing: 16px;
+
+                    VerticalLayout {
+                        alignment: start;
+                        vertical-stretch: 0;
+                        width: 16px;
+
+                        LucideIcon {
+                            icon: root.entry.kind == TimelineKind.meeting ? IconSet.Users : IconSet.FileText;
+                            icon-color: root.entry.kind == TimelineKind.meeting ? Theme.accent : Theme.text-muted;
+                            size: 16px;
+                        }
+                    }
+
+                    // Collapsed: one line + ellipsis if it does not fit.
+                    // Expanded: same Text unwraps in place, so the hidden
+                    // remainder appears under the first line instead of a
+                    // second copy of the whole dictation.
+                    Text {
+                        text: root.entry.title;
+                        wrap: root.is-dictation && root.expanded ? word-wrap : no-wrap;
+                        overflow: root.is-dictation && root.expanded ? clip : elide;
+                        horizontal-stretch: 1;
+                        // A collapsed title shares the action row's visual
+                        // axis. Expanded dictations still grow downward.
+                        vertical-alignment: root.is-dictation && root.expanded ? top : center;
+                        font-size: 13.5px;
+                        color: Theme.text-secondary;
+                    }
+
+                    VerticalLayout {
+                        alignment: start;
+                        vertical-stretch: 0;
+                        // Trailing column (duration, time, copy, delete/confirm):
+                        // only its children have widths, not the column itself,
+                        // so without this it keeps the default non-zero stretch
+                        // and competes with the title `Text` for leftover space.
+                        // Pin it to exactly its content width, so the title is
+                        // the only thing that grows or elides, and the
+                        // "Confirmer" pill widening the delete slot can only take
+                        // space from the title, never from the time (SOU-215).
+                        horizontal-stretch: 0;
+
+                        HorizontalLayout {
+                            spacing: 10px;
+                            alignment: end;
+
+                            if root.entry.has-summary: LucideIcon {
+                                icon: IconSet.Sparkles;
+                                icon-color: root.entry.summary-is-stale ? Theme.warning : Theme.accent;
+                                filled: true;
+                                size: 14px;
+                                y: (parent.height - self.height) / 2;
+                            }
+
+                            Text {
+                                text: root.entry.duration-label;
+                                width: Theme.row-duration-width;
+                                horizontal-alignment: right;
+                                color: Theme.text-muted;
+                                font-family: "JetBrains Mono";
+                                font-size: 11.5px;
+                                vertical-alignment: center;
+                            }
+
+                            Text {
+                                text: root.entry.time-label;
+                                width: Theme.row-timeline-time-width;
+                                horizontal-alignment: right;
+                                color: Theme.text-muted;
+                                font-family: "JetBrains Mono";
+                                font-size: 11.5px;
+                                vertical-alignment: center;
+                            }
+
+                            // Copy (dictation only): to the right of the
+                            // time, reserved space always allocated so
+                            // nothing else in the row shifts - only its own
+                            // opacity fades in/out with hover. Per Damien's
+                            // 2026-09-23 feedback on SOU-241 (icons floating
+                            // mid-row, between title and time, read as
+                            // misplaced) and the Tauri reference: hover-only,
+                            // right of the time, no overlap on confirm.
+                            copy-area := TouchArea {
+                                // Sized to content (icon + "Copier"/"Copy"),
+                                // not a wide arbitrary box - the previous
+                                // 88px left a dead gap before delete-area,
+                                // reading as a floating, disconnected button
+                                // instead of part of the same action cluster
+                                // (Damien, 2026-09-23).
+                                width: root.is-dictation ? 72px : 0px;
+                                height: 28px;
+                                mouse-cursor: pointer;
+                                accessible-role: button;
+                                accessible-label: root.copied ? @tr("Copié !") : @tr("Copier");
+                                accessible-action-default => {
+                                    root.copy-requested();
+                                    root.copied = true;
+                                }
+                                clicked => {
+                                    root.copy-requested();
+                                    root.copied = true;
+                                }
+
+                                Rectangle {
+                                    // SOU-241: `clip: true` is load-bearing,
+                                    // not decorative - copy-area is 0px wide
+                                    // for meetings (no copy action there),
+                                    // but its icon/text children are
+                                    // positioned by absolute x, which Slint
+                                    // does not clip to the parent's bounds by
+                                    // default. Without this, the "Copier"
+                                    // icon+label bled into whatever sat to
+                                    // its right (the delete/confirm slot),
+                                    // producing garbled overlapping text on
+                                    // meeting rows.
+                                    clip: true;
+                                    border-radius: 4px;
+                                    background: copy-area.has-hover ? Theme.surface-2 : transparent;
+                                    opacity: root.actions-visible ? 1.0 : 0.0;
+                                    animate opacity { duration: 100ms; }
+
+                                    LucideIcon {
+                                        icon: IconSet.Copy;
+                                        icon-color: copy-area.has-hover ? Theme.text-primary : Theme.text-muted;
+                                        size: 14px;
+                                        x: 8px;
+                                        y: (parent.height - self.height) / 2;
+                                    }
+                                    Text {
+                                        text: root.copied ? @tr("Copié !") : @tr("Copier");
+                                        font-size: 12.5px;
+                                        color: copy-area.has-hover ? Theme.text-primary : Theme.text-muted;
+                                        x: 25px;
+                                        height: 100%;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                            }
+
+                            // Single trailing slot, reused for chevron (idle,
+                            // meetings), trash (hover, any deletable row) and
+                            // the "Confirmer" pill (after a delete click) -
+                            // one reserved area that only ever grows for the
+                            // widest of the three, never stacks two of them.
+                            // `confirming-delete` is an input driven by
+                            // `TimelineSection.confirming-delete-id`, not
+                            // owned here: this row only asks to enter
+                            // confirm mode via `confirm-delete-requested()`,
+                            // so any other row's click (or this row's own
+                            // `opened`/`copy-requested`) can clear it from
+                            // one shared place - per Damien's 2026-09-23
+                            // request, confirming delete must not linger
+                            // once you've clicked away from it.
+                            delete-area := TouchArea {
+                                width: root.is-live ? 0px : (root.confirming-delete ? 72px : Theme.row-action-width);
+                                height: 28px;
+                                mouse-cursor: pointer;
+                                accessible-role: button;
+                                accessible-label: root.confirming-delete ? @tr("Confirmer la suppression") : @tr("Supprimer");
+                                accessible-action-default => {
+                                    if root.confirming-delete {
+                                        root.removed();
+                                    } else {
+                                        root.confirm-delete-requested();
+                                    }
+                                }
+                                clicked => {
+                                    if root.confirming-delete {
+                                        root.removed();
+                                    } else {
+                                        root.confirm-delete-requested();
+                                    }
+                                }
+
+                                Rectangle {
+                                    border-radius: 4px;
+                                    background: root.confirming-delete
+                                        ? (delete-area.has-hover ? Theme.danger.with-alpha(0.15) : transparent)
+                                        : (delete-area.has-hover ? Theme.surface-3 : transparent);
+
+                                    if root.confirming-delete: Text {
+                                        text: @tr("Confirmer");
+                                        color: Theme.danger-soft;
+                                        font-family: "Archivo SemiBold";
+                                        font-size: 12px;
+                                        width: 100%;
+                                        height: 100%;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
+                                    if !root.confirming-delete && root.actions-visible: LucideIcon {
+                                        icon: IconSet.Trash2;
+                                        icon-color: delete-area.has-hover ? Theme.danger-soft : Theme.text-muted;
+                                        size: 14px;
+                                        x: (parent.width - self.width) / 2;
+                                        y: (parent.height - self.height) / 2;
+                                    }
+                                    if !root.confirming-delete && !root.actions-visible && root.entry.kind == TimelineKind.meeting: LucideIcon {
+                                        icon: IconSet.ChevronRight;
+                                        icon-color: Theme.text-muted;
+                                        size: 15px;
+                                        x: (parent.width - self.width) / 2;
+                                        y: (parent.height - self.height) / 2;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        }
+    }
+}

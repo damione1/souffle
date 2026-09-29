@@ -1,0 +1,146 @@
+import { Theme } from "../theme.slint";
+
+// Port of the volume slider in FeedbackSoundsSettingsSection. Stock Slider
+// uses a Fluent blue track that ignores Theme.
+export component ThemedSlider inherits Rectangle {
+    in property <int> value;
+    in property <int> minimum: 0;
+    in property <int> maximum: 100;
+    in property <int> step: 1;
+    in property <bool> enabled: true;
+    in property <string> control-label: @tr("Valeur");
+
+    callback changed(int);
+
+    width: 140px;
+    height: 18px;
+    horizontal-stretch: 0;
+    vertical-stretch: 0;
+    opacity: root.enabled ? 1.0 : 0.5;
+    border-width: key-focus.has-focus ? 2px : 0px;
+    border-color: Theme.accent;
+    border-radius: 4px;
+
+    accessible-role: slider;
+    accessible-label: root.control-label;
+    accessible-enabled: root.enabled;
+    accessible-read-only: !root.enabled;
+    accessible-value: root.value;
+    accessible-value-minimum: root.minimum;
+    accessible-value-maximum: root.maximum;
+    accessible-value-step: root.step;
+    accessible-action-set-value(v) => {
+        if root.enabled && v.is-float() {
+            root.publish(round(v.to-float()));
+        }
+    }
+    accessible-action-increment => { root.increment(); }
+    accessible-action-decrement => { root.decrement(); }
+
+    forward-focus: key-focus;
+
+    key-focus := FocusScope {
+        key-pressed(event) => {
+            if !root.enabled {
+                return reject;
+            }
+            if event.text == Key.LeftArrow || event.text == Key.DownArrow {
+                root.decrement();
+                return accept;
+            }
+            if event.text == Key.RightArrow || event.text == Key.UpArrow {
+                root.increment();
+                return accept;
+            }
+            if event.text == Key.Home {
+                root.publish(root.minimum);
+                return accept;
+            }
+            if event.text == Key.End {
+                root.publish(root.maximum);
+                return accept;
+            }
+            return reject;
+        }
+    }
+
+    property <float> fraction: root.maximum <= root.minimum
+        ? 0
+        : max(0, min(1, (root.value - root.minimum) / (root.maximum - root.minimum)));
+
+    Rectangle {
+        x: 0px;
+        y: 7px;
+        height: 4px;
+        width: parent.width;
+        border-radius: 2px;
+        background: Theme.surface-3;
+    }
+    // SOU-217: pin the fill to the track's left edge. Without an explicit
+    // `x`, Slint centres a child Rectangle in its parent, so the accent fill
+    // grew outward from the middle of the track and never met the thumb.
+    Rectangle {
+        x: 0px;
+        y: 7px;
+        height: 4px;
+        width: parent.width * root.fraction;
+        border-radius: 2px;
+        background: Theme.accent;
+    }
+    Rectangle {
+        x: parent.width * root.fraction - 7px;
+        y: 2px;
+        width: 14px;
+        height: 14px;
+        border-radius: 7px;
+        background: white;
+        border-width: 1px;
+        border-color: Theme.ghost-border;
+    }
+
+    track := TouchArea {
+        enabled: root.enabled;
+        // Both halves of the drag ratio come from this TouchArea (`self.mouse-x`
+        // / `self.width`) so they share one origin. Pointer-down snaps the
+        // thumb to the press position immediately, like a native slider.
+        pointer-event(event) => {
+            if event.button == PointerEventButton.left && event.kind == PointerEventKind.down {
+                key-focus.focus();
+                root.apply(self.mouse-x, self.width);
+            }
+        }
+        moved => {
+            if (self.pressed) {
+                root.apply(self.mouse-x, self.width);
+            }
+        }
+        clicked => {
+            root.apply(self.mouse-x, self.width);
+        }
+    }
+
+    function publish(candidate: int) {
+        if !root.enabled {
+            return;
+        }
+        let bounded = max(root.minimum, min(root.maximum, candidate));
+        if bounded != root.value {
+            root.changed(bounded);
+        }
+    }
+
+    function increment() {
+        root.publish(root.value + root.step);
+    }
+
+    function decrement() {
+        root.publish(root.value - root.step);
+    }
+
+    function apply(mouse-x: length, track-width: length) {
+        if !root.enabled || track-width <= 0px {
+            return;
+        }
+        root.publish(round(root.minimum + (root.maximum - root.minimum) * max(0, min(1, mouse-x / track-width))));
+    }
+}

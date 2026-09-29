@@ -9,6 +9,5 @@
   "author": "Damien Goehrig",
   "license": "GPL-3.0-or-later",
   "ollama": "https://ollama.com/",
-  "rust": "https://rustup.rs/",
-  "node": "https://nodejs.org/"
+  "rust": "https://rustup.rs/"
 }

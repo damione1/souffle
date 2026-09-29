@@ -1,0 +1,2758 @@
+use std::fs::File;
+use std::path::Path;
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+
+use candle_core::{Device, Tensor};
+use tracing::{debug, info, trace, warn};
+
+use super::{
+    AudioInputRequirements, EngineError, Speaker, TranscriptionEngine, TranscriptionSegment,
+    collapse_whitespace,
+};
+use crate::constants::{MIMI_FRAME_SIZE, MIMI_FRAMES_PER_SECOND, SAMPLE_RATE};
+use crate::lid::{LanguageTracker, detect_word};
+use crate::platform::with_autorelease_pool;
+use crate::settings::MeetingTranscriptionLanguage;
+
+#[cfg(test)]
+#[path = "kyutai_verification.rs"]
+mod verification;
+
+/// Extra-head index used for pause detection, matching Kyutai's reference
+/// stt-rs example (`prs[2][0] > 0.5`).
+const VAD_PAUSE_HEAD: usize = 2;
+const VAD_PAUSE_THRESHOLD: f32 = 0.5;
+/// RMS below this on an 80 ms Mimi frame counts as pause when the checkpoint
+/// has no semantic VAD heads. Same order as Whisper/Parakeet's silence floor
+/// on a 10 ms frame: enough to refuse a refresh mid-word, not a room-tone gate.
+const ENERGY_PAUSE_RMS: f32 = 0.01;
+
+/// Tensor name `checkpoint_has_semantic_vad` looks up. The 1B semantic-VAD export
+/// ships `extra_heads.0..3`; the 2.6B export has none.
+const EXTRA_HEADS_PROBE_TENSOR: &str = "extra_heads.0.weight";
+/// Safety margin (frames) on top of the ASR delay before trusting the VAD
+/// pause streak: semantic VAD can fire slightly before speech fully clears.
+const VAD_FLUSH_MARGIN_FRAMES: usize = 6;
+/// Soft refresh fires at this fraction of `config.context` when pausing
+/// (Kyutai/Unmute recommend clearing KV between speech turns).
+const REFRESH_SOFT_CONTEXT_NUM: usize = 6;
+const REFRESH_SOFT_CONTEXT_DEN: usize = 10;
+
+/// Extract frame `f` (MIMI_FRAME_SIZE samples) from `buf`, zero-padding when the
+/// buffer is short or the frame is past its end. Used to align the two diarized
+/// lanes into equal-length batched steps.
+fn frame_at(buf: &[f32], f: usize) -> Vec<f32> {
+    let start = f * MIMI_FRAME_SIZE;
+    let mut frame = vec![0.0f32; MIMI_FRAME_SIZE];
+    if start < buf.len() {
+        let end = (start + MIMI_FRAME_SIZE).min(buf.len());
+        frame[..end - start].copy_from_slice(&buf[start..end]);
+    }
+    frame
+}
+
+/// Debug frame counter — reset per session for clean logging
+static FRAME_COUNT: AtomicU64 = AtomicU64::new(0);
+/// Debug audio buffer — captures the first 3s of each session for offline analysis
+static DEBUG_SAMPLES: Mutex<Option<Vec<f32>>> = Mutex::new(None);
+/// Set once the session's debug WAV has been taken for writing, so the capture
+/// runs once per session instead of refilling and rewriting every 3s.
+static DEBUG_WAV_WRITTEN: AtomicBool = AtomicBool::new(false);
+/// Length of the per-session debug capture, in samples.
+const DEBUG_CAPTURE_SAMPLES: usize = SAMPLE_RATE as usize * 3;
+
+/// Feeds one engine chunk into the per-session debug capture. Returns the
+/// captured samples exactly once, when the window is full; the slot is then
+/// dropped and `written` stays set until the next session resets it.
+fn take_full_debug_capture(
+    slot: &mut Option<Vec<f32>>,
+    written: &AtomicBool,
+    session_start: bool,
+    audio: &[f32],
+) -> Option<Vec<f32>> {
+    if written.load(Ordering::Relaxed) {
+        return None;
+    }
+    if slot.is_none() && session_start {
+        *slot = Some(Vec::with_capacity(DEBUG_CAPTURE_SAMPLES));
+    }
+    let buf = slot.as_mut()?;
+    if buf.len() < DEBUG_CAPTURE_SAMPLES {
+        buf.extend_from_slice(audio);
+        return None;
+    }
+    written.store(true, Ordering::Relaxed);
+    slot.take()
+}
+
+/// Kyutai STT model configuration, deserialized from config.json
+#[derive(Debug, serde::Deserialize)]
+pub struct SttConfig {
+    pub audio_silence_prefix_seconds: f64,
+    pub audio_delay_seconds: f64,
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct KyutaiConfig {
+    pub mimi_name: String,
+    pub tokenizer_name: String,
+    pub card: usize,
+    pub text_card: usize,
+    pub dim: usize,
+    pub n_q: usize,
+    pub context: usize,
+    pub max_period: f64,
+    pub num_heads: usize,
+    pub num_layers: usize,
+    pub causal: bool,
+    pub stt_config: SttConfig,
+}
+
+impl KyutaiConfig {
+    fn to_lm_config(&self, has_extra_heads: bool) -> moshi::lm::Config {
+        let transformer = moshi::transformer::Config {
+            d_model: self.dim,
+            num_heads: self.num_heads,
+            num_layers: self.num_layers,
+            dim_feedforward: self.dim * 4,
+            causal: self.causal,
+            norm_first: true,
+            bias_ff: false,
+            bias_attn: false,
+            layer_scale: None,
+            context: self.context,
+            max_period: self.max_period as usize,
+            use_conv_block: false,
+            use_conv_bias: true,
+            cross_attention: None,
+            gating: Some(candle_nn::Activation::Silu),
+            norm: moshi::NormType::RmsNorm,
+            positional_embedding: moshi::transformer::PositionalEmbedding::Rope,
+            conv_layout: false,
+            conv_kernel_size: 3,
+            kv_repeat: 1,
+            max_seq_len: 4096 * 4,
+            shared_cross_attn: false,
+        };
+        moshi::lm::Config {
+            transformer,
+            depformer: None,
+            audio_vocab_size: self.card + 1,
+            text_in_vocab_size: self.text_card + 1,
+            text_out_vocab_size: self.text_card,
+            audio_codebooks: self.n_q,
+            conditioners: Default::default(),
+            extra_heads: has_extra_heads.then_some(moshi::lm::ExtraHeadsConfig {
+                num_heads: 4,
+                dim: 6,
+            }),
+        }
+    }
+}
+
+/// Whether a proactive KV-cache refresh should run, and why.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RefreshKind {
+    /// Pause-aligned refresh inside the soft context window (preferred).
+    SoftPause,
+    /// Legacy: formerly forced a refresh before the LM context window saturated.
+    /// Kept for test assertions and debug logging.
+    HardDeadline,
+    /// Per-lane reset triggered by consecutive language mismatches.
+    LanguageMismatch,
+}
+
+/// Whether to clear KV cache and how.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RefreshDecision {
+    None,
+    Full(RefreshKind),
+    Lane { batch_idx: usize, kind: RefreshKind },
+}
+
+/// Pause streak long enough that the ASR delay window holds only silence.
+/// Shared by `decide_refresh` (when a KV clear is safe) and `tail_drained_for`
+/// (when the stop-time silence suffix can be skipped), so the two cannot drift.
+fn drained_pause_frames(emission_delay_frames: usize) -> usize {
+    emission_delay_frames + VAD_FLUSH_MARGIN_FRAMES
+}
+
+/// Decide proactive KV refresh before the next frame.
+///
+/// `emission_delay_frames` is how far the decoder lags the audio (`asr_delay_in_tokens`).
+/// A pause-aligned clear is only safe once the VAD streak covers that lag plus
+/// [`VAD_FLUSH_MARGIN_FRAMES`]: shorter pauses still have an in-flight word (and
+/// the last `audio_delay` seconds of audio) sitting in `ItemState`.
+///
+/// `pause_refresh_consumed` makes a pause-aligned refresh one-shot per lane and
+/// pause episode. A lane becomes eligible again only after speech clears its
+/// marker and a new pause has drained the ASR delay window (SOU-193).
+fn decide_refresh(
+    frames_since_refresh: usize,
+    context: usize,
+    vad_pause_streak: &[usize],
+    pause_refresh_consumed: &[bool],
+    batch_size: usize,
+    emission_delay_frames: usize,
+) -> RefreshDecision {
+    if context == 0 || frames_since_refresh == 0 {
+        return RefreshDecision::None;
+    }
+    let soft = (context * REFRESH_SOFT_CONTEXT_NUM) / REFRESH_SOFT_CONTEXT_DEN;
+
+    if frames_since_refresh < soft {
+        return RefreshDecision::None;
+    }
+
+    let pause_threshold = drained_pause_frames(emission_delay_frames);
+    let pausing: Vec<usize> = vad_pause_streak
+        .iter()
+        .enumerate()
+        .filter(|(idx, streak)| {
+            **streak >= pause_threshold
+                && !pause_refresh_consumed.get(*idx).copied().unwrap_or(true)
+        })
+        .map(|(idx, _)| idx)
+        .collect();
+
+    if pausing.is_empty() {
+        return RefreshDecision::None;
+    }
+
+    if batch_size == 1 {
+        return RefreshDecision::Full(RefreshKind::SoftPause);
+    }
+
+    if pausing.len() == 1 {
+        return RefreshDecision::Lane {
+            batch_idx: pausing[0],
+            kind: RefreshKind::SoftPause,
+        };
+    }
+
+    RefreshDecision::Full(RefreshKind::SoftPause)
+}
+
+/// Calculate the Root Mean Square (RMS) energy of a PCM audio slice.
+/// Returns 0.0 if the slice is empty.
+fn pcm_rms(pcm: &[f32]) -> f32 {
+    if pcm.is_empty() {
+        return 0.0;
+    }
+    let sum: f32 = pcm.iter().map(|s| s * s).sum();
+    (sum / pcm.len() as f32).sqrt()
+}
+
+/// Determine if a PCM audio slice is a pause based on its RMS energy.
+/// Used when the checkpoint has no semantic VAD heads.
+fn is_energy_pause(pcm: &[f32]) -> bool {
+    pcm_rms(pcm) < ENERGY_PAUSE_RMS
+}
+
+fn note_pause_state(streak: &mut usize, consumed: &mut bool, is_pause: bool) {
+    if is_pause {
+        *streak = streak.saturating_add(1);
+    } else {
+        *streak = 0;
+        *consumed = false;
+    }
+}
+
+/// Advance per-lane pause streaks from frame energy. Used when the checkpoint
+/// has no semantic VAD heads, so `AsrMsg::Step` is never emitted and the
+/// heads-based `note_vad_pause` path cannot run.
+fn note_energy_pause_streaks(
+    streaks: &mut [usize],
+    pause_refresh_consumed: &mut [bool],
+    lane_pcm: &[&[f32]],
+) {
+    for (idx, pcm) in lane_pcm.iter().enumerate() {
+        if let (Some(streak), Some(consumed)) =
+            (streaks.get_mut(idx), pause_refresh_consumed.get_mut(idx))
+        {
+            note_pause_state(streak, consumed, is_energy_pause(pcm));
+        }
+    }
+}
+
+/// Helper function to check if the extra heads probe tensor is present in a list of tensor names.
+/// Used in testing to simulate safetensors metadata inspection.
+#[cfg(test)]
+fn has_extra_heads_tensor(tensor_names: impl IntoIterator<Item = impl AsRef<str>>) -> bool {
+    tensor_names
+        .into_iter()
+        .any(|n| n.as_ref() == EXTRA_HEADS_PROBE_TENSOR)
+}
+
+/// Loaded model components — kept together so they can be used by the inference loop
+struct LoadedModel {
+    integrity: ModelIntegrity,
+    /// Completed outputs from a failed call, retained only until stop salvage.
+    completed_salvage: Vec<TranscriptionSegment>,
+    state: moshi::asr::State,
+    text_tokenizer: sentencepiece::SentencePieceProcessor,
+    config: KyutaiConfig,
+    device: Device,
+    #[allow(dead_code)]
+    model_path: std::path::PathBuf,
+    /// Silence prefix (config audio_silence_prefix_seconds) still to be fed
+    /// before the first real audio of the current refresh epoch.
+    prefix_pending: bool,
+    /// Prefix duration for the current epoch, per batch lane; subtracted from
+    /// moshi times.
+    time_offset_seconds: Vec<f64>,
+    /// Wall-clock seconds of real audio attributed to prior epochs of each lane,
+    /// so Word timestamps stay monotone across KV clears. Per lane because
+    /// `refresh_lane` restarts one lane's moshi clock and not the other's.
+    epoch_origin_seconds: Vec<f64>,
+    /// LM frames fed to each lane since that lane's last KV clear, full or
+    /// per-lane. This is what a lane's epoch credit is computed from.
+    frames_since_lane_reset: Vec<usize>,
+    /// Whether each lane has already had a pause-triggered KV clear during
+    /// its current pause episode. Cleared only when that lane resumes speech.
+    pause_refresh_consumed: Vec<bool>,
+    /// Last start_time emitted per lane. Guarantees monotonicity even if a
+    /// lane's internal clock restarts (reset_batch_idx).
+    last_emitted_start: Vec<f64>,
+    /// LM frames since the last soft/hard full refresh (includes this epoch's
+    /// prefix). Drives the refresh policy and the hard context deadline.
+    frames_since_refresh: usize,
+    /// Soft context refreshes performed this session (diagnostics).
+    refresh_count: u64,
+    /// Consecutive pause frames, per batch lane. Sourced from the semantic
+    /// VAD extra heads when the checkpoint has them, otherwise from frame
+    /// energy (`ENERGY_PAUSE_RMS`). A streak stuck at zero after load means
+    /// speech (or that no frames have been stepped yet), not "no signal".
+    vad_pause_streak: Vec<usize>,
+    /// Whether this checkpoint exposed `extra_heads.*` at load. When false,
+    /// `AsrMsg::Step` never arrives and pause detection falls back to energy.
+    has_extra_heads: bool,
+    /// Per-lane LID and mismatch streak tracking.
+    language_tracker: LanguageTracker,
+    /// Word waiting for its EndWord (or the next Word) before emit, per lane.
+    pending_words: Vec<Option<PendingWord>>,
+    /// Pending words closed by a KV refresh, emitted on the next consume.
+    orphaned_words: Vec<PendingWord>,
+}
+
+impl LoadedModel {
+    /// Return every per-session counter, timeline and word buffer to the
+    /// values a freshly built model starts with, sized for `lanes` batch
+    /// lanes. Leaves the moshi `State` alone: callers pair this with
+    /// `State::reset()` (soft session reset) or a freshly built `State`.
+    ///
+    /// The destructuring below is deliberately exhaustive (no `..`): a new
+    /// `LoadedModel` field fails to compile here until someone decides
+    /// whether a session boundary must reset it.
+    fn reset_session_bookkeeping(
+        &mut self,
+        lanes: usize,
+        meeting_language_prior: MeetingTranscriptionLanguage,
+    ) {
+        let LoadedModel {
+            integrity,
+            completed_salvage,
+            state: _,
+            text_tokenizer: _,
+            config: _,
+            device: _,
+            model_path: _,
+            prefix_pending,
+            time_offset_seconds,
+            epoch_origin_seconds,
+            frames_since_lane_reset,
+            pause_refresh_consumed,
+            last_emitted_start,
+            frames_since_refresh,
+            refresh_count,
+            vad_pause_streak,
+            has_extra_heads: _,
+            language_tracker,
+            pending_words,
+            orphaned_words,
+        } = self;
+        *integrity = ModelIntegrity::Ready;
+        completed_salvage.clear();
+        *prefix_pending = true;
+        *time_offset_seconds = vec![0.0; lanes];
+        *epoch_origin_seconds = vec![0.0; lanes];
+        *frames_since_lane_reset = vec![0; lanes];
+        *pause_refresh_consumed = vec![false; lanes];
+        *last_emitted_start = vec![0.0; lanes];
+        *frames_since_refresh = 0;
+        *refresh_count = 0;
+        *vad_pause_streak = vec![0; lanes];
+        language_tracker.resize(lanes, meeting_language_prior);
+        language_tracker.reset_all();
+        *pending_words = vec![None; lanes];
+        orphaned_words.clear();
+
+        FRAME_COUNT.store(0, Ordering::Relaxed);
+        if let Ok(mut dbg) = DEBUG_SAMPLES.lock() {
+            *dbg = None;
+        }
+        DEBUG_WAV_WRITTEN.store(false, Ordering::Relaxed);
+    }
+}
+
+#[derive(Default)]
+enum ModelIntegrity {
+    #[default]
+    Ready,
+    Invalid,
+}
+
+impl ModelIntegrity {
+    fn ensure_ready(&self) -> Result<(), EngineError> {
+        match self {
+            Self::Ready => Ok(()),
+            Self::Invalid => Err(EngineError::InferenceError(
+                "ASR reset left invalid state; full model reconstruction required".into(),
+            )),
+        }
+    }
+}
+
+/// A decoded word held until moshi emits `EndWord` so `end_time` is real.
+#[derive(Clone)]
+struct PendingWord {
+    text: String,
+    start_time: f64,
+    language: Option<String>,
+    speaker: Option<Speaker>,
+}
+
+// Private instrumentation seam: the production batch loop can be exercised
+// without constructing a multi-GB Moshi State or a SentencePiece tokenizer.
+// The test implementation delegates timeline and pending-word operations to
+// the same production primitives; it only substitutes decoding and KV reset.
+trait AsrBatchModel {
+    fn integrity(&mut self) -> &mut ModelIntegrity;
+    fn completed_salvage(&mut self) -> &mut Vec<TranscriptionSegment>;
+    fn batch_size(&self) -> usize;
+    fn decode(&self, tokens: &[u32]) -> String;
+    fn map_time(&mut self, raw: f64, lane: usize) -> (f64, f64);
+    fn on_word(&mut self, text: &str, lane: usize) -> bool;
+    fn reset_lane(&mut self, lane: usize) -> Result<(), EngineError>;
+    fn words(&mut self) -> (&mut Vec<Option<PendingWord>>, &mut Vec<PendingWord>);
+    fn note_vad(&mut self, prs: &[Vec<f32>]);
+}
+
+impl AsrBatchModel for LoadedModel {
+    fn integrity(&mut self) -> &mut ModelIntegrity {
+        &mut self.integrity
+    }
+    fn completed_salvage(&mut self) -> &mut Vec<TranscriptionSegment> {
+        &mut self.completed_salvage
+    }
+    fn batch_size(&self) -> usize {
+        self.state.batch_size()
+    }
+    fn decode(&self, tokens: &[u32]) -> String {
+        self.text_tokenizer
+            .decode_piece_ids(tokens)
+            .unwrap_or_default()
+    }
+    fn map_time(&mut self, raw: f64, lane: usize) -> (f64, f64) {
+        let mapped = KyutaiEngine::word_start_time(self, raw, lane);
+        (mapped, KyutaiEngine::monotonic_time(self, lane, mapped))
+    }
+    fn on_word(&mut self, text: &str, lane: usize) -> bool {
+        self.language_tracker.on_word(text, lane)
+    }
+    fn reset_lane(&mut self, lane: usize) -> Result<(), EngineError> {
+        KyutaiEngine::refresh_lane(self, lane, RefreshKind::LanguageMismatch)
+    }
+    fn words(&mut self) -> (&mut Vec<Option<PendingWord>>, &mut Vec<PendingWord>) {
+        (&mut self.pending_words, &mut self.orphaned_words)
+    }
+    fn note_vad(&mut self, prs: &[Vec<f32>]) {
+        KyutaiEngine::note_vad_pause(self, prs);
+    }
+}
+
+/// Kyutai STT engine implementation.
+/// Uses moshi crate for Mimi audio codec + decoder-only transformer.
+/// Streaming: feed 1920-sample (80ms @ 24kHz) chunks, get words back.
+pub struct KyutaiEngine {
+    model: Option<LoadedModel>,
+    /// When true, the streaming state is built with batch size 2 so the mic (Me)
+    /// and system audio (Them) legs are transcribed as independent batch lanes
+    /// of one model. Takes effect on the next `reset_state`.
+    diarize: bool,
+    /// Heuristic prior for LID/mismatch resets (never passed to moshi).
+    meeting_language_prior: MeetingTranscriptionLanguage,
+}
+
+impl Default for KyutaiEngine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl KyutaiEngine {
+    pub fn new() -> Self {
+        Self {
+            model: None,
+            diarize: false,
+            meeting_language_prior: MeetingTranscriptionLanguage::Auto,
+        }
+    }
+
+    /// moshi batch size for the current mode: 2 lanes when diarizing, else 1.
+    fn batch_size(&self) -> usize {
+        if self.diarize { 2 } else { 1 }
+    }
+
+    fn select_device() -> Result<Device, EngineError> {
+        if candle_core::utils::metal_is_available() {
+            Device::new_metal(0).map_err(|e| EngineError::LoadError(format!("Metal init: {e}")))
+        } else {
+            info!("Metal not available, falling back to CPU");
+            Ok(Device::Cpu)
+        }
+    }
+
+    fn build_state(
+        device: &Device,
+        model_path: &Path,
+        config: &KyutaiConfig,
+        batch_size: usize,
+        has_extra_heads: bool,
+    ) -> Result<moshi::asr::State, EngineError> {
+        let mimi_path = model_path.join(&config.mimi_name);
+        let audio_tokenizer = moshi::mimi::load(
+            mimi_path
+                .to_str()
+                .ok_or_else(|| EngineError::LoadError("Invalid mimi path".into()))?,
+            Some(32),
+            device,
+        )
+        .map_err(|e| EngineError::LoadError(format!("Mimi reload: {e}")))?;
+
+        let dtype = device.bf16_default_to_f32();
+        let model_file = model_path.join("model.safetensors");
+        let vb_lm = unsafe {
+            candle_nn::VarBuilder::from_mmaped_safetensors(&[&model_file], dtype, device)
+                .map_err(|e| EngineError::LoadError(format!("Model weights reload: {e}")))?
+        };
+        let lm = moshi::lm::LmModel::new(
+            &config.to_lm_config(has_extra_heads),
+            moshi::nn::MaybeQuantizedVarBuilder::Real(vb_lm),
+        )
+        .map_err(|e| EngineError::LoadError(format!("LM model reload: {e}")))?;
+
+        let asr_delay_in_tokens =
+            (config.stt_config.audio_delay_seconds * MIMI_FRAMES_PER_SECOND) as usize;
+        moshi::asr::State::new(batch_size, asr_delay_in_tokens, 0., audio_tokenizer, lm)
+            .map_err(|e| EngineError::LoadError(format!("ASR state init: {e}")))
+    }
+
+    fn build_loaded_model(
+        device: Device,
+        model_path: std::path::PathBuf,
+        config: KyutaiConfig,
+        text_tokenizer: sentencepiece::SentencePieceProcessor,
+        batch_size: usize,
+        meeting_language_prior: MeetingTranscriptionLanguage,
+    ) -> Result<LoadedModel, EngineError> {
+        let model_file = model_path.join("model.safetensors");
+        let has_extra_heads = Self::checkpoint_has_semantic_vad(&model_file);
+        if has_extra_heads {
+            info!("Kyutai checkpoint has semantic VAD extra heads");
+        } else {
+            warn!(
+                audio_delay_seconds = config.stt_config.audio_delay_seconds,
+                "Kyutai checkpoint has no semantic VAD extra heads; pause detection \
+                 falls back to frame energy. A hard KV refresh can still drop \
+                 in-flight speech if no quiet gap appears"
+            );
+        }
+        let state = Self::build_state(&device, &model_path, &config, batch_size, has_extra_heads)?;
+        Ok(LoadedModel {
+            integrity: ModelIntegrity::Ready,
+            completed_salvage: Vec::new(),
+            state,
+            text_tokenizer,
+            config,
+            device,
+            model_path,
+            prefix_pending: true,
+            time_offset_seconds: vec![0.0; batch_size],
+            epoch_origin_seconds: vec![0.0; batch_size],
+            frames_since_lane_reset: vec![0; batch_size],
+            pause_refresh_consumed: vec![false; batch_size],
+            last_emitted_start: vec![0.0; batch_size],
+            frames_since_refresh: 0,
+            refresh_count: 0,
+            vad_pause_streak: vec![0; batch_size],
+            has_extra_heads,
+            language_tracker: LanguageTracker::new(batch_size, meeting_language_prior),
+            pending_words: vec![None; batch_size],
+            orphaned_words: Vec::new(),
+        })
+    }
+
+    /// Silence prefix length in whole Mimi frames. Rounded up so the prefix
+    /// never leaves a partial frame that would zero-pad real audio mid-stream.
+    fn prefix_frame_count(prefix_seconds: f64) -> usize {
+        (prefix_seconds * MIMI_FRAMES_PER_SECOND).ceil() as usize
+    }
+
+    /// Checks if the safetensors checkpoint contains semantic VAD extra heads.
+    /// Handles missing or corrupted metadata gracefully by returning false,
+    /// since the model load will either fail naturally later or succeed if it's
+    /// a valid checkpoint just lacking this metadata.
+    fn checkpoint_has_semantic_vad(model_file: &Path) -> bool {
+        let Ok(file) = File::open(model_file) else {
+            return false;
+        };
+        let Ok(mmap) = (unsafe { memmap2::Mmap::map(&file) }) else {
+            return false;
+        };
+        match safetensors::tensor::SafeTensors::read_metadata(&mmap) {
+            Ok((_, metadata)) => metadata.info(EXTRA_HEADS_PROBE_TENSOR).is_some(),
+            Err(_) => false,
+        }
+    }
+
+    fn synchronize_device(device: &Device, context: &str) -> Result<(), EngineError> {
+        device
+            .synchronize()
+            .map_err(|e| EngineError::InferenceError(format!("{context}: {e}")))
+    }
+
+    /// Map a moshi word timestamp into session wall-clock seconds, accounting
+    /// for the current epoch's silence prefix and prior soft-refresh epochs.
+    fn word_start_time(model: &LoadedModel, moshi_start: f64, batch_idx: usize) -> f64 {
+        Self::word_start_time_raw(
+            moshi_start,
+            model
+                .time_offset_seconds
+                .get(batch_idx)
+                .copied()
+                .unwrap_or(0.0),
+            model
+                .epoch_origin_seconds
+                .get(batch_idx)
+                .copied()
+                .unwrap_or(0.0),
+        )
+    }
+
+    fn word_start_time_raw(
+        moshi_start: f64,
+        time_offset_seconds: f64,
+        epoch_origin_seconds: f64,
+    ) -> f64 {
+        (moshi_start - time_offset_seconds + epoch_origin_seconds).max(0.0)
+    }
+
+    /// Floor an emitted timestamp at the last one emitted for the same lane.
+    /// A regression here can only mean a lane's moshi clock restarted without
+    /// its epoch being credited; the warning is the only signal that would
+    /// surface such a bug, since the UI would just silently rewind.
+    fn monotonic_time(model: &mut LoadedModel, batch_idx: usize, raw: f64) -> f64 {
+        let Some(floor) = model.last_emitted_start.get_mut(batch_idx) else {
+            return raw;
+        };
+        if raw < *floor - 1.0 {
+            warn!(
+                batch_idx,
+                raw = format!("{raw:.2}"),
+                floor = format!("{:.2}", *floor),
+                drop = format!("{:.2}", *floor - raw),
+                "Lane timestamp regressed; clamping to keep the transcript monotone"
+            );
+        }
+        Self::clamp_time(floor, raw)
+    }
+
+    fn clamp_time(floor: &mut f64, raw: f64) -> f64 {
+        let clamped = raw.max(*floor);
+        *floor = clamped;
+        clamped
+    }
+
+    /// Credit a lane's elapsed audio to its epoch origin and restart its clock.
+    /// Moshi's `reset_batch_idx` zeroes that lane's `step_idx` and
+    /// `last_stop_time`, so without this credit the lane's next word maps back
+    /// onto the start of the epoch and the transcript rewinds by up to a full
+    /// context window.
+    fn credit_lane_epoch(
+        epoch_origin_seconds: &mut [f64],
+        time_offset_seconds: &mut [f64],
+        frames_since_lane_reset: &mut [usize],
+        lane: usize,
+    ) {
+        let (Some(origin), Some(offset), Some(frames)) = (
+            epoch_origin_seconds.get_mut(lane),
+            time_offset_seconds.get_mut(lane),
+            frames_since_lane_reset.get_mut(lane),
+        ) else {
+            return;
+        };
+        let lane_secs = *frames as f64 / MIMI_FRAMES_PER_SECOND - *offset;
+        *origin += lane_secs.max(0.0);
+        *offset = 0.0;
+        *frames = 0;
+    }
+
+    /// Compute the epoch origins and monotonic floors to carry into a
+    /// rebuilt model, by applying `credit_lane_epoch`'s arithmetic to every
+    /// lane. Used by a stall-recovery rebuild, which must not rewind the
+    /// transcript the way a session-boundary `reset_state` deliberately
+    /// does. `last_emitted_start` already reflects each lane's true
+    /// wall-clock position and is returned unchanged.
+    fn carry_timeline_across_rebuild(
+        epoch_origin_seconds: &[f64],
+        time_offset_seconds: &[f64],
+        frames_since_lane_reset: &[usize],
+        last_emitted_start: &[f64],
+    ) -> (Vec<f64>, Vec<f64>) {
+        let mut origin = epoch_origin_seconds.to_vec();
+        let mut offset = time_offset_seconds.to_vec();
+        let mut frames = frames_since_lane_reset.to_vec();
+        for lane in 0..origin.len() {
+            Self::credit_lane_epoch(&mut origin, &mut offset, &mut frames, lane);
+        }
+        (origin, last_emitted_start.to_vec())
+    }
+
+    fn pending_to_segment(pending: PendingWord, end_time: f64) -> TranscriptionSegment {
+        TranscriptionSegment {
+            text: pending.text,
+            start_time: pending.start_time,
+            end_time: end_time.max(pending.start_time),
+            is_final: true,
+            language: pending.language,
+            confidence: None,
+            speaker: pending.speaker,
+        }
+    }
+
+    /// Live preview of a word still waiting for EndWord. Does not consume
+    /// the pending slot; the later final still comes from `emit_pending`.
+    fn pending_to_tentative_segment(pending: &PendingWord) -> TranscriptionSegment {
+        TranscriptionSegment {
+            text: pending.text.clone(),
+            start_time: pending.start_time,
+            end_time: pending.start_time,
+            is_final: false,
+            language: pending.language.clone(),
+            confidence: None,
+            speaker: pending.speaker,
+        }
+    }
+
+    fn emit_pending(
+        pending_words: &mut [Option<PendingWord>],
+        batch_idx: usize,
+        end_time: f64,
+        segments: &mut Vec<TranscriptionSegment>,
+    ) {
+        if let Some(pending) = pending_words.get_mut(batch_idx).and_then(Option::take) {
+            segments.push(Self::pending_to_segment(pending, end_time));
+        }
+    }
+
+    fn drain_orphans(
+        orphaned_words: &mut Vec<PendingWord>,
+        segments: &mut Vec<TranscriptionSegment>,
+    ) {
+        for pending in orphaned_words.drain(..) {
+            let end = pending.start_time;
+            segments.push(Self::pending_to_segment(pending, end));
+        }
+    }
+
+    /// Everything a new word owes the UI, in the order the consumers expect:
+    /// words orphaned by a lane reset, then the previous word closed at this
+    /// word's start, then this word as a preview. A final must never land
+    /// after the preview it would otherwise erase.
+    fn open_word(
+        pending_words: &mut Vec<Option<PendingWord>>,
+        orphaned_words: &mut Vec<PendingWord>,
+        batch_idx: usize,
+        pending: PendingWord,
+        segments: &mut Vec<TranscriptionSegment>,
+    ) {
+        Self::drain_orphans(orphaned_words, segments);
+        Self::emit_pending(pending_words, batch_idx, pending.start_time, segments);
+        if batch_idx >= pending_words.len() {
+            pending_words.resize_with(batch_idx + 1, || None);
+        }
+        segments.push(Self::pending_to_tentative_segment(&pending));
+        pending_words[batch_idx] = Some(pending);
+    }
+
+    fn drain_all_pending(model: &mut LoadedModel, segments: &mut Vec<TranscriptionSegment>) {
+        Self::drain_orphans(&mut model.orphaned_words, segments);
+        for batch_idx in 0..model.pending_words.len() {
+            if let Some(pending) = model.pending_words[batch_idx].take() {
+                let end = pending.start_time;
+                segments.push(Self::pending_to_segment(pending, end));
+            }
+        }
+    }
+
+    fn transcription_call<M: AsrBatchModel>(
+        model: &mut M,
+        run: impl FnOnce(&mut M, &mut Vec<TranscriptionSegment>) -> Result<(), EngineError>,
+    ) -> Result<Vec<TranscriptionSegment>, EngineError> {
+        model.integrity().ensure_ready()?;
+        let mut segments = Vec::new();
+        match run(model, &mut segments) {
+            Ok(()) => Ok(segments),
+            Err(error) => {
+                match model.integrity() {
+                    ModelIntegrity::Ready => {}
+                    ModelIntegrity::Invalid => {
+                        // Result cannot publish partial outputs. Retain finals
+                        // from every frame/prefix of this call, regardless of
+                        // which reset failed. Pending metadata supplies previews.
+                        model
+                            .completed_salvage()
+                            .extend(segments.into_iter().filter(|segment| segment.is_final));
+                    }
+                }
+                Err(error)
+            }
+        }
+    }
+
+    fn salvage_invalid_pending<M: AsrBatchModel>(
+        model: &mut M,
+    ) -> Option<Vec<TranscriptionSegment>> {
+        match model.integrity() {
+            ModelIntegrity::Ready => return None,
+            ModelIntegrity::Invalid => {}
+        }
+        // No State access: these starts were mapped in their original epoch.
+        // Without a trustworthy EndWord, close at start rather than inventing
+        // a duration from a partially reset model's clock. Keep invalidity.
+        let mut segments = std::mem::take(model.completed_salvage());
+        let (pending, orphans) = model.words();
+        Self::drain_orphans(orphans, &mut segments);
+        for word in pending.iter_mut().filter_map(Option::take) {
+            let end = word.start_time;
+            segments.push(Self::pending_to_segment(word, end));
+        }
+        Some(segments)
+    }
+
+    /// Soft KV-cache clear: empties LM/Mimi/ItemState without rebuilding Metal
+    /// devices or remapping weights. Preferred over full `reset_state` mid-session.
+    fn refresh_loaded(model: &mut LoadedModel, kind: RefreshKind) -> Result<(), EngineError> {
+        let frames = model.frames_since_refresh;
+        let context = model.config.context;
+        for lane in 0..model.epoch_origin_seconds.len() {
+            Self::credit_lane_epoch(
+                &mut model.epoch_origin_seconds,
+                &mut model.time_offset_seconds,
+                &mut model.frames_since_lane_reset,
+                lane,
+            );
+        }
+        model
+            .state
+            .reset()
+            .map_err(|e| EngineError::InferenceError(format!("ASR context refresh: {e}")))?;
+        model.prefix_pending = true;
+        model.frames_since_refresh = 0;
+        model.vad_pause_streak = vec![0; model.state.batch_size()];
+        if kind == RefreshKind::SoftPause {
+            model.pause_refresh_consumed.fill(true);
+        }
+        model.language_tracker.reset_all();
+        let mut orphaned: Vec<PendingWord> = Vec::new();
+        for pending in &mut model.pending_words {
+            if let Some(word) = pending.take() {
+                orphaned.push(word);
+            }
+        }
+        model.orphaned_words.append(&mut orphaned);
+        model.refresh_count = model.refresh_count.saturating_add(1);
+        info!(
+            kind = ?kind,
+            frames_before_refresh = frames,
+            context,
+            refresh_count = model.refresh_count,
+            epoch_origin_seconds = model
+                .epoch_origin_seconds
+                .iter()
+                .map(|s| format!("{s:.2}"))
+                .collect::<Vec<_>>()
+                .join(","),
+            "ASR context refreshed (soft KV clear)"
+        );
+        Ok(())
+    }
+
+    /// Per-lane KV clear via moshi `reset_batch_idx`. Does not rebuild Metal or
+    /// re-feed the silence prefix; the other lane keeps decoding uninterrupted.
+    fn refresh_lane(
+        model: &mut LoadedModel,
+        batch_idx: usize,
+        kind: RefreshKind,
+    ) -> Result<(), EngineError> {
+        model.integrity.ensure_ready()?;
+        // This path feeds no silence prefix, so the lane's offset goes to zero
+        // along with its clock.
+        Self::credit_lane_epoch(
+            &mut model.epoch_origin_seconds,
+            &mut model.time_offset_seconds,
+            &mut model.frames_since_lane_reset,
+            batch_idx,
+        );
+        Self::complete_reset(
+            &mut model.integrity,
+            model
+                .state
+                .reset_batch_idx(batch_idx)
+                .map_err(|e| EngineError::InferenceError(format!("ASR lane reset: {e}"))),
+        )?;
+        if let Some(streak) = model.vad_pause_streak.get_mut(batch_idx) {
+            *streak = 0;
+        }
+        if kind == RefreshKind::SoftPause
+            && let Some(consumed) = model.pause_refresh_consumed.get_mut(batch_idx)
+        {
+            *consumed = true;
+        }
+        model.language_tracker.reset_lane(batch_idx);
+        let pending = model
+            .pending_words
+            .get_mut(batch_idx)
+            .and_then(Option::take);
+        if let Some(pending) = pending {
+            model.orphaned_words.push(pending);
+        }
+        debug!(
+            kind = ?kind,
+            batch_idx,
+            epoch_origin_seconds = format!(
+                "{:.2}",
+                model.epoch_origin_seconds.get(batch_idx).copied().unwrap_or(0.0)
+            ),
+            "ASR lane context reset (per-batch KV clear)"
+        );
+        Ok(())
+    }
+
+    fn complete_reset(
+        integrity: &mut ModelIntegrity,
+        result: Result<(), EngineError>,
+    ) -> Result<(), EngineError> {
+        if result.is_err() {
+            // Per-lane Moshi reset can mutate ItemState before LM/Mimi fails.
+            // Only reconstruction permits another forward.
+            *integrity = ModelIntegrity::Invalid;
+        }
+        result
+    }
+
+    fn maybe_refresh_before_frame(model: &mut LoadedModel) -> Result<(), EngineError> {
+        model.integrity.ensure_ready()?;
+        let batch_size = model.state.batch_size();
+        match decide_refresh(
+            model.frames_since_refresh,
+            model.config.context,
+            &model.vad_pause_streak,
+            &model.pause_refresh_consumed,
+            batch_size,
+            Self::emission_delay_frames(model),
+        ) {
+            RefreshDecision::None => {}
+            RefreshDecision::Full(kind) => Self::refresh_loaded(model, kind)?,
+            RefreshDecision::Lane { batch_idx, kind } => {
+                Self::refresh_lane(model, batch_idx, kind)?
+            }
+        }
+        Ok(())
+    }
+
+    fn emission_delay_frames(model: &LoadedModel) -> usize {
+        (model.config.stt_config.audio_delay_seconds * MIMI_FRAMES_PER_SECOND) as usize
+    }
+
+    /// Whether the engine's own semantic VAD has paused long enough that
+    /// every word already spoken has had time to clear the pipeline: a pause
+    /// streak covering the emission delay, plus margin. Shared by `flush`
+    /// (skip the silence suffix), `decide_refresh` (when a KV clear is safe),
+    /// and the `tail_drained` trait method (cut a single-stream drain window
+    /// short) so the three can't drift apart.
+    ///
+    /// Diarized mode always returns false: lane 0's pause streak says
+    /// nothing about lane 1 (system audio), and `DiarizedMode` doesn't
+    /// consult this signal anyway since both lanes must stay frame-aligned
+    /// regardless of either side's pause state.
+    fn tail_drained_for(model: &LoadedModel, diarize: bool) -> bool {
+        if diarize {
+            return false;
+        }
+        let delay_frames = Self::emission_delay_frames(model);
+        let pause_streak = model.vad_pause_streak.first().copied().unwrap_or(0);
+        pause_streak >= drained_pause_frames(delay_frames)
+    }
+
+    fn note_vad_pause(model: &mut LoadedModel, prs: &[Vec<f32>]) {
+        if let Some(pause_head) = prs.get(VAD_PAUSE_HEAD) {
+            for (batch_idx, p) in pause_head.iter().enumerate() {
+                if let (Some(streak), Some(consumed)) = (
+                    model.vad_pause_streak.get_mut(batch_idx),
+                    model.pause_refresh_consumed.get_mut(batch_idx),
+                ) {
+                    note_pause_state(streak, consumed, *p > VAD_PAUSE_THRESHOLD);
+                }
+            }
+        }
+    }
+
+    /// Feed the configured silence prefix as real LM frames (counts toward
+    /// the context budget) and set `time_offset_seconds` for this epoch.
+    fn feed_silence_prefix(
+        model: &mut LoadedModel,
+        device: &Device,
+        debug_enabled: bool,
+        segments: &mut Vec<TranscriptionSegment>,
+    ) -> Result<(), EngineError> {
+        model.prefix_pending = false;
+        let prefix_frames =
+            Self::prefix_frame_count(model.config.stt_config.audio_silence_prefix_seconds);
+        if prefix_frames == 0 {
+            model.time_offset_seconds.fill(0.0);
+            return Ok(());
+        }
+        // The prefix is fed to every lane, and its frames also count into
+        // `frames_since_lane_reset`, which is what makes subtracting the offset
+        // when crediting an epoch the right thing to do.
+        let prefix_seconds = prefix_frames as f64 / MIMI_FRAMES_PER_SECOND;
+        model.time_offset_seconds.fill(prefix_seconds);
+        info!(
+            frames = prefix_frames,
+            seconds = prefix_seconds,
+            "Feeding silence prefix before epoch audio"
+        );
+        let silence = vec![0.0f32; MIMI_FRAME_SIZE];
+        for _ in 0..prefix_frames {
+            let asr_msgs = if model.state.batch_size() == 2 {
+                let mut data = Vec::with_capacity(2 * MIMI_FRAME_SIZE);
+                data.extend_from_slice(&silence);
+                data.extend_from_slice(&silence);
+                Self::step_pcm_dual(model, device, &data)?
+            } else {
+                Self::step_pcm_single(model, device, &silence, debug_enabled)?
+            };
+            // Prefix frames can still emit delayed words from the previous
+            // epoch's lookahead — keep consuming them with correct timestamps.
+            Self::consume_asr_msgs(model, &asr_msgs, debug_enabled, segments)?;
+        }
+        Ok(())
+    }
+
+    fn step_pcm_single(
+        model: &mut LoadedModel,
+        device: &Device,
+        chunk_data: &[f32],
+        debug_enabled: bool,
+    ) -> Result<Vec<moshi::asr::AsrMsg>, EngineError> {
+        model.integrity.ensure_ready()?;
+        // Wrap Metal operations in autorelease pool to drain ObjC objects
+        // created by candle's Metal backend (matmul, attention, etc.).
+        // Without this, autoreleased objects accumulate and corrupt GPU
+        // memory after ~3 recording sessions.
+        let asr_msgs = with_autorelease_pool(|| {
+            let pcm_tensor = Tensor::new(chunk_data, device)
+                .and_then(|t| t.reshape((1, 1, MIMI_FRAME_SIZE)))
+                .map_err(|e| EngineError::InferenceError(format!("Tensor creation: {e}")))?;
+
+            model
+                .state
+                .step_pcm(
+                    pcm_tensor,
+                    None,
+                    &().into(),
+                    |items, text_tensor, _audio_tensors| {
+                        #[cfg(test)]
+                        verification::tokens(items);
+                        let frame = FRAME_COUNT.load(Ordering::Relaxed);
+                        if debug_enabled
+                            && (frame < 20 || frame.is_multiple_of(50))
+                            && let Ok(text_vals) = text_tensor.to_vec2::<u32>()
+                        {
+                            for (i, item) in items.iter().enumerate() {
+                                let tv = text_vals
+                                    .get(i)
+                                    .map(|v| format!("{v:?}"))
+                                    .unwrap_or_default();
+                                trace!(
+                                    frame,
+                                    batch = i,
+                                    text_token = item.text_token(),
+                                    first_step = item.is_first_step(),
+                                    input_text = tv,
+                                    "pre-forward"
+                                );
+                            }
+                        }
+                    },
+                )
+                .map_err(|e| EngineError::InferenceError(format!("step_pcm: {e}")))
+        })?;
+        model.frames_since_refresh = model.frames_since_refresh.saturating_add(1);
+        // One step_pcm advances every lane, so every lane's clock advances.
+        for frames in model.frames_since_lane_reset.iter_mut() {
+            *frames = frames.saturating_add(1);
+        }
+        FRAME_COUNT.fetch_add(1, Ordering::Relaxed);
+        if !model.has_extra_heads {
+            note_energy_pause_streaks(
+                &mut model.vad_pause_streak,
+                &mut model.pause_refresh_consumed,
+                &[chunk_data],
+            );
+        }
+        Ok(asr_msgs)
+    }
+
+    fn step_pcm_dual(
+        model: &mut LoadedModel,
+        device: &Device,
+        data: &[f32],
+    ) -> Result<Vec<moshi::asr::AsrMsg>, EngineError> {
+        model.integrity.ensure_ready()?;
+        let asr_msgs = with_autorelease_pool(|| {
+            let pcm_tensor = Tensor::new(data, device)
+                .and_then(|t| t.reshape((2, 1, MIMI_FRAME_SIZE)))
+                .map_err(|e| EngineError::InferenceError(format!("Tensor creation: {e}")))?;
+            model
+                .state
+                .step_pcm(pcm_tensor, None, &().into(), |_, _, _| {})
+                .map_err(|e| EngineError::InferenceError(format!("step_pcm: {e}")))
+        })?;
+        model.frames_since_refresh = model.frames_since_refresh.saturating_add(1);
+        // One step_pcm advances every lane, so every lane's clock advances.
+        for frames in model.frames_since_lane_reset.iter_mut() {
+            *frames = frames.saturating_add(1);
+        }
+        FRAME_COUNT.fetch_add(1, Ordering::Relaxed);
+        if !model.has_extra_heads && data.len() >= 2 * MIMI_FRAME_SIZE {
+            note_energy_pause_streaks(
+                &mut model.vad_pause_streak,
+                &mut model.pause_refresh_consumed,
+                &[
+                    &data[..MIMI_FRAME_SIZE],
+                    &data[MIMI_FRAME_SIZE..2 * MIMI_FRAME_SIZE],
+                ],
+            );
+        }
+        Ok(asr_msgs)
+    }
+
+    fn consume_asr_msgs<M: AsrBatchModel>(
+        model: &mut M,
+        asr_msgs: &[moshi::asr::AsrMsg],
+        debug_enabled: bool,
+        segments: &mut Vec<TranscriptionSegment>,
+    ) -> Result<(), EngineError> {
+        model.integrity().ensure_ready()?;
+        let (_, orphans) = model.words();
+        Self::drain_orphans(orphans, segments);
+        let frame_num = FRAME_COUNT.load(Ordering::Relaxed).saturating_sub(1);
+        let diarized = model.batch_size() == 2;
+        // Every message belongs to the input epoch, including its EndWord.
+        let mut requested_resets = Vec::new();
+
+        if debug_enabled && (frame_num < 20 || frame_num.is_multiple_of(50)) {
+            let mut words = 0;
+            let mut end_words = 0;
+            let mut steps = 0;
+            for msg in asr_msgs {
+                match msg {
+                    moshi::asr::AsrMsg::Word { .. } => words += 1,
+                    moshi::asr::AsrMsg::EndWord { .. } => end_words += 1,
+                    moshi::asr::AsrMsg::Step { step_idx, prs, .. } => {
+                        steps += 1;
+                        if frame_num < 10 || frame_num.is_multiple_of(50) {
+                            let vad_str: Vec<String> =
+                                prs.iter().map(|p| format!("{:.2}", p[0])).collect();
+                            trace!(
+                                frame = frame_num,
+                                model_step = step_idx,
+                                vad = vad_str.join(", "),
+                                "Step VAD"
+                            );
+                        }
+                    }
+                }
+            }
+            if words > 0 || end_words > 0 {
+                debug!(frame = frame_num, words, end_words, steps, "ASR messages");
+            }
+        }
+
+        for msg in asr_msgs {
+            match msg {
+                moshi::asr::AsrMsg::Word {
+                    tokens,
+                    start_time,
+                    batch_idx,
+                } => {
+                    let text = model.decode(tokens);
+                    if debug_enabled {
+                        debug!(target: crate::logging::TRANSCRIPT_TARGET, tokens = ?tokens, text = ?text, t = format!("{start_time:.2}"), "WORD emitted");
+                    }
+                    if text.is_empty() {
+                        continue;
+                    }
+                    let language = detect_word(&text).map(|code| code.as_str().to_string());
+                    // Keep the input epoch until every message is mapped.
+                    let (raw_start, start_time) = model.map_time(*start_time, *batch_idx);
+                    #[cfg(test)]
+                    verification::mapped(
+                        verification::TraceKind::Word,
+                        *batch_idx,
+                        raw_start,
+                        start_time,
+                        Some(&text),
+                    );
+                    #[cfg(not(test))]
+                    let _ = raw_start;
+                    // SOU-060: `on_word` only requests a KV wipe when Auto
+                    // inferred a prior (model lock-in). Explicit Fr/En still
+                    // labels the segment above and never wipes a healthy lane.
+                    let mismatch_reset = model.on_word(&text, *batch_idx);
+                    if mismatch_reset && !requested_resets.contains(batch_idx) {
+                        requested_resets.push(*batch_idx);
+                    }
+                    let speaker = if diarized {
+                        Some(if *batch_idx == 0 {
+                            Speaker::Me
+                        } else {
+                            Speaker::Them
+                        })
+                    } else {
+                        None
+                    };
+                    let (pending, orphans) = model.words();
+                    Self::open_word(
+                        pending,
+                        orphans,
+                        *batch_idx,
+                        PendingWord {
+                            text,
+                            start_time,
+                            language,
+                            speaker,
+                        },
+                        segments,
+                    );
+                }
+                moshi::asr::AsrMsg::EndWord {
+                    stop_time,
+                    batch_idx,
+                } => {
+                    let (raw_end, end_time) = model.map_time(*stop_time, *batch_idx);
+                    #[cfg(test)]
+                    verification::mapped(
+                        verification::TraceKind::EndWord,
+                        *batch_idx,
+                        raw_end,
+                        end_time,
+                        None,
+                    );
+                    #[cfg(not(test))]
+                    let _ = raw_end;
+                    let (pending, _) = model.words();
+                    Self::emit_pending(pending, *batch_idx, end_time, segments);
+                }
+                moshi::asr::AsrMsg::Step { prs, .. } => {
+                    model.note_vad(prs);
+                }
+            }
+        }
+        for lane in requested_resets {
+            if let Err(e) = model.reset_lane(lane) {
+                *model.integrity() = ModelIntegrity::Invalid;
+                warn!(
+                    lane,
+                    "ASR reset failed; invalidating model; call boundary retains completed outputs for stop salvage: {e}"
+                );
+                return Err(e);
+            }
+        }
+        let (_, orphans) = model.words();
+        Self::drain_orphans(orphans, segments);
+        Ok(())
+    }
+
+    fn context_window_stats(&self) -> Option<super::ContextWindowStats> {
+        self.model.as_ref().map(|m| super::ContextWindowStats {
+            context_frames: m.config.context,
+            frames_since_refresh: m.frames_since_refresh,
+            refresh_count: m.refresh_count,
+        })
+    }
+
+    pub fn set_meeting_language_prior(&mut self, prior: MeetingTranscriptionLanguage) {
+        self.meeting_language_prior = prior;
+        if let Some(model) = self.model.as_mut() {
+            let batch_size = model.state.batch_size();
+            model
+                .language_tracker
+                .resize(batch_size, self.meeting_language_prior);
+        }
+    }
+
+    /// Reset the ASR state for a new recording session.
+    ///
+    /// When the loaded state already has the lane count this session needs
+    /// (1 for dictation, 2 when diarizing) and is not invalidated, this is a
+    /// soft reset: moshi `State::reset()` empties the LM and Mimi KV caches
+    /// and every lane's `ItemState`, then the session bookkeeping goes back
+    /// to its fresh values. No Metal device, Mimi or LM weights are rebuilt.
+    /// RoPE positions come from the KV cache length, which that reset
+    /// empties; moshi's `model_step_idx` is not reset but only feeds the
+    /// `AsrMsg::Step` counter, never a position or a timestamp. This is the
+    /// same KV clear `refresh_loaded` already relies on mid-session.
+    ///
+    /// A lane-count change (dictation <-> diarized meeting), an invalidated
+    /// model, or a failed soft reset takes the full rebuild of Mimi + LM +
+    /// State from disk instead. Either way a genuinely new session starts
+    /// its timeline at zero; the old model's timeline is not carried over.
+    pub fn reset_state(&mut self) -> Result<(), EngineError> {
+        let lanes = self.batch_size();
+        let meeting_language_prior = self.meeting_language_prior;
+        if let Some(model) = self.model.as_mut()
+            && model.state.batch_size() == lanes
+            && model.integrity.ensure_ready().is_ok()
+        {
+            match model.state.reset() {
+                Ok(()) => {
+                    model.reset_session_bookkeeping(lanes, meeting_language_prior);
+                    info!(lanes, "ASR state soft-reset for new session");
+                    return Ok(());
+                }
+                Err(e) => {
+                    warn!("Soft ASR state reset failed, rebuilding the model: {e}");
+                }
+            }
+        }
+        self.rebuild_model(false)?;
+        info!(lanes, "ASR state rebuilt for new session");
+        Ok(())
+    }
+
+    /// Same full rebuild as `reset_state`, but for stall recovery: the
+    /// session is still ongoing, so every lane's elapsed audio is credited
+    /// into the rebuilt model's epoch origin first, and the monotonic floors
+    /// carry over too. Without this, a stall-recovery rebuild would silently
+    /// rewind every subsequent timestamp to 0 (see SOU-002), and the
+    /// `monotonic_time` safety net can't catch it because it is the floor
+    /// that gets zeroed.
+    pub fn reset_state_preserving_timeline(&mut self) -> Result<(), EngineError> {
+        self.rebuild_model(true)?;
+        info!("ASR state rebuilt mid-session, timeline preserved");
+        Ok(())
+    }
+
+    /// Shared teardown-and-rebuild for `reset_state_preserving_timeline` and
+    /// the `reset_state` fallback (lane-count change, invalidated model,
+    /// failed soft reset). Teardown and rebuild use separate
+    /// autorelease pools so stale Metal objects are drained before a fresh
+    /// device/model is created. Everything but the timeline (KV state,
+    /// `frames_since_refresh`, `refresh_count`, `vad_pause_streak`,
+    /// `language_tracker`, `pending_words`, `prefix_pending`) is always
+    /// reinitialised: the point of the reset is to discard the wedged state.
+    /// Stall recovery also carries the pause-episode markers so rebuilding
+    /// during silence cannot re-arm a pause refresh without resumed speech.
+    fn rebuild_model(&mut self, preserve_timeline: bool) -> Result<(), EngineError> {
+        {
+            let loaded = self.model.as_ref().ok_or(EngineError::NotInitialized)?;
+            Self::synchronize_device(&loaded.device, "Metal sync before reset")?;
+        }
+
+        // Captured before the rebuild closure moves the model fields.
+        let batch_size = self.batch_size();
+        let meeting_language_prior = self.meeting_language_prior;
+        let old = self.model.take().ok_or(EngineError::NotInitialized)?;
+
+        // Read the timeline off the old model before its fields are moved
+        // into the drop/rebuild closures below.
+        let carried_timeline = preserve_timeline.then(|| {
+            Self::carry_timeline_across_rebuild(
+                &old.epoch_origin_seconds,
+                &old.time_offset_seconds,
+                &old.frames_since_lane_reset,
+                &old.last_emitted_start,
+            )
+        });
+        let carried_pause_refresh_consumed =
+            preserve_timeline.then(|| old.pause_refresh_consumed.clone());
+        // A word mid-utterance when the rebuild happens has no EndWord yet
+        // and is silently dropped by the `..` below: there is no return path
+        // here for a trailing segment without a larger change to this
+        // reset's return type, so this is only a log breadcrumb, not a fix.
+        let dropped_pending = old.pending_words.iter().filter(|w| w.is_some()).count();
+        let dropped_orphaned = old.orphaned_words.len();
+
+        let LoadedModel {
+            state: old_state,
+            text_tokenizer,
+            config,
+            device: old_device,
+            model_path,
+            ..
+        } = old;
+
+        with_autorelease_pool(move || {
+            drop(old_state);
+            drop(old_device);
+        });
+
+        let mut rebuilt = with_autorelease_pool(move || -> Result<LoadedModel, EngineError> {
+            let device = Self::select_device()?;
+            Self::build_loaded_model(
+                device,
+                model_path,
+                config,
+                text_tokenizer,
+                batch_size,
+                meeting_language_prior,
+            )
+        })?;
+        // The rebuilt model is already fresh from `build_loaded_model`; this
+        // also clears the process-wide debug counters, so one function
+        // defines what a session boundary resets.
+        rebuilt.reset_session_bookkeeping(batch_size, meeting_language_prior);
+
+        if let Some((epoch_origin_seconds, last_emitted_start)) = carried_timeline {
+            // The rebuilt model's vectors are sized from `batch_size`, so a
+            // carried vector should be the same length; fall back to the
+            // fresh (zeroed) timeline rather than indexing blindly if not.
+            if epoch_origin_seconds.len() == rebuilt.epoch_origin_seconds.len()
+                && last_emitted_start.len() == rebuilt.last_emitted_start.len()
+            {
+                rebuilt.epoch_origin_seconds = epoch_origin_seconds;
+                rebuilt.last_emitted_start = last_emitted_start;
+            } else {
+                warn!(
+                    old_lanes = epoch_origin_seconds.len(),
+                    new_lanes = rebuilt.epoch_origin_seconds.len(),
+                    "Stall recovery rebuild changed lane count; timeline not carried over"
+                );
+            }
+        }
+        if let Some(consumed) = carried_pause_refresh_consumed {
+            if consumed.len() == rebuilt.pause_refresh_consumed.len() {
+                rebuilt.pause_refresh_consumed = consumed;
+            } else {
+                warn!(
+                    old_lanes = consumed.len(),
+                    new_lanes = rebuilt.pause_refresh_consumed.len(),
+                    "Stall recovery rebuild changed lane count; pause markers not carried over"
+                );
+            }
+        }
+
+        if preserve_timeline && (dropped_pending > 0 || dropped_orphaned > 0) {
+            warn!(
+                dropped_pending,
+                dropped_orphaned,
+                "Stall recovery rebuild dropped in-flight word(s) with no EndWord: \
+                 the transcript is missing whatever was being said right before the freeze"
+            );
+        }
+
+        self.model = Some(rebuilt);
+        Ok(())
+    }
+}
+
+impl TranscriptionEngine for KyutaiEngine {
+    fn load_model(&mut self, model_path: &Path) -> Result<(), EngineError> {
+        let device = Self::select_device()?;
+        info!(device = ?device, "Loading Kyutai STT model");
+
+        // Read config.json
+        let config_path = model_path.join("config.json");
+        let config_str = std::fs::read_to_string(&config_path)
+            .map_err(|_| EngineError::ModelNotFound(config_path.clone()))?;
+        let config: KyutaiConfig = serde_json::from_str(&config_str)
+            .map_err(|e| EngineError::LoadError(format!("Invalid config.json: {e}")))?;
+
+        // Load SentencePiece tokenizer
+        let tokenizer_path = model_path.join(&config.tokenizer_name);
+        let text_tokenizer = sentencepiece::SentencePieceProcessor::open(&tokenizer_path)
+            .map_err(|e| EngineError::LoadError(format!("Tokenizer load failed: {e}")))?;
+        info!("Tokenizer loaded");
+
+        let model_file = model_path.join("model.safetensors");
+        if !model_file.exists() {
+            return Err(EngineError::ModelNotFound(model_file));
+        }
+
+        // Initial load is always single-stream; diarization is enabled later via
+        // set_diarization + reset_state.
+        let batch_size = self.batch_size();
+        let meeting_language_prior = self.meeting_language_prior;
+        let loaded = with_autorelease_pool(move || {
+            Self::build_loaded_model(
+                device,
+                model_path.to_path_buf(),
+                config,
+                text_tokenizer,
+                batch_size,
+                meeting_language_prior,
+            )
+        })?;
+
+        info!("Kyutai STT model fully loaded");
+
+        self.model = Some(loaded);
+
+        Ok(())
+    }
+
+    fn unload_model(&mut self) -> Result<(), EngineError> {
+        if let Some(loaded) = self.model.as_ref() {
+            Self::synchronize_device(&loaded.device, "Metal sync before unload")?;
+        }
+        if let Some(loaded) = self.model.take() {
+            with_autorelease_pool(move || {
+                drop(loaded);
+            });
+        }
+        info!("Kyutai STT model unloaded");
+        Ok(())
+    }
+
+    fn transcribe(
+        &mut self,
+        audio: &[f32],
+        _language: Option<&str>,
+    ) -> Result<Vec<TranscriptionSegment>, EngineError> {
+        let debug_enabled = crate::debug::transcription_debug_enabled();
+        let model = self.model.as_mut().ok_or(EngineError::NotInitialized)?;
+
+        model.integrity.ensure_ready()?;
+
+        // Debug: save the first 3s of audio of each session to WAV, once
+        if debug_enabled {
+            let Ok(mut dbg) = DEBUG_SAMPLES.lock() else {
+                return Ok(Vec::new());
+            };
+            let session_start = FRAME_COUNT.load(Ordering::Relaxed) == 0;
+            if let Some(buf) =
+                take_full_debug_capture(&mut dbg, &DEBUG_WAV_WRITTEN, session_start, audio)
+            {
+                drop(dbg);
+                let path = crate::constants::app_data_dir().join("debug_engine_input.wav");
+                if let Ok(mut w) = hound::WavWriter::create(
+                    &path,
+                    hound::WavSpec {
+                        channels: 1,
+                        sample_rate: SAMPLE_RATE,
+                        bits_per_sample: 32,
+                        sample_format: hound::SampleFormat::Float,
+                    },
+                ) {
+                    for &s in buf.iter() {
+                        let _ = w.write_sample(s);
+                    }
+                    let _ = w.finalize();
+                    debug!(path = %path.display(), "Saved engine input audio");
+                }
+            }
+        }
+
+        // Log audio amplitude reaching the engine
+        if debug_enabled && !audio.is_empty() {
+            let max_amp = audio.iter().map(|s| s.abs()).fold(0.0f32, f32::max);
+            let rms = (audio.iter().map(|s| s * s).sum::<f32>() / audio.len() as f32).sqrt();
+            let frame_num = FRAME_COUNT.load(Ordering::Relaxed);
+            if frame_num < 5 || frame_num.is_multiple_of(50) {
+                debug!(
+                    samples = audio.len(),
+                    max_amp = format!("{max_amp:.4}"),
+                    rms = format!("{rms:.6}"),
+                    "Engine input"
+                );
+            }
+        }
+
+        // Clone device handle (cheap Arc clone) so closure can use it
+        // without conflicting with mutable borrow of model.state
+        let device = model.device.clone();
+
+        // Process audio in MIMI_FRAME_SIZE-sample frames (80ms at 24kHz).
+        // Soft context refresh + silence prefix are handled per-frame so a
+        // mid-session KV clear can re-anchor before the next real samples.
+        Self::transcription_call(model, |model, segments| {
+            for chunk in audio.chunks(MIMI_FRAME_SIZE) {
+                Self::maybe_refresh_before_frame(model)?;
+                if model.prefix_pending {
+                    Self::feed_silence_prefix(model, &device, debug_enabled, segments)?;
+                }
+
+                let padded;
+                let chunk_data = if chunk.len() < MIMI_FRAME_SIZE {
+                    padded = {
+                        let mut v = chunk.to_vec();
+                        v.resize(MIMI_FRAME_SIZE, 0.0);
+                        v
+                    };
+                    &padded[..]
+                } else {
+                    chunk
+                };
+
+                let asr_msgs = Self::step_pcm_single(model, &device, chunk_data, debug_enabled)?;
+                Self::consume_asr_msgs(model, &asr_msgs, debug_enabled, segments)?;
+            }
+
+            Ok(())
+        })
+    }
+
+    fn flush(&mut self) -> Result<Vec<TranscriptionSegment>, EngineError> {
+        let diarize = self.diarize;
+        let (delay_frames, suffix_seconds, pause_streak, drained) = {
+            let model = self.model.as_ref().ok_or(EngineError::NotInitialized)?;
+            model.integrity.ensure_ready()?;
+            let delay_frames = Self::emission_delay_frames(model);
+            let suffix_seconds = model.config.stt_config.audio_delay_seconds + 1.0;
+            let pause_streak = model.vad_pause_streak.first().copied().unwrap_or(0);
+            let drained = Self::tail_drained_for(model, diarize);
+            (delay_frames, suffix_seconds, pause_streak, drained)
+        };
+        let silence_samples = (suffix_seconds * SAMPLE_RATE as f64) as usize;
+
+        // Words are emitted audio_delay after they are spoken. If the semantic
+        // VAD has reported a pause for longer than that delay (plus margin),
+        // every word has already cleared the pipeline and the silence suffix
+        // would only burn inference time at stop.
+        if drained {
+            info!(
+                streak = pause_streak,
+                delay_frames, "VAD pause covers ASR delay, skipping silence flush"
+            );
+            let mut segments = Vec::new();
+            if let Some(model) = self.model.as_mut() {
+                Self::drain_all_pending(model, &mut segments);
+            }
+            return Ok(segments);
+        }
+
+        // Feed silence suffix to push any remaining words out of the model's
+        // internal pipeline (audio_delay + 1 second of silence). Both lanes get
+        // the same silence in diarized mode.
+        let silence = vec![0.0f32; silence_samples];
+        let mut segments = if diarize {
+            self.transcribe_dual(&silence, &silence)?
+        } else {
+            self.transcribe(&silence, None)?
+        };
+        if let Some(model) = self.model.as_mut() {
+            Self::drain_all_pending(model, &mut segments);
+        }
+        Ok(segments)
+    }
+
+    fn reset_state(&mut self) -> Result<(), EngineError> {
+        KyutaiEngine::reset_state(self)
+    }
+
+    fn salvage_pending_after_flush_error(&mut self) -> Vec<TranscriptionSegment> {
+        self.model
+            .as_mut()
+            .and_then(Self::salvage_invalid_pending)
+            .unwrap_or_default()
+    }
+
+    fn reset_state_preserving_timeline(&mut self) -> Result<(), EngineError> {
+        KyutaiEngine::reset_state_preserving_timeline(self)
+    }
+
+    fn supports_diarization(&self) -> bool {
+        true
+    }
+
+    fn set_diarization(&mut self, enabled: bool) {
+        self.diarize = enabled;
+    }
+
+    fn set_meeting_language_prior(&mut self, prior: crate::settings::MeetingTranscriptionLanguage) {
+        KyutaiEngine::set_meeting_language_prior(self, prior);
+    }
+
+    fn transcribe_dual(
+        &mut self,
+        me: &[f32],
+        them: &[f32],
+    ) -> Result<Vec<TranscriptionSegment>, EngineError> {
+        let debug_enabled = crate::debug::transcription_debug_enabled();
+        let model = self.model.as_mut().ok_or(EngineError::NotInitialized)?;
+        let device = model.device.clone();
+        model.integrity.ensure_ready()?;
+
+        // Both lanes step together; cover whichever is longer (the mixer keeps
+        // them equal, but pad defensively).
+        let frame_count = me
+            .len()
+            .div_ceil(MIMI_FRAME_SIZE)
+            .max(them.len().div_ceil(MIMI_FRAME_SIZE));
+
+        Self::transcription_call(model, |model, segments| {
+            for f in 0..frame_count {
+                Self::maybe_refresh_before_frame(model)?;
+                if model.prefix_pending {
+                    Self::feed_silence_prefix(model, &device, debug_enabled, segments)?;
+                }
+
+                let mut data = Vec::with_capacity(2 * MIMI_FRAME_SIZE);
+                data.extend_from_slice(&frame_at(me, f));
+                data.extend_from_slice(&frame_at(them, f));
+
+                let asr_msgs = Self::step_pcm_dual(model, &device, &data)?;
+                Self::consume_asr_msgs(model, &asr_msgs, debug_enabled, segments)?;
+            }
+
+            Ok(())
+        })
+    }
+
+    fn audio_requirements(&self) -> AudioInputRequirements {
+        AudioInputRequirements {
+            sample_rate_hz: SAMPLE_RATE,
+            channels: 1,
+            chunk_size_samples: MIMI_FRAME_SIZE as u32,
+        }
+    }
+
+    fn mic_gain(&self) -> f32 {
+        1.0
+    }
+
+    fn emission_delay_seconds(&self) -> f64 {
+        self.model
+            .as_ref()
+            .map(|m| m.config.stt_config.audio_delay_seconds)
+            .unwrap_or(0.0)
+    }
+
+    fn tail_drained(&self) -> bool {
+        self.model
+            .as_ref()
+            .map(|m| Self::tail_drained_for(m, self.diarize))
+            .unwrap_or(false)
+    }
+
+    fn normalize_text(&self, text: &str) -> String {
+        // SentencePiece uses ▁ (U+2581) as word-boundary marker.
+        // Replace with space, then trim/collapse.
+        let normalized = text.replace('▁', " ");
+        collapse_whitespace(&normalized)
+    }
+
+    fn context_window_stats(&self) -> Option<super::ContextWindowStats> {
+        KyutaiEngine::context_window_stats(self)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn debug_capture_is_taken_once_per_session() {
+        let written = AtomicBool::new(false);
+        let mut slot = None;
+        let chunk = vec![0.25f32; MIMI_FRAME_SIZE];
+        let mut taken = Vec::new();
+        // 60 s of engine chunks: only the first 3 s window may come out.
+        for i in 0..(SAMPLE_RATE as usize * 60 / MIMI_FRAME_SIZE) {
+            if let Some(buf) = take_full_debug_capture(&mut slot, &written, i == 0, &chunk) {
+                taken.push(buf);
+            }
+        }
+        assert_eq!(taken.len(), 1);
+        assert!(taken[0].len() >= DEBUG_CAPTURE_SAMPLES);
+        assert!(taken[0].len() < DEBUG_CAPTURE_SAMPLES + MIMI_FRAME_SIZE);
+        assert!(
+            slot.is_none(),
+            "the capture buffer is released after the write"
+        );
+
+        // A new session clears the flag and captures again.
+        written.store(false, Ordering::Relaxed);
+        let mut again = 0;
+        for i in 0..(SAMPLE_RATE as usize * 10 / MIMI_FRAME_SIZE) {
+            if take_full_debug_capture(&mut slot, &written, i == 0, &chunk).is_some() {
+                again += 1;
+            }
+        }
+        assert_eq!(again, 1);
+    }
+
+    #[test]
+    fn debug_capture_waits_for_session_start() {
+        let written = AtomicBool::new(false);
+        let mut slot = None;
+        let chunk = vec![0.0f32; MIMI_FRAME_SIZE];
+        assert!(take_full_debug_capture(&mut slot, &written, false, &chunk).is_none());
+        assert!(slot.is_none());
+    }
+
+    fn consume_test_call(
+        model: &mut BatchTestModel,
+        batch: &[moshi::asr::AsrMsg],
+        output: &mut Vec<TranscriptionSegment>,
+    ) -> Result<(), EngineError> {
+        output.extend(KyutaiEngine::transcription_call(
+            model,
+            |model, segments| KyutaiEngine::consume_asr_msgs(model, batch, false, segments),
+        )?);
+        Ok(())
+    }
+
+    struct BatchTestModel {
+        integrity: ModelIntegrity,
+        completed_salvage: Vec<TranscriptionSegment>,
+        partial_mutation: bool,
+        item_reset: bool,
+        origins: Vec<f64>,
+        offsets: Vec<f64>,
+        frames: Vec<usize>,
+        floors: Vec<f64>,
+        pending: Vec<Option<PendingWord>>,
+        orphans: Vec<PendingWord>,
+        tracker: LanguageTracker,
+        resets: usize,
+        fail_reset: bool,
+    }
+
+    impl BatchTestModel {
+        fn timeline(&self, lane: usize) -> (f64, f64, usize, f64) {
+            (
+                self.origins[lane],
+                self.offsets[lane],
+                self.frames[lane],
+                self.floors[lane],
+            )
+        }
+        fn new(lanes: usize, prefix: f64) -> Self {
+            let mut tracker = LanguageTracker::new(lanes, MeetingTranscriptionLanguage::Auto);
+            // Establish English lock-in and stop one mismatch short of the
+            // real LID threshold. No forced reset request in the test seam.
+            for lane in 0..lanes {
+                for _ in 0..20 {
+                    assert!(!tracker.on_word("the", lane));
+                }
+                for _ in 0..2 {
+                    assert!(!tracker.on_word("bonjour", lane));
+                }
+            }
+            Self {
+                integrity: ModelIntegrity::Ready,
+                completed_salvage: Vec::new(),
+                partial_mutation: false,
+                item_reset: false,
+                origins: vec![48.80; lanes],
+                offsets: vec![prefix; lanes],
+                frames: vec![738; lanes],
+                floors: vec![0.0; lanes],
+                pending: vec![None; lanes],
+                orphans: Vec::new(),
+                tracker,
+                resets: 0,
+                fail_reset: false,
+            }
+        }
+    }
+
+    impl AsrBatchModel for BatchTestModel {
+        fn integrity(&mut self) -> &mut ModelIntegrity {
+            &mut self.integrity
+        }
+        fn completed_salvage(&mut self) -> &mut Vec<TranscriptionSegment> {
+            &mut self.completed_salvage
+        }
+        fn batch_size(&self) -> usize {
+            self.origins.len()
+        }
+        fn decode(&self, tokens: &[u32]) -> String {
+            tokens.iter().map(|t| char::from_u32(*t).unwrap()).collect()
+        }
+        fn map_time(&mut self, raw: f64, lane: usize) -> (f64, f64) {
+            let mapped =
+                KyutaiEngine::word_start_time_raw(raw, self.offsets[lane], self.origins[lane]);
+            (
+                mapped,
+                KyutaiEngine::clamp_time(&mut self.floors[lane], mapped),
+            )
+        }
+        fn on_word(&mut self, text: &str, lane: usize) -> bool {
+            self.tracker.on_word(text, lane)
+        }
+        fn reset_lane(&mut self, lane: usize) -> Result<(), EngineError> {
+            self.resets += 1;
+            KyutaiEngine::credit_lane_epoch(
+                &mut self.origins,
+                &mut self.offsets,
+                &mut self.frames,
+                lane,
+            );
+            if self.fail_reset {
+                self.item_reset = self.partial_mutation;
+                return Err(EngineError::InferenceError("E1 injected KV failure".into()));
+            }
+            self.tracker.reset_lane(lane);
+            if let Some(word) = self.pending[lane].take() {
+                self.orphans.push(word);
+            }
+            Ok(())
+        }
+        fn words(&mut self) -> (&mut Vec<Option<PendingWord>>, &mut Vec<PendingWord>) {
+            (&mut self.pending, &mut self.orphans)
+        }
+        fn note_vad(&mut self, _prs: &[Vec<f32>]) {}
+    }
+
+    fn e1_word(lane: usize, raw: f64) -> moshi::asr::AsrMsg {
+        moshi::asr::AsrMsg::Word {
+            tokens: "bonjour".chars().map(u32::from).collect(),
+            start_time: raw,
+            batch_idx: lane,
+        }
+    }
+
+    #[test]
+    fn batch_epoch_reset_preserves_all_message_times() {
+        let mut model = BatchTestModel::new(2, 0.0);
+        let other = model.timeline(1);
+        let batch = vec![
+            e1_word(0, 58.56),
+            moshi::asr::AsrMsg::EndWord {
+                stop_time: 58.56,
+                batch_idx: 0,
+            },
+        ];
+        let mut segments = Vec::new();
+        KyutaiEngine::consume_asr_msgs(&mut model, &batch, false, &mut segments).unwrap();
+        assert_eq!(segments.len(), 2);
+        assert!(
+            (segments[1].end_time - 107.36).abs() < 1e-8,
+            "end={}",
+            segments[1].end_time
+        );
+        assert_eq!(model.timeline(1), other);
+        assert_eq!(model.resets, 1);
+        let (raw, mapped) = model.map_time(0.88, 0);
+        assert_eq!(raw, mapped, "no clamp after reset");
+    }
+    #[test]
+    fn batch_epoch_matrix_covers_pending_lanes_and_reset_failures() {
+        fn near(actual: f64, expected: f64) {
+            assert!((actual - expected).abs() < 1e-8, "{actual} != {expected}");
+        }
+        // Prefix is distinct from decoder delay: the target 107.36 old-epoch
+        // timestamp uses raw 58.56 (738-6 frames), with a zero prefix.
+        for prefix in [0.0, 0.48] {
+            for word_only in [false, true] {
+                for failed in [false, true] {
+                    let mut model = BatchTestModel::new(2, prefix);
+                    model.fail_reset = failed;
+                    let other = model.timeline(1);
+                    let mut batch = vec![e1_word(0, 58.56)];
+                    if !word_only {
+                        batch.push(moshi::asr::AsrMsg::EndWord {
+                            stop_time: 58.56,
+                            batch_idx: 0,
+                        });
+                    }
+                    let mut segments = Vec::new();
+                    let result = consume_test_call(&mut model, &batch, &mut segments);
+                    if failed {
+                        assert!(result.is_err());
+                        assert!(segments.is_empty());
+                        assert!(model.integrity.ensure_ready().is_err());
+                        assert_eq!(model.timeline(1), other);
+                        assert_eq!(model.resets, 1);
+                        continue;
+                    }
+                    result.unwrap();
+                    near(model.origins[0], 107.84 - prefix);
+                    near(segments[0].start_time, 107.36 - prefix);
+                    if !word_only {
+                        near(segments.last().unwrap().end_time, 107.36 - prefix);
+                    }
+                    assert_eq!(model.timeline(1), other);
+                    assert_eq!(model.resets, 1);
+                    assert_eq!(
+                        segments.iter().filter(|s| s.is_final).count(),
+                        usize::from(!word_only || !failed)
+                    );
+                    let (raw, delivered) = model.map_time(0.88, 0);
+                    near(raw, 108.72 - prefix);
+                    near(delivered, raw);
+                }
+            }
+        }
+        // Separate lanes can each request one reset in the same batch.
+        let mut model = BatchTestModel::new(2, 0.0);
+        let batch = vec![
+            e1_word(0, 58.56),
+            e1_word(1, 58.56),
+            moshi::asr::AsrMsg::EndWord {
+                stop_time: 58.56,
+                batch_idx: 0,
+            },
+            moshi::asr::AsrMsg::EndWord {
+                stop_time: 58.56,
+                batch_idx: 1,
+            },
+        ];
+        let mut segments = Vec::new();
+        KyutaiEngine::consume_asr_msgs(&mut model, &batch, false, &mut segments).unwrap();
+        assert_eq!(model.resets, 2);
+        assert_eq!(segments.iter().filter(|s| s.is_final).count(), 2);
+        // A failed reset leaves the LID mismatch active. The next Word in the
+        // same batch requests it again: experimental ordering coalesces the
+        // two lane/kind requests without double-finalizing either word.
+        let mut model = BatchTestModel::new(1, 0.0);
+        model.fail_reset = true;
+        let batch = vec![
+            e1_word(0, 58.24),
+            e1_word(0, 58.56),
+            moshi::asr::AsrMsg::EndWord {
+                stop_time: 58.64,
+                batch_idx: 0,
+            },
+        ];
+        let mut segments = Vec::new();
+        assert!(consume_test_call(&mut model, &batch, &mut segments).is_err());
+        assert_eq!(model.resets, 1);
+        assert!(segments.is_empty());
+    }
+
+    #[test]
+    fn batch_reset_failure_before_or_after_mutation_blocks_forward_until_rebuild() {
+        for partial in [false, true] {
+            let mut model = BatchTestModel::new(2, 0.0);
+            model.fail_reset = true;
+            model.partial_mutation = partial;
+            let batch = [
+                e1_word(0, 58.56),
+                moshi::asr::AsrMsg::EndWord {
+                    stop_time: 58.64,
+                    batch_idx: 0,
+                },
+            ];
+            let mut segments = Vec::new();
+            assert!(consume_test_call(&mut model, &batch, &mut segments).is_err());
+            assert_eq!(model.item_reset, partial);
+            assert!(segments.is_empty()); // Explicit error API: no partial publication.
+            let credited = model.timeline(0);
+            let mut forwards = 0;
+            for _ in 0..3 {
+                // Same pre-forward validity guard used by both production steps.
+                if model.integrity.ensure_ready().is_ok() {
+                    forwards += 1;
+                }
+                assert!(consume_test_call(&mut model, &batch, &mut segments).is_err());
+            }
+            assert_eq!(forwards, 0);
+            assert_eq!(model.resets, 1);
+            assert_eq!(model.timeline(0), credited);
+            assert!((model.origins[0] - 107.84).abs() < 1e-8);
+            assert_eq!(model.frames[0], 0); // Recovery carry cannot double-credit.
+            model = BatchTestModel::new(2, 0.0); // A fresh reconstructed model only.
+            assert!(model.integrity.ensure_ready().is_ok());
+        }
+    }
+
+    #[test]
+    fn invalid_pending_salvage_is_final_once_without_state_or_forward() {
+        let mut model = BatchTestModel::new(2, 0.0);
+        let word = |text: &str, start, speaker| PendingWord {
+            text: text.into(),
+            start_time: start,
+            language: Some("fr".into()),
+            speaker: Some(speaker),
+        };
+        model.orphans.push(word("orphan", 9.0, Speaker::Them));
+        model.pending[0] = Some(word("pending", 10.0, Speaker::Me));
+        assert!(KyutaiEngine::salvage_invalid_pending(&mut model).is_none());
+        model.integrity = ModelIntegrity::Invalid;
+        let timeline = [model.timeline(0), model.timeline(1)];
+        let segments = KyutaiEngine::salvage_invalid_pending(&mut model).unwrap();
+        assert_eq!(
+            segments.iter().map(|s| s.text.as_str()).collect::<Vec<_>>(),
+            ["orphan", "pending"]
+        );
+        for segment in &segments {
+            assert!(segment.is_final);
+            assert_eq!(segment.end_time, segment.start_time);
+            assert_eq!(segment.language.as_deref(), Some("fr"));
+        }
+        assert_eq!(segments[0].speaker, Some(Speaker::Them));
+        assert_eq!(segments[1].speaker, Some(Speaker::Me));
+        assert!(
+            KyutaiEngine::salvage_invalid_pending(&mut model)
+                .unwrap()
+                .is_empty()
+        );
+        assert!(model.integrity.ensure_ready().is_err());
+        assert_eq!([model.timeline(0), model.timeline(1)], timeline);
+        assert_eq!(model.resets, 0);
+    }
+
+    #[test]
+    fn failed_reset_salvages_completed_batch_finals_once_without_duplicates() {
+        for unfinished_word in [false, true] {
+            let mut model = BatchTestModel::new(1, 0.0);
+            model.fail_reset = true;
+            let mut batch = vec![
+                e1_word(0, 58.24),
+                moshi::asr::AsrMsg::EndWord {
+                    stop_time: 58.32,
+                    batch_idx: 0,
+                },
+            ];
+            if unfinished_word {
+                batch.push(e1_word(0, 58.56));
+            }
+            let mut output = Vec::new();
+            assert!(consume_test_call(&mut model, &batch, &mut output).is_err());
+            assert!(output.is_empty());
+            let salvaged = KyutaiEngine::salvage_invalid_pending(&mut model).unwrap();
+            assert_eq!(salvaged.len(), 1 + usize::from(unfinished_word));
+            assert!(salvaged.iter().all(|segment| segment.is_final));
+            assert!((salvaged[0].start_time - 107.04).abs() < 1e-8);
+            assert!((salvaged[0].end_time - 107.12).abs() < 1e-8);
+            if unfinished_word {
+                assert!((salvaged[1].start_time - 107.36).abs() < 1e-8);
+                assert_eq!(salvaged[1].end_time, salvaged[1].start_time);
+            }
+            assert!(
+                KyutaiEngine::salvage_invalid_pending(&mut model)
+                    .unwrap()
+                    .is_empty()
+            );
+            assert!(model.integrity.ensure_ready().is_err());
+            assert_eq!(model.resets, 1);
+        }
+    }
+
+    #[test]
+    fn pre_frame_soft_pause_failure_salvages_prior_frame_finals_once() {
+        let mut model = BatchTestModel::new(2, 0.0);
+        model.tracker.reset_all(); // First frame must not request a language reset.
+        model.fail_reset = true;
+        model.partial_mutation = true;
+        let mut forwards = 0;
+        let result = KyutaiEngine::transcription_call(&mut model, |model, segments| {
+            for frame in 0..3 {
+                model.integrity.ensure_ready()?;
+                if frame == 1 {
+                    assert_eq!(
+                        decide_refresh(738, 750, &[12, 0], &[false, false], 2, 6),
+                        RefreshDecision::Lane {
+                            batch_idx: 0,
+                            kind: RefreshKind::SoftPause
+                        }
+                    );
+                    let reset = model.reset_lane(0);
+                    KyutaiEngine::complete_reset(&mut model.integrity, reset)?;
+                }
+                forwards += 1;
+                KyutaiEngine::consume_asr_msgs(
+                    model,
+                    &[
+                        e1_word(0, 58.24),
+                        moshi::asr::AsrMsg::EndWord {
+                            stop_time: 58.32,
+                            batch_idx: 0,
+                        },
+                        e1_word(1, 58.56),
+                    ],
+                    false,
+                    segments,
+                )?;
+            }
+            Ok(())
+        });
+        assert!(
+            matches!(result, Err(EngineError::InferenceError(ref error)) if error == "E1 injected KV failure")
+        );
+        assert_eq!(forwards, 1);
+        assert!(model.item_reset);
+        let salvaged = KyutaiEngine::salvage_invalid_pending(&mut model).unwrap();
+        assert_eq!(salvaged.len(), 2);
+        assert!(salvaged.iter().all(|segment| segment.is_final
+            && segment.text == "bonjour"
+            && segment.language.as_deref() == Some("fr")));
+        assert_eq!(salvaged[0].speaker, Some(Speaker::Me));
+        assert!((salvaged[0].start_time - 107.04).abs() < 1e-8);
+        assert!((salvaged[0].end_time - 107.12).abs() < 1e-8);
+        assert_eq!(salvaged[1].speaker, Some(Speaker::Them));
+        assert!((salvaged[1].start_time - 107.36).abs() < 1e-8);
+        assert_eq!(salvaged[1].end_time, salvaged[1].start_time);
+        assert!(
+            KyutaiEngine::salvage_invalid_pending(&mut model)
+                .unwrap()
+                .is_empty()
+        );
+        assert!(model.integrity.ensure_ready().is_err());
+        assert_eq!(model.resets, 1);
+    }
+
+    #[test]
+    fn lane_reset_failure_invalidates_without_masking_original_error() {
+        for partial in [false, true] {
+            let mut integrity = ModelIntegrity::Ready;
+            KyutaiEngine::complete_reset(&mut integrity, Ok(())).unwrap();
+            assert!(integrity.ensure_ready().is_ok());
+            let message = format!("ASR lane reset: injected mutation={partial}");
+            let error = KyutaiEngine::complete_reset(
+                &mut integrity,
+                Err(EngineError::InferenceError(message.clone())),
+            )
+            .unwrap_err();
+            assert!(matches!(error, EngineError::InferenceError(actual) if actual == message));
+            assert!(integrity.ensure_ready().is_err());
+            // A later successful reset is not a reconstruction.
+            KyutaiEngine::complete_reset(&mut integrity, Ok(())).unwrap();
+            assert!(integrity.ensure_ready().is_err());
+        }
+    }
+
+    use super::*;
+
+    #[test]
+    fn prefix_frame_count_zero_for_no_prefix() {
+        // stt-1b-en_fr-candle config: audio_silence_prefix_seconds = 0.0
+        assert_eq!(KyutaiEngine::prefix_frame_count(0.0), 0);
+    }
+
+    #[test]
+    fn prefix_frame_count_rounds_up_to_whole_frames() {
+        // stt-2.6b-en-candle config: audio_silence_prefix_seconds = 1.0
+        // 1.0s * 12.5 = 12.5 frames -> 13 whole frames, never a partial
+        // frame that would zero-pad real audio mid-stream.
+        assert_eq!(KyutaiEngine::prefix_frame_count(1.0), 13);
+        assert_eq!(KyutaiEngine::prefix_frame_count(0.5), 7);
+        assert_eq!(KyutaiEngine::prefix_frame_count(2.0), 25);
+    }
+
+    /// stt-1b-en_fr: audio_delay_seconds = 0.5 → 6 frames at 12.5 Hz.
+    const STT_1B_DELAY: usize = 6;
+    /// stt-2.6b-en: audio_delay_seconds = 2.5 → 31 frames at 12.5 Hz.
+    const STT_26B_DELAY: usize = 31;
+
+    #[test]
+    fn drained_pause_frames_is_delay_plus_margin() {
+        assert_eq!(drained_pause_frames(STT_1B_DELAY), 12);
+        assert_eq!(drained_pause_frames(STT_26B_DELAY), 37);
+    }
+
+    #[test]
+    fn extra_heads_probe_matches_the_1b_tensor_name_only() {
+        assert!(has_extra_heads_tensor([
+            "extra_heads.0.weight",
+            "text_emb.weight"
+        ]));
+        assert!(!has_extra_heads_tensor([
+            "text_emb.weight",
+            "out_norm.weight"
+        ]));
+        assert!(!has_extra_heads_tensor(Vec::<&str>::new()));
+    }
+
+    #[test]
+    fn checkpoint_has_semantic_vad_handles_missing_file_gracefully() {
+        // Should return false rather than erroring out
+        assert!(!KyutaiEngine::checkpoint_has_semantic_vad(
+            std::path::Path::new("/does/not/exist.safetensors")
+        ));
+    }
+
+    #[test]
+    fn energy_pause_treats_digital_silence_as_pause_and_speech_as_active() {
+        let silence = vec![0.0f32; MIMI_FRAME_SIZE];
+        let speech = vec![0.2f32; MIMI_FRAME_SIZE];
+        let nan_speech = vec![f32::NAN; MIMI_FRAME_SIZE];
+        let empty: Vec<f32> = vec![];
+
+        assert!(is_energy_pause(&silence));
+        assert!(!is_energy_pause(&speech));
+        assert!(!is_energy_pause(&nan_speech)); // NaN is not < threshold
+
+        assert_eq!(pcm_rms(&empty), 0.0);
+        assert!(is_energy_pause(&empty));
+    }
+
+    #[test]
+    fn energy_pause_streak_accumulates_on_quiet_frames_and_resets_on_speech() {
+        let silence = vec![0.0f32; MIMI_FRAME_SIZE];
+        let speech = vec![0.2f32; MIMI_FRAME_SIZE];
+        let mut streaks = [0usize, 0];
+        let mut consumed = [true, true];
+
+        note_energy_pause_streaks(&mut streaks, &mut consumed, &[&silence, &speech]);
+        assert_eq!(streaks, [1, 0]);
+        assert_eq!(consumed, [true, false]);
+        note_energy_pause_streaks(&mut streaks, &mut consumed, &[&silence, &silence]);
+        assert_eq!(streaks, [2, 1]);
+        assert_eq!(consumed, [true, false]);
+        note_energy_pause_streaks(&mut streaks, &mut consumed, &[&speech, &silence]);
+        assert_eq!(streaks, [0, 2]);
+        assert_eq!(consumed, [false, false]);
+    }
+
+    #[test]
+    fn energy_pause_streak_can_soft_refresh_a_checkpoint_without_vad_heads() {
+        // 2.6B: no AsrMsg::Step, streak stays 0 unless energy fills it.
+        // Without this fallback, 300 frames into a 375 context is nothing
+        // — never SoftPause.
+        let silence = vec![0.0f32; MIMI_FRAME_SIZE];
+        let mut streaks = [0usize];
+        let mut consumed = [false];
+        let drained = drained_pause_frames(STT_26B_DELAY);
+        for _ in 0..drained {
+            note_energy_pause_streaks(&mut streaks, &mut consumed, &[&silence]);
+        }
+        assert_eq!(
+            decide_refresh(300, 375, &streaks, &consumed, 1, STT_26B_DELAY),
+            RefreshDecision::Full(RefreshKind::SoftPause)
+        );
+        assert_eq!(
+            decide_refresh(300, 375, &[0], &[false], 1, STT_26B_DELAY),
+            RefreshDecision::None
+        );
+    }
+
+    #[test]
+    fn decide_refresh_none_before_soft_window() {
+        let streak = [0usize];
+        assert_eq!(
+            decide_refresh(100, 375, &streak, &[false], 1, STT_1B_DELAY),
+            RefreshDecision::None
+        );
+        assert_eq!(
+            decide_refresh(224, 375, &streak, &[false], 1, STT_1B_DELAY),
+            RefreshDecision::None
+        );
+        assert_eq!(
+            decide_refresh(225, 375, &[0], &[false], 1, STT_1B_DELAY),
+            RefreshDecision::None
+        );
+    }
+
+    #[test]
+    fn decide_refresh_soft_pause_at_60_percent_context() {
+        let drained = drained_pause_frames(STT_1B_DELAY);
+        assert_eq!(
+            decide_refresh(225, 375, &[drained], &[false], 1, STT_1B_DELAY),
+            RefreshDecision::Full(RefreshKind::SoftPause)
+        );
+    }
+
+    #[test]
+    fn decide_refresh_no_hard_deadline_past_soft_window_without_pause() {
+        assert_eq!(
+            decide_refresh(350, 375, &[0], &[false], 1, STT_1B_DELAY),
+            RefreshDecision::None
+        );
+        assert_eq!(
+            decide_refresh(
+                350,
+                375,
+                &[drained_pause_frames(STT_1B_DELAY)],
+                &[false],
+                1,
+                STT_1B_DELAY
+            ),
+            RefreshDecision::Full(RefreshKind::SoftPause)
+        );
+    }
+
+    #[test]
+    fn decide_refresh_ignores_zero_context_or_fresh_epoch() {
+        let drained = drained_pause_frames(STT_1B_DELAY);
+        assert_eq!(
+            decide_refresh(400, 0, &[drained], &[false], 1, STT_1B_DELAY),
+            RefreshDecision::None
+        );
+        assert_eq!(
+            decide_refresh(0, 375, &[drained], &[false], 1, STT_1B_DELAY),
+            RefreshDecision::None
+        );
+    }
+
+    #[test]
+    fn decide_refresh_dual_one_lane_paused_other_active() {
+        let drained = drained_pause_frames(STT_1B_DELAY);
+        assert_eq!(
+            decide_refresh(300, 375, &[drained, 2], &[false, false], 2, STT_1B_DELAY),
+            RefreshDecision::Lane {
+                batch_idx: 0,
+                kind: RefreshKind::SoftPause,
+            }
+        );
+    }
+
+    #[test]
+    fn decide_refresh_dual_both_paused_full_refresh() {
+        let drained = drained_pause_frames(STT_1B_DELAY);
+        assert_eq!(
+            decide_refresh(
+                300,
+                375,
+                &[drained, drained + 2],
+                &[false, false],
+                2,
+                STT_1B_DELAY
+            ),
+            RefreshDecision::Full(RefreshKind::SoftPause)
+        );
+    }
+
+    #[test]
+    fn decide_refresh_flat_six_frame_pause_does_not_clear_while_delay_is_in_flight() {
+        // The old REFRESH_PAUSE_FRAMES = 6 sat exactly on the 1B delay and five
+        // times below the 2.6B delay. Either way, six frames of pause still
+        // hold an in-flight word.
+        assert_eq!(
+            decide_refresh(225, 375, &[6], &[false], 1, STT_1B_DELAY),
+            RefreshDecision::None
+        );
+        assert_eq!(
+            decide_refresh(300, 375, &[6], &[false], 1, STT_26B_DELAY),
+            RefreshDecision::None
+        );
+        assert_eq!(
+            decide_refresh(300, 375, &[8, 2], &[false, false], 2, STT_26B_DELAY),
+            RefreshDecision::None
+        );
+    }
+
+    #[test]
+    fn decide_refresh_fires_once_the_delay_window_holds_only_silence() {
+        let drained = drained_pause_frames(STT_26B_DELAY);
+        assert_eq!(
+            decide_refresh(300, 375, &[drained], &[false], 1, STT_26B_DELAY),
+            RefreshDecision::Full(RefreshKind::SoftPause)
+        );
+        assert_eq!(
+            decide_refresh(300, 375, &[drained, 2], &[false, false], 2, STT_26B_DELAY),
+            RefreshDecision::Lane {
+                batch_idx: 0,
+                kind: RefreshKind::SoftPause,
+            }
+        );
+    }
+
+    #[test]
+    fn decide_refresh_lane_pause_marker_blocks_retrigger_during_long_silence() {
+        // SOU-193: elapsed frames must not re-arm a lane that has remained
+        // silent since its pause-triggered refresh.
+        let drained = drained_pause_frames(STT_1B_DELAY);
+        assert_eq!(
+            decide_refresh(300, 375, &[drained], &[true], 1, STT_1B_DELAY),
+            RefreshDecision::None
+        );
+        assert_eq!(
+            decide_refresh(300, 375, &[drained, 2], &[true, false], 2, STT_1B_DELAY),
+            RefreshDecision::None
+        );
+    }
+
+    #[test]
+    fn decide_refresh_lane_rearms_after_speech_and_a_new_pause() {
+        let silence = vec![0.0f32; MIMI_FRAME_SIZE];
+        let speech = vec![0.2f32; MIMI_FRAME_SIZE];
+        let drained = drained_pause_frames(STT_1B_DELAY);
+        let mut streaks = [drained, 2];
+        let mut consumed = [true, false];
+
+        note_energy_pause_streaks(&mut streaks, &mut consumed, &[&speech, &speech]);
+        for _ in 0..drained {
+            note_energy_pause_streaks(&mut streaks, &mut consumed, &[&silence, &speech]);
+        }
+        assert_eq!(
+            decide_refresh(300, 375, &streaks, &consumed, 2, STT_1B_DELAY),
+            RefreshDecision::Lane {
+                batch_idx: 0,
+                kind: RefreshKind::SoftPause,
+            }
+        );
+    }
+
+    #[test]
+    fn decide_refresh_lane_pause_marker_is_per_lane_not_global() {
+        // Lane 0 has already refreshed in its current pause; lane 1 is in an
+        // independent, unconsumed pause. Only lane 1 should refresh — lane 0
+        // must not suppress it, and the pair must not be treated as
+        // "both paused" (Full) just because lane 0 also has a long streak.
+        let drained = drained_pause_frames(STT_1B_DELAY);
+        assert_eq!(
+            decide_refresh(
+                300,
+                375,
+                &[drained, drained],
+                &[true, false],
+                2,
+                STT_1B_DELAY
+            ),
+            RefreshDecision::Lane {
+                batch_idx: 1,
+                kind: RefreshKind::SoftPause,
+            }
+        );
+    }
+
+    #[test]
+    fn word_start_time_keeps_epochs_monotone() {
+        // moshi_start within epoch, minus prefix, plus prior epochs.
+        assert_eq!(KyutaiEngine::word_start_time_raw(2.0, 1.0, 30.0), 31.0);
+        // Prefix still draining: clamp at 0.
+        assert_eq!(KyutaiEngine::word_start_time_raw(0.5, 1.0, 0.0), 0.0);
+    }
+
+    #[test]
+    fn credit_lane_epoch_keeps_the_reset_lane_monotone() {
+        // Two lanes 24s into an epoch that opened with a 13-frame (1.04s)
+        // silence prefix, 58s of earlier epochs already credited.
+        let mut origin = [58.0f64, 58.0];
+        let mut offset = [1.04f64, 1.04];
+        let mut frames = [300usize, 300];
+
+        let last_emitted = KyutaiEngine::word_start_time_raw(
+            (300 - 13) as f64 / crate::constants::MIMI_FRAMES_PER_SECOND,
+            offset[0],
+            origin[0],
+        );
+
+        KyutaiEngine::credit_lane_epoch(&mut origin, &mut offset, &mut frames, 0);
+
+        // reset_batch_idx restarts the lane's moshi clock at 0: the next word
+        // must not land before the last one emitted on that lane.
+        let after_reset = KyutaiEngine::word_start_time_raw(0.0, offset[0], origin[0]);
+        assert!(
+            after_reset >= last_emitted,
+            "lane 0 rewound: {after_reset} < {last_emitted}"
+        );
+        assert_eq!(frames[0], 0);
+        assert_eq!(offset[0], 0.0);
+    }
+
+    #[test]
+    fn credit_lane_epoch_leaves_the_other_lane_untouched() {
+        let mut origin = [58.0f64, 58.0];
+        let mut offset = [1.04f64, 1.04];
+        let mut frames = [300usize, 300];
+
+        KyutaiEngine::credit_lane_epoch(&mut origin, &mut offset, &mut frames, 0);
+
+        // The lane that kept decoding must keep its clock: crediting it here
+        // would push its words forward by a whole epoch.
+        assert_eq!(origin[1], 58.0);
+        assert_eq!(offset[1], 1.04);
+        assert_eq!(frames[1], 300);
+    }
+
+    #[test]
+    fn carry_timeline_across_rebuild_credits_a_lane_mid_epoch() {
+        // 10s of real audio decoded (125 frames at 12.5 fps), no prefix left
+        // to subtract: the full 10s must be credited into the origin.
+        let origin = [10.0f64];
+        let offset = [0.0f64];
+        let frames = [125usize];
+        let last_emitted = [9.5f64];
+
+        let (carried_origin, carried_last_emitted) =
+            KyutaiEngine::carry_timeline_across_rebuild(&origin, &offset, &frames, &last_emitted);
+
+        assert_eq!(carried_origin, vec![20.0]);
+        // Monotonic floors are copied through untouched: they already reflect
+        // each lane's true wall-clock position.
+        assert_eq!(carried_last_emitted, vec![9.5]);
+    }
+
+    #[test]
+    fn carry_timeline_across_rebuild_leaves_an_already_credited_lane_unchanged() {
+        // Freshly refreshed lane: no frames decoded since its last credit.
+        let origin = [42.0f64];
+        let offset = [0.0f64];
+        let frames = [0usize];
+        let last_emitted = [42.0f64];
+
+        let (carried_origin, _) =
+            KyutaiEngine::carry_timeline_across_rebuild(&origin, &offset, &frames, &last_emitted);
+
+        assert_eq!(carried_origin, vec![42.0]);
+    }
+
+    #[test]
+    fn carry_timeline_across_rebuild_does_not_double_count_the_prefix() {
+        // Epoch opened with a 13-frame (1.04s) silence prefix and only that
+        // prefix has been fed so far: the prefix must not itself be credited
+        // as real audio.
+        let origin = [5.0f64];
+        let offset = [1.04f64];
+        let frames = [13usize];
+        let last_emitted = [5.0f64];
+
+        let (carried_origin, _) =
+            KyutaiEngine::carry_timeline_across_rebuild(&origin, &offset, &frames, &last_emitted);
+
+        assert_eq!(carried_origin, vec![5.0]);
+    }
+
+    #[test]
+    fn carry_timeline_across_rebuild_clamps_a_negative_credit_at_zero() {
+        // Fewer frames decoded than the prefix accounts for (shouldn't
+        // happen, but `credit_lane_epoch` clamps rather than going negative).
+        let origin = [7.0f64];
+        let offset = [1.04f64];
+        let frames = [5usize];
+        let last_emitted = [7.0f64];
+
+        let (carried_origin, _) =
+            KyutaiEngine::carry_timeline_across_rebuild(&origin, &offset, &frames, &last_emitted);
+
+        assert_eq!(carried_origin, vec![7.0]);
+    }
+
+    #[test]
+    fn pending_word_uses_endword_stop_time() {
+        let pending = PendingWord {
+            text: "hello".into(),
+            start_time: 1.2,
+            language: Some("en".into()),
+            speaker: Some(Speaker::Me),
+        };
+        let seg = KyutaiEngine::pending_to_segment(pending, 1.6);
+        assert_eq!(seg.text, "hello");
+        assert_eq!(seg.start_time, 1.2);
+        assert_eq!(seg.end_time, 1.6);
+        assert_eq!(seg.speaker, Some(Speaker::Me));
+        assert!(seg.is_final);
+    }
+
+    #[test]
+    fn pending_word_end_time_never_precedes_start() {
+        let pending = PendingWord {
+            text: "hi".into(),
+            start_time: 2.0,
+            language: None,
+            speaker: None,
+        };
+        let seg = KyutaiEngine::pending_to_segment(pending, 1.5);
+        assert_eq!(seg.end_time, 2.0);
+    }
+
+    #[test]
+    fn pending_word_tentative_is_not_final_and_does_not_consume() {
+        let pending = PendingWord {
+            text: "hello".into(),
+            start_time: 1.2,
+            language: Some("en".into()),
+            speaker: Some(Speaker::Me),
+        };
+        let tentative = KyutaiEngine::pending_to_tentative_segment(&pending);
+        assert_eq!(tentative.text, "hello");
+        assert_eq!(tentative.start_time, 1.2);
+        assert_eq!(tentative.end_time, 1.2);
+        assert_eq!(tentative.language.as_deref(), Some("en"));
+        assert_eq!(tentative.speaker, Some(Speaker::Me));
+        assert!(!tentative.is_final);
+
+        let finalized = KyutaiEngine::pending_to_segment(pending, 1.6);
+        assert_eq!(finalized.text, "hello");
+        assert_eq!(finalized.end_time, 1.6);
+        assert!(finalized.is_final);
+    }
+
+    fn word(text: &str, start_time: f64) -> PendingWord {
+        PendingWord {
+            text: text.into(),
+            start_time,
+            language: None,
+            speaker: None,
+        }
+    }
+
+    #[test]
+    fn open_word_emits_the_orphan_final_before_the_new_preview() {
+        // A language-mismatch reset moved "bonjour" to the orphan list before
+        // "monde" arrived. The consumers drop a preview as soon as a final
+        // lands, so the orphan has to come first.
+        let mut pending_words = vec![None];
+        let mut orphaned_words = vec![word("bonjour", 1.0)];
+        let mut segments = Vec::new();
+
+        KyutaiEngine::open_word(
+            &mut pending_words,
+            &mut orphaned_words,
+            0,
+            word("monde", 1.4),
+            &mut segments,
+        );
+
+        assert_eq!(segments.len(), 2);
+        assert_eq!(segments[0].text, "bonjour");
+        assert!(segments[0].is_final);
+        assert_eq!(segments[1].text, "monde");
+        assert!(!segments[1].is_final);
+        assert!(orphaned_words.is_empty());
+        assert_eq!(
+            pending_words[0].as_ref().map(|p| p.text.as_str()),
+            Some("monde")
+        );
+    }
+
+    #[test]
+    fn open_word_closes_the_previous_word_before_previewing_the_new_one() {
+        let mut pending_words = vec![Some(word("hello", 1.0))];
+        let mut orphaned_words = Vec::new();
+        let mut segments = Vec::new();
+
+        KyutaiEngine::open_word(
+            &mut pending_words,
+            &mut orphaned_words,
+            0,
+            word("world", 1.5),
+            &mut segments,
+        );
+
+        assert_eq!(segments.len(), 2);
+        assert_eq!(segments[0].text, "hello");
+        assert!(segments[0].is_final);
+        assert_eq!(segments[0].end_time, 1.5);
+        assert_eq!(segments[1].text, "world");
+        assert!(!segments[1].is_final);
+    }
+
+    #[test]
+    fn open_word_grows_the_lane_list_for_a_new_batch_index() {
+        let mut pending_words = Vec::new();
+        let mut orphaned_words = Vec::new();
+        let mut segments = Vec::new();
+
+        KyutaiEngine::open_word(
+            &mut pending_words,
+            &mut orphaned_words,
+            1,
+            word("them", 2.0),
+            &mut segments,
+        );
+
+        assert_eq!(pending_words.len(), 2);
+        assert!(pending_words[0].is_none());
+        assert_eq!(segments.len(), 1);
+        assert!(!segments[0].is_final);
+    }
+}

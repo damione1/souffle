@@ -1,0 +1,82 @@
+import { Theme } from "../theme.slint";
+
+// Shared chrome for the app's modal dialogs (What's New, Update available,
+// Settings > Permissions). Port of the one recipe every Tauri dialog used
+// (`WhatsNewDialog.svelte`, `UpdateAvailableDialog.svelte`,
+// `PermissionsOnboarding.svelte`): a `bg-black/50` scrim, a centered
+// `max-w-lg bg-canvas p-6 outline-1 outline-ghost-border` panel with square
+// corners (`--radius-card: 0`), a `text-lg font-bold` title over a
+// `text-sm text-text-muted` subtitle, then the dialog's own body.
+//
+// Escape and a click on the scrim both ask the owner to close; a click
+// inside the panel is swallowed by its own TouchArea so it never reaches
+// the scrim's. The owner decides what "close" means (dismiss + persist,
+// or just hide) - this component never flips visibility itself.
+export component ModalDialog inherits Rectangle {
+    in property <string> title;
+    in property <string> subtitle;
+    in property <length> panel-max-width: 512px;
+    in property <length> panel-height: 420px;
+
+    callback close-requested();
+
+    background: Theme.modal-scrim;
+    accessible-role: groupbox;
+    accessible-label: root.title;
+
+    forward-focus: modal-focus;
+    init => { modal-focus.focus(); }
+
+    modal-focus := FocusScope {
+        key-pressed(event) => {
+            if event.text == Key.Escape {
+                root.close-requested();
+                return accept;
+            }
+            return reject;
+        }
+    }
+
+    TouchArea {
+        clicked => { root.close-requested(); }
+    }
+
+    panel := Rectangle {
+        width: min(parent.width - 48px, root.panel-max-width);
+        height: min(parent.height - 48px, root.panel-height);
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        border-width: 1px;
+        border-color: Theme.ghost-border;
+        background: Theme.canvas;
+
+        TouchArea { }
+
+        VerticalLayout {
+            padding: 24px;
+            spacing: 16px;
+
+            VerticalLayout {
+                spacing: 4px;
+                vertical-stretch: 0;
+
+                Text {
+                    text: root.title;
+                    font-family: "Archivo SemiBold";
+                    font-size: 18px;
+                    font-weight: 700;
+                    color: Theme.text-primary;
+                    wrap: word-wrap;
+                }
+                if root.subtitle != "": Text {
+                    text: root.subtitle;
+                    font-size: 14px;
+                    color: Theme.text-muted;
+                    wrap: word-wrap;
+                }
+            }
+
+            @children
+        }
+    }
+}

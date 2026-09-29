@@ -1,0 +1,10 @@
+{
+  "accepted_samples": 3743820,
+  "clamps": 0,
+  "finals": 311,
+  "future_times": 0,
+  "prior": "Auto",
+  "segments": 622,
+  "text_and_final_flags_identical_to_E1_baseline": true,
+  "wall_seconds": 84.412537792
+}

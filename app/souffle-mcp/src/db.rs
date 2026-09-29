@@ -1,0 +1,1400 @@
+//! Read-only data layer for the MCP sidecar.
+//!
+//! This intentionally does not depend on the app crate: it opens the same
+//! SQLite file the app writes to (`SQLITE_OPEN_READ_ONLY`, so it can run
+//! concurrently with the app under WAL) and re-implements just the read
+//! queries the MCP tools need. Keeping the two crates independent is the
+//! whole point of the sidecar (it must build and run without pulling in
+//! Tauri, candle, or ort), at the cost of the schema being duplicated on the
+//! read side. `souffle-mcp` schema drift against the writer is caught by the
+//! contract test in `app/tests/mcp_sidecar_contract.rs`, which writes
+//! through the real app `Database` and reads back through this module.
+
+use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+use std::time::Duration;
+
+use rusqlite::{Connection, OpenFlags, params};
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+use souffle_schema::Speaker;
+use souffle_schema::paragraphs::{PAUSE_THRESHOLD_SECONDS, SegmentLike, group_into_paragraphs};
+use thiserror::Error;
+
+/// Must match `constants::APP_IDENTIFIER` in the main crate.
+const APP_IDENTIFIER: &str = "com.souffle.desktop";
+
+#[derive(Debug, Error)]
+pub enum McpDbError {
+    #[error("Souffle database not found at {0}. Launch Souffle at least once so it can create it.")]
+    NotFound(PathBuf),
+    #[error("Open database: {0}")]
+    Open(#[source] rusqlite::Error),
+    #[error("Query failed: {0}")]
+    Query(#[source] rusqlite::Error),
+    #[error("Meeting not found: {0}")]
+    MeetingNotFound(String),
+    #[error("No meetings found")]
+    NoMeetings,
+    #[error("Database lock poisoned: {0}")]
+    Lock(String),
+    #[error(
+        "This Souffle database is at schema version {found}, newer than version {expected}, \
+         which is the newest this MCP server knows how to read. Update Souffle (the sidecar \
+         ships with the app) and restart your MCP client."
+    )]
+    SchemaTooNew { found: i64, expected: i64 },
+    #[error(
+        "Could not read the Souffle database schema version: {0}. Launch Souffle at least \
+         once so it can create and migrate the database."
+    )]
+    SchemaUnreadable(String),
+}
+
+/// Why the database cannot be served. Kept as data rather than as a
+/// `McpDbError` because the verdict is taken once, at open, and returned on
+/// every tool call afterwards.
+#[derive(Debug, Clone)]
+enum SchemaVerdict {
+    TooNew { found: i64 },
+    Unreadable(String),
+}
+
+impl SchemaVerdict {
+    fn to_error(&self) -> McpDbError {
+        match self {
+            SchemaVerdict::TooNew { found } => McpDbError::SchemaTooNew {
+                found: *found,
+                expected: souffle_schema::SCHEMA_VERSION,
+            },
+            SchemaVerdict::Unreadable(detail) => McpDbError::SchemaUnreadable(detail.clone()),
+        }
+    }
+}
+
+/// Read `schema_version` and decide whether this build can serve the file.
+///
+/// The rule is asymmetric on purpose. A database newer than this build is
+/// refused: a migration may have moved or redefined the columns the queries
+/// below read, and a wrong answer is worse than no answer. An older database
+/// is served, because a user who has not launched the new app yet still has
+/// every column these queries touch.
+///
+/// A missing or unreadable table is refused rather than assumed compatible.
+fn check_schema(conn: &Connection) -> Result<i64, SchemaVerdict> {
+    let found: i64 = conn
+        .query_row("SELECT version FROM schema_version LIMIT 1", [], |row| {
+            row.get(0)
+        })
+        .map_err(|e| SchemaVerdict::Unreadable(e.to_string()))?;
+
+    if found > souffle_schema::SCHEMA_VERSION {
+        return Err(SchemaVerdict::TooNew { found });
+    }
+    Ok(found)
+}
+
+/// Resolve the Souffle SQLite database path: the `SOUFFLE_DB` env var
+/// overrides everything (used by tests and manual debugging); otherwise this
+/// mirrors `constants::app_data_dir()` in the main crate.
+pub fn resolve_db_path() -> PathBuf {
+    if let Ok(path) = std::env::var("SOUFFLE_DB") {
+        return PathBuf::from(path);
+    }
+    dirs_next::data_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(running_app_identifier())
+        .join("souffle.db")
+}
+
+fn running_app_identifier() -> String {
+    bundle_identifier_from_info_plist().unwrap_or_else(|| APP_IDENTIFIER.to_string())
+}
+
+/// Sidecar lives at `Foo.app/Contents/MacOS/souffle-mcp`. Nightly builds
+/// use `com.souffle.desktop.nightly`; fall back to the shipped id.
+fn bundle_identifier_from_info_plist() -> Option<String> {
+    let exe = std::env::current_exe().ok()?;
+    let macos = exe.parent()?;
+    if macos.file_name()?.to_str()? != "MacOS" {
+        return None;
+    }
+    let plist = std::fs::read_to_string(macos.parent()?.join("Info.plist")).ok()?;
+    bundle_id_from_info_plist_xml(&plist)
+}
+
+fn bundle_id_from_info_plist_xml(plist: &str) -> Option<String> {
+    let key = "<key>CFBundleIdentifier</key>";
+    let after = plist.split_once(key)?.1.trim_start();
+    let after = after.strip_prefix("<string>")?;
+    let id = after.split_once("</string>")?.0.trim();
+    id.starts_with("com.souffle.").then(|| id.to_string())
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct IncludeSet {
+    pub transcript: bool,
+    pub summary: bool,
+    pub notes: bool,
+    pub metadata: bool,
+}
+
+impl IncludeSet {
+    pub fn all() -> Self {
+        Self {
+            transcript: true,
+            summary: true,
+            notes: true,
+            metadata: true,
+        }
+    }
+
+    /// `None` or an empty list both mean "everything" — an MCP client asking
+    /// for a meeting with no `include` filter almost always wants the full
+    /// picture, not nothing.
+    pub fn from_names(names: Option<&[String]>) -> Self {
+        let Some(names) = names else {
+            return Self::all();
+        };
+        if names.is_empty() {
+            return Self::all();
+        }
+        Self {
+            transcript: names.iter().any(|n| n == "transcript"),
+            summary: names.iter().any(|n| n == "summary"),
+            notes: names.iter().any(|n| n == "notes"),
+            metadata: names.iter().any(|n| n == "metadata"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct ParticipantInfo {
+    pub name: String,
+    pub email: Option<String>,
+    pub is_organizer: bool,
+}
+
+/// Declared once, in `souffle-schema`, and read by both processes.
+pub use souffle_schema::{StructuredActionItem, StructuredSummary};
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct MeetingSummary {
+    pub id: String,
+    pub title: String,
+    pub started_at: String,
+    pub ended_at: Option<String>,
+    pub is_ongoing: bool,
+    pub duration_seconds: f64,
+    pub participants: Vec<String>,
+    pub has_summary: bool,
+    pub has_notes: bool,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct MeetingMetadata {
+    pub calendar_event_id: Option<String>,
+    pub participants: Vec<ParticipantInfo>,
+    pub summary_model: Option<String>,
+    pub summary_generated_at: Option<String>,
+    pub segment_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct MeetingDetail {
+    pub id: String,
+    pub title: String,
+    pub started_at: String,
+    pub ended_at: Option<String>,
+    pub is_ongoing: bool,
+    pub duration_seconds: f64,
+    pub transcript: Option<String>,
+    pub summary: Option<String>,
+    pub structured_summary: Option<StructuredSummary>,
+    pub notes: Option<String>,
+    pub metadata: Option<MeetingMetadata>,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct MeetingSearchHit {
+    pub id: String,
+    pub title: String,
+    pub started_at: String,
+    pub snippet: String,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct DictationSummary {
+    pub id: String,
+    pub text: String,
+    pub timestamp: String,
+}
+
+/// Raw `segments` row from SQLite, in `sort_order` (storage order). The
+/// shared paragraph grouper does its own per-speaker ordering, so nothing
+/// is re-sorted here.
+struct SegmentRow {
+    text: String,
+    start_time: f64,
+    end_time: f64,
+    /// Leftover `spk:<id>` labels (and anything else) read as `None`, via
+    /// `Speaker::parse`.
+    speaker: Option<Speaker>,
+}
+
+impl SegmentLike for SegmentRow {
+    fn text(&self) -> &str {
+        &self.text
+    }
+    fn start_time(&self) -> f64 {
+        self.start_time
+    }
+    fn end_time(&self) -> f64 {
+        self.end_time
+    }
+    fn speaker(&self) -> Option<Speaker> {
+        self.speaker
+    }
+}
+
+struct MeetingRow {
+    id: String,
+    title: String,
+    started_at: String,
+    ended_at: Option<String>,
+    duration_seconds: f64,
+    summary: Option<String>,
+    summary_model: Option<String>,
+    summary_generated_at: Option<String>,
+    structured_summary: Option<String>,
+    edited_transcript: Option<String>,
+    notes: Option<String>,
+    calendar_event_id: Option<String>,
+    participants: Option<String>,
+}
+
+impl MeetingRow {
+    /// Malformed participant JSON is treated as "no participants" rather
+    /// than failing the whole meeting read — it is a cosmetic field.
+    fn participants(&self) -> Vec<ParticipantInfo> {
+        self.participants
+            .as_deref()
+            .and_then(|raw| serde_json::from_str(raw).ok())
+            .unwrap_or_default()
+    }
+
+    fn participant_names(&self) -> Vec<String> {
+        self.participants().into_iter().map(|p| p.name).collect()
+    }
+
+    fn structured_summary(&self) -> Option<StructuredSummary> {
+        self.structured_summary
+            .as_deref()
+            .and_then(|raw| serde_json::from_str(raw).ok())
+    }
+}
+
+#[derive(Debug)]
+pub struct McpDb {
+    /// `Mutex` (not just `Connection`) so `McpDb` is `Sync` — the rmcp tool
+    /// macros generate `Send` futures that hold `&SouffleMcpServer` across
+    /// await points, and `rusqlite::Connection` alone is `!Sync`.
+    conn: Mutex<Connection>,
+    /// Taken once at open. `Err` makes every tool call refuse with the same
+    /// explanation instead of querying columns that may have moved.
+    schema: Result<i64, SchemaVerdict>,
+}
+
+/// Mirror of the app's `db::search::SearchSource`. The sidecar is a standalone
+/// binary that depends on neither `souffle` nor `tauri`, so the enum is
+/// restated here rather than imported. Only `Meeting` is needed: the sidecar
+/// never reads dictation rows out of the full-text index. The string is the
+/// on-disk encoding of `text_search.source_type` and must match the app's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SearchSource {
+    Meeting,
+}
+
+impl SearchSource {
+    const fn as_str(self) -> &'static str {
+        match self {
+            SearchSource::Meeting => "meeting",
+        }
+    }
+}
+
+impl rusqlite::ToSql for SearchSource {
+    fn to_sql(&self) -> rusqlite::Result<rusqlite::types::ToSqlOutput<'_>> {
+        Ok(rusqlite::types::ToSqlOutput::from(self.as_str()))
+    }
+}
+
+impl McpDb {
+    /// Open the database read-only. WAL mode lets this coexist with the app
+    /// writing concurrently; `busy_timeout` covers the rare case where a
+    /// writer holds a brief exclusive lock during checkpointing.
+    pub fn open(path: &Path) -> Result<Self, McpDbError> {
+        if !path.exists() {
+            return Err(McpDbError::NotFound(path.to_path_buf()));
+        }
+        let conn = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .map_err(McpDbError::Open)?;
+        conn.busy_timeout(Duration::from_secs(5))
+            .map_err(McpDbError::Open)?;
+        // Read-only, single row, no transaction: this cannot hold a lock the
+        // app would wait on.
+        let schema = check_schema(&conn);
+        if let Err(verdict) = &schema {
+            // stdout carries MCP protocol traffic, so diagnostics go to stderr.
+            eprintln!("souffle-mcp: {}", verdict.to_error());
+        }
+        Ok(Self {
+            conn: Mutex::new(conn),
+            schema,
+        })
+    }
+
+    /// The schema version of the open database, or the reason it cannot be
+    /// served.
+    pub fn schema_version(&self) -> Result<i64, McpDbError> {
+        self.schema
+            .as_ref()
+            .copied()
+            .map_err(SchemaVerdict::to_error)
+    }
+
+    fn conn(&self) -> Result<std::sync::MutexGuard<'_, Connection>, McpDbError> {
+        if let Err(verdict) = &self.schema {
+            return Err(verdict.to_error());
+        }
+        self.conn
+            .lock()
+            .map_err(|e| McpDbError::Lock(e.to_string()))
+    }
+
+    pub fn list_meetings(
+        &self,
+        query: Option<&str>,
+        from: Option<&str>,
+        to: Option<&str>,
+        limit: i64,
+    ) -> Result<Vec<MeetingSummary>, McpDbError> {
+        let conn = self.conn()?;
+        let rows = if let Some(q) = query.filter(|q| !q.trim().is_empty()) {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT m.id, m.title, m.started_at, m.ended_at, m.duration_seconds,
+                            m.summary, m.summary_model, m.summary_generated_at,
+                            m.structured_summary,
+                            m.edited_transcript, m.notes, m.calendar_event_id, m.participants
+                     FROM meetings m
+                     WHERE m.id IN (
+                         SELECT source_id FROM text_search
+                         WHERE source_type = ?5 AND text_search MATCH ?1
+                     )
+                     AND (?2 IS NULL OR julianday(m.started_at) >= julianday(?2))
+                     AND (?3 IS NULL OR julianday(m.started_at) <= julianday(?3))
+                     ORDER BY m.started_at DESC
+                     LIMIT ?4",
+                )
+                .map_err(McpDbError::Query)?;
+            query_meeting_rows(
+                &mut stmt,
+                params![q, from, to, limit, SearchSource::Meeting],
+            )?
+        } else {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT m.id, m.title, m.started_at, m.ended_at, m.duration_seconds,
+                            m.summary, m.summary_model, m.summary_generated_at,
+                            m.structured_summary,
+                            m.edited_transcript, m.notes, m.calendar_event_id, m.participants
+                     FROM meetings m
+                     WHERE (?1 IS NULL OR julianday(m.started_at) >= julianday(?1))
+                       AND (?2 IS NULL OR julianday(m.started_at) <= julianday(?2))
+                     ORDER BY m.started_at DESC
+                     LIMIT ?3",
+                )
+                .map_err(McpDbError::Query)?;
+            query_meeting_rows(&mut stmt, params![from, to, limit])?
+        };
+
+        Ok(rows
+            .into_iter()
+            .map(|row| MeetingSummary {
+                has_summary: row.summary.is_some(),
+                has_notes: row.notes.as_deref().is_some_and(|n| !n.is_empty()),
+                participants: row.participant_names(),
+                id: row.id,
+                title: row.title,
+                started_at: row.started_at,
+                is_ongoing: row.ended_at.is_none(),
+                ended_at: row.ended_at,
+                duration_seconds: row.duration_seconds,
+            })
+            .collect())
+    }
+
+    pub fn get_meeting(&self, id: &str, include: IncludeSet) -> Result<MeetingDetail, McpDbError> {
+        // `rusqlite::Error` is a foreign `#[non_exhaustive]` enum: listing its
+        // variants here would be neither possible nor useful.
+        #[allow(clippy::wildcard_enum_match_arm)]
+        let row = self
+            .conn()?
+            .query_row(
+                "SELECT id, title, started_at, ended_at, duration_seconds,
+                        summary, summary_model, summary_generated_at, structured_summary,
+                        edited_transcript, notes, calendar_event_id, participants
+                 FROM meetings WHERE id = ?1",
+                params![id],
+                map_meeting_row,
+            )
+            .map_err(|e| match e {
+                rusqlite::Error::QueryReturnedNoRows => McpDbError::MeetingNotFound(id.to_string()),
+                other => McpDbError::Query(other),
+            })?;
+
+        self.build_meeting_detail(row, include)
+    }
+
+    pub fn latest_meeting(&self, include: IncludeSet) -> Result<MeetingDetail, McpDbError> {
+        // `rusqlite::Error` is a foreign `#[non_exhaustive]` enum: listing its
+        // variants here would be neither possible nor useful.
+        #[allow(clippy::wildcard_enum_match_arm)]
+        let id: Option<String> = self
+            .conn()?
+            .query_row(
+                "SELECT id FROM meetings ORDER BY started_at DESC LIMIT 1",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(|e| match e {
+                rusqlite::Error::QueryReturnedNoRows => McpDbError::NoMeetings,
+                other => McpDbError::Query(other),
+            })?;
+        let id = id.ok_or(McpDbError::NoMeetings)?;
+        self.get_meeting(&id, include)
+    }
+
+    fn build_meeting_detail(
+        &self,
+        row: MeetingRow,
+        include: IncludeSet,
+    ) -> Result<MeetingDetail, McpDbError> {
+        let need_segments = include.transcript || include.metadata;
+        let segments = if need_segments {
+            self.load_segments(&row.id)?
+        } else {
+            Vec::new()
+        };
+        let transcript = if include.transcript {
+            Some(
+                row.edited_transcript
+                    .clone()
+                    .unwrap_or_else(|| render_transcript(&segments)),
+            )
+        } else {
+            None
+        };
+
+        let summary = if include.summary {
+            row.summary.clone()
+        } else {
+            None
+        };
+        let structured_summary = if include.summary {
+            row.structured_summary()
+        } else {
+            None
+        };
+        let notes = if include.notes {
+            row.notes.clone()
+        } else {
+            None
+        };
+        let metadata = if include.metadata {
+            Some(MeetingMetadata {
+                calendar_event_id: row.calendar_event_id.clone(),
+                participants: row.participants(),
+                summary_model: row.summary_model.clone(),
+                summary_generated_at: row.summary_generated_at.clone(),
+                segment_count: segments.len(),
+            })
+        } else {
+            None
+        };
+
+        Ok(MeetingDetail {
+            id: row.id,
+            title: row.title,
+            started_at: row.started_at,
+            is_ongoing: row.ended_at.is_none(),
+            ended_at: row.ended_at,
+            duration_seconds: row.duration_seconds,
+            transcript,
+            summary,
+            structured_summary,
+            notes,
+            metadata,
+        })
+    }
+
+    fn load_segments(&self, meeting_id: &str) -> Result<Vec<SegmentRow>, McpDbError> {
+        let conn = self.conn()?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT text, start_time, end_time, speaker
+                 FROM segments WHERE meeting_id = ?1 ORDER BY sort_order",
+            )
+            .map_err(McpDbError::Query)?;
+
+        let segments = stmt
+            .query_map(params![meeting_id], |row| {
+                let speaker: Option<String> = row.get(3)?;
+                Ok(SegmentRow {
+                    text: row.get(0)?,
+                    start_time: row.get(1)?,
+                    end_time: row.get(2)?,
+                    speaker: speaker.as_deref().and_then(Speaker::parse),
+                })
+            })
+            .map_err(McpDbError::Query)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(McpDbError::Query)?;
+        Ok(segments)
+    }
+
+    pub fn search_meetings(
+        &self,
+        query: &str,
+        limit: i64,
+    ) -> Result<Vec<MeetingSearchHit>, McpDbError> {
+        if query.trim().is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let conn = self.conn()?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT ts.source_id, m.title, m.started_at,
+                        snippet(text_search, 0, '**', '**', '...', 32)
+                 FROM text_search ts
+                 JOIN meetings m ON m.id = ts.source_id
+                 WHERE ts.source_type = ?3 AND text_search MATCH ?1
+                 ORDER BY rank
+                 LIMIT ?2",
+            )
+            .map_err(McpDbError::Query)?;
+
+        stmt.query_map(params![query, limit, SearchSource::Meeting], |row| {
+            Ok(MeetingSearchHit {
+                id: row.get(0)?,
+                title: row.get(1)?,
+                started_at: row.get(2)?,
+                snippet: row.get(3)?,
+            })
+        })
+        .map_err(McpDbError::Query)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(McpDbError::Query)
+    }
+
+    pub fn list_dictations(&self, limit: i64) -> Result<Vec<DictationSummary>, McpDbError> {
+        let conn = self.conn()?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, text, timestamp FROM dictation_entries
+                 ORDER BY timestamp DESC LIMIT ?1",
+            )
+            .map_err(McpDbError::Query)?;
+
+        stmt.query_map(params![limit], |row| {
+            Ok(DictationSummary {
+                id: row.get(0)?,
+                text: row.get(1)?,
+                timestamp: row.get(2)?,
+            })
+        })
+        .map_err(McpDbError::Query)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(McpDbError::Query)
+    }
+}
+
+fn map_meeting_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<MeetingRow> {
+    Ok(MeetingRow {
+        id: row.get(0)?,
+        title: row.get(1)?,
+        started_at: row.get(2)?,
+        ended_at: row.get(3)?,
+        duration_seconds: row.get(4)?,
+        summary: row.get(5)?,
+        summary_model: row.get(6)?,
+        summary_generated_at: row.get(7)?,
+        structured_summary: row.get(8)?,
+        edited_transcript: row.get(9)?,
+        notes: row.get(10)?,
+        calendar_event_id: row.get(11)?,
+        participants: row.get(12)?,
+    })
+}
+
+fn query_meeting_rows(
+    stmt: &mut rusqlite::Statement<'_>,
+    params: impl rusqlite::Params,
+) -> Result<Vec<MeetingRow>, McpDbError> {
+    stmt.query_map(params, map_meeting_row)
+        .map_err(McpDbError::Query)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(McpDbError::Query)
+}
+
+/// Plain-text transcript for an AI assistant: the same paragraphs the app
+/// exports and shows (`souffle_schema::paragraphs`), each prefixed with the
+/// speaker label when known, separated by blank lines, no timestamps.
+fn render_transcript(segments: &[SegmentRow]) -> String {
+    group_into_paragraphs(segments, PAUSE_THRESHOLD_SECONDS)
+        .into_iter()
+        .map(|p| match p.speaker {
+            Some(speaker) => format!("{}: {}", speaker.display_name(), p.text),
+            None => p.text,
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rusqlite::Connection;
+    use tempfile::TempDir;
+
+    #[test]
+    fn reads_nightly_bundle_id_from_info_plist() {
+        let xml = r#"
+            <key>CFBundleName</key>
+            <string>Soufflé Nightly</string>
+            <key>CFBundleIdentifier</key>
+            <string>com.souffle.desktop.nightly</string>
+        "#;
+        assert_eq!(
+            bundle_id_from_info_plist_xml(xml).as_deref(),
+            Some("com.souffle.desktop.nightly")
+        );
+    }
+
+    #[test]
+    fn ignores_a_plist_that_is_not_ours() {
+        let xml = "<key>CFBundleIdentifier</key><string>com.apple.Safari</string>";
+        assert_eq!(bundle_id_from_info_plist_xml(xml), None);
+    }
+
+    /// Minimal fixture mirroring the app's current schema (meetings v10 +
+    /// segments + dictation_entries + text_search FTS5). Kept intentionally
+    /// small: the schema-drift contract test in
+    /// `app/tests/mcp_sidecar_contract.rs` is what actually guards
+    /// this against the real writer.
+    fn fixture_db() -> (Connection, TempDir, PathBuf) {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("fixture.db");
+        let conn = Connection::open(&path).unwrap();
+        conn.execute_batch(
+            "
+            CREATE TABLE meetings (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                started_at TEXT NOT NULL,
+                ended_at TEXT,
+                duration_seconds REAL NOT NULL,
+                transcription_profile TEXT NOT NULL,
+                recording_sessions TEXT NOT NULL,
+                summary TEXT,
+                summary_is_stale INTEGER NOT NULL DEFAULT 0,
+                summary_model TEXT,
+                summary_generated_at TEXT,
+                structured_summary TEXT,
+                edited_transcript TEXT,
+                notes TEXT,
+                calendar_event_id TEXT,
+                participants TEXT
+            );
+            CREATE TABLE segments (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                meeting_id TEXT NOT NULL,
+                text TEXT NOT NULL,
+                start_time REAL NOT NULL,
+                end_time REAL NOT NULL,
+                is_final INTEGER NOT NULL DEFAULT 1,
+                language TEXT,
+                confidence REAL,
+                sort_order INTEGER NOT NULL,
+                speaker TEXT
+            );
+            CREATE TABLE dictation_entries (
+                id TEXT PRIMARY KEY,
+                text TEXT NOT NULL,
+                timestamp TEXT NOT NULL
+            );
+            CREATE VIRTUAL TABLE text_search USING fts5(
+                content, source_type, source_id
+            );
+            CREATE TABLE schema_version (
+                version INTEGER NOT NULL
+            );
+            ",
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO schema_version (version) VALUES (?1)",
+            params![souffle_schema::SCHEMA_VERSION],
+        )
+        .unwrap();
+        (conn, dir, path)
+    }
+
+    fn set_schema_version(conn: &Connection, version: i64) {
+        conn.execute("UPDATE schema_version SET version = ?1", params![version])
+            .unwrap();
+    }
+
+    /// AC1: a database written by a newer app is refused, and the message
+    /// names both versions.
+    #[test]
+    fn refuses_a_database_newer_than_this_build() {
+        let (conn, _dir, path) = fixture_db();
+        insert_meeting(&conn, "m1", "Standup", "2026-01-01T09:00:00Z", &[], None);
+        set_schema_version(&conn, souffle_schema::SCHEMA_VERSION + 1);
+        drop(conn);
+
+        let db = McpDb::open(&path).expect("opening must still succeed");
+        let err = db.list_meetings(None, None, None, 10).unwrap_err();
+        let message = err.to_string();
+        assert!(
+            message.contains(&(souffle_schema::SCHEMA_VERSION + 1).to_string()),
+            "{message}"
+        );
+        assert!(
+            message.contains(&souffle_schema::SCHEMA_VERSION.to_string()),
+            "{message}"
+        );
+        assert!(db.schema_version().is_err());
+    }
+
+    /// AC3: no `schema_version` table means no assumption of compatibility.
+    #[test]
+    fn refuses_a_database_with_no_schema_version_table() {
+        let (conn, _dir, path) = fixture_db();
+        conn.execute_batch("DROP TABLE schema_version;").unwrap();
+        drop(conn);
+
+        let db = McpDb::open(&path).expect("opening must still succeed");
+        let err = db.list_meetings(None, None, None, 10).unwrap_err();
+        assert!(
+            err.to_string().contains("schema version"),
+            "{}",
+            err.to_string()
+        );
+    }
+
+    /// The guard is asymmetric: a user who has not launched the new app yet
+    /// still has every column these queries read.
+    #[test]
+    fn serves_a_database_older_than_this_build() {
+        let (conn, _dir, path) = fixture_db();
+        insert_meeting(&conn, "m1", "Standup", "2026-01-01T09:00:00Z", &[], None);
+        set_schema_version(&conn, 1);
+        drop(conn);
+
+        let db = McpDb::open(&path).unwrap();
+        assert_eq!(db.schema_version().unwrap(), 1);
+        assert_eq!(db.list_meetings(None, None, None, 10).unwrap().len(), 1);
+    }
+
+    /// AC2: at the version this build knows, nothing changes.
+    #[test]
+    fn serves_a_database_at_the_known_version() {
+        let (conn, _dir, path) = fixture_db();
+        insert_meeting(&conn, "m1", "Standup", "2026-01-01T09:00:00Z", &[], None);
+        drop(conn);
+
+        let db = McpDb::open(&path).unwrap();
+        assert_eq!(db.schema_version().unwrap(), souffle_schema::SCHEMA_VERSION);
+        assert_eq!(db.list_meetings(None, None, None, 10).unwrap().len(), 1);
+    }
+
+    fn insert_meeting(
+        conn: &Connection,
+        id: &str,
+        title: &str,
+        started_at: &str,
+        segments: &[(&str, f64, f64, Option<&str>)],
+        participants: Option<&str>,
+    ) {
+        conn.execute(
+            "INSERT INTO meetings (id, title, started_at, ended_at, duration_seconds, transcription_profile, recording_sessions, participants)
+             VALUES (?1, ?2, ?3, ?3, 10.0, '{}', '[]', ?4)",
+            params![id, title, started_at, participants],
+        )
+        .unwrap();
+
+        let mut full_text = Vec::new();
+        for (i, (text, start, end, speaker)) in segments.iter().enumerate() {
+            conn.execute(
+                "INSERT INTO segments (meeting_id, text, start_time, end_time, sort_order, speaker)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![id, text, start, end, i as i64, speaker],
+            )
+            .unwrap();
+            full_text.push(*text);
+        }
+        if !full_text.is_empty() {
+            conn.execute(
+                "INSERT INTO text_search (content, source_type, source_id) VALUES (?1, 'meeting', ?2)",
+                params![full_text.join(" "), id],
+            )
+            .unwrap();
+        }
+    }
+
+    fn insert_dictation(conn: &Connection, id: &str, text: &str, timestamp: &str) {
+        conn.execute(
+            "INSERT INTO dictation_entries (id, text, timestamp) VALUES (?1, ?2, ?3)",
+            params![id, text, timestamp],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO text_search (content, source_type, source_id) VALUES (?1, 'dictation', ?2)",
+            params![text, id],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn missing_db_returns_clean_error() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("nope.db");
+        let err = McpDb::open(&path).unwrap_err();
+        assert!(matches!(err, McpDbError::NotFound(_)));
+        assert!(err.to_string().contains("Launch Souffle"));
+    }
+
+    #[test]
+    fn list_meetings_orders_newest_first_and_respects_limit() {
+        let (conn, _dir, path) = fixture_db();
+        insert_meeting(
+            &conn,
+            "m1",
+            "First",
+            "2026-01-01T10:00:00+00:00",
+            &[("hi", 0.0, 1.0, None)],
+            None,
+        );
+        insert_meeting(
+            &conn,
+            "m2",
+            "Second",
+            "2026-01-02T10:00:00+00:00",
+            &[("hi", 0.0, 1.0, None)],
+            None,
+        );
+        insert_meeting(
+            &conn,
+            "m3",
+            "Third",
+            "2026-01-03T10:00:00+00:00",
+            &[("hi", 0.0, 1.0, None)],
+            None,
+        );
+        drop(conn);
+
+        let db = McpDb::open(&path).unwrap();
+        let all = db.list_meetings(None, None, None, 20).unwrap();
+        assert_eq!(
+            all.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(),
+            vec!["m3", "m2", "m1"]
+        );
+
+        let limited = db.list_meetings(None, None, None, 2).unwrap();
+        assert_eq!(limited.len(), 2);
+    }
+
+    #[test]
+    fn list_meetings_filters_by_date_range() {
+        let (conn, _dir, path) = fixture_db();
+        insert_meeting(
+            &conn,
+            "m1",
+            "First",
+            "2026-01-01T10:00:00+00:00",
+            &[("hi", 0.0, 1.0, None)],
+            None,
+        );
+        insert_meeting(
+            &conn,
+            "m2",
+            "Second",
+            "2026-02-01T10:00:00+00:00",
+            &[("hi", 0.0, 1.0, None)],
+            None,
+        );
+        drop(conn);
+
+        let db = McpDb::open(&path).unwrap();
+        let filtered = db
+            .list_meetings(None, Some("2026-01-15"), None, 20)
+            .unwrap();
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].id, "m2");
+    }
+
+    #[test]
+    fn list_meetings_filters_by_query() {
+        let (conn, _dir, path) = fixture_db();
+        insert_meeting(
+            &conn,
+            "m1",
+            "First",
+            "2026-01-01T10:00:00+00:00",
+            &[("budget review", 0.0, 1.0, None)],
+            None,
+        );
+        insert_meeting(
+            &conn,
+            "m2",
+            "Second",
+            "2026-01-02T10:00:00+00:00",
+            &[("standup notes", 0.0, 1.0, None)],
+            None,
+        );
+        drop(conn);
+
+        let db = McpDb::open(&path).unwrap();
+        let hits = db.list_meetings(Some("budget"), None, None, 20).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].id, "m1");
+    }
+
+    #[test]
+    fn list_meetings_reports_participant_names_and_flags() {
+        let (conn, _dir, path) = fixture_db();
+        conn.execute(
+            "INSERT INTO meetings (id, title, started_at, duration_seconds, transcription_profile, recording_sessions, summary, notes, participants)
+             VALUES ('m1', 'Standup', '2026-01-01T10:00:00+00:00', 10.0, '{}', '[]', 'a summary', 'some notes',
+                     '[{\"name\":\"Alice\",\"email\":null,\"is_organizer\":true}]')",
+            [],
+        )
+        .unwrap();
+        drop(conn);
+
+        let db = McpDb::open(&path).unwrap();
+        let items = db.list_meetings(None, None, None, 20).unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].participants, vec!["Alice".to_string()]);
+        assert!(items[0].has_summary);
+        assert!(items[0].has_notes);
+    }
+
+    #[test]
+    fn get_meeting_orders_interleaved_diarized_segments_by_start_time() {
+        let (conn, _dir, path) = fixture_db();
+        insert_meeting(
+            &conn,
+            "m1",
+            "Standup",
+            "2026-01-01T10:00:00+00:00",
+            &[
+                ("Second line", 5.0, 6.0, Some("them")),
+                ("First line", 1.0, 2.0, Some("me")),
+                ("Third line", 8.0, 9.0, Some("me")),
+            ],
+            None,
+        );
+        drop(conn);
+
+        let db = McpDb::open(&path).unwrap();
+        let transcript = db
+            .get_meeting("m1", IncludeSet::all())
+            .unwrap()
+            .transcript
+            .unwrap();
+        assert_eq!(
+            transcript,
+            "Me: First line\n\nThem: Second line\n\nMe: Third line"
+        );
+    }
+
+    /// The sidecar's `SegmentRow` runs the shared grouper through the same
+    /// pinned fixture as the app: inserted through SQLite in storage order,
+    /// read back as the fixture's paragraphs with `Me: `/`Them: ` prefixes.
+    #[test]
+    fn get_meeting_matches_the_shared_paragraph_fixture() {
+        let raw = include_str!("../../souffle-schema/tests/fixtures/paragraph_grouping.json");
+        let fixture: serde_json::Value = serde_json::from_str(raw).expect("valid fixture JSON");
+        let case = fixture["cases"]
+            .as_array()
+            .expect("cases array")
+            .iter()
+            .find(|c| c["name"] == "diarized_crosstalk_word_level")
+            .expect("fixture case present");
+
+        let segments: Vec<(String, f64, f64, Option<String>)> = case["segments"]
+            .as_array()
+            .expect("segments array")
+            .iter()
+            .map(|s| {
+                (
+                    s["text"].as_str().expect("text").to_string(),
+                    s["start_time"].as_f64().expect("start_time"),
+                    s["end_time"].as_f64().expect("end_time"),
+                    s["speaker"].as_str().map(str::to_string),
+                )
+            })
+            .collect();
+        let rows: Vec<(&str, f64, f64, Option<&str>)> = segments
+            .iter()
+            .map(|(text, start, end, speaker)| (text.as_str(), *start, *end, speaker.as_deref()))
+            .collect();
+
+        let (conn, _dir, path) = fixture_db();
+        insert_meeting(
+            &conn,
+            "m1",
+            "Standup",
+            "2026-01-01T10:00:00+00:00",
+            &rows,
+            None,
+        );
+        drop(conn);
+
+        let expected = case["expected"]
+            .as_array()
+            .expect("expected array")
+            .iter()
+            .map(|p| {
+                let text = p["text"].as_str().expect("text");
+                match p["speaker"].as_str().and_then(Speaker::parse) {
+                    Some(speaker) => format!("{}: {text}", speaker.display_name()),
+                    None => text.to_string(),
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n\n");
+
+        let db = McpDb::open(&path).unwrap();
+        let transcript = db
+            .get_meeting("m1", IncludeSet::all())
+            .unwrap()
+            .transcript
+            .unwrap();
+        assert_eq!(transcript, expected);
+    }
+
+    #[test]
+    fn get_meeting_renders_transcript_from_segments_when_not_edited() {
+        let (conn, _dir, path) = fixture_db();
+        insert_meeting(
+            &conn,
+            "m1",
+            "Standup",
+            "2026-01-01T10:00:00+00:00",
+            &[
+                ("Hello there.", 0.0, 1.0, Some("me")),
+                ("General Kenobi.", 1.2, 2.0, Some("them")),
+                ("Much later.", 30.0, 31.0, Some("them")),
+            ],
+            None,
+        );
+        drop(conn);
+
+        let db = McpDb::open(&path).unwrap();
+        let detail = db.get_meeting("m1", IncludeSet::all()).unwrap();
+        let transcript = detail.transcript.unwrap();
+        assert!(transcript.contains("Me: Hello there."));
+        assert!(transcript.contains("Them: General Kenobi."));
+        // Same speaker but a big pause still starts a fresh paragraph.
+        assert_eq!(transcript.matches("Them:").count(), 2);
+    }
+
+    #[test]
+    fn get_meeting_keeps_each_speaker_flowing_during_word_level_crosstalk() {
+        let (conn, _dir, path) = fixture_db();
+        insert_meeting(
+            &conn,
+            "m1",
+            "Standup",
+            "2026-01-01T10:00:00+00:00",
+            &[
+                ("hello", 0.0, 0.3, Some("me")),
+                ("hi", 0.15, 0.35, Some("them")),
+                ("how", 0.5, 0.7, Some("me")),
+                ("good", 0.6, 0.8, Some("them")),
+                ("are", 0.9, 1.1, Some("me")),
+                ("thanks", 1.0, 1.2, Some("them")),
+                ("you", 1.3, 1.5, Some("me")),
+            ],
+            None,
+        );
+        drop(conn);
+
+        let db = McpDb::open(&path).unwrap();
+        let transcript = db
+            .get_meeting("m1", IncludeSet::all())
+            .unwrap()
+            .transcript
+            .unwrap();
+        assert_eq!(transcript, "Me: hello how are you\n\nThem: hi good thanks");
+    }
+
+    #[test]
+    fn get_meeting_closes_an_interrupted_monologue_at_the_following_sentence_end() {
+        // Me monologues without a pause; Them interjects mid-monologue. Me's
+        // turn must not absorb everything: it closes at the first sentence
+        // end after the interjection, so Them's interjection lands between
+        // Me's two turns instead of trailing behind the whole monologue.
+        let (conn, _dir, path) = fixture_db();
+        insert_meeting(
+            &conn,
+            "m1",
+            "Standup",
+            "2026-01-01T10:00:00+00:00",
+            &[
+                ("Let me explain the whole plan", 0.0, 0.5, Some("me")),
+                ("in detail because it's", 0.6, 1.1, Some("me")),
+                ("wait", 1.2, 1.7, Some("them")),
+                ("complicated.", 1.8, 2.3, Some("me")),
+                ("So let's start now", 3.0, 3.5, Some("me")),
+            ],
+            None,
+        );
+        drop(conn);
+
+        let db = McpDb::open(&path).unwrap();
+        let transcript = db
+            .get_meeting("m1", IncludeSet::all())
+            .unwrap()
+            .transcript
+            .unwrap();
+        assert_eq!(
+            transcript,
+            "Me: Let me explain the whole plan in detail because it's complicated.\n\nThem: wait\n\nMe: So let's start now"
+        );
+    }
+
+    #[test]
+    fn get_meeting_ignores_a_sentence_end_before_the_interruption() {
+        // An earlier sentence end, spoken before Them interjects, must not
+        // retroactively split the turn: only the sentence end that comes
+        // after the interjection closes it.
+        let (conn, _dir, path) = fixture_db();
+        insert_meeting(
+            &conn,
+            "m1",
+            "Standup",
+            "2026-01-01T10:00:00+00:00",
+            &[
+                ("First point.", 0.0, 0.5, Some("me")),
+                ("Second part continues", 0.6, 1.1, Some("me")),
+                ("quick question", 1.2, 1.7, Some("them")),
+                ("and concludes.", 1.8, 2.3, Some("me")),
+                ("New topic starts", 3.0, 3.5, Some("me")),
+            ],
+            None,
+        );
+        drop(conn);
+
+        let db = McpDb::open(&path).unwrap();
+        let transcript = db
+            .get_meeting("m1", IncludeSet::all())
+            .unwrap()
+            .transcript
+            .unwrap();
+        assert_eq!(
+            transcript,
+            "Me: First point. Second part continues and concludes.\n\nThem: quick question\n\nMe: New topic starts"
+        );
+    }
+
+    #[test]
+    fn get_meeting_prefers_edited_transcript() {
+        let (conn, _dir, path) = fixture_db();
+        conn.execute(
+            "INSERT INTO meetings (id, title, started_at, duration_seconds, transcription_profile, recording_sessions, edited_transcript)
+             VALUES ('m1', 'Standup', '2026-01-01T10:00:00+00:00', 10.0, '{}', '[]', 'hand-edited text')",
+            [],
+        )
+        .unwrap();
+        drop(conn);
+
+        let db = McpDb::open(&path).unwrap();
+        let detail = db.get_meeting("m1", IncludeSet::all()).unwrap();
+        assert_eq!(detail.transcript.as_deref(), Some("hand-edited text"));
+    }
+
+    #[test]
+    fn get_meeting_respects_include_filter() {
+        let (conn, _dir, path) = fixture_db();
+        conn.execute(
+            "INSERT INTO meetings (id, title, started_at, duration_seconds, transcription_profile, recording_sessions, summary, notes)
+             VALUES ('m1', 'Standup', '2026-01-01T10:00:00+00:00', 10.0, '{}', '[]', 'a summary', 'some notes')",
+            [],
+        )
+        .unwrap();
+        drop(conn);
+
+        let db = McpDb::open(&path).unwrap();
+        let names = vec!["summary".to_string()];
+        let detail = db
+            .get_meeting("m1", IncludeSet::from_names(Some(&names)))
+            .unwrap();
+        assert_eq!(detail.summary.as_deref(), Some("a summary"));
+        assert!(detail.transcript.is_none());
+        assert!(detail.notes.is_none());
+        assert!(detail.metadata.is_none());
+    }
+
+    #[test]
+    fn get_meeting_missing_id_is_a_clean_error() {
+        let (conn, _dir, path) = fixture_db();
+        drop(conn);
+        let db = McpDb::open(&path).unwrap();
+        let err = db.get_meeting("nope", IncludeSet::all()).unwrap_err();
+        assert!(matches!(err, McpDbError::MeetingNotFound(id) if id == "nope"));
+    }
+
+    #[test]
+    fn get_meeting_prefixes_me_them_labels() {
+        let (conn, _dir, path) = fixture_db();
+        insert_meeting(
+            &conn,
+            "m1",
+            "Standup",
+            "2026-01-01T10:00:00+00:00",
+            &[
+                ("Hi Bob.", 0.0, 1.0, Some("me")),
+                ("Hi Alice.", 1.2, 2.0, Some("them")),
+            ],
+            None,
+        );
+        drop(conn);
+
+        let db = McpDb::open(&path).unwrap();
+        let detail = db.get_meeting("m1", IncludeSet::all()).unwrap();
+        let transcript = detail.transcript.unwrap();
+        assert!(transcript.contains("Me: Hi Bob."));
+        assert!(transcript.contains("Them: Hi Alice."));
+    }
+
+    #[test]
+    fn leftover_spk_labels_render_as_unlabeled() {
+        let (conn, _dir, path) = fixture_db();
+        insert_meeting(
+            &conn,
+            "m1",
+            "Standup",
+            "2026-01-01T10:00:00+00:00",
+            &[("Orphaned reference.", 0.0, 1.0, Some("spk:99"))],
+            None,
+        );
+        drop(conn);
+
+        let db = McpDb::open(&path).unwrap();
+        let detail = db.get_meeting("m1", IncludeSet::all()).unwrap();
+        let transcript = detail.transcript.unwrap();
+        assert_eq!(transcript, "Orphaned reference.");
+    }
+
+    #[test]
+    fn latest_meeting_picks_most_recent() {
+        let (conn, _dir, path) = fixture_db();
+        insert_meeting(
+            &conn,
+            "m1",
+            "First",
+            "2026-01-01T10:00:00+00:00",
+            &[("hi", 0.0, 1.0, None)],
+            None,
+        );
+        insert_meeting(
+            &conn,
+            "m2",
+            "Second",
+            "2026-01-05T10:00:00+00:00",
+            &[("hi", 0.0, 1.0, None)],
+            None,
+        );
+        drop(conn);
+
+        let db = McpDb::open(&path).unwrap();
+        let latest = db.latest_meeting(IncludeSet::all()).unwrap();
+        assert_eq!(latest.id, "m2");
+    }
+
+    #[test]
+    fn latest_meeting_empty_db_errors() {
+        let (conn, _dir, path) = fixture_db();
+        drop(conn);
+        let db = McpDb::open(&path).unwrap();
+        assert!(matches!(
+            db.latest_meeting(IncludeSet::all()),
+            Err(McpDbError::NoMeetings)
+        ));
+    }
+
+    #[test]
+    fn search_meetings_returns_snippets() {
+        let (conn, _dir, path) = fixture_db();
+        insert_meeting(
+            &conn,
+            "m1",
+            "Standup",
+            "2026-01-01T10:00:00+00:00",
+            &[("we discussed the roadmap today", 0.0, 1.0, None)],
+            None,
+        );
+        drop(conn);
+
+        let db = McpDb::open(&path).unwrap();
+        let hits = db.search_meetings("roadmap", 20).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].id, "m1");
+        assert!(hits[0].snippet.contains("**roadmap**"));
+    }
+
+    #[test]
+    fn search_meetings_empty_query_returns_empty() {
+        let (conn, _dir, path) = fixture_db();
+        drop(conn);
+        let db = McpDb::open(&path).unwrap();
+        assert!(db.search_meetings("", 20).unwrap().is_empty());
+    }
+
+    #[test]
+    fn list_dictations_orders_newest_first() {
+        let (conn, _dir, path) = fixture_db();
+        insert_dictation(&conn, "d1", "first note", "2026-01-01T10:00:00+00:00");
+        insert_dictation(&conn, "d2", "second note", "2026-01-02T10:00:00+00:00");
+        drop(conn);
+
+        let db = McpDb::open(&path).unwrap();
+        let entries = db.list_dictations(20).unwrap();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].id, "d2");
+    }
+
+    #[test]
+    fn list_dictations_respects_limit() {
+        let (conn, _dir, path) = fixture_db();
+        for i in 0..5 {
+            insert_dictation(
+                &conn,
+                &format!("d{i}"),
+                "note",
+                &format!("2026-01-0{}T10:00:00+00:00", i + 1),
+            );
+        }
+        drop(conn);
+
+        let db = McpDb::open(&path).unwrap();
+        assert_eq!(db.list_dictations(3).unwrap().len(), 3);
+    }
+}

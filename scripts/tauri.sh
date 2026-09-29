@@ -5,7 +5,7 @@
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
-cfg="$root/src-tauri/tauri.nightly.conf.json"
+cfg="$root/app/tauri.nightly.conf.json"
 
 nightly=0
 for arg in "$@"; do

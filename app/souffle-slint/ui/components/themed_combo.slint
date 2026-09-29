@@ -1,0 +1,269 @@
+import { Theme } from "../theme.slint";
+import { LucideIcon, IconSet } from "lucide_icon.slint";
+
+// Port of app.css `.field-select`. `std-widgets` ComboBox uses the Fluent
+// skin (and stretches in a SettingsField row), so closed-set and catalogue
+// pickers both go through this instead.
+export component ThemedComboBox inherits Rectangle {
+    in property <[string]> model;
+    // Optional stable open-set values matching `model` by index. Catalogue
+    // pickers use ids here; closed-set and label-only pickers leave it empty.
+    in property <[string]> option-values;
+    in property <string> current-value;
+    in property <bool> enabled: true;
+    in property <length> combo-width: Theme.settings-control-width;
+    in property <bool> fill-width: false;
+    in property <string> control-label: @tr("Sélection");
+
+    callback selected(string);
+    // Additive: fires alongside `selected` with the raw model index, for
+    // callers that need to resolve display data `option-values` can't carry
+    // (e.g. a label list parallel to `model`). Existing callers can ignore it.
+    callback selected-index(int);
+
+    // Transient keyboard cursor only. The selected value remains fully
+    // controlled by `current-value` and the parent callback contract.
+    property <int> highlighted-index: 0;
+
+    width: root.combo-width;
+    height: Theme.settings-control-height;
+    horizontal-stretch: root.fill-width ? 1 : 0;
+    vertical-stretch: 0;
+    border-radius: 4px;
+    border-width: key-focus.has-focus ? 2px : 1px;
+    border-color: key-focus.has-focus ? Theme.accent : Theme.ghost-border;
+    background: area.pressed ? Theme.surface-2 : Theme.input;
+    opacity: root.enabled ? 1.0 : 0.5;
+
+    accessible-role: combobox;
+    accessible-label: root.control-label;
+    accessible-value: root.current-value;
+    accessible-enabled: root.enabled;
+    accessible-expandable: true;
+    accessible-expanded: popup.is-open;
+    accessible-action-default => {
+        root.open(0);
+    }
+    accessible-action-expand => { root.open(0); }
+
+    forward-focus: key-focus;
+
+    key-focus := FocusScope {
+        key-pressed(event) => {
+            if !root.enabled {
+                return reject;
+            }
+            if event.text == Key.Return || event.text == Key.Space || event.text == Key.DownArrow {
+                root.open(0);
+                return accept;
+            }
+            if event.text == Key.UpArrow {
+                root.open(root.model.length - 1);
+                return accept;
+            }
+            if event.text == Key.Escape && popup.is-open {
+                popup.close();
+                return accept;
+            }
+            return reject;
+        }
+    }
+
+    label := Text {
+        x: 12px;
+        width: parent.width - 36px;
+        height: parent.height;
+        text: root.current-value == "__AUTOMATIC__" ? @tr("Automatique")
+            : root.current-value == "__FOLLOW_DEFAULT__" ? @tr("Suivre l'appareil par défaut")
+            : root.current-value == "__CLAMSHELL_DEVICE_UNAVAILABLE__" ? @tr("Appareil personnalisé (indisponible)")
+            : root.current-value == "__NEVER__" ? @tr("Jamais")
+            : root.current-value == "__DEFAULT__" ? @tr("Par défaut")
+            : root.current-value == "__DETAILED__" ? @tr("Compte rendu détaillé")
+            : root.current-value == "__BRIEF__" ? @tr("Aperçu bref")
+            : root.current-value == "__BUILTIN__" ? @tr("Intégré")
+            : root.current-value == "__USB__" ? @tr("USB")
+            : root.current-value == "__BLUETOOTH__" ? @tr("Bluetooth")
+            : root.current-value == "__VIRTUAL__" ? @tr("Virtuel")
+            : root.current-value == "__AGGREGATE__" ? @tr("Agrégé")
+            : root.current-value == "__UNKNOWN__" ? @tr("Inconnu")
+            : root.current-value == "__CLEANUP__" ? @tr("Nettoyage")
+            : root.current-value == "__PROFESSIONAL_EMAIL__" ? @tr("E-mail professionnel")
+            : root.current-value == "__BULLETS__" ? @tr("Puces")
+            : root.current-value == "__NO_FILLERS__" ? @tr("Sans fillers")
+            : root.current-value;
+        font-size: 14px;
+        color: Theme.text-secondary;
+        vertical-alignment: center;
+        overflow: elide;
+    }
+
+    LucideIcon {
+        icon: IconSet.ChevronDown;
+        icon-color: Theme.text-muted;
+        size: 14px;
+        x: parent.width - 26px;
+        y: (parent.height - self.height) / 2;
+    }
+
+    area := TouchArea {
+        enabled: root.enabled;
+        clicked => {
+            key-focus.focus();
+            root.open(0);
+        }
+    }
+
+    function open(fallback-index: int) {
+        if !root.enabled || root.model.length == 0 {
+            return;
+        }
+        // SOU-228: seed the keyboard cursor with the caller's fallback (0, or
+        // the last index for the Up arrow). Slint has no imperative loop in
+        // functions, so the reverse-lookup of `current-value` rides on the
+        // popup repeater instead: rows instantiate on `show()` and the row
+        // carrying the current selection pulls the cursor onto itself (see
+        // the row `init` below). When no row matches, the fallback stands.
+        root.highlighted-index = max(0, min(root.model.length - 1, fallback-index));
+        popup.show();
+    }
+
+    function choose(index: int) {
+        if !root.enabled || index < 0 || index >= root.model.length {
+            return;
+        }
+        root.selected(root.option-values.length == root.model.length
+            ? root.option-values[index]
+            : root.model[index]);
+        root.selected-index(index);
+    }
+
+    function restore-focus() {
+        key-focus.focus();
+    }
+
+    popup := PopupWindow {
+        close-policy: PopupClosePolicy.close-on-click-outside;
+        x: 0;
+        y: parent.height + 4px;
+        width: max(parent.width, 160px);
+        forward-focus: popup-focus;
+
+        popup-focus := FocusScope {
+            key-pressed(event) => {
+                if event.text == Key.DownArrow {
+                    root.highlighted-index = min(root.model.length - 1, root.highlighted-index + 1);
+                    return accept;
+                }
+                if event.text == Key.UpArrow {
+                    root.highlighted-index = max(0, root.highlighted-index - 1);
+                    return accept;
+                }
+                if event.text == Key.Home {
+                    root.highlighted-index = 0;
+                    return accept;
+                }
+                if event.text == Key.End {
+                    root.highlighted-index = root.model.length - 1;
+                    return accept;
+                }
+                if event.text == Key.Return || event.text == Key.Space {
+                    root.choose(root.highlighted-index);
+                    popup.close();
+                    root.restore-focus();
+                    return accept;
+                }
+                if event.text == Key.Escape {
+                    popup.close();
+                    root.restore-focus();
+                    return accept;
+                }
+                return reject;
+            }
+
+            Rectangle {
+                border-width: 1px;
+                border-color: Theme.ghost-border;
+                border-radius: 4px;
+                background: Theme.surface-1;
+                accessible-role: list;
+                accessible-label: root.control-label;
+                accessible-item-count: root.model.length;
+
+                VerticalLayout {
+                    padding: 4px;
+                    alignment: start;
+                    spacing: 0px;
+
+                    for item[index] in root.model: Rectangle {
+                        height: 32px;
+                        vertical-stretch: 0;
+                        background: index == root.highlighted-index || row-area.has-hover ? Theme.surface-2 : transparent;
+                        border-radius: 3px;
+                        border-width: index == root.highlighted-index ? 1px : 0px;
+                        border-color: Theme.accent;
+                        accessible-role: list-item;
+                        accessible-label: item;
+                        accessible-enabled: root.enabled;
+                        accessible-item-selectable: true;
+                        accessible-item-selected: item == root.current-value;
+                        accessible-item-index: index;
+                        // SOU-228: popup contents are (re)instantiated on
+                        // every `show()`, so each row checks whether it holds
+                        // the current selection — by stable id when
+                        // `option-values` mirrors `model`, else by label —
+                        // and moves the keyboard cursor onto itself. With no
+                        // match (value absent from the model), the cursor
+                        // keeps the fallback index seeded by `open()`.
+                        init => {
+                            if (root.option-values.length == root.model.length
+                                ? root.option-values[index]
+                                : item) == root.current-value {
+                                root.highlighted-index = index;
+                            }
+                        }
+                        accessible-action-default => {
+                            root.choose(index);
+                            popup.close();
+                            root.restore-focus();
+                        }
+
+                        Text {
+                            x: 10px;
+                            width: parent.width - 20px;
+                            height: parent.height;
+                            text: item == "__AUTOMATIC__" ? @tr("Automatique")
+                                : item == "__FOLLOW_DEFAULT__" ? @tr("Suivre l'appareil par défaut")
+                                : item == "__NEVER__" ? @tr("Jamais")
+                                : item == "__DEFAULT__" ? @tr("Par défaut")
+                                : item == "__DETAILED__" ? @tr("Compte rendu détaillé")
+                                : item == "__BRIEF__" ? @tr("Aperçu bref")
+                                : item == "__BUILTIN__" ? @tr("Intégré")
+                                : item == "__USB__" ? @tr("USB")
+                                : item == "__BLUETOOTH__" ? @tr("Bluetooth")
+                                : item == "__VIRTUAL__" ? @tr("Virtuel")
+                                : item == "__AGGREGATE__" ? @tr("Agrégé")
+                                : item == "__UNKNOWN__" ? @tr("Inconnu")
+                                : item == "__CLEANUP__" ? @tr("Nettoyage")
+                                : item == "__PROFESSIONAL_EMAIL__" ? @tr("E-mail professionnel")
+                                : item == "__BULLETS__" ? @tr("Puces")
+                                : item == "__NO_FILLERS__" ? @tr("Sans fillers")
+                                : item;
+                            font-size: 13px;
+                            color: item == root.current-value ? Theme.text-primary : Theme.text-secondary;
+                            vertical-alignment: center;
+                            overflow: elide;
+                        }
+
+                        row-area := TouchArea {
+                            clicked => {
+                                root.choose(index);
+                                popup.close();
+                                root.restore-focus();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

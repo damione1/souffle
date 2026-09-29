@@ -39,11 +39,12 @@
       "mock": "home",
       "flip": false,
       "title": "On sait toujours qui a dit quoi.",
-      "body": "La capture de l'audio système sépare <em class=\"me\">Moi</em> de <em class=\"them\">Eux</em> dans la transcription en direct, sans pilote audio virtuel à installer. L'enregistrement se débrouille seul : il propose de démarrer quand une réunion du calendrier commence, remarque quand elle semble terminée, et reprend là où il en était quand votre Mac se réveille.",
+      "body": "La capture de l'audio système sépare <em class=\"me\">Moi</em> de <em class=\"them\">Eux</em> dans la transcription en direct avec un modèle Kyutai, sans pilote audio virtuel à installer. L'enregistrement se débrouille seul : il vous notifie quand une réunion du calendrier commence, remarque quand elle semble terminée, et reprend là où il en était quand votre Mac se réveille.",
       "bullets": [
         "L'enregistrement audio est optionnel : vous choisissez combien de temps le garder, et vous le réécoutez en cliquant dans la transcription",
+        "Arrêtez, puis reprenez plus tard : une même réunion peut compter plusieurs sessions",
         "Si le moteur cale ou que le micro lâche, la réunion n'est pas perdue : Soufflé reprend ou sauve ce qu'il peut",
-        "Tout est classé par jour, et vous retrouvez n'importe quel mot prononcé grâce à la recherche"
+        "Tout est classé par jour, avec une recherche sur le titre des réunions et le texte des dictées"
       ]
     },
     {
@@ -60,7 +61,7 @@
         "Un appui pour lancer et arrêter, ou maintenu tant que vous parlez, y compris sur un modificateur seul",
         "Dites une phrase déclencheur pour coller un extrait vocal au lieu d'une dictée libre",
         "Corrigez un nom mal entendu une fois : il reste corrigé ensuite",
-        "Une IA locale peut s'occuper de polir la formulation, avec des instructions que vous pouvez changer",
+        "Une IA locale polit la formulation quand un fournisseur est disponible, avec des instructions que vous pouvez changer",
         "Français et anglais sur le même modèle, sans bascule"
       ],
       "overlayAfter": true
@@ -75,14 +76,14 @@
       "title": "Le résumé se fait aussi sur votre Mac, pas dans le cloud.",
       "body": "Décisions, tâches avec responsables, et les questions restées sans réponse : le tout extrait en même temps que le résumé, par Apple Intelligence ou par un Ollama local quand votre Mac ne l'offre pas. La transcription, elle, n'a besoin ni de l'un ni de l'autre.",
       "bullets": [
-        "Notes et participants modifiables à côté de la transcription",
+        "Notes modifiables et participants du calendrier, à côté de la transcription",
         "Rien à configurer quand Apple Intelligence est disponible"
       ]
     }
   ],
   "overlay": {
     "title": "La même dictée, dans toutes vos apps.",
-    "body": "Pas besoin de garder une fenêtre ouverte : restez dans votre application habituelle, appuyez sur le raccourci, une petite pastille apparaît par-dessus ce que vous faites, et le texte arrive directement dans le champ où était votre curseur. Messagerie, courriel, éditeur, terminal : la pastille s'en fiche, et elle n'apparaît jamais dans un enregistrement d'écran.",
+    "body": "Pas besoin de garder une fenêtre ouverte : restez dans votre application habituelle, appuyez sur le raccourci, une petite pastille apparaît par-dessus ce que vous faites, et le texte arrive directement dans le champ où était votre curseur. Messagerie, courriel, éditeur, terminal : la pastille s'en fiche, et par défaut elle est exclue des enregistrements d'écran.",
     "bullets": [
       "Le texte atterrit là où votre curseur était déjà, sans copier-coller",
       "Les terminaux et les champs sécurisés peuvent recevoir des frappes simulées",
@@ -157,7 +158,7 @@
       {
         "icon": "trash",
         "h": "Effacez aussi facilement",
-        "d": "Les Paramètres effacent tout d'un coup, l'audio enregistré compris."
+        "d": "Supprimez une réunion ou une dictée depuis l'app. Pour tout effacer, audio enregistré compris, quittez et supprimez un seul dossier."
       },
       {
         "icon": "plug",
@@ -188,7 +189,7 @@
       }
     ],
     "permTitle": "Permissions, demandées au besoin",
-    "permSub": "Jamais à l'avance : les Paramètres montrent l'état de chacune, avec un lien direct vers le bon panneau des Réglages système.",
+    "permSub": "L'assistant de démarrage les propose, ou passez l'étape et chacune est demandée quand une fonction en a besoin. Les Paramètres montrent l'état de chacune, avec un lien direct vers le bon panneau des Réglages système.",
     "perms": [
       {
         "k": "Microphone",
@@ -205,6 +206,10 @@
       {
         "k": "Calendrier",
         "v": "Liste les événements du jour, optionnel"
+      },
+      {
+        "k": "Notifications",
+        "v": "Rappels du calendrier et alertes, demandée au lancement"
       }
     ],
     "statusTitle": "Open source, en développement actif.",
@@ -235,7 +240,7 @@
     "statusModel": "Kyutai STT 1B",
     "liveTranscript": "Transcription en direct",
     "systemAudio": "Audio système actif",
-    "editHint": "Double-cliquez sur un paragraphe pour corriger un mot mal entendu. Les occurrences suivantes se corrigent toutes seules.",
+    "editHint": "Cliquez un mot pour lui ajouter un alias de dictionnaire.",
     "me": "Moi",
     "them": "Eux",
     "notesTitle": "Notes",
@@ -577,7 +582,7 @@
         "h": "Permissions",
         "blocks": [
           {
-            "p": "Soufflé demande chacune de ces permissions au moment où vous utilisez la fonction qui en a besoin, jamais à l'avance. Paramètres → Système → Permissions montre l'état de chacune et renvoie directement au bon panneau des Réglages système."
+            "p": "L'assistant de démarrage a une étape Permissions facultative ; passez-la et Soufflé demande chacune de ces permissions au moment où vous utilisez la fonction qui en a besoin. Les notifications font exception : elles sont demandées au lancement de l'app. Paramètres → Système → Permissions montre l'état de chacune et renvoie directement au bon panneau des Réglages système."
           },
           {
             "table": [
@@ -595,7 +600,11 @@
               ],
               [
                 "Calendrier",
-                "Lit les événements du jour pour les lister et proposer de démarrer un enregistrement. Optionnel, et inactif tant que vous ne l'activez pas."
+                "Lit les événements du jour pour les lister sur l'accueil et vous notifier quand l'un commence. Optionnel, et inactif tant que vous ne l'activez pas."
+              ],
+              [
+                "Notifications",
+                "Rappels du calendrier, réunion sur le point de s'arrêter seule, collage qui a échoué. Demandée au lancement ; la refuser ne fait que taire ces alertes."
               ]
             ]
           },
@@ -612,7 +621,7 @@
             "p": "Un assistant couvre les permissions dont Soufflé a besoin, le micro à utiliser, le modèle de transcription à télécharger, et le raccourci de dictée. Le raccourci par défaut est <kbd>⌘⇧Espace</kbd>."
           },
           {
-            "p": "L'étape du raccourci propose aussi le collage automatique, actif par défaut : quand vous arrêtez de dicter, le texte part directement dans l'app où vous étiez. Désactivez-le et le texte atterrit dans le presse-papiers. Une installation neuve termine avec Lancer à la connexion activé ; changez-le plus tard dans Paramètres → Système. Tout cela se change plus tard dans les Paramètres."
+            "p": "L'étape du raccourci propose aussi le collage automatique, inactif tant que vous ne le cochez pas : une fois actif, quand vous arrêtez de dicter, le texte part directement dans l'app où vous étiez. Laissé inactif, le texte atterrit dans le presse-papiers. Une installation neuve termine avec Lancer à l'ouverture de session activé ; changez-le plus tard dans Paramètres → Système. Tout cela se change plus tard dans les Paramètres."
           }
         ]
       },
@@ -621,16 +630,16 @@
         "h": "Dictée",
         "blocks": [
           {
-            "p": "Appuyez sur le raccourci n'importe où, parlez, appuyez à nouveau. Le texte est inséré dans l'app qui avait le focus, ou copié dans le presse-papiers si vous avez désactivé le collage automatique."
+            "p": "Appuyez sur le raccourci n'importe où, parlez, appuyez à nouveau. Le texte est inséré dans l'app qui avait le focus, ou copié dans le presse-papiers tant que le collage automatique est inactif. Appuyez sur <kbd>Échap</kbd> pendant une dictée en bascule pour la jeter. Si un collage échoue, le texte attend sur l'accueil sous <em>Dictée à récupérer</em> jusqu'à ce que vous le copiiez ou le supprimiez."
           },
           {
             "p": "Les apps qui refusent un collage synthétique (terminaux, champs sécurisés) peuvent recevoir des frappes simulées à la place. Paramètres → Interface propose trois méthodes de collage : le presse-papiers avec ⌘V, la frappe simulée, ou une écriture directe dans le champ focalisé via l'Accessibilité."
           },
           {
-            "p": "Deux passages optionnels tournent à la sortie. Le <strong>polish de la dictée</strong> fait passer la transcription brute dans un LLM local, avec un modèle de prompt que vous pouvez modifier (nettoyage, courriel professionnel, liste à puces, retrait des hésitations) ; il demande Apple Intelligence ou Ollama. L'<strong>apprentissage des corrections</strong>, actif par défaut, surveille le champ juste après l'insertion : corrigez un nom mal entendu une fois à la main, et Soufflé garde cette orthographe pour la suite, dans le dictionnaire personnalisé sous Paramètres → Transcription."
+            "p": "Deux passages tournent à la sortie, et chacun se désactive. Le <strong>polish de la dictée</strong>, actif par défaut quand un fournisseur est disponible, fait passer la transcription brute dans un LLM local, avec un modèle de prompt que vous pouvez modifier (nettoyage, courriel professionnel, liste à puces, retrait des hésitations) ; il demande Apple Intelligence ou Ollama. L'<strong>apprentissage des corrections</strong>, actif par défaut, surveille le champ juste après l'insertion : corrigez un nom mal entendu une fois à la main, et Soufflé garde cette orthographe pour la suite, dans le dictionnaire personnalisé sous Paramètres → Transcription."
           },
           {
-            "p": "Les <strong>extraits vocaux</strong> vivent sous Paramètres → Transcription : dites une phrase déclencheur en début de dictée et Soufflé colle l'expansion à la place, sans tenir compte de la casse ni des accents, et sans polish IA sur cette prise. Le menu de la barre des menus propose aussi <em>Copier la dernière transcription</em> quand vous en avez besoin."
+            "p": "Les <strong>extraits vocaux</strong> vivent sous Paramètres → Transcription : dites une phrase déclencheur en début de dictée et Soufflé colle l'expansion à la place, sans tenir compte de la casse ni des accents, et sans polish IA sur cette prise. Le menu de la barre des menus propose aussi <em>Copier la dernière transcription</em> quand vous en avez besoin, et <em>Pause raccourci (1 h)</em> quand la touche doit servir à autre chose."
           },
           {
             "p": "Des sons de départ et d'arrêt, optionnels, confirment que le raccourci a été capté."
@@ -642,7 +651,7 @@
         "h": "Raccourcis",
         "blocks": [
           {
-            "p": "Les deux raccourcis de dictée se règlent dans Paramètres → Interface. La bascule utilise une combinaison classique avec modificateur (<kbd>⌘⇧Espace</kbd> par défaut). Le push-to-talk peut faire de même, ou une seule touche (un modificateur seul, ou F5–F12), qui demande la permission Accessibilité pour que le tap natif s'installe. Les deux ne peuvent pas partager la même combinaison."
+            "p": "Les deux raccourcis de dictée se règlent dans Paramètres → Interface. Chacun accepte une combinaison classique avec modificateur, ou une seule touche (un modificateur seul, gauche ou droit, ou F5–F12), qui demande la permission Accessibilité pour que le tap natif s'installe. Les deux ne peuvent pas partager la même combinaison."
           },
           {
             "table": [
@@ -653,6 +662,10 @@
               [
                 "Maintenir pour parler",
                 "Maintenir pour enregistrer, relâcher pour arrêter. Non assigné par défaut ; liez une combinaison classique ou une seule touche (modificateur seul, F5–F12) si vous préférez maintenir."
+              ],
+              [
+                "Annuler",
+                "<kbd>Échap</kbd> jette une dictée en bascule en cours. La touche n'est captée que pendant une dictée."
               ]
             ]
           }
@@ -666,7 +679,7 @@
             "p": "La dictée n'ouvre pas de fenêtre. Une petite pastille apparaît au-dessus de ce que vous êtes en train de faire : un point d'enregistrement, le libellé, une forme d'onde en direct et un bouton d'arrêt. Elle reste compacte tant qu'il n'y a rien à afficher, puis s'élargit et grandit ligne par ligne pendant que vous parlez."
           },
           {
-            "p": "À l'arrêt, la pastille passe en <em>Reformulation…</em> le temps du passage de polish local, puis disparaît au moment où le texte atterrit dans le champ que vous utilisiez déjà. Sa fenêtre est exclue de la capture d'écran : elle n'apparaît pas dans la réunion où vous êtes."
+            "p": "À l'arrêt, la pastille passe en <em>Reformulation…</em> le temps du passage de polish local, puis disparaît au moment où le texte atterrit dans le champ que vous utilisiez déjà. Par défaut, sa fenêtre est exclue de la capture d'écran : elle n'apparaît pas dans la réunion où vous êtes ; <em>Masquer l'overlay dans les captures d'écran</em>, dans Paramètres → Interface, change ce comportement."
           },
           {
             "p": "Vous pouvez masquer la pastille dans Paramètres → Interface ; faites-la glisser quand elle est visible pour la déplacer. La position est mémorisée d'un écran à l'autre."
@@ -678,16 +691,19 @@
         "h": "Réunions",
         "blocks": [
           {
-            "p": "Une réunion enregistre votre micro et, sur macOS 14.4+, l'audio système : la transcription en direct sépare donc <em>Moi</em> de <em>Eux</em> au fil de l'eau."
+            "p": "Une réunion enregistre votre micro et, sur macOS 14.4+, l'audio système : la transcription en direct sépare donc <em>Moi</em> de <em>Eux</em> au fil de l'eau. La séparation Moi/Eux demande un modèle Kyutai ; Whisper et Parakeet transcrivent la réunion en un seul flux."
           },
           {
-            "p": "Le cycle de vie est pensé pour ne rien demander : l'app propose de démarrer quand une réunion du calendrier commence, détecte que la réunion semble terminée et s'arrête d'elle-même après vous avoir prévenu, et récupère ou sauve la session si le moteur cale ou si le micro disparaît. Quand le Mac se met en veille, l'enregistrement est fermé proprement, et Soufflé propose de le reprendre au réveil."
+            "p": "Le cycle de vie est pensé pour ne rien demander : l'app vous notifie au début d'une réunion du calendrier, et les événements du jour ont un bouton Démarrer sur l'accueil. Elle détecte que la réunion semble terminée et s'arrête d'elle-même après vous avoir prévenu, et récupère ou sauve la session si le moteur cale ou si le micro disparaît. Quand le Mac se met en veille, l'enregistrement est fermé proprement, et Soufflé propose de le reprendre au réveil. Une réunion arrêtée peut aussi être reprise à la main avec <em>Reprendre l'enregistrement</em>, qui ajoute une session à la même réunion. Si un micro ne répond plus, un bandeau le signale et propose <em>Redémarrer Soufflé</em>."
           },
           {
             "p": "Une réunion s'arrête seule après 10 minutes sans parole, avec un garde-fou à 4 heures derrière. Les deux se règlent dans Paramètres → Audio, avec le micro que Soufflé doit privilégier."
           },
           {
-            "p": "L'enregistrement audio est inactif par défaut. Activez-le dans Paramètres → Système → Données et le son de la réunion est conservé en fichiers Opus compacts, pendant 7 jours, 30 jours ou jusqu'à ce que vous les effaciez, rejouables en cliquant n'importe quelle ligne de la transcription."
+            "p": "L'enregistrement audio est inactif par défaut. Activez-le dans Paramètres → Système → Données et le son de la réunion est conservé en fichiers Opus compacts, pendant 7 jours, 30 jours ou jusqu'à ce que vous les effaciez, rejouables en cliquant n'importe quelle ligne de la transcription. Avec l'audio système, le fichier est en stéréo, vous à gauche et les autres à droite, pour environ 1,5 fois le disque d'un fichier mono."
+          },
+          {
+            "p": "Depuis la page d'une réunion, vous pouvez copier le résumé ou la transcription, exporter la réunion, ou la supprimer. Les modèles de résumé se modifient dans Paramètres → IA."
           }
         ]
       },
@@ -727,7 +743,7 @@
               ],
               [
                 "Kyutai STT 2.6B",
-                "Anglais seulement, meilleure qualité, ~5,6 Go. Affiche le texte pendant que vous parlez."
+                "Anglais seulement, meilleure qualité, ~5,6 Go. Affiche le texte pendant que vous parlez. Sans détecteur de pause, une longue prise de parole sans silence peut perdre environ 2,5 secondes toutes les 28 secondes."
               ],
               [
                 "Whisper Large V3 Turbo",
@@ -762,19 +778,27 @@
               ],
               [
                 "Collage automatique<br><span class=\"docs-tab\">Interface</span>",
-                "Actif : le texte part dans l'app que vous utilisiez. Inactif : il est copié dans le presse-papiers."
+                "Actif : le texte part dans l'app que vous utilisiez. Inactif, par défaut : il est copié dans le presse-papiers."
               ],
               [
-                "Sons de retour<br><span class=\"docs-tab\">Interface</span>",
+                "Délai de collage<br><span class=\"docs-tab\">Interface</span>",
+                "Temps d'attente avant le collage. Augmentez-le si le texte arrive dans la mauvaise app."
+              ],
+              [
+                "Langue et thème<br><span class=\"docs-tab\">Interface</span>",
+                "L'interface en français ou en anglais, et une apparence claire, sombre ou système."
+              ],
+              [
+                "Sons de dictée<br><span class=\"docs-tab\">Interface</span>",
                 "Signaux sonores de départ et d'arrêt, avec un volume."
               ],
               [
-                "Masquer la pastille<br><span class=\"docs-tab\">Interface</span>",
-                "Cache le HUD flottant pendant la dictée ou une réunion. Faites-le glisser quand il est visible pour le déplacer ; la position est mémorisée."
+                "Masquer l'overlay d'enregistrement<br><span class=\"docs-tab\">Interface</span>",
+                "Cache le HUD flottant pendant la dictée ou une réunion. Faites-le glisser quand il est visible pour le déplacer ; la position est mémorisée. Un second interrupteur, actif par défaut, l'exclut des captures d'écran."
               ],
               [
                 "Polish de la dictée<br><span class=\"docs-tab\">IA</span>",
-                "Le passage LLM local et ses modèles de prompt, modifiables. Demande Apple Intelligence ou Ollama."
+                "Le passage LLM local et ses modèles de prompt, modifiables. Actif par défaut quand Apple Intelligence ou Ollama est disponible."
               ],
               [
                 "Dictionnaire personnalisé<br><span class=\"docs-tab\">Transcription</span>",
@@ -793,19 +817,23 @@
                 "Arrêt après 5, 10, 15 ou 30 minutes sans parole, avec un garde-fou de durée maximale derrière."
               ],
               [
+                "Langue de transcription (réunions)<br><span class=\"docs-tab\">Audio</span>",
+                "Un indice pour la détection de langue en réunion, jamais imposé au moteur."
+              ],
+              [
                 "Déchargement du modèle<br><span class=\"docs-tab\">Transcription</span>",
                 "Libère la RAM du modèle après 5, 15 ou 60 minutes d'inactivité, ou jamais."
               ],
               [
                 "Calendrier<br><span class=\"docs-tab\">Réunions</span>",
-                "Inactif tant que vous ne l'activez pas. Liste les événements du jour et propose de démarrer quand l'un commence."
+                "Inactif tant que vous ne l'activez pas. Liste les événements du jour des calendriers que vous gardez cochés, vous rappelle un événement quelques minutes avant (2 par défaut), et vous notifie quand l'un commence pendant qu'un appel utilise le micro."
               ],
               [
                 "Résumés<br><span class=\"docs-tab\">IA</span>",
                 "Fournisseur, serveur et modèle Ollama, et les modèles de résumé."
               ],
               [
-                "Lancer à la connexion<br><span class=\"docs-tab\">Système</span>",
+                "Lancer à l'ouverture de session<br><span class=\"docs-tab\">Système</span>",
                 "Ouvre Soufflé automatiquement au démarrage du Mac. Actif par défaut après l'assistant d'une installation neuve."
               ],
               [
@@ -813,8 +841,12 @@
                 "Inactif, conservé 7 jours, 30 jours, ou jusqu'à suppression."
               ],
               [
+                "Stockage du modèle<br><span class=\"docs-tab\">Système</span>",
+                "Supprime du disque le modèle de transcription sélectionné, une fois téléchargé et déchargé."
+              ],
+              [
                 "Vérification des mises à jour<br><span class=\"docs-tab\">Système</span>",
-                "Demande une fois par jour à GitHub s'il existe une version plus récente. Se désactive dans À propos."
+                "Demande une fois par jour à GitHub s'il existe une version plus récente. Se désactive dans À propos. Une mise à jour n'est téléchargée que si vous appuyez sur <em>Télécharger la mise à jour</em>, et s'installe avec <em>Installer et redémarrer</em>, qui vous demande d'abord d'arrêter une réunion en cours."
               ]
             ]
           }
@@ -835,16 +867,20 @@
               ],
               [
                 "api.github.com",
-                "Une fois par jour, et chaque fois que vous appuyez sur <em>Vérifier les mises à jour</em>, demande s'il existe une version plus récente. N'envoie rien d'autre que la requête : aucun identifiant, aucun compte, aucune donnée d'usage. Affiche une boîte de dialogue et ne télécharge ni n'installe jamais rien. Se désactive dans Paramètres → Système → À propos."
+                "Une fois par jour, et chaque fois que vous appuyez sur <em>Vérifier les mises à jour</em>, demande s'il existe une version plus récente, et récupère les notes de version pour Nouveautés. N'envoie rien d'autre que la requête : aucun identifiant, aucun compte, aucune donnée d'usage. La vérification quotidienne se désactive dans Paramètres → Système → À propos."
+              ],
+              [
+                "github.com",
+                "Seulement si vous appuyez sur <em>Télécharger la mise à jour</em> : récupère la mise à jour signée, vérifiée avant que <em>Installer et redémarrer</em> soit proposé."
               ],
               [
                 "localhost:11434",
-                "Votre instance Ollama, uniquement si vous activez les résumés avec Ollama. C'est votre machine, sauf si vous la pointez ailleurs."
+                "Votre instance Ollama, uniquement si vous activez les résumés avec Ollama. C'est votre machine, sauf si vous la pointez ailleurs. Un modèle téléchargé depuis Paramètres → IA est récupéré par cette instance, pas par Soufflé."
               ]
             ]
           },
           {
-            "p": "Vos enregistrements, transcriptions, notes et résumés ne sont jamais envoyés nulle part. Ils vivent dans une base SQLite locale, et Paramètres → Système → Données exporte ou efface l'ensemble."
+            "p": "Vos enregistrements, transcriptions, notes et résumés ne sont jamais envoyés nulle part. Ils vivent dans une base SQLite locale : Paramètres → Système → Données exporte l'ensemble, et supprimer le dossier de données l'efface."
           }
         ]
       },
@@ -909,7 +945,7 @@
             "code": "{\n  \"mcpServers\": {\n    \"souffle\": {\n      \"command\": \"/Applications/Soufflé.app/Contents/MacOS/souffle-mcp\"\n    }\n  }\n}"
           },
           {
-            "p": "Cinq outils sont exposés : <code>list_meetings</code>, <code>get_meeting</code>, <code>search_meetings</code>, <code>latest_meeting</code> et <code>list_dictations</code>. Paramètres → Système → Données reprend les mêmes extraits avec le chemin déjà rempli, et un bouton qui teste la connexion."
+            "p": "Cinq outils sont exposés : <code>list_meetings</code>, <code>get_meeting</code>, <code>search_meetings</code>, <code>get_latest_meeting</code> et <code>list_dictations</code>. Paramètres → Système → Données reprend les mêmes extraits avec le chemin déjà rempli, et un bouton qui teste la connexion."
           }
         ]
       },
@@ -975,7 +1011,7 @@
               ],
               [
                 "Le texte dicté n'est pas inséré",
-                "Le collage automatique est peut-être désactivé : dans ce cas le texte attend dans le presse-papiers. Sinon, c'est la permission Accessibilité. Si Soufflé y figure déjà et est bien coché, l'entrée peut être une trace périmée laissée par une mise à jour : retirez-la avec le bouton moins et rajoutez-la, ou passez par Paramètres → Système → Permissions → Réparer la permission."
+                "Le collage automatique est peut-être désactivé : dans ce cas le texte attend dans le presse-papiers. Sinon, c'est la permission Accessibilité. Si Soufflé y figure déjà et est bien coché, l'entrée peut être une trace périmée laissée par une mise à jour : retirez-la avec le bouton moins et rajoutez-la, ou utilisez <em>Réparer</em> dans Paramètres → Système → Permissions."
               ],
               [
                 "Une app refuse le collage",
@@ -987,11 +1023,11 @@
               ],
               [
                 "Le polish ou les résumés ne font rien",
-                "Les deux ont besoin d'un fournisseur. Sans Apple Intelligence (macOS 26+), installez Ollama et choisissez un modèle dans Paramètres → Réunions. La raison pour laquelle un passage a été sauté est affichée dans le message d'état et écrite dans le journal."
+                "Les deux ont besoin d'un fournisseur. Sans Apple Intelligence (macOS 26+), installez Ollama et choisissez un modèle dans Paramètres → IA. La raison pour laquelle un passage a été sauté est affichée dans le message d'état et écrite dans le journal."
               ],
               [
                 "Le téléchargement d'un modèle s'est arrêté en route",
-                "Resélectionnez le modèle : le téléchargement reprend. Supprimer son dossier sous <code>models/</code> force un téléchargement propre."
+                "Resélectionnez le modèle pour relancer le téléchargement. Supprimer son dossier sous <code>models/</code> force un téléchargement propre."
               ],
               [
                 "Autre chose",
@@ -1015,10 +1051,10 @@
             "p": "Sinon, sortez Soufflé du dossier Applications."
           },
           {
-            "p": "Dans les deux cas vos données restent. Pour les retirer aussi, supprimez <code>~/Library/Application&nbsp;Support/com.souffle.desktop/</code> — ou, avant de désinstaller, passez par Paramètres → Système → Données, qui efface réunions, dictées et audio enregistré d'un coup."
+            "p": "Dans les deux cas vos données restent. Pour les retirer aussi, quittez Soufflé et supprimez <code>~/Library/Application&nbsp;Support/com.souffle.desktop/</code> : réunions, dictées, audio enregistré et modèles y sont tous."
           },
           {
-            "p": "Pour récupérer du disque sans désinstaller, supprimez depuis Paramètres → Transcription les modèles dont vous ne vous servez plus."
+            "p": "Pour récupérer du disque sans désinstaller, sélectionnez un modèle dont vous ne vous servez plus et supprimez-le sous Paramètres → Système → Stockage du modèle. Il doit être téléchargé et déchargé."
           }
         ]
       },
@@ -1027,10 +1063,13 @@
         "h": "Compiler depuis les sources",
         "blocks": [
           {
-            "p": "Demande un Mac Apple Silicon, <a href=\"https://rustup.rs/\">Rust</a>, <a href=\"https://nodejs.org/\">Node.js</a> 18+ et cmake (<code>brew install cmake</code>)."
+            "p": "L'app est écrite en Rust avec une interface native <a href=\"https://slint.dev/\">Slint</a>, et un peu de Swift pour la pastille. La compiler demande un Mac Apple Silicon, <a href=\"https://rustup.rs/\">Rust</a>, les outils en ligne de commande Xcode et cmake (<code>brew install cmake</code>)."
           },
           {
-            "code": "git clone https://github.com/damione1/souffle.git\ncd souffle\nnpm install\nnpm run tauri dev"
+            "code": "git clone https://github.com/damione1/souffle.git\ncd souffle\nmake nightly"
+          },
+          {
+            "p": "<code>make nightly</code> compile et ouvre <strong>Soufflé Nightly</strong>, une build de débogage avec sa propre identité, qui cohabite avec un Soufflé installé. <code>./scripts/bundle-macos.sh</code> produit un bundle de version signé."
           }
         ]
       },
@@ -1074,6 +1113,6 @@
         "d": "Pas d'inscription, pas d'abonnement, pas de clé d'API à coller. Vous téléchargez et ça marche."
       }
     ],
-    "more": "L'app fait exactement trois requêtes sortantes. Voici lesquelles, et pourquoi."
+    "more": "Chaque connexion sortante de l'app est listée. Voici lesquelles, et pourquoi."
   }
 }

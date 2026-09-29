@@ -1,0 +1,35 @@
+{
+  "validated_code_commit": "f68bb4eb",
+  "review_followup": "Full current CLAUDE.md gate rerun in order after centralizing completed-final preservation at mono/dual transcription call boundaries, including pre-frame SoftPause failure during flush suffix inference; original errors and Invalid state retained without double-stash",
+  "ordered_commands": [
+    {"command": "./scripts/build-mcp-sidecar.test.sh && ./scripts/build-mcp-sidecar.sh", "exit_code": 0, "result": "target resolution test passed; aarch64-apple-darwin sidecar built"},
+    {"command": "cargo fmt --manifest-path app/Cargo.toml --all -- --check", "exit_code": 0},
+    {"command": "cargo clippy --manifest-path app/Cargo.toml --workspace --all-targets -- -D warnings", "exit_code": 0, "note": "Dependency block 0.1.6 emitted a Cargo future-incompatibility notice; no Clippy warnings/errors"},
+    {"command": "cargo test --manifest-path app/Cargo.toml --workspace", "exit_code": 0, "passed": 1291, "failed": 0, "ignored": 13, "note": "Native paste main/worker layout lookup executable also passed without posting input. Kyutai targeted suite: 39 passed, including genuine red-to-green pre-frame SoftPause loss regression. Ignored real-model controls were explicitly executed separately; ECorp was rerun after the reset-invalidation fix. Successful Kyutai stepping/reset/flush outputs remain unchanged; the new boundary only retains outputs on error with Invalid integrity. Moshi 0.6.4 full reset is currently infallible, so its path was left unchanged."},
+    {"command": "./scripts/check_slint_translations.sh", "exit_code": 0, "result": "en/fr complete"},
+    {"command": "CODEQL_THREADS=0 ./scripts/codeql-local.sh", "exit_code": 0, "result": "CodeQL local gate green"}
+  ],
+  "codeql": {
+    "cli": "2.27.0",
+    "queries": {"rust": "0.1.43", "javascript": "2.4.6", "actions": "0.6.36"},
+    "sarif_result_counts": {"rust": 0, "javascript": 0, "actions": 0},
+    "sarif_sha256": {
+      "rust": "e26bfc90c67b900710bbad54921d47bb0bd42e663ed2139d832e261276117fcb",
+      "javascript": "5b2d28a51fdd5f6042d1f30986d3cae1abe0b8139ea0fd549e57633370140e50",
+      "actions": "6965768e186cf3077fa8a6611b2d035d2bd5b8e69fc1220556429395e187ffc4"
+    },
+    "extraction_limits": {
+      "rust_files_with_errors": 29,
+      "rust_files_without_errors": 163,
+      "rust_extraction_warnings": 38,
+      "rust_warning_locations": "37 generated app/target warnings; one existing app/src/frontmost.rs panic macro expansion failure",
+      "rust_unresolved_macro_calls": 4650,
+      "javascript_extraction_error_notifications": 660,
+      "javascript_error_files": 33,
+      "javascript_error_locations": "Generated CMake compiler_depend.ts files under app/target, not TypeScript source",
+      "javascript_successfully_extracted_files": 68,
+      "actions_successfully_extracted_files": 6,
+      "changed_file_extraction_warnings": 0
+    }
+  }
+}

@@ -1,0 +1,41 @@
+import { Theme } from "../theme.slint";
+
+// Compact square used by the calendar picker. Stock CheckBox is Fluent-blue.
+export component ThemedCheckbox inherits Rectangle {
+    in property <bool> checked;
+    in property <bool> enabled: true;
+
+    callback toggled(bool);
+
+    width: 16px;
+    height: 16px;
+    horizontal-stretch: 0;
+    vertical-stretch: 0;
+    border-radius: 3px;
+    border-width: 1px;
+    border-color: root.checked ? Theme.accent : Theme.ghost-border;
+    background: root.checked ? Theme.accent : transparent;
+    opacity: root.enabled ? 1.0 : 0.5;
+
+    accessible-role: checkbox;
+    accessible-checkable: true;
+    accessible-checked: root.checked;
+    accessible-enabled: root.enabled;
+    accessible-action-default => { root.toggled(!root.checked); }
+
+    if root.checked: Text {
+        text: @tr("✓");
+        font-size: 11px;
+        font-weight: 700;
+        color: Theme.canvas;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        width: 100%;
+        height: 100%;
+    }
+
+    TouchArea {
+        enabled: root.enabled;
+        clicked => { root.toggled(!root.checked); }
+    }
+}

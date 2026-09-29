@@ -1,0 +1,82 @@
+import { Theme } from "../theme.slint";
+import { ThemedButton, ThemedButtonKind } from "themed_button.slint";
+import { LucideIcon, IconSet } from "lucide_icon.slint";
+
+// Port of components/ui/StatusBanner.svelte (`warning` variant: the only
+// one this shell instantiates). `action-label` empty means no action
+// button; the caller is responsible for not instantiating this at all when
+// there's no message (mirrors the Svelte `{#if message}` guard). The
+// reference is a `rounded-default px-4 py-3 outline-warning/30` box with a
+// `btn btn-primary btn-sm` action and a `btn btn-icon` X - house widgets
+// here, not `std-widgets`' Fluent `Button`.
+export component StatusBanner inherits Rectangle {
+    in property <string> message;
+    in property <string> action-label;
+    // Svelte's `{#if onDismiss}`: a banner whose owner clears it by itself
+    // (the wizard's per-step status) shows no X rather than a dead one.
+    in property <bool> dismissible: true;
+
+    callback action-triggered();
+    callback dismissed();
+
+    border-width: 1px;
+    border-color: Theme.warning.with-alpha(0.3);
+    border-radius: 4px;
+
+    HorizontalLayout {
+        padding-left: 16px;
+        padding-right: 10px;
+        padding-top: 10px;
+        padding-bottom: 10px;
+        spacing: 12px;
+
+        Text {
+            text: root.message;
+            color: Theme.text-primary;
+            font-size: 13px;
+            vertical-alignment: center;
+            wrap: word-wrap;
+            horizontal-stretch: 1;
+        }
+
+        VerticalLayout {
+            alignment: center;
+            horizontal-stretch: 0;
+
+            HorizontalLayout {
+                spacing: 8px;
+                alignment: end;
+
+                if root.action-label != "": ThemedButton {
+                    text: root.action-label;
+                    kind: ThemedButtonKind.primary;
+                    compact: true;
+                    clicked => { root.action-triggered(); }
+                }
+
+                if root.dismissible: dismiss-btn := Rectangle {
+                    width: 28px;
+                    height: 28px;
+                    border-radius: 4px;
+                    background: dismiss-area.has-hover ? Theme.surface-2 : transparent;
+
+                    accessible-role: button;
+                    accessible-label: @tr("Fermer");
+                    accessible-action-default => { root.dismissed(); }
+
+                    dismiss-area := TouchArea {
+                        clicked => { root.dismissed(); }
+                    }
+
+                    LucideIcon {
+                        icon: IconSet.X;
+                        size: 14px;
+                        icon-color: dismiss-area.has-hover ? Theme.text-primary : Theme.text-muted;
+                        x: (parent.width - self.width) / 2;
+                        y: (parent.height - self.height) / 2;
+                    }
+                }
+            }
+        }
+    }
+}

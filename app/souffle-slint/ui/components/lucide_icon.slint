@@ -1,0 +1,16 @@
+import { IconDisplay, IconSet, Icon } from "@lucide";
+import { Theme } from "../theme.slint";
+
+export { IconSet, Icon }
+
+// Lucide via lucide-slint (`@lucide`), not hand-copied SVG files.
+// `color` is the stroke (and the fill when `filled` is set), matching
+// how the Tauri app uses Lucide `currentColor` / `fill="currentColor"`.
+export component LucideIcon inherits IconDisplay {
+    in property <brush> icon-color: Theme.text-muted;
+    in property <bool> filled: false;
+
+    stroke: root.icon-color;
+    stroke-fill: root.filled ? root.icon-color : transparent;
+    stroke-width: 2;
+}

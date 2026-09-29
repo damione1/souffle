@@ -1,0 +1,232 @@
+{
+  "accepted_samples": 11171296,
+  "active_rms_seconds": 421.5199999999847,
+  "audio_seconds": 465.47066666666666,
+  "backend": "Metal",
+  "bin_columns": [
+    "Word",
+    "callback",
+    "delimiter"
+  ],
+  "bins_15s": [
+    [
+      32,
+      187,
+      113
+    ],
+    [
+      32,
+      187,
+      114
+    ],
+    [
+      37,
+      188,
+      112
+    ],
+    [
+      34,
+      187,
+      112
+    ],
+    [
+      34,
+      188,
+      116
+    ],
+    [
+      35,
+      187,
+      110
+    ],
+    [
+      32,
+      188,
+      112
+    ],
+    [
+      36,
+      187,
+      107
+    ],
+    [
+      36,
+      188,
+      111
+    ],
+    [
+      34,
+      187,
+      112
+    ],
+    [
+      35,
+      188,
+      114
+    ],
+    [
+      30,
+      187,
+      116
+    ],
+    [
+      35,
+      188,
+      105
+    ],
+    [
+      16,
+      187,
+      69
+    ],
+    [
+      33,
+      188,
+      108
+    ],
+    [
+      30,
+      187,
+      110
+    ],
+    [
+      32,
+      188,
+      109
+    ],
+    [
+      34,
+      187,
+      108
+    ],
+    [
+      31,
+      188,
+      120
+    ],
+    [
+      25,
+      187,
+      128
+    ],
+    [
+      37,
+      188,
+      112
+    ],
+    [
+      34,
+      187,
+      106
+    ],
+    [
+      36,
+      188,
+      116
+    ],
+    [
+      33,
+      187,
+      110
+    ],
+    [
+      38,
+      188,
+      103
+    ],
+    [
+      33,
+      187,
+      120
+    ],
+    [
+      32,
+      188,
+      115
+    ],
+    [
+      34,
+      187,
+      109
+    ],
+    [
+      35,
+      188,
+      110
+    ],
+    [
+      26,
+      187,
+      115
+    ],
+    [
+      32,
+      188,
+      111
+    ],
+    [
+      3,
+      7,
+      4
+    ]
+  ],
+  "clamps": 0,
+  "context": 750,
+  "dtype": "BF16",
+  "finals": 1017,
+  "first_15s_famine": null,
+  "frames_after_flush": 1,
+  "future_times": 0,
+  "last_lexical_cursor": 465.36,
+  "last_source_word_cursor": 465.36,
+  "lcs_matched_reference_words": 1109,
+  "lexical_alignment_limit": "LCS is content screening, not phoneme alignment or WER",
+  "lost_samples": 0,
+  "max_non_delimiter_run": 84,
+  "max_planned_lexical_gap": 8.569999999999993,
+  "max_repeated_non_delimiter_token": 49,
+  "missing_sentinels": [
+    "azur",
+    "ambre",
+    "nacre",
+    "grenat",
+    "saphir",
+    "cristal"
+  ],
+  "origins": [
+    466.96
+  ],
+  "phase_columns": [
+    "Word",
+    "EndWord",
+    "callback",
+    "delimiter"
+  ],
+  "phase_counts": [
+    [
+      1016,
+      1014,
+      5819,
+      3437
+    ],
+    [
+      1,
+      1,
+      19,
+      17
+    ]
+  ],
+  "planned_speech_seconds": 462.9206666666667,
+  "policy": "production SoftOnly, no override",
+  "previews": 1017,
+  "prior": "Fr",
+  "reference_words": 1232,
+  "refreshes": 3,
+  "source_calls": 5819,
+  "step_after_flush": 5838,
+  "temperature": 0.0,
+  "token_limit": "callback observes previous selection, final selected token not observable",
+  "transcript_words": 1203,
+  "unmatched_reference_words": 123,
+  "wall_seconds": 249.551849
+}

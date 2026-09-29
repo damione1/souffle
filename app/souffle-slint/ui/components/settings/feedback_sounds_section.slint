@@ -1,0 +1,61 @@
+import { SettingsField } from "settings_field.slint";
+import { SettingsGroup } from "settings_group.slint";
+import { Theme } from "../../theme.slint";
+import { ThemedSwitch } from "../themed_switch.slint";
+import { ThemedSlider } from "../themed_slider.slint";
+
+// Port of FeedbackSoundsSettingsSection.svelte.
+export component FeedbackSoundsSection inherits VerticalLayout {
+    in property <bool> enabled;
+    in property <int> volume;
+    in property <int> volume-min;
+    in property <int> volume-max;
+
+    callback enabled-changed(bool);
+    callback volume-changed(int);
+
+    spacing: 22px;
+    alignment: start;
+
+    SettingsGroup {
+        title: @tr("SONS DE DICTÉE");
+
+        SettingsField {
+            show-divider: false;
+            label: @tr("Activer les sons");
+            description: @tr("Jouer un son au démarrage et à l'arrêt de l'enregistrement.");
+
+            ThemedSwitch {
+                control-label: @tr("Activer les sons");
+                checked: root.enabled;
+                toggled(new) => { root.enabled-changed(new); }
+            }
+        }
+
+        if root.enabled: SettingsField {
+            label: @tr("Volume");
+
+            HorizontalLayout {
+                spacing: 10px;
+                alignment: center;
+                horizontal-stretch: 0;
+
+                ThemedSlider {
+                    control-label: @tr("Volume des sons de dictée");
+                    value: root.volume;
+                    minimum: root.volume-min;
+                    maximum: root.volume-max;
+                    changed(value) => { root.volume-changed(value); }
+                }
+
+                Text {
+                    text: @tr("{}%", root.volume);
+                    color: Theme.text-muted;
+                    font-size: 12px;
+                    vertical-alignment: center;
+                    width: 34px;
+                }
+            }
+        }
+    }
+}

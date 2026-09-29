@@ -1,0 +1,59 @@
+import { Theme } from "../theme.slint";
+import { ThemedButton, ThemedButtonKind } from "themed_button.slint";
+import { ThemedTextArea } from "themed_text_area.slint";
+
+// Kept on the home screen when stopping succeeded but persistence or text
+// insertion did not. The transcript remains selectable/editable until the
+// user explicitly copies or discards it; an error can therefore never turn
+// into silent data loss merely because RecordingView unmounted.
+export component DictationRecovery inherits Rectangle {
+    in-out property <string> text;
+
+    callback copy-requested();
+    callback discard-requested();
+
+    height: 214px;
+    vertical-stretch: 0;
+    border-width: 1px;
+    border-color: Theme.warning;
+    border-radius: 6px;
+    background: Theme.surface-2;
+
+    VerticalLayout {
+        padding: 12px;
+        spacing: 8px;
+        alignment: start;
+
+        Text {
+            text: @tr("Dictée à récupérer");
+            color: Theme.text-primary;
+            font-size: 14px;
+            font-weight: 600;
+        }
+        Text {
+            text: @tr("Le texte reste ici tant que vous ne l’avez pas copié ou supprimé.");
+            color: Theme.text-muted;
+            font-size: 12px;
+            wrap: word-wrap;
+        }
+        ThemedTextArea {
+            text <=> root.text;
+            area-height: 108px;
+            control-label: @tr("Texte de dictée à récupérer");
+        }
+        HorizontalLayout {
+            spacing: 8px;
+            alignment: end;
+            ThemedButton {
+                text: @tr("Supprimer");
+                kind: ThemedButtonKind.ghost;
+                clicked => { root.discard-requested(); }
+            }
+            ThemedButton {
+                text: @tr("Copier le texte");
+                kind: ThemedButtonKind.primary;
+                clicked => { root.copy-requested(); }
+            }
+        }
+    }
+}

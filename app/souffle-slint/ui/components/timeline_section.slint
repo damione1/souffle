@@ -1,0 +1,345 @@
+import { TimelineEntry, TimelineItemRow } from "timeline_item.slint";
+import { EmptyState } from "empty_state.slint";
+import { TimelineKind, TimelineDay, UpcomingPhase, AccessState } from "../types.slint";
+import { Theme } from "../theme.slint";
+import { LucideIcon, IconSet } from "lucide_icon.slint";
+
+export struct TimelineDayGroup {
+    day: TimelineDay,
+    // Only read when `day` is `earlier`. 0 = Monday, 0 = January.
+    weekday: int,
+    day-of-month: int,
+    month: int,
+    entries: [TimelineEntry],
+}
+
+// One of today's calendar events. `phase` is computed in Rust so this
+// file doesn't parse timestamps. `id` is `${event.id}-${start}` so
+// recurring occurrences stay distinct.
+export struct UpcomingEvent {
+    id: string,
+    title: string,
+    time-range: string,
+    participant-count: int,
+    phase: UpcomingPhase,
+}
+
+// Port of features/timeline/components/TimelineSection.svelte: the
+// "upcoming today" calendar section, the setup CTA when that section
+// has nothing to show, then the day-grouped timeline.
+export component TimelineSection inherits VerticalLayout {
+    in property <[TimelineDayGroup]> groups;
+
+    // Port of controller.svelte.ts's day label ("Aujourd'hui", "Hier",
+    // "lundi 21 septembre"). The date order is part of the translated
+    // pattern so English can read "Monday, September 21".
+    pure function day-label(group: TimelineDayGroup) -> string {
+        if group.day == TimelineDay.today { return @tr("Aujourd'hui"); }
+        if group.day == TimelineDay.yesterday { return @tr("Hier"); }
+        return @tr("{0} {1} {2}", root.weekday-name(group.weekday), group.day-of-month, root.month-name(group.month));
+    }
+    pure function weekday-name(index: int) -> string {
+        return [@tr("lundi"), @tr("mardi"), @tr("mercredi"), @tr("jeudi"), @tr("vendredi"), @tr("samedi"), @tr("dimanche")][index];
+    }
+    pure function month-name(index: int) -> string {
+        return [@tr("janvier"), @tr("février"), @tr("mars"), @tr("avril"), @tr("mai"), @tr("juin"), @tr("juillet"), @tr("août"), @tr("septembre"), @tr("octobre"), @tr("novembre"), @tr("décembre")][index];
+    }
+    in property <bool> is-empty;
+    in property <bool> has-matches: true;
+    in property <string> live-meeting-id;
+    in property <string> expanded-dictation-id;
+    in property <bool> calendar-enabled: false;
+    in property <AccessState> calendar-permission;
+    in property <[UpcomingEvent]> upcoming;
+    in property <bool> can-start-event: true;
+
+    callback item-opened(TimelineKind, string /* id */);
+    callback item-removed(TimelineKind, string /* id */);
+    callback item-copy-requested(string /* text */);
+    callback calendar-setup-requested();
+    callback event-start-requested(string /* occurrence id */);
+
+    // Shared across every `TimelineItemRow`: at most one row is ever
+    // "confirming delete" at a time. Owning this here (not locally per row)
+    // is what lets clicking a *different* row's title/copy/delete discard
+    // an in-flight confirm on the row you clicked away from - a plain
+    // `TouchArea` click doesn't grab keyboard focus in Slint, so there is no
+    // per-row "focus lost" signal to hook instead (Damien, 2026-09-23).
+    property <string> confirming-delete-id: "";
+
+    public function dismiss-delete-confirmation() {
+        root.confirming-delete-id = "";
+    }
+
+    // Same predicate as TimelineSection.svelte's `showCalendarSetupCta`.
+    property <bool> show-calendar-setup: root.upcoming.length == 0 && (!root.calendar-enabled || root.calendar-permission == AccessState.denied);
+
+    // `alignment: start` everywhere below: without it, a `VerticalLayout`
+    // defaults to "stretch pool" sizing, and `TimelineItemRow` (a `Rectangle`
+    // wrapping a `HorizontalLayout` - same shrink-wrap recipe as the app
+    // header's status pill) doesn't expose its content's natural height as
+    // its own, so it inflates to fill whatever "leftover" vertical space
+    // the pool has - the huge blank gap between a date header and its first
+    // row was exactly that inflation, not a margin/padding bug. See
+    // `components/app_header.slint`'s doc comment for the same bug in the
+    // horizontal axis.
+    alignment: start;
+    spacing: 26px;
+
+    if root.upcoming.length > 0: VerticalLayout {
+        alignment: start;
+        spacing: 6px;
+
+        Text {
+            text: @tr("À VENIR AUJOURD'HUI");
+            font-family: "Archivo SemiBold";
+            font-size: 11px;
+            letter-spacing: 1.1px;
+            color: Theme.text-muted;
+        }
+
+        VerticalLayout {
+            alignment: start;
+
+            for event in root.upcoming: Rectangle {
+                opacity: event.phase == UpcomingPhase.past ? 0.5 : 1.0;
+
+                VerticalLayout {
+                    alignment: start;
+
+                    Rectangle {
+                        height: 1px;
+                        background: Theme.rule;
+                    }
+
+                    HorizontalLayout {
+                        padding-top: 12px;
+                        padding-bottom: 12px;
+                        spacing: 12px;
+
+                        LucideIcon {
+                            icon: IconSet.CalendarClock;
+                            icon-color: Theme.secondary;
+                            size: 16px;
+                            y: (parent.height - self.height) / 2;
+                        }
+
+                        Text {
+                            text: event.title;
+                            overflow: elide;
+                            horizontal-stretch: 1;
+                            font-size: 13.5px;
+                            color: Theme.text-primary;
+                            vertical-alignment: center;
+                        }
+
+                        if event.phase == UpcomingPhase.now: Rectangle {
+                            height: 18px;
+                            width: now-label.width + 16px;
+                            horizontal-stretch: 0;
+                            background: Theme.text-primary;
+                            y: (parent.height - self.height) / 2;
+                            now-label := Text {
+                                x: 8px;
+                                height: 100%;
+                                text: @tr("EN COURS");
+                                font-family: "Archivo SemiBold";
+                                font-size: 10.5px;
+                                letter-spacing: 0.6px;
+                                color: Theme.canvas;
+                                vertical-alignment: center;
+                            }
+                        }
+                        if event.phase == UpcomingPhase.next: Rectangle {
+                            height: 18px;
+                            width: next-label.width + 16px;
+                            horizontal-stretch: 0;
+                            border-width: 1px;
+                            border-color: Theme.rule;
+                            y: (parent.height - self.height) / 2;
+                            next-label := Text {
+                                x: 8px;
+                                height: 100%;
+                                text: @tr("SUIVANT");
+                                font-family: "Archivo SemiBold";
+                                font-size: 10.5px;
+                                letter-spacing: 0.6px;
+                                color: Theme.text-muted;
+                                vertical-alignment: center;
+                            }
+                        }
+
+                        if event.participant-count > 0: HorizontalLayout {
+                            spacing: 5px;
+                            alignment: center;
+                            horizontal-stretch: 0;
+
+                            LucideIcon {
+                                icon: IconSet.Users;
+                                icon-color: Theme.text-muted;
+                                size: 13px;
+                                y: (parent.height - self.height) / 2;
+                            }
+                            Text {
+                                text: event.participant-count;
+                                font-size: 12px;
+                                color: Theme.text-muted;
+                                vertical-alignment: center;
+                            }
+                        }
+
+                        HorizontalLayout {
+                            spacing: 11px;
+                            alignment: end;
+                            horizontal-stretch: 0;
+
+                            Text {
+                                text: event.time-range;
+                                width: Theme.row-time-width;
+                                horizontal-alignment: right;
+                                font-family: "JetBrains Mono";
+                                font-size: 11.5px;
+                                color: Theme.text-muted;
+                                vertical-alignment: center;
+                            }
+
+                            Rectangle {
+                                width: Theme.row-action-width;
+                                height: 22px;
+
+                                if event.phase == UpcomingPhase.now || event.phase == UpcomingPhase.next || event.phase == UpcomingPhase.later: play-area := TouchArea {
+                                    width: Theme.row-action-width;
+                                    height: 22px;
+                                    enabled: root.can-start-event;
+                                    accessible-role: button;
+                                    accessible-label: @tr("Démarrer la transcription");
+                                    accessible-action-default => { root.event-start-requested(event.id); }
+                                    clicked => { root.event-start-requested(event.id); }
+
+                                    LucideIcon {
+                                        icon: IconSet.Play;
+                                        icon-color: play-area.has-hover ? Theme.accent : Theme.text-muted;
+                                        filled: true;
+                                        size: 13px;
+                                        x: (parent.width - self.width) / 2;
+                                        y: (parent.height - self.height) / 2;
+                                        opacity: root.can-start-event ? 1.0 : 0.5;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if root.show-calendar-setup: Rectangle {
+        background: setup-area.has-hover ? Theme.surface-2 : transparent;
+
+        setup-area := TouchArea {
+            accessible-role: button;
+            accessible-label: @tr("Configurer le calendrier");
+            accessible-action-default => { root.calendar-setup-requested(); }
+            clicked => { root.calendar-setup-requested(); }
+
+            VerticalLayout {
+                alignment: start;
+
+                Rectangle {
+                    height: 1px;
+                    background: Theme.rule;
+                }
+
+                HorizontalLayout {
+                    padding-top: 12px;
+                    padding-bottom: 12px;
+                    spacing: 12px;
+
+                    LucideIcon {
+                        icon: IconSet.CalendarPlus;
+                        icon-color: Theme.secondary;
+                        size: 16px;
+                        y: (parent.height - self.height) / 2;
+                    }
+
+                    VerticalLayout {
+                        alignment: start;
+                        horizontal-stretch: 1;
+                        spacing: 2px;
+
+                        Text {
+                            text: @tr("Affichez vos réunions du jour ici");
+                            overflow: elide;
+                            font-size: 13.5px;
+                            color: Theme.text-primary;
+                        }
+                        Text {
+                            text: @tr("Connectez le calendrier macOS pour des rappels et un démarrage en un clic.");
+                            overflow: elide;
+                            font-size: 12px;
+                            color: Theme.text-muted;
+                        }
+                    }
+
+                    Text {
+                        text: @tr("Configurer");
+                        font-family: "Archivo SemiBold";
+                        font-size: 12px;
+                        color: Theme.accent;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+        }
+    }
+
+    if root.is-empty: EmptyState {
+        title: @tr("Rien ici pour l'instant");
+        message: @tr("Vos dictées et meetings apparaîtront ici, du plus récent au plus ancien.");
+    }
+    if !root.is-empty && !root.has-matches: EmptyState {
+        title: @tr("Aucun résultat");
+        message: @tr("Essayez d'autres mots-clés — la recherche couvre toutes les transcriptions.");
+    }
+    if !root.is-empty && root.has-matches: VerticalLayout {
+        alignment: start;
+        spacing: 26px;
+
+        for group in root.groups: VerticalLayout {
+            alignment: start;
+            spacing: 6px;
+
+            Text {
+                text: root.day-label(group).to-uppercase();
+                font-family: "Archivo SemiBold";
+                font-size: 11px;
+                letter-spacing: 1.1px;
+                color: Theme.text-muted;
+            }
+
+            VerticalLayout {
+                alignment: start;
+                for entry in group.entries: TimelineItemRow {
+                    entry: entry;
+                    is-live: entry.kind == TimelineKind.meeting && entry.id == root.live-meeting-id;
+                    expanded: entry.kind == TimelineKind.dictation && entry.id == root.expanded-dictation-id;
+                    confirming-delete: root.confirming-delete-id == entry.id;
+                    confirm-delete-requested => { root.confirming-delete-id = entry.id; }
+                    opened => {
+                        root.confirming-delete-id = "";
+                        root.item-opened(entry.kind, entry.id);
+                    }
+                    removed => {
+                        root.confirming-delete-id = "";
+                        root.item-removed(entry.kind, entry.id);
+                    }
+                    copy-requested => {
+                        root.confirming-delete-id = "";
+                        root.item-copy-requested(entry.title);
+                    }
+                }
+            }
+        }
+    }
+}

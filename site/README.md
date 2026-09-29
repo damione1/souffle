@@ -74,20 +74,21 @@ is the only place that still hardcodes EN and FR.
 
 ## The app screens
 
-The mock screens are not screenshots. They are HTML and CSS built from the
-real components, and they run the app's own behaviour:
+The mock screens are not screenshots. They are HTML and CSS modelled on the
+app's screens, and they run the app's own behaviour. The app is native Slint
+(`app/souffle-slint/ui/`); the originals were Svelte components, since ported:
 
-| Mock | Built from | What animates |
+| Mock | App counterpart | What animates |
 | --- | --- | --- |
-| Live meeting | `LiveSessionCard` (meeting), `MeetingNotesSection` | waveform, pulsing dot, elapsed clock, transcript committing a tentative tail |
-| Home | `ActionHero`, `TimelineSection`, `TimelineItem` | static |
-| Dictation | `LiveSessionCard` (dictation) | waveform, clock, text typing itself, blinking caret |
-| Outcomes | `MeetingStructuredSummarySection` | static |
-| Overlay | `PillApp` over a generic chat client | the full dictate → reformulate → paste cycle |
+| Live meeting | `recording_view.slint`, notes in `meeting_detail.slint` | waveform, pulsing dot, elapsed clock, transcript committing a tentative tail |
+| Home | `components/action_hero.slint`, `timeline_section.slint`, `timeline_item.slint` | static |
+| Dictation | `recording_view.slint` (dictation) | waveform, clock, text typing itself, blinking caret |
+| Outcomes | `components/summary_section.slint` | static |
+| Overlay | `app/swift/pill_panel.swift` over a generic chat client | the full dictate → reformulate → paste cycle |
 
-`js/mocks.js` ports the draw loop from `Waveform.svelte` (48 bars, 3 px wide,
-2 px gap, same easing and alpha curve) and feeds it a synthetic speech
-envelope instead of the backend's `AudioLevel` events.
+`js/mocks.js` draws the same waveform as `recording_view.slint` (48 bars, 3 px
+wide, 2 px gap, same easing and alpha curve) and feeds it a synthetic speech
+envelope instead of the engine's live audio levels.
 
 Scenes idle until scrolled into view, stop when scrolled away or when the
 tab is hidden, and render their finished state under
@@ -98,8 +99,9 @@ with it. The values here were copied deliberately rather than approximated.
 
 ### The mocks currently run ahead of the app
 
-They used to take their colours straight from the `.light` palette in
-`src/app.css`. They no longer do. The screens now render the design the site
+They used to take their colours straight from the `.light` palette of the old
+web frontend, which the Slint app now carries in `app/souffle-slint/ui/theme.slint`.
+They no longer do. The screens now render the design the site
 itself uses, in its Operate register: a warm white ground, panels as bands
 between hairlines instead of cards with a fill and a shadow, inversion as the
 whole state vocabulary, and one variable face.
@@ -108,8 +110,8 @@ That is a deliberate, temporary inversion of the usual contract. The mocks are
 the specification for the app rather than a record of it, and the app is being
 brought up to them. **Until it is, the site is showing a UI the shipped build
 does not have.** When the app lands, this section goes and the palette is
-sourced from `app.css` again.
+sourced from `theme.slint` again.
 
 The pill is the one part already verified against the real thing: its values
-come from `src-tauri/swift/pill_panel.swift`, which replaced the original
+come from `app/swift/pill_panel.swift`, which replaced the original
 implementation after these mocks were written.

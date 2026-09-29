@@ -1,0 +1,95 @@
+import { SettingsField } from "settings_field.slint";
+import { SettingsFieldVertical } from "settings_field_vertical.slint";
+import { SettingsGroup } from "settings_group.slint";
+import { Theme } from "../../theme.slint";
+import { ThemedSwitch } from "../themed_switch.slint";
+import { ThemedButton } from "../themed_button.slint";
+import { ThemedComboBox } from "../themed_combo.slint";
+import { ThemedTextArea } from "../themed_text_area.slint";
+
+// Port of DictationPolishSettingsSection.svelte. The active template's
+// prompt is forwarded as a plain property (`active-prompt`) rather than
+// looked up in `.slint` from a list - same reasoning as the other pickers
+// in this tab.
+export component DictationPolishSection inherits VerticalLayout {
+    in property <bool> enabled;
+    in property <bool> provider-available;
+    in property <[string]> template-ids;
+    in property <[string]> template-labels;
+    in property <string> active-template-label;
+    in-out property <string> active-prompt;
+
+    callback enabled-changed(bool);
+    callback template-changed(string);
+    callback prompt-changed(string);
+    callback open-provider-settings-requested();
+
+    spacing: 22px;
+    alignment: start;
+
+    SettingsGroup {
+        title: @tr("POLISH DE LA DICTÉE");
+
+    SettingsField {
+        show-divider: false;
+        label: @tr("Nettoyer la dictée avec l'IA");
+        description: @tr("Passe le même fournisseur de résumés (Ollama ou Apple Intelligence) après transcription pour corriger ponctuation, termes techniques et autocorrections parlées, sans changer le sens.");
+
+        ThemedSwitch {
+            control-label: @tr("Nettoyer la dictée avec l'IA");
+            checked: root.enabled;
+            toggled(new) => { root.enabled-changed(new); }
+        }
+    }
+
+    if root.enabled && !root.provider-available: Rectangle {
+        border-width: 1px;
+        border-color: Theme.warning;
+        border-radius: 6px;
+        background: Theme.surface-2;
+
+        HorizontalLayout {
+            padding: 10px;
+            spacing: 10px;
+            alignment: space-between;
+
+            Text {
+                text: @tr("Aucun fournisseur IA disponible pour la retouche.");
+                color: Theme.warning;
+                font-size: 11.5px;
+                wrap: word-wrap;
+                horizontal-stretch: 1;
+            }
+            ThemedButton {
+                text: @tr("Choisir un fournisseur");
+                clicked => { root.open-provider-settings-requested(); }
+            }
+        }
+    }
+
+    if root.enabled && root.template-labels.length > 0: SettingsField {
+        label: @tr("Modèle de retouche");
+
+        ThemedComboBox {
+            control-label: @tr("Modèle de retouche");
+            model: root.template-labels;
+            option-values: root.template-ids;
+            current-value: root.active-template-label;
+            selected(id) => { root.template-changed(id); }
+        }
+    }
+
+    if root.enabled && root.template-labels.length > 0: SettingsFieldVertical {
+        label: @tr("Instruction");
+        description: @tr("Prompt envoyé à l'IA pour retoucher le texte transcrit.");
+
+        ThemedTextArea {
+            text <=> root.active-prompt;
+            area-height: 160px;
+            placeholder: @tr("Instruction de retouche");
+            control-label: @tr("Instruction de retouche");
+            edited(value) => { root.prompt-changed(value); }
+        }
+    }
+    }
+}

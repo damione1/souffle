@@ -1,0 +1,67 @@
+import { Theme } from "../theme.slint";
+
+// Port of app.css's `.switch` (42x24 pill track, 18x18 white knob sliding
+// from x=3 to x=21). `std-widgets.slint`'s `Switch` ignores `Theme` the
+// same way `Button` did - see `themed_button.slint`.
+export component ThemedSwitch inherits Rectangle {
+    in property <bool> checked;
+    in property <bool> enabled: true;
+    in property <string> control-label: @tr("Interrupteur");
+
+    // Carries the new value directly - no internal state to read back via
+    // `self.checked` (this component is purely one-way, same reasoning as
+    // `FilterChip`: no risk of the widget's own state disagreeing with the
+    // caller's source of truth).
+    callback toggled(bool);
+
+    width: 42px;
+    height: 24px;
+    horizontal-stretch: 0;
+    vertical-stretch: 0;
+    border-radius: 12px;
+    border-width: key-focus.has-focus ? 2px : (root.checked ? 0px : 1px);
+    border-color: key-focus.has-focus ? Theme.text-primary : Theme.ghost-border;
+    background: root.checked ? (area.pressed ? Theme.accent-hover : Theme.accent) : (area.pressed ? Theme.surface-3 : Theme.surface-4);
+    opacity: root.enabled ? 1.0 : 0.5;
+
+    accessible-role: switch;
+    accessible-label: root.control-label;
+    accessible-enabled: root.enabled;
+    accessible-checkable: true;
+    accessible-checked: root.checked;
+    accessible-action-default => { if root.enabled { root.toggled(!root.checked); } }
+
+    forward-focus: key-focus;
+
+    key-focus := FocusScope {
+        key-pressed(event) => {
+            if !root.enabled {
+                return reject;
+            }
+            if event.text == Key.Return || event.text == Key.Space {
+                root.toggled(!root.checked);
+                return accept;
+            }
+            return reject;
+        }
+    }
+
+    area := TouchArea {
+        enabled: root.enabled;
+        clicked => {
+            key-focus.focus();
+            root.toggled(!root.checked);
+        }
+    }
+
+    knob := Rectangle {
+        x: root.checked ? 21px : 3px;
+        y: 3px;
+        width: 18px;
+        height: 18px;
+        border-radius: 9px;
+        background: white;
+
+        animate x { duration: 150ms; easing: ease; }
+    }
+}

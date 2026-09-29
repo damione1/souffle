@@ -21,19 +21,24 @@ reviews:
     enabled: false
     labels:
       - ci-green
+    # The migration and release trains use stacked PRs whose base is not the
+    # repository default branch. Keep those PRs eligible for the label-gated
+    # review once their CI has passed.
+    base_branches:
+      - "develop"
+      - "feature/.*"
+      - "release/.*"
 
   # Generated and vendored code is not reviewable material.
   path_filters:
-    - "!src/lib/types/generated.ts"
-    - "!src/lib/api/generated.ts"
-    - "!src-tauri/gen/**"
-    - "!src-tauri/fixtures/**"
-    - "!src-tauri/target/**"
+    - "!app/gen/**"
+    - "!app/fixtures/**"
+    - "!app/target/**"
     - "!dist/**"
     - "!**/node_modules/**"
 
   path_instructions:
-    - path: "src-tauri/src/engine/**"
+    - path: "app/src/engine/**"
       instructions: |
         Streaming ASR. The dominant defect class here is a segment timestamp that moves.
         Flag any change to VAD gating, KV refresh, frame eviction or lane pairing that could
@@ -43,22 +48,18 @@ reviews:
         Check that epoch origin survives a reset or a resume after sleep.
         A flush that discards a short remainder loses the last word: flag remainder handling.
 
-    - path: "src-tauri/src/audio/**"
+    - path: "app/src/audio/**"
       instructions: |
         Capture, AEC, device hot-swap. Flag any path where audio accumulated during a device
         rebuild can be discarded, in particular drift bounds applied after a route change.
         AEC changes must stay gated on output mute and volume: suppressing the microphone
         while the system output is silent is a known regression.
 
-    - path: "src-tauri/src/commands/**"
+    - path: "app/src/commands/**"
       instructions: |
-        Tauri IPC boundary. Flag every new or modified `Result<_, String>`: the frontend cannot
-        discriminate a cause from a string, and a typed error already exists.
-        Flag session orchestration logic added here rather than in the layer below.
-        A changed #[tauri::command] signature requires `npm run generate:types`; if the
-        generated files are not in the diff, say so.
+        IPC boundary (pure Rust function calls to Slint). Flag every new or modified Result<_, String>: the frontend cannot discriminate a cause from a string, and a typed error already exists. Flag session orchestration logic added here rather than in the layer below.
 
-    - path: "src-tauri/src/**"
+    - path: "app/src/**"
       instructions: |
         Flag any window operation (show, hide, resize, move, focus, emit to a window) performed
         while an AppState mutex or any other lock is held. This deadlocks the main thread and
@@ -67,21 +68,7 @@ reviews:
         successful without a verification step actually confirming it.
         Flag state written only in memory when a crash or restart must preserve it.
 
-    - path: "src/lib/features/**"
-      instructions: |
-        Flag state that lives only in the webview and is lost on reload or crash when the
-        backend is the owner of record. Flag an error path that is swallowed rather than
-        surfaced to the user. Flag a UI action that does not consult the state machine before
-        firing. When an alert asks the user to change a setting, it must offer the control,
-        not describe the path to it.
-
-    - path: "src/**/*.svelte"
-      instructions: |
-        Svelte 5 runes. Flag `setSize` or any resize called from JS on a window anchored to the
-        top of the screen: it moves the anchor. Flag derived state that reintroduces a
-        reactivity cycle. User-facing strings must exist in both locales.
-
-    - path: "src-tauri/src/db/**"
+    - path: "app/src/db/**"
       instructions: |
         Flag a migration that computes a value from a table that may still be empty at that
         point in the sequence. Flag any write path to the transcript that does not also update
@@ -126,7 +113,7 @@ reviews:
     clippy:
       enabled: true
     eslint:
-      enabled: true
+      enabled: false
     gitleaks:
       enabled: true
     actionlint:
