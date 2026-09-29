@@ -6972,6 +6972,12 @@ fn main() {
         return;
     }
 
+    // Before bootstrap opens (and creates) the database: an install upgraded
+    // from the Tauri app must not replay the first setup (SOU-310). The data
+    // dir rename has to happen first; bootstrap repeats it as a no-op.
+    souffle_lib::constants::migrate_legacy_data_dir();
+    onboarding_flags::adopt_pre_slint_install();
+
     // Real bootstrap (audio thread, engine actor, DB). Must run before
     // Slint's own window/event loop; `handle` is the same `Arc<AppState>`
     // every command below takes.
