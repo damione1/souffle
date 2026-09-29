@@ -6,10 +6,11 @@
 //! the only in-process signal that carries a fresh answer. System audio is
 //! read through TCC's `TCCAccessPreflight` SPI and asked for by mounting the
 //! tap. Accessibility (needed for the synthesized Cmd+V paste and for the
-//! native single-key shortcut tap) is read through the same SPI, because
-//! `AXIsProcessTrusted` answers from a cache that can miss a grant
-//! (SOU-298), and is granted only via System Settings: its "request" raises
-//! macOS's alert, or opens the pane once macOS no longer shows it.
+//! native single-key shortcut tap) is read through the same SPI, and any
+//! answer short of "granted" is re-read in a fresh process: both in-process
+//! reads are cached and can miss the first grant (SOU-298, SOU-308). It is
+//! granted only via System Settings: its "request" raises macOS's alert, or
+//! opens the pane once macOS no longer shows it.
 //!
 //! Input Monitoring is deliberately absent. An active `CGEventTap` is
 //! authorized by Accessibility, which subsumes the listen right, so the
@@ -281,19 +282,138 @@ fn prompt_then_open_settings(prompt: impl FnOnce(), wait: impl FnOnce(), open: i
 
 // --- Accessibility (synthesized Cmd+V paste) ---
 
-/// Whether this process is trusted for Accessibility, read live from TCC.
+/// Whether this process is trusted for Accessibility.
 ///
-/// `AXIsProcessTrusted` answers from a per-process HIServices cache that is
-/// refreshed only by the `com.apple.accessibility.api` distributed
-/// notification. On the first toggle in System Settings (the one that asks
-/// for Touch ID or a password) that notification arrives before tccd
-/// commits the grant, so the cache refills with the old "denied" and nothing
-/// invalidates it again: the row stays "To be granted" and paste is refused
-/// until the user toggles off and on (SOU-298). `TCCAccessPreflight` is an
-/// XPC round trip on every call, so it cannot go stale.
+/// Neither in-process read can be trusted to see the first grant.
+/// `AXIsProcessTrusted` answers from a HIServices cache, and libTCC keeps
+/// every `TCCAccessPreflight` reply that tccd does not mark `do_not_cache`;
+/// tccd marks only "allowed" replies, so a "denied" or "not determined" is
+/// served from memory. Both are refilled when `com.apple.accessibility.api`
+/// arrives, which System Settings posts on the click, before tccd commits.
+/// The first toggle waits for Touch ID or a password, so the refill reads
+/// the old "denied" and keeps it: the row stays "To be granted", paste is
+/// refused, until an off/on whose commit is instant (SOU-298, SOU-308).
+/// A fresh process starts with an empty cache, so it decides every answer
+/// short of "granted".
 #[cfg(target_os = "macos")]
 pub fn accessibility_granted() -> bool {
-    accessibility_trust(accessibility_preflight(), ax_is_process_trusted)
+    accessibility_trust(accessibility_state(), ax_is_process_trusted)
+}
+
+/// TCC's Accessibility answer for this app, re-read in a fresh process
+/// whenever the in-process one could be stale.
+fn accessibility_state() -> Option<PermState> {
+    accessibility_state_with(accessibility_preflight(), fresh_accessibility_preflight)
+}
+
+/// A "granted" reply is never cached by libTCC, so it is already fresh and
+/// no helper runs: the steady state once the user has said yes costs
+/// nothing. Any other answer may be a cached leftover, and a fresh process
+/// decides; a helper that could not answer leaves the in-process value, the
+/// behavior before SOU-308. With no SPI (`None`) the helper has none either.
+fn accessibility_state_with(
+    in_process: Option<PermState>,
+    fresh: impl FnOnce() -> Option<PermState>,
+) -> Option<PermState> {
+    match in_process {
+        Some(PermState::Granted) | None => in_process,
+        Some(_) => fresh().or(in_process),
+    }
+}
+
+/// Turns the app's own executable into a one-shot Accessibility reader. An
+/// exact second argument, so nothing Finder or launchd passes (`-psn_...`)
+/// can reach it.
+const PREFLIGHT_HELPER_ARG: &str = "--internal-tcc-preflight-accessibility";
+
+/// A healthy helper answers in 10 to 20 ms. The deadline only bounds a
+/// wedged one; the in-process answer stands in.
+#[cfg(all(target_os = "macos", feature = "private-tcc"))]
+const PREFLIGHT_HELPER_DEADLINE: Duration = Duration::from_secs(1);
+
+// Away from 0/1/2 and from clap's and a panic's codes, so no crash or
+// argument error is ever read as a verdict.
+const PREFLIGHT_EXIT_GRANTED: i32 = 40;
+const PREFLIGHT_EXIT_DENIED: i32 = 41;
+const PREFLIGHT_EXIT_UNKNOWN: i32 = 42;
+const PREFLIGHT_EXIT_UNAVAILABLE: i32 = 43;
+
+fn preflight_exit_code(state: Option<PermState>) -> i32 {
+    match state {
+        Some(PermState::Granted) => PREFLIGHT_EXIT_GRANTED,
+        Some(PermState::Denied) => PREFLIGHT_EXIT_DENIED,
+        Some(PermState::Unknown) => PREFLIGHT_EXIT_UNKNOWN,
+        _ => PREFLIGHT_EXIT_UNAVAILABLE,
+    }
+}
+
+fn preflight_state_from_exit(code: Option<i32>) -> Option<PermState> {
+    match code? {
+        PREFLIGHT_EXIT_GRANTED => Some(PermState::Granted),
+        PREFLIGHT_EXIT_DENIED => Some(PermState::Denied),
+        PREFLIGHT_EXIT_UNKNOWN => Some(PermState::Unknown),
+        _ => None,
+    }
+}
+
+fn is_preflight_helper(args: &[String]) -> bool {
+    matches!(args, [_, arg] if arg == PREFLIGHT_HELPER_ARG)
+}
+
+/// Helper mode, dispatched from `main` before the single-instance guard and
+/// the bootstrap. It only reads: one `TCCAccessPreflight`, no prompt, no
+/// device, no log. tccd attributes the child to the app that spawned it
+/// (`responsible=`), so it answers for Soufflé, from an empty cache.
+pub fn try_run_preflight_helper(args: &[String]) -> Option<i32> {
+    is_preflight_helper(args).then(|| preflight_exit_code(accessibility_preflight()))
+}
+
+/// Spawned only from inside an `.app`: a bare binary (a test harness, a
+/// `cargo run`) would not understand the argument.
+#[cfg(all(target_os = "macos", feature = "private-tcc"))]
+fn fresh_accessibility_preflight() -> Option<PermState> {
+    use std::process::{Command, Stdio};
+    use std::time::Instant;
+
+    let exe = std::env::current_exe().ok()?;
+    app_bundle_path_from_exe(&exe)?;
+    let mut child = match Command::new(&exe)
+        .arg(PREFLIGHT_HELPER_ARG)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+    {
+        Ok(child) => child,
+        Err(error) => {
+            tracing::warn!(%error, "Accessibility preflight helper did not start");
+            return None;
+        }
+    };
+    let deadline = Instant::now() + PREFLIGHT_HELPER_DEADLINE;
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return preflight_state_from_exit(status.code()),
+            Ok(None) if Instant::now() < deadline => {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            Ok(None) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                tracing::warn!("Accessibility preflight helper timed out");
+                return None;
+            }
+            Err(error) => {
+                tracing::warn!(%error, "Accessibility preflight helper wait failed");
+                return None;
+            }
+        }
+    }
+}
+
+#[cfg(not(all(target_os = "macos", feature = "private-tcc")))]
+fn fresh_accessibility_preflight() -> Option<PermState> {
+    None
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -355,7 +475,7 @@ fn request_accessibility_with(
 #[cfg(target_os = "macos")]
 fn open_accessibility_settings() {
     request_accessibility_with(
-        accessibility_preflight(),
+        accessibility_state(),
         || {
             on_main(|| {
                 let _ = accessibility_trusted_with_prompt_now(true);
@@ -607,9 +727,11 @@ fn request_microphone_access() -> Option<bool> {
 
 /// `TCCAccessPreflight(service, NULL)`, from the private TCC framework.
 /// CoreAudio ships no permission query for process taps, so this SPI is the
-/// only way to read the status without mounting one. Unlike the public
-/// preflight APIs it is an XPC round trip to tccd on every call, so it never
-/// answers from a per-process cache.
+/// only way to read the status without mounting one. It is **not** live on
+/// every call: libTCC keeps each reply tccd does not mark `do_not_cache`,
+/// and tccd marks only "allowed" ones, so a "denied" or "not determined"
+/// can be served from this process's memory long after it changed
+/// (measured on macOS 27, SOU-308). A "granted" answer is fresh.
 #[cfg(all(target_os = "macos", feature = "private-tcc"))]
 fn tcc_preflight(service: &str) -> Option<PermState> {
     use objc2_core_foundation::{CFRetained, CFString};
@@ -930,6 +1052,105 @@ mod tests {
         assert!(accessibility_trust(Some(PermState::Unknown), ax(true)));
         assert!(!accessibility_trust(Some(PermState::Unknown), ax(false)));
         assert_eq!(ax_calls.get(), 4);
+    }
+
+    // SOU-308: libTCC never caches a "granted" reply, so it needs no helper;
+    // any other in-process answer can be a cached leftover from before the
+    // first toggle committed, and a fresh process decides.
+    #[test]
+    fn accessibility_state_rereads_every_answer_short_of_granted() {
+        let helper_calls = Cell::new(0);
+        let fresh = |value: Option<PermState>| {
+            let calls = &helper_calls;
+            move || {
+                calls.set(calls.get() + 1);
+                value
+            }
+        };
+
+        assert_eq!(
+            accessibility_state_with(Some(PermState::Granted), fresh(Some(PermState::Denied))),
+            Some(PermState::Granted)
+        );
+        assert_eq!(
+            accessibility_state_with(None, fresh(Some(PermState::Granted))),
+            None,
+            "no SPI in process means none in the helper either"
+        );
+        assert_eq!(helper_calls.get(), 0);
+
+        for cached in [PermState::Denied, PermState::Unknown] {
+            assert_eq!(
+                accessibility_state_with(Some(cached), fresh(Some(PermState::Granted))),
+                Some(PermState::Granted),
+                "cached {cached:?}"
+            );
+        }
+        assert_eq!(
+            accessibility_state_with(Some(PermState::Unknown), fresh(Some(PermState::Denied))),
+            Some(PermState::Denied)
+        );
+        assert_eq!(helper_calls.get(), 3);
+    }
+
+    #[test]
+    fn a_helper_that_cannot_answer_keeps_the_in_process_value() {
+        for cached in [PermState::Denied, PermState::Unknown] {
+            assert_eq!(
+                accessibility_state_with(Some(cached), || None),
+                Some(cached)
+            );
+        }
+    }
+
+    // The regression itself: the first toggle leaves "denied" in libTCC's
+    // cache, the fresh process sees the grant, and the row and paste follow.
+    #[test]
+    fn a_stale_cached_denial_no_longer_hides_the_first_grant() {
+        let state = accessibility_state_with(Some(PermState::Denied), || Some(PermState::Granted));
+        assert!(accessibility_trust(state, || false));
+    }
+
+    #[test]
+    fn preflight_helper_exit_codes_round_trip_and_reject_foreign_codes() {
+        for state in [PermState::Granted, PermState::Denied, PermState::Unknown] {
+            assert_eq!(
+                preflight_state_from_exit(Some(preflight_exit_code(Some(state)))),
+                Some(state)
+            );
+        }
+        assert_eq!(preflight_exit_code(None), PREFLIGHT_EXIT_UNAVAILABLE);
+        // Raw SPI values, clap's 1/2, a panic's 101, and a signal (no code)
+        // must never be read as a verdict.
+        for code in [
+            Some(PREFLIGHT_EXIT_UNAVAILABLE),
+            Some(0),
+            Some(1),
+            Some(2),
+            Some(101),
+            None,
+        ] {
+            assert_eq!(preflight_state_from_exit(code), None, "code {code:?}");
+        }
+    }
+
+    #[test]
+    fn preflight_helper_runs_only_on_its_exact_argument() {
+        let args = |list: &[&str]| list.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert!(is_preflight_helper(&args(&[
+            "souffle",
+            PREFLIGHT_HELPER_ARG
+        ])));
+        for list in [
+            &["souffle"][..],
+            &["souffle", "-psn_0_123456"],
+            &["souffle", "--internal-tcc-preflight"],
+            &["souffle", PREFLIGHT_HELPER_ARG, "extra"],
+            &[PREFLIGHT_HELPER_ARG],
+        ] {
+            assert!(!is_preflight_helper(&args(list)), "{list:?}");
+            assert_eq!(try_run_preflight_helper(&args(list)), None, "{list:?}");
+        }
     }
 
     // SOU-298: with no TCC record, macOS's own alert carries the "Open
