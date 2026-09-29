@@ -277,11 +277,19 @@ if [[ "$sign_updater" -eq 1 ]]; then
 
   key_file="$(mktemp)"
   trap 'rm -f "$key_file"' EXIT
-  printf '%s' "$TAURI_SIGNING_PRIVATE_KEY" > "$key_file"
-  if [[ -n "${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:-}" ]]; then
-    minisign -S -s "$key_file" -m "$tar_path" <<< "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD"
+  # `tauri signer generate` stores the key as base64 of the minisign key
+  # file, which is what the TAURI_SIGNING_PRIVATE_KEY secret holds. minisign
+  # wants the key file itself, so decode unless it is already the raw file.
+  if [[ "$TAURI_SIGNING_PRIVATE_KEY" == "untrusted comment:"* ]]; then
+    printf '%s' "$TAURI_SIGNING_PRIVATE_KEY" > "$key_file"
   else
-    minisign -S -s "$key_file" -m "$tar_path" <<< ""
+    printf '%s' "$TAURI_SIGNING_PRIVATE_KEY" | base64 -D > "$key_file"
+  fi
+  # -x: minisign defaults to <file>.minisig; the release uploads <file>.sig.
+  if [[ -n "${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:-}" ]]; then
+    minisign -S -s "$key_file" -m "$tar_path" -x "${tar_path}.sig" <<< "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD"
+  else
+    minisign -S -s "$key_file" -m "$tar_path" -x "${tar_path}.sig" <<< ""
   fi
 
   sig_b64="$(base64 -i "${tar_path}.sig")"
