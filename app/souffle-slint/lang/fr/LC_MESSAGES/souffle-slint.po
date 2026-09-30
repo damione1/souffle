@@ -2913,3 +2913,18 @@ msgid ""
 msgstr ""
 "La mise en veille a interrompu cette réunion. Reprenez l'enregistrement pour "
 "continuer."
+
+#: app/souffle-slint/ui/components/settings/interface_section.slint:14
+msgctxt "ShortcutNoticeText"
+msgid "Le raccourci doit inclure une touche de modification (Cmd, Ctrl, Maj, Alt) ou être une touche de fonction."
+msgstr "Le raccourci doit inclure une touche de modification (Cmd, Ctrl, Maj, Alt) ou être une touche de fonction."
+
+#: app/souffle-slint/ui/components/settings/interface_section.slint:15
+msgctxt "ShortcutNoticeText"
+msgid "Cette touche ne peut pas servir de raccourci."
+msgstr "Cette touche ne peut pas servir de raccourci."
+
+#: app/souffle-slint/ui/components/settings/interface_section.slint:16
+msgctxt "ShortcutNoticeText"
+msgid "Ce raccourci n'utilise que ⌥ (ou ⌥⇧) : le caractère que cette combinaison tape, par exemple | avec ⌥⇧L en AZERTY, ne pourra plus être saisi dans aucune app."
+msgstr "Ce raccourci n'utilise que ⌥ (ou ⌥⇧) : le caractère que cette combinaison tape, par exemple | avec ⌥⇧L en AZERTY, ne pourra plus être saisi dans aucune app."

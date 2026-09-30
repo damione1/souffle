@@ -2905,3 +2905,18 @@ msgid ""
 "La mise en veille a interrompu cette réunion. Reprenez l'enregistrement pour "
 "continuer."
 msgstr "Sleep interrupted this meeting. Resume recording to continue."
+
+#: app/souffle-slint/ui/components/settings/interface_section.slint:14
+msgctxt "ShortcutNoticeText"
+msgid "Le raccourci doit inclure une touche de modification (Cmd, Ctrl, Maj, Alt) ou être une touche de fonction."
+msgstr "The shortcut must include a modifier key (Cmd, Ctrl, Shift, Option) or be a function key."
+
+#: app/souffle-slint/ui/components/settings/interface_section.slint:15
+msgctxt "ShortcutNoticeText"
+msgid "Cette touche ne peut pas servir de raccourci."
+msgstr "This key can't be used as a shortcut."
+
+#: app/souffle-slint/ui/components/settings/interface_section.slint:16
+msgctxt "ShortcutNoticeText"
+msgid "Ce raccourci n'utilise que ⌥ (ou ⌥⇧) : le caractère que cette combinaison tape, par exemple | avec ⌥⇧L en AZERTY, ne pourra plus être saisi dans aucune app."
+msgstr "This shortcut only uses ⌥ (or ⌥⇧): the character this combination types, for example | with ⌥⇧L on AZERTY, can no longer be typed in any app."

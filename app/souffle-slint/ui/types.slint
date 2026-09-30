@@ -101,6 +101,13 @@ export enum PermissionKind { microphone, system-audio, accessibility, calendar }
 
 export enum ShortcutField { none, toggle, ptt }
 
+// What the shortcut recorder tells the user about the last key press (#360).
+// Converted from `shortcut_capture::Capture` by one exhaustive match in
+// main.rs (`shortcut_notice`). `none` is a real state: nothing to say.
+// `types-character` is a warning shown after a successful save, the others
+// are refusals.
+export enum ShortcutNotice { none, missing-modifier, unusable-key, types-character }
+
 // Mirrors souffle_lib::export::ExportFormat at the UI boundary
 // (`export_format_from_slint` in main.rs, exhaustive match). Used by
 // MeetingDetail's Export menu only - never a free string across this

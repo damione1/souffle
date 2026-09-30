@@ -19,32 +19,107 @@
 //! `observe_key_event` is fed from the single winit window-event hook
 //! (`wire_window_activity` in `main.rs`), which runs synchronously right
 //! before Slint dispatches the same event to the recorder's `FocusScope`, so
-//! `take_physical_key` in the capture callback reads the key of that event.
+//! `take_pressed_key` in the capture callback reads the key of that event.
+//!
+//! One correction on top of winit 0.30: it maps both the ANSI grave key
+//! (keyCode `0x32`, `<` next to left Shift on ISO keyboards) and the ISO
+//! section key (`0x0A`, top left: `@` on French AZERTY, `§`/`^` on QWERTZ) to
+//! `Backquote` (winit PR #4019 fixed it after 0.30). Storing `Backquote` for
+//! the ISO key would register `0x32`, a different key, so the raw keyCode of
+//! the event being dispatched decides between the two (`resolve_key`).
 
 use std::cell::Cell;
 
+use objc2::MainThreadMarker;
+use objc2_app_kit::{NSApplication, NSEventType};
 use slint::winit_030::winit::event::KeyEvent;
 use slint::winit_030::winit::keyboard::{KeyCode, PhysicalKey};
+
+/// `kVK_ISO_Section` (HIToolbox `Events.h`).
+const ISO_SECTION_KEYCODE: u16 = 0x0a;
+/// `kVK_ANSI_Grave`.
+const ANSI_GRAVE_KEYCODE: u16 = 0x32;
+/// `kVK_CapsLock` and `kVK_Function` (Fn/Globe): winit reports neither as a
+/// keyboard event, so the recorder learns about them from an AppKit monitor
+/// (`is_unusable_flags_key`).
+const CAPS_LOCK_KEYCODE: u16 = 0x39;
+const FUNCTION_KEYCODE: u16 = 0x3f;
+
+/// The physical key of a keyboard event.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PressedKey {
+    Code(KeyCode),
+    /// A key winit has no `KeyCode` for (the JIS ろ/英数/かな keys on
+    /// macOS). It cannot be stored, but it was pressed.
+    Unidentified,
+}
+
+impl PressedKey {
+    fn code(self) -> Option<KeyCode> {
+        match self {
+            PressedKey::Code(code) => Some(code),
+            PressedKey::Unidentified => None,
+        }
+    }
+}
 
 thread_local! {
     /// Physical key of the last winit keyboard event, consumed by the capture
     /// callback that event triggers. UI thread only.
-    static LAST_PHYSICAL_KEY: Cell<Option<KeyCode>> = const { Cell::new(None) };
+    static LAST_PRESSED_KEY: Cell<Option<PressedKey>> = const { Cell::new(None) };
 }
 
 /// Records the physical key of a winit keyboard event (press or release).
 pub fn observe_key_event(event: &KeyEvent) {
-    let key = match event.physical_key {
-        PhysicalKey::Code(code) => Some(code),
-        PhysicalKey::Unidentified(_) => None,
+    let raw = match event.physical_key {
+        PhysicalKey::Code(KeyCode::Backquote) => current_event_key_code(),
+        PhysicalKey::Code(_) | PhysicalKey::Unidentified(_) => None,
     };
-    LAST_PHYSICAL_KEY.with(|slot| slot.set(key));
+    LAST_PRESSED_KEY.with(|slot| slot.set(Some(resolve_key(event.physical_key, raw))));
+}
+
+/// Undoes winit 0.30's `0x0A` → `Backquote` fold. `raw` is the macOS keyCode
+/// of the event being dispatched, when it could be read.
+fn resolve_key(physical: PhysicalKey, raw: Option<u16>) -> PressedKey {
+    match physical {
+        PhysicalKey::Code(KeyCode::Backquote) if raw == Some(ISO_SECTION_KEYCODE) => {
+            PressedKey::Code(KeyCode::IntlBackslash)
+        }
+        PhysicalKey::Code(code) => PressedKey::Code(code),
+        PhysicalKey::Unidentified(_) => PressedKey::Unidentified,
+    }
+}
+
+/// The keyCode of AppKit's current event, read only to tell the two keys
+/// winit folds into `Backquote` apart.
+///
+/// During normal dispatch the winit hook runs inside `-[NSView keyDown:]`,
+/// so `currentEvent` is the event being handled. winit queues an event
+/// instead when its handler is already running (re-entrance), and then
+/// `currentEvent` may be a later one; anything that is not a key event with
+/// one of the two folded keyCodes is therefore ignored and winit's
+/// `Backquote` stands, which is the behaviour before this check.
+fn current_event_key_code() -> Option<u16> {
+    let mtm = MainThreadMarker::new()?;
+    let event = NSApplication::sharedApplication(mtm).currentEvent()?;
+    let kind = event.r#type();
+    if kind != NSEventType::KeyDown && kind != NSEventType::KeyUp {
+        return None;
+    }
+    let code = event.keyCode();
+    (code == ISO_SECTION_KEYCODE || code == ANSI_GRAVE_KEYCODE).then_some(code)
 }
 
 /// The physical key of the event being dispatched, taken so a later Slint
 /// event that did not come through winit cannot reuse it.
-pub fn take_physical_key() -> Option<KeyCode> {
-    LAST_PHYSICAL_KEY.with(Cell::take)
+pub fn take_pressed_key() -> Option<PressedKey> {
+    LAST_PRESSED_KEY.with(Cell::take)
+}
+
+/// True for the keyCode of a `flagsChanged` event from Caps Lock or Fn/Globe,
+/// the two keys that never reach the recorder as a key press.
+pub fn is_unusable_flags_key(key_code: u16) -> bool {
+    key_code == CAPS_LOCK_KEYCODE || key_code == FUNCTION_KEYCODE
 }
 
 /// The modifiers held alongside a key press, named after the physical keys.
@@ -82,7 +157,7 @@ impl Modifiers {
 /// `KeyCode` is winit's `#[non_exhaustive]` set of about 190 physical keys:
 /// listing every key that is not a modifier would be noise, not safety.
 #[allow(clippy::wildcard_enum_match_arm)]
-pub fn modifier_only_shortcut(key: KeyCode) -> Option<&'static str> {
+fn modifier_only_shortcut(key: KeyCode) -> Option<&'static str> {
     Some(match key {
         KeyCode::SuperLeft => "MetaLeft",
         KeyCode::SuperRight => "MetaRight",
@@ -231,23 +306,54 @@ fn is_function_key(key: KeyCode) -> bool {
     )
 }
 
-/// True for a bare letter/digit/symbol key with no modifier and no function
-/// key held (mirrors `shortcutMissingModifier()`).
-pub fn missing_modifier(key: KeyCode, modifiers: Modifiers) -> bool {
-    !modifiers.any() && !is_function_key(key)
+/// Keys whose press types a character (letters, digits, punctuation): the
+/// ones whose label comes from the keyboard layout.
+fn types_character(key: KeyCode) -> bool {
+    key_name(key).is_some_and(|name| crate::keyboard_layout::virtual_key_code(name).is_some())
 }
 
-/// Builds the accelerator string the backend stores from a non-modifier key
-/// press plus the modifiers held at the same time (mirrors
-/// `keyEventToShortcut()`). Command stays `CommandOrControl`, the token
-/// existing bindings use; the physical Control key is `Control`, so ⌃Space no
-/// longer collapses into ⌘Space. Returns `None` for a bare modifier press or
-/// a key `global-hotkey` cannot register.
-pub fn format_combo(key: KeyCode, modifiers: Modifiers) -> Option<String> {
-    if modifier_only_shortcut(key).is_some() {
-        return None;
+/// Why a key press is not saved as a shortcut.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Rejection {
+    /// A letter/digit/symbol with no modifier and no function key.
+    MissingModifier,
+    /// A key `global-hotkey` cannot register (ISO section key, JIS keys,
+    /// media keys, or one winit cannot identify).
+    UnusableKey,
+}
+
+/// What the recorder does with a key press.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Capture {
+    /// A bare modifier: saved on its release, unless a real key comes first.
+    Modifier(&'static str),
+    /// An accelerator to save. `swallows_character` when only ⌥ (and ⇧) are
+    /// held with a character key: the hotkey then eats that character (⌥⇧L
+    /// is `|` on AZERTY) in every app, which is allowed but worth a warning.
+    Save {
+        accelerator: String,
+        swallows_character: bool,
+    },
+    Rejected(Rejection),
+}
+
+/// Decides what a key press means for the recorder (mirrors
+/// `keyEventToShortcut()` and `shortcutMissingModifier()`). Command stays
+/// `CommandOrControl`, the token existing bindings use; the physical Control
+/// key is `Control`, so ⌃Space no longer collapses into ⌘Space.
+pub fn classify(key: PressedKey, modifiers: Modifiers) -> Capture {
+    let Some(code) = key.code() else {
+        return Capture::Rejected(Rejection::UnusableKey);
+    };
+    if let Some(name) = modifier_only_shortcut(code) {
+        return Capture::Modifier(name);
     }
-    let key = key_name(key)?;
+    let Some(name) = key_name(code) else {
+        return Capture::Rejected(Rejection::UnusableKey);
+    };
+    if !modifiers.any() && !is_function_key(code) {
+        return Capture::Rejected(Rejection::MissingModifier);
+    }
 
     let mut parts = Vec::new();
     if modifiers.command {
@@ -262,8 +368,19 @@ pub fn format_combo(key: KeyCode, modifiers: Modifiers) -> Option<String> {
     if modifiers.alt {
         parts.push("Alt");
     }
-    parts.push(key);
-    Some(parts.join("+"))
+    parts.push(name);
+    Capture::Save {
+        accelerator: parts.join("+"),
+        swallows_character: modifiers.alt
+            && !modifiers.command
+            && !modifiers.control
+            && types_character(code),
+    }
+}
+
+/// The bare modifier a key release ends, if any.
+pub fn released_modifier(key: PressedKey) -> Option<&'static str> {
+    key.code().and_then(modifier_only_shortcut)
 }
 
 #[cfg(test)]
@@ -276,6 +393,24 @@ mod tests {
         Modifiers::from_slint(command, shift, alt, control)
     }
 
+    fn save(accelerator: &str) -> Capture {
+        Capture::Save {
+            accelerator: accelerator.to_string(),
+            swallows_character: false,
+        }
+    }
+
+    fn key(code: KeyCode) -> PressedKey {
+        PressedKey::Code(code)
+    }
+
+    const COMMAND: Modifiers = Modifiers {
+        command: true,
+        control: false,
+        shift: false,
+        alt: false,
+    };
+
     #[test]
     fn slint_modifiers_are_swapped_back_to_physical_keys() {
         let command = slint(true, false, false, false);
@@ -285,29 +420,27 @@ mod tests {
     }
 
     #[test]
-    fn bare_letter_without_modifier_has_no_modifier() {
+    fn bare_letter_needs_a_modifier() {
         assert_eq!(
-            format_combo(KeyCode::KeyD, Modifiers::default()),
-            Some("D".to_string())
+            classify(key(KeyCode::KeyD), Modifiers::default()),
+            Capture::Rejected(Rejection::MissingModifier)
         );
-        assert!(missing_modifier(KeyCode::KeyD, Modifiers::default()));
     }
 
     #[test]
     fn function_key_does_not_need_a_modifier() {
-        assert!(!missing_modifier(KeyCode::F5, Modifiers::default()));
-        assert!(!missing_modifier(KeyCode::F13, Modifiers::default()));
+        assert_eq!(classify(key(KeyCode::F5), Modifiers::default()), save("F5"));
         assert_eq!(
-            format_combo(KeyCode::F5, Modifiers::default()),
-            Some("F5".to_string())
+            classify(key(KeyCode::F13), Modifiers::default()),
+            save("F13")
         );
     }
 
     #[test]
     fn combo_with_command_and_shift() {
         assert_eq!(
-            format_combo(KeyCode::KeyD, slint(true, false, true, false)),
-            Some("CommandOrControl+Shift+D".to_string())
+            classify(key(KeyCode::KeyD), slint(true, false, true, false)),
+            save("CommandOrControl+Shift+D")
         );
     }
 
@@ -315,16 +448,16 @@ mod tests {
     #[test]
     fn control_space_is_control_not_command() {
         assert_eq!(
-            format_combo(KeyCode::Space, slint(false, true, false, false)),
-            Some("Control+Space".to_string())
+            classify(key(KeyCode::Space), slint(false, true, false, false)),
+            save("Control+Space")
         );
     }
 
     #[test]
     fn command_space_stays_command_or_control() {
         assert_eq!(
-            format_combo(KeyCode::Space, slint(true, false, false, false)),
-            Some("CommandOrControl+Space".to_string())
+            classify(key(KeyCode::Space), COMMAND),
+            save("CommandOrControl+Space")
         );
     }
 
@@ -332,16 +465,16 @@ mod tests {
     #[test]
     fn hyper_keeps_both_command_and_control() {
         assert_eq!(
-            format_combo(KeyCode::KeyT, slint(true, true, true, true)),
-            Some("CommandOrControl+Control+Shift+Alt+T".to_string())
+            classify(key(KeyCode::KeyT), slint(true, true, true, true)),
+            save("CommandOrControl+Control+Shift+Alt+T")
         );
     }
 
     #[test]
     fn punctuation_is_named_after_the_physical_key() {
         assert_eq!(
-            format_combo(KeyCode::Minus, slint(false, false, true, false)),
-            Some("Shift+Minus".to_string())
+            classify(key(KeyCode::Minus), slint(true, false, true, false)),
+            save("CommandOrControl+Shift+Minus")
         );
     }
 
@@ -349,7 +482,7 @@ mod tests {
     /// right Option was `AltLeft`.
     #[test]
     fn bare_modifiers_keep_their_side() {
-        for (key, name) in [
+        for (code, name) in [
             (KeyCode::SuperLeft, "MetaLeft"),
             (KeyCode::SuperRight, "MetaRight"),
             (KeyCode::ControlLeft, "ControlLeft"),
@@ -359,9 +492,14 @@ mod tests {
             (KeyCode::ShiftLeft, "ShiftLeft"),
             (KeyCode::ShiftRight, "ShiftRight"),
         ] {
-            assert_eq!(modifier_only_shortcut(key), Some(name), "{key:?}");
-            assert_eq!(format_combo(key, Modifiers::default()), None, "{key:?}");
+            assert_eq!(
+                classify(key(code), Modifiers::default()),
+                Capture::Modifier(name)
+            );
+            assert_eq!(released_modifier(key(code)), Some(name), "{code:?}");
         }
+        assert_eq!(released_modifier(key(KeyCode::KeyA)), None);
+        assert_eq!(released_modifier(PressedKey::Unidentified), None);
     }
 
     /// The captured key is the physical one, so the layout the user types
@@ -372,36 +510,135 @@ mod tests {
     /// nothing).
     #[test]
     fn non_qwerty_layouts_store_the_pressed_position() {
-        let command = slint(true, false, false, false);
-        for (key, stored) in [
+        for (code, stored) in [
             (KeyCode::KeyQ, "CommandOrControl+Q"),
             (KeyCode::Digit1, "CommandOrControl+1"),
             (KeyCode::KeyY, "CommandOrControl+Y"),
             (KeyCode::KeyD, "CommandOrControl+D"),
         ] {
-            assert_eq!(format_combo(key, command).as_deref(), Some(stored));
+            assert_eq!(classify(key(code), COMMAND), save(stored));
+        }
+    }
+
+    /// global-hotkey 0.6.4 has no name for these keys, so they are refused
+    /// with a message instead of being saved as another key or ignored.
+    #[test]
+    fn unregistrable_keys_are_rejected() {
+        for pressed in [
+            key(KeyCode::IntlBackslash),
+            key(KeyCode::IntlYen),
+            key(KeyCode::IntlRo),
+            key(KeyCode::Lang1),
+            key(KeyCode::Lang2),
+            key(KeyCode::MediaPlayPause),
+            PressedKey::Unidentified,
+        ] {
+            for modifiers in [COMMAND, Modifiers::default()] {
+                assert_eq!(
+                    classify(pressed, modifiers),
+                    Capture::Rejected(Rejection::UnusableKey),
+                    "{pressed:?}"
+                );
+            }
+        }
+    }
+
+    /// #360 follow-up: winit 0.30 reports the ISO section key (`0x0A`) as
+    /// `Backquote`; stored that way it would register `0x32`, another key.
+    #[test]
+    fn iso_section_key_never_becomes_backquote() {
+        let backquote = PhysicalKey::Code(KeyCode::Backquote);
+        assert_eq!(
+            resolve_key(backquote, Some(ISO_SECTION_KEYCODE)),
+            key(KeyCode::IntlBackslash)
+        );
+        assert_eq!(
+            classify(resolve_key(backquote, Some(ISO_SECTION_KEYCODE)), COMMAND),
+            Capture::Rejected(Rejection::UnusableKey)
+        );
+    }
+
+    #[test]
+    fn ansi_grave_key_stays_backquote() {
+        let backquote = PhysicalKey::Code(KeyCode::Backquote);
+        for raw in [Some(ANSI_GRAVE_KEYCODE), None] {
+            assert_eq!(
+                resolve_key(backquote, raw),
+                key(KeyCode::Backquote),
+                "{raw:?}"
+            );
+        }
+        assert_eq!(
+            classify(resolve_key(backquote, Some(ANSI_GRAVE_KEYCODE)), COMMAND),
+            save("CommandOrControl+Backquote")
+        );
+    }
+
+    /// Only the `Backquote` fold is corrected: a raw `0x0A` next to another
+    /// winit key is a stale `currentEvent`, not a reason to change the key.
+    #[test]
+    fn raw_keycode_only_overrides_backquote() {
+        assert_eq!(
+            resolve_key(PhysicalKey::Code(KeyCode::KeyA), Some(ISO_SECTION_KEYCODE)),
+            key(KeyCode::KeyA)
+        );
+    }
+
+    #[test]
+    fn caps_lock_and_fn_are_the_unusable_flags_keys() {
+        assert!(is_unusable_flags_key(0x39));
+        assert!(is_unusable_flags_key(0x3f));
+        for modifier in [0x37, 0x36, 0x38, 0x3c, 0x3a, 0x3d, 0x3b, 0x3e] {
+            assert!(!is_unusable_flags_key(modifier), "{modifier:#x}");
+        }
+    }
+
+    /// ⌥ or ⌥⇧ plus a character key eats that character in every app.
+    #[test]
+    fn option_only_character_combos_warn() {
+        let option = slint(false, false, false, true);
+        let option_shift = slint(false, false, true, true);
+        for (code, modifiers, accelerator) in [
+            (KeyCode::KeyL, option_shift, "Shift+Alt+L"),
+            (KeyCode::Digit5, option, "Alt+5"),
+            (KeyCode::Minus, option, "Alt+Minus"),
+        ] {
+            assert_eq!(
+                classify(key(code), modifiers),
+                Capture::Save {
+                    accelerator: accelerator.to_string(),
+                    swallows_character: true,
+                }
+            );
         }
     }
 
     #[test]
-    fn unregistrable_keys_have_no_combo() {
-        let command = slint(true, false, false, false);
-        for key in [
-            KeyCode::IntlBackslash,
-            KeyCode::IntlYen,
-            KeyCode::IntlRo,
-            KeyCode::Lang1,
-            KeyCode::Fn,
-            KeyCode::CapsLock,
+    fn option_with_command_control_or_a_named_key_does_not_warn() {
+        let option = slint(false, false, false, true);
+        for (code, modifiers, accelerator) in [
+            (
+                KeyCode::KeyL,
+                slint(true, false, false, true),
+                "CommandOrControl+Alt+L",
+            ),
+            (
+                KeyCode::KeyL,
+                slint(false, true, false, true),
+                "Control+Alt+L",
+            ),
+            (KeyCode::Space, option, "Alt+Space"),
+            (KeyCode::F5, option, "Alt+F5"),
+            (KeyCode::KeyL, slint(false, false, true, false), "Shift+L"),
         ] {
-            assert_eq!(format_combo(key, command), None, "{key:?}");
+            assert_eq!(classify(key(code), modifiers), save(accelerator));
         }
     }
 
     #[test]
     fn physical_key_is_consumed_once() {
-        LAST_PHYSICAL_KEY.with(|slot| slot.set(Some(KeyCode::KeyD)));
-        assert_eq!(take_physical_key(), Some(KeyCode::KeyD));
-        assert_eq!(take_physical_key(), None);
+        LAST_PRESSED_KEY.with(|slot| slot.set(Some(key(KeyCode::KeyD))));
+        assert_eq!(take_pressed_key(), Some(key(KeyCode::KeyD)));
+        assert_eq!(take_pressed_key(), None);
     }
 }
