@@ -98,10 +98,31 @@ fn format_shortcut_label(shortcut: &str) -> String {
         return String::new();
     }
     shortcut
-        .replace("CommandOrControl", "\u{2318}")
-        .replace("Shift", "\u{21e7}")
-        .replace("Alt", "\u{2325}")
-        .replace('+', " ")
+        .split('+')
+        .map(shortcut_label_token)
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// One `+`-separated accelerator token as the user sees it: modifiers as
+/// their macOS symbol, and a bare modifier with its side ("⌘ Left"), the
+/// same way for all four modifiers (#360). Anything else is the key name.
+fn shortcut_label_token(token: &str) -> &str {
+    match token {
+        "CommandOrControl" => "\u{2318}",
+        "Control" => "\u{2303}",
+        "Shift" => "\u{21e7}",
+        "Alt" => "\u{2325}",
+        "MetaLeft" => "\u{2318} Left",
+        "MetaRight" => "\u{2318} Right",
+        "ControlLeft" => "\u{2303} Left",
+        "ControlRight" => "\u{2303} Right",
+        "AltLeft" => "\u{2325} Left",
+        "AltRight" => "\u{2325} Right",
+        "ShiftLeft" => "\u{21e7} Left",
+        "ShiftRight" => "\u{21e7} Right",
+        key => key,
+    }
 }
 
 /// Builds and persists one shortcut candidate without exposing rejected
@@ -7501,6 +7522,30 @@ mod tests {
         assert_eq!(committed.push_to_talk, "Alt+Space");
         assert_eq!(persisted.borrow().as_ref(), Some(&committed));
         assert_eq!(cache.borrow().as_ref(), Some(&committed));
+    }
+
+    /// #360: bare modifiers used to show raw (`ControlLeft`) or half
+    /// replaced (`⌥Left`); every one now reads symbol plus side.
+    #[test]
+    fn shortcut_labels_show_every_modifier_the_same_way() {
+        use super::format_shortcut_label;
+        for (stored, label) in [
+            ("MetaLeft", "⌘ Left"),
+            ("MetaRight", "⌘ Right"),
+            ("ControlLeft", "⌃ Left"),
+            ("ControlRight", "⌃ Right"),
+            ("AltLeft", "⌥ Left"),
+            ("AltRight", "⌥ Right"),
+            ("ShiftLeft", "⇧ Left"),
+            ("ShiftRight", "⇧ Right"),
+            ("CommandOrControl+Shift+Space", "⌘ ⇧ Space"),
+            ("Control+Space", "⌃ Space"),
+            ("CommandOrControl+Control+Shift+Alt+T", "⌘ ⌃ ⇧ ⌥ T"),
+            ("F5", "F5"),
+            ("", ""),
+        ] {
+            assert_eq!(format_shortcut_label(stored), label, "{stored}");
+        }
     }
 
     // SOU-296: the idle view shows "Reformulation…" while at least one
