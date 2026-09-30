@@ -8,11 +8,11 @@ import { ThemedSpinBox } from "../themed_spin.slint";
 import { AppTheme, AppLocale, PasteMethod, ShortcutField } from "../../types.slint";
 
 // Captures the next key press as a shortcut accelerator. Slint's `KeyEvent`
-// only hands over a produced character (or one of i-slint-common's
-// private-use code points for named/modifier keys), not a DOM physical
-// `code`, so the actual accelerator-string parsing happens in Rust
-// (`shortcut_capture.rs`) from the raw `text`/modifier booleans forwarded
-// here - this component only owns focus/recording UI state. Exported so
+// only hands over a produced character, not the physical key, so the
+// accelerator is built in Rust (`shortcut_capture.rs`) from the physical key
+// the winit hook recorded for this event plus the modifier booleans
+// forwarded here; `text` is forwarded but not used for the key (#360). This
+// component only owns focus/recording UI state. Exported so
 // `onboarding_view.slint`'s shortcut step (SOU-190) reuses it instead of a
 // second FocusScope implementation.
 export component ShortcutRecorderButton inherits FocusScope {

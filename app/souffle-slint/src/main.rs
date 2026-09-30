@@ -2975,23 +2975,26 @@ fn wire_onboarding_callbacks(
     let weak = window.as_weak();
     let handle = tauri_handle.clone();
     let ob_for_capture = ob.clone();
-    window.on_onboarding_shortcut_captured(move |text, ctrl, shift, alt, meta| {
+    window.on_onboarding_shortcut_captured(move |_text, ctrl, shift, alt, meta| {
         let Some(window) = weak.upgrade() else {
             return;
         };
-        let modifiers = shortcut_capture::Modifiers { control: ctrl, shift, alt, meta };
-        if let Some(name) = shortcut_capture::modifier_only_shortcut(&text) {
+        let Some(key) = shortcut_capture::take_physical_key() else {
+            return;
+        };
+        let modifiers = shortcut_capture::Modifiers::from_slint(ctrl, shift, alt, meta);
+        if let Some(name) = shortcut_capture::modifier_only_shortcut(key) {
             ob_for_capture.borrow_mut().pending_modifier = Some(name.to_string());
             return;
         }
         ob_for_capture.borrow_mut().pending_modifier = None;
-        if shortcut_capture::missing_modifier(&text, modifiers) {
+        if shortcut_capture::missing_modifier(key, modifiers) {
             window.set_onboarding_shortcut_error(
                 "Le raccourci doit inclure une touche de modification (Cmd, Ctrl, Maj, Alt) ou être une touche de fonction.".into(),
             );
             return;
         }
-        let Some(value) = shortcut_capture::format_combo(&text, modifiers) else {
+        let Some(value) = shortcut_capture::format_combo(key, modifiers) else {
             return;
         };
         apply_onboarding_shortcut(&handle, &window, &ob_for_capture, value);
@@ -3000,11 +3003,13 @@ fn wire_onboarding_callbacks(
     let weak = window.as_weak();
     let handle = tauri_handle.clone();
     let ob_for_release = ob.clone();
-    window.on_onboarding_shortcut_released(move |text, _ctrl, _shift, _alt, _meta| {
+    window.on_onboarding_shortcut_released(move |_text, _ctrl, _shift, _alt, _meta| {
         let Some(window) = weak.upgrade() else {
             return;
         };
-        let Some(name) = shortcut_capture::modifier_only_shortcut(&text) else {
+        let Some(name) = shortcut_capture::take_physical_key()
+            .and_then(shortcut_capture::modifier_only_shortcut)
+        else {
             return;
         };
         let mut pending = ob_for_release.borrow_mut();
@@ -6598,17 +6603,15 @@ fn wire_callbacks(
     let handle = tauri_handle.clone();
     let shortcuts_state_for_capture = shortcuts_state.clone();
     let pending_modifier_for_capture = pending_modifier.clone();
-    window.on_settings_shortcut_captured(move |field, text, ctrl, shift, alt, meta| {
+    window.on_settings_shortcut_captured(move |field, _text, ctrl, shift, alt, meta| {
         let Some(window) = weak.upgrade() else {
             return;
         };
-        let modifiers = shortcut_capture::Modifiers {
-            control: ctrl,
-            shift,
-            alt,
-            meta,
+        let Some(key) = shortcut_capture::take_physical_key() else {
+            return;
         };
-        if let Some(name) = shortcut_capture::modifier_only_shortcut(&text) {
+        let modifiers = shortcut_capture::Modifiers::from_slint(ctrl, shift, alt, meta);
+        if let Some(name) = shortcut_capture::modifier_only_shortcut(key) {
             // Wait for the matching key-released event (see
             // `on_settings_shortcut_released`) instead of committing now -
             // a real key pressed while this is still held wins instead.
@@ -6616,13 +6619,13 @@ fn wire_callbacks(
             return;
         }
         *pending_modifier_for_capture.borrow_mut() = None;
-        if shortcut_capture::missing_modifier(&text, modifiers) {
+        if shortcut_capture::missing_modifier(key, modifiers) {
             window.set_settings_shortcut_error(
                 "Le raccourci doit inclure une touche de modification (Cmd, Ctrl, Maj, Alt) ou être une touche de fonction.".into(),
             );
             return;
         }
-        let Some(value) = shortcut_capture::format_combo(&text, modifiers) else {
+        let Some(value) = shortcut_capture::format_combo(key, modifiers) else {
             return;
         };
         apply_shortcut(&handle, &shortcuts_state_for_capture, &window, field, value);
@@ -6632,11 +6635,13 @@ fn wire_callbacks(
     let handle = tauri_handle.clone();
     let shortcuts_state_for_release = shortcuts_state.clone();
     let pending_modifier_for_release = pending_modifier.clone();
-    window.on_settings_shortcut_released(move |field, text, _ctrl, _shift, _alt, _meta| {
+    window.on_settings_shortcut_released(move |field, _text, _ctrl, _shift, _alt, _meta| {
         let Some(window) = weak.upgrade() else {
             return;
         };
-        let Some(name) = shortcut_capture::modifier_only_shortcut(&text) else {
+        let Some(name) = shortcut_capture::take_physical_key()
+            .and_then(shortcut_capture::modifier_only_shortcut)
+        else {
             return;
         };
         let mut pending = pending_modifier_for_release.borrow_mut();
@@ -7262,6 +7267,11 @@ fn wire_window_activity(
     let weak_activity = Rc::downgrade(activity);
     let weak_permissions = Rc::downgrade(permissions);
     window.window().on_winit_window_event(move |_, event| {
+        // #360: the shortcut recorder reads the physical key of this event,
+        // which Slint's `KeyEvent` does not carry.
+        if let WindowEvent::KeyboardInput { event, .. } = event {
+            shortcut_capture::observe_key_event(event);
+        }
         if let WindowEvent::Occluded(occluded) = event
             && let Some(activity) = weak_activity.upgrade()
         {
