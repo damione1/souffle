@@ -10,6 +10,7 @@ mod audio_ui;
 mod data_ui;
 mod edit_learning;
 mod ia_ui;
+mod keyboard_layout;
 mod lists_ui;
 mod markdown;
 mod meeting_idle_ui;
@@ -26,6 +27,7 @@ mod settings_log;
 mod settings_ui;
 mod settings_values;
 mod shortcut_capture;
+mod shortcut_label;
 mod summary;
 mod timeline;
 mod transcript;
@@ -90,39 +92,6 @@ struct TranscriptState {
     offsets: Vec<f32>,
     mounted_start: usize,
     mounted_end: usize,
-}
-
-// Port of src/lib/utils/format.ts::formatShortcutLabel.
-fn format_shortcut_label(shortcut: &str) -> String {
-    if shortcut.is_empty() {
-        return String::new();
-    }
-    shortcut
-        .split('+')
-        .map(shortcut_label_token)
-        .collect::<Vec<_>>()
-        .join(" ")
-}
-
-/// One `+`-separated accelerator token as the user sees it: modifiers as
-/// their macOS symbol, and a bare modifier with its side ("⌘ Left"), the
-/// same way for all four modifiers (#360). Anything else is the key name.
-fn shortcut_label_token(token: &str) -> &str {
-    match token {
-        "CommandOrControl" => "\u{2318}",
-        "Control" => "\u{2303}",
-        "Shift" => "\u{21e7}",
-        "Alt" => "\u{2325}",
-        "MetaLeft" => "\u{2318} Left",
-        "MetaRight" => "\u{2318} Right",
-        "ControlLeft" => "\u{2303} Left",
-        "ControlRight" => "\u{2303} Right",
-        "AltLeft" => "\u{2325} Left",
-        "AltRight" => "\u{2325} Right",
-        "ShiftLeft" => "\u{21e7} Left",
-        "ShiftRight" => "\u{21e7} Right",
-        key => key,
-    }
 }
 
 /// Builds and persists one shortcut candidate without exposing rejected
@@ -2884,8 +2853,10 @@ fn show_onboarding_step(
         }
         OnboardingStep::Shortcut => {
             let guard = ob.borrow();
-            window.set_onboarding_toggle_shortcut_label(
-                format_shortcut_label(&guard.toggle_shortcut).into(),
+            shortcut_label::project(
+                window,
+                shortcut_label::LabelSlot::OnboardingToggle,
+                &guard.toggle_shortcut,
             );
             window.set_onboarding_accessibility_granted(
                 permissions.status().accessibility == PermState::Granted,
@@ -3303,8 +3274,10 @@ fn apply_onboarding_shortcut(
         Ok(()) => {
             window.set_onboarding_shortcut_error("".into());
             let guard = ob.borrow();
-            window.set_onboarding_toggle_shortcut_label(
-                format_shortcut_label(&guard.toggle_shortcut).into(),
+            shortcut_label::project(
+                window,
+                shortcut_label::LabelSlot::OnboardingToggle,
+                &guard.toggle_shortcut,
             );
         }
         Err(e) => window.set_onboarding_shortcut_error(e.into()),
@@ -7155,8 +7128,10 @@ fn main() {
                         let dark =
                             project_startup_settings(&window, &startup.settings, &onboarding_state);
                         souffle_lib::native::appearance::apply_resolved(dark);
-                        window.set_dictation_shortcut(
-                            format_shortcut_label(&startup.shortcuts.toggle).into(),
+                        shortcut_label::project(
+                            &window,
+                            shortcut_label::LabelSlot::DictationHint,
+                            &startup.shortcuts.toggle,
                         );
                         let unload_timeout_options =
                             souffle_lib::settings::SettingsOptions::current()
@@ -7287,6 +7262,7 @@ fn wire_window_activity(
 
     let weak_activity = Rc::downgrade(activity);
     let weak_permissions = Rc::downgrade(permissions);
+    let weak_window = window.as_weak();
     window.window().on_winit_window_event(move |_, event| {
         // #360: the shortcut recorder reads the physical key of this event,
         // which Slint's `KeyEvent` does not carry.
@@ -7302,6 +7278,13 @@ fn wire_window_activity(
             && let Some(permissions) = weak_permissions.upgrade()
         {
             permissions.refresh();
+        }
+        // #360: a keyboard layout switched while the app was in the
+        // background changes what the shortcut labels should say.
+        if matches!(event, WindowEvent::Focused(true))
+            && let Some(window) = weak_window.upgrade()
+        {
+            shortcut_label::refresh(&window);
         }
         EventResult::Propagate
     });
@@ -7522,30 +7505,6 @@ mod tests {
         assert_eq!(committed.push_to_talk, "Alt+Space");
         assert_eq!(persisted.borrow().as_ref(), Some(&committed));
         assert_eq!(cache.borrow().as_ref(), Some(&committed));
-    }
-
-    /// #360: bare modifiers used to show raw (`ControlLeft`) or half
-    /// replaced (`⌥Left`); every one now reads symbol plus side.
-    #[test]
-    fn shortcut_labels_show_every_modifier_the_same_way() {
-        use super::format_shortcut_label;
-        for (stored, label) in [
-            ("MetaLeft", "⌘ Left"),
-            ("MetaRight", "⌘ Right"),
-            ("ControlLeft", "⌃ Left"),
-            ("ControlRight", "⌃ Right"),
-            ("AltLeft", "⌥ Left"),
-            ("AltRight", "⌥ Right"),
-            ("ShiftLeft", "⇧ Left"),
-            ("ShiftRight", "⇧ Right"),
-            ("CommandOrControl+Shift+Space", "⌘ ⇧ Space"),
-            ("Control+Space", "⌃ Space"),
-            ("CommandOrControl+Control+Shift+Alt+T", "⌘ ⌃ ⇧ ⌥ T"),
-            ("F5", "F5"),
-            ("", ""),
-        ] {
-            assert_eq!(format_shortcut_label(stored), label, "{stored}");
-        }
     }
 
     // SOU-296: the idle view shows "Reformulation…" while at least one

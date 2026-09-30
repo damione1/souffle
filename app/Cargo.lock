@@ -7235,6 +7235,7 @@ dependencies = [
  "crossbeam-channel",
  "i-slint-backend-testing",
  "lucide-slint",
+ "objc2 0.6.4",
  "serde_json",
  "slint",
  "slint-build",
