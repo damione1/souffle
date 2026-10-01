@@ -1,0 +1,17 @@
+import { InstallBlockReason } from "../types.slint";
+
+// Copy shared by every surface that offers to install an update (the
+// Update Available dialog and Settings > "Mises à jour"), so the reason an
+// install is refused reads the same everywhere. One `@tr` per variant -
+// never the raw enum token.
+export global UpdateCopy {
+    public pure function install-block-label(reason: InstallBlockReason) -> string {
+        if reason == InstallBlockReason.recording-dictation { return @tr("Terminez la dictée avant d'installer."); }
+        if reason == InstallBlockReason.recording-meeting { return @tr("Arrêtez la réunion avant d'installer."); }
+        if reason == InstallBlockReason.stopping { return @tr("Attendez la fin de l'arrêt de l'enregistrement."); }
+        if reason == InstallBlockReason.downloading { return @tr("Attendez la fin du téléchargement du modèle."); }
+        if reason == InstallBlockReason.loading { return @tr("Attendez la fin du chargement du modèle."); }
+        if reason == InstallBlockReason.unloading { return @tr("Attendez la fin du déchargement du modèle."); }
+        return "";
+    }
+}

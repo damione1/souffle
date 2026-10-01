@@ -2,11 +2,11 @@
 //!
 //! A microphone stuck inside CoreAudio cannot be freed from inside the
 //! process: its `mic-open` thread cannot be killed safely, and only a new
-//! process gets a clean HAL client. The updater relaunches too, but it opens
-//! the replaced bundle right before exiting; a plain restart cannot do that,
-//! because the new instance would find this one still holding the
-//! single-instance lock, raise its window and exit. So the relaunch waits
-//! for this process to be gone first.
+//! process gets a clean HAL client. Opening the bundle right before exiting
+//! does not work, because the new instance would find this one still holding
+//! the single-instance lock, raise its window and exit. So the relaunch waits
+//! for this process to be gone first; the updater relaunches through it too
+//! (`updater::relaunch_and_exit`) for the same reason.
 
 use std::process::{Command, Stdio};
 
