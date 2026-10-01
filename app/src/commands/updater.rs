@@ -126,6 +126,16 @@ fn with_state<R>(f: impl FnOnce(&mut DownloadState) -> R) -> Result<R, String> {
     Ok(f(&mut guard))
 }
 
+/// Whether a new download may start from `phase`. An in-flight download or a
+/// verified package waiting to be installed is reused, never restarted; a
+/// failure (download or install) can always be retried.
+fn download_can_start(phase: UpdatePhase) -> bool {
+    match phase {
+        UpdatePhase::Idle | UpdatePhase::Failed => true,
+        UpdatePhase::Downloading | UpdatePhase::Ready => false,
+    }
+}
+
 fn attempt_is_current(attempt: u64) -> bool {
     DOWNLOAD_ATTEMPT.load(Ordering::SeqCst) == attempt
 }
@@ -147,9 +157,8 @@ pub fn get_update_install_block(
 /// `update_check`; this fetches the signed manifest, downloads, and verifies.
 pub async fn download_update() -> Result<UpdateDownloadStatus, String> {
     let attempt = {
-        let busy =
-            with_state(|s| matches!(s.phase, UpdatePhase::Downloading | UpdatePhase::Ready))?;
-        if busy {
+        let can_start = with_state(|s| download_can_start(s.phase))?;
+        if !can_start {
             return with_state(|s| s.status());
         }
         CANCEL_DOWNLOAD.store(false, Ordering::SeqCst);
@@ -220,7 +229,10 @@ pub fn cancel_update_download() -> Result<UpdateDownloadStatus, String> {
 }
 
 /// Replace the on-disk bundle and restart. Refuses before any side effect when
-/// the state machine is busy.
+/// the state machine is busy (the package stays ready, so install can be
+/// retried once the recording or model work is over). A failed bundle swap
+/// marks the download failed: the package bytes are consumed by then, so the
+/// only way forward is a fresh download, which `download_update` allows.
 pub async fn install_update(state: Arc<AppState>) -> Result<(), String> {
     let machine = state.current_machine_state()?;
     if let Some(reason) = install_blocked_reason(&machine) {
@@ -239,19 +251,27 @@ pub async fn install_update(state: Arc<AppState>) -> Result<(), String> {
             .ok_or_else(|| "No update package is ready to install".to_string())
     })??;
 
-    // Explicit shutdown before install: free Metal before the process exits
-    // as part of the relaunch, same requirement `RunEvent::ExitRequested`
-    // enforced before this ticket.
+    info!(version = %package.version, "Installing update");
+    if let Err(e) = crate::native::updater::install_bundle(&package.bytes) {
+        let error = format!("Update install failed: {e}");
+        let _ = fail(error.clone(), true);
+        return Err(error);
+    }
+
+    // Explicit shutdown only once the new bundle is in place: free Metal
+    // before the process exits as part of the relaunch, same requirement
+    // `RunEvent::ExitRequested` enforced before this ticket. A failed swap
+    // above returns with the engine still running.
     if let Err(e) = state.engine_actor.shutdown() {
         warn!("Engine shutdown before update restart: {e}");
     }
 
-    info!(version = %package.version, "Installing update; relaunching");
-    // Never returns on success — the process exits as part of the relaunch.
-    crate::native::updater::install_and_relaunch(&package.bytes)
+    info!(version = %package.version, "Update installed; relaunching");
+    crate::native::updater::relaunch_and_exit()
 }
 
 fn fail(error: String, manual_fallback: bool) -> Result<UpdateDownloadStatus, String> {
+    warn!("{error}");
     with_state(|s| {
         let version = s.version.clone();
         *s = DownloadState {
@@ -363,6 +383,14 @@ mod tests {
             })
             .is_none()
         );
+    }
+
+    #[test]
+    fn a_download_starts_only_from_idle_or_after_a_failure() {
+        assert!(download_can_start(UpdatePhase::Idle));
+        assert!(download_can_start(UpdatePhase::Failed));
+        assert!(!download_can_start(UpdatePhase::Downloading));
+        assert!(!download_can_start(UpdatePhase::Ready));
     }
 
     #[test]

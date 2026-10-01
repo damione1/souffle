@@ -4,6 +4,7 @@ import { ModalDialog } from "../modal_dialog.slint";
 import { ThemedButton, ThemedButtonKind } from "../themed_button.slint";
 import { InstallBlockReason, UpdatePhase } from "../../types.slint";
 import { Theme } from "../../theme.slint";
+import { UpdateCopy } from "../update_copy.slint";
 
 // Port of UpdateAvailableDialog.svelte + UpdateAction.svelte. `download_update`/
 // `install_update` are real commands (`commands/updater.rs`). No live download
@@ -12,9 +13,9 @@ import { Theme } from "../../theme.slint";
 // `get_update_install_block` is a real state-machine query for why "Install
 // and restart" may be greyed out; Rust projects it onto the
 // `install-blocked` / `install-block-reason` pair (`update_ui.rs`) and the
-// label per reason lives here, one `@tr` per variant - never the raw enum
-// token. Release notes go through the same pre-parsed `MarkdownBlock`
-// rendering as What's New (`markdown.rs`).
+// label per reason lives in `UpdateCopy` (shared with Settings), one `@tr`
+// per variant - never the raw enum token. Release notes go through the same
+// pre-parsed `MarkdownBlock` rendering as What's New (`markdown.rs`).
 //
 // Action row follows UpdateAction.svelte per phase: idle → Télécharger;
 // downloading → disabled busy label; ready → Installer (disabled while
@@ -35,16 +36,6 @@ export component UpdateAvailableDialog inherits ModalDialog {
     callback dismiss-requested();
     callback link-clicked(string);
 
-    pure function block-label(reason: InstallBlockReason) -> string {
-        if reason == InstallBlockReason.recording-dictation { return @tr("Terminez la dictée avant d'installer."); }
-        if reason == InstallBlockReason.recording-meeting { return @tr("Arrêtez la réunion avant d'installer."); }
-        if reason == InstallBlockReason.stopping { return @tr("Attendez la fin de l'arrêt de l'enregistrement."); }
-        if reason == InstallBlockReason.downloading { return @tr("Attendez la fin du téléchargement du modèle."); }
-        if reason == InstallBlockReason.loading { return @tr("Attendez la fin du chargement du modèle."); }
-        if reason == InstallBlockReason.unloading { return @tr("Attendez la fin du déchargement du modèle."); }
-        return "";
-    }
-
     title: @tr("Mise à jour disponible");
     subtitle: @tr("Version {}", root.latest-version);
     panel-height: 440px;
@@ -64,7 +55,7 @@ export component UpdateAvailableDialog inherits ModalDialog {
     }
 
     if root.phase == UpdatePhase.ready && root.install-blocked: Text {
-        text: block-label(root.install-block-reason);
+        text: UpdateCopy.install-block-label(root.install-block-reason);
         color: Theme.text-muted;
         font-size: 12px;
         wrap: word-wrap;
