@@ -331,6 +331,7 @@ export component MainWindow inherits Window {
     in property <string> settings-unload-timeout-label;
     in property <string> settings-model-error-message;
     in property <string> settings-model-delete-error;
+    in property <bool> settings-model-files-deletable;
     in property <bool> settings-dictation-learn-from-edit;
     // Windowed slice of the dictionary, not the full list (SOU-229) - same
     // spacer/scroll-mirror plumbing as `meeting-detail-transcript-*` above:
@@ -870,6 +871,7 @@ export component MainWindow inherits Window {
         unload-timeout-label: root.settings-unload-timeout-label;
         model-error-message: root.settings-model-error-message;
         model-delete-error: root.settings-model-delete-error;
+        model-files-deletable: root.settings-model-files-deletable;
         dictation-learn-from-edit: root.settings-dictation-learn-from-edit;
         dictionary-entries: root.settings-dictionary-entries;
         dictionary-entry-count: root.settings-dictionary-count;

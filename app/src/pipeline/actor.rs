@@ -85,7 +85,7 @@ pub enum EngineCommand {
     AttachApp(Arc<AppState>),
     LoadModel {
         profile: TranscriptionProfile,
-        model_dir: PathBuf,
+        model_dir: crate::engine::ModelLocation,
         reply: Sender<Result<EngineInfo, String>>,
     },
     UnloadModel {
@@ -268,12 +268,12 @@ impl EngineActorHandle {
     pub fn load_model(
         &self,
         profile: TranscriptionProfile,
-        model_dir: PathBuf,
+        model_dir: impl Into<crate::engine::ModelLocation>,
     ) -> Result<EngineInfo, String> {
         self.request(
             |reply| EngineCommand::LoadModel {
                 profile,
-                model_dir,
+                model_dir: model_dir.into(),
                 reply,
             },
             Some(Duration::from_secs(300)), // 5 minute timeout for model loading
@@ -731,14 +731,20 @@ impl EngineActor {
     fn handle_load(
         &mut self,
         profile: &TranscriptionProfile,
-        model_dir: &std::path::Path,
+        model_dir: &crate::engine::ModelLocation,
     ) -> Result<EngineInfo, String> {
         // Swap = unload + drop old, then create + load new — all sequential,
         // all on this thread.
         self.drop_engine();
 
         let mut engine = (self.factory)(profile)?;
-        engine.load_model(model_dir).map_err(|e| e.to_string())?;
+        match model_dir {
+            crate::engine::ModelLocation::Files(path) => engine.load_model(path),
+            crate::engine::ModelLocation::SystemSpeech { locale } => {
+                engine.load_system_assets(locale)
+            }
+        }
+        .map_err(|e| e.to_string())?;
         let info = EngineInfo {
             audio: engine.audio_requirements(),
             mic_gain: engine.mic_gain(),

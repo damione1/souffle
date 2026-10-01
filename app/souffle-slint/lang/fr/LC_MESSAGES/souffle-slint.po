@@ -2913,3 +2913,11 @@ msgid ""
 msgstr ""
 "La mise en veille a interrompu cette réunion. Reprenez l'enregistrement pour "
 "continuer."
+
+msgctxt "ThemedComboBox"
+msgid "Apple Speech — assets système"
+msgstr "Apple Speech — assets système"
+
+msgctxt "ModelDeleteSection"
+msgid "Les assets Apple Speech sont gérés par macOS. Soufflé ne les supprime pas."
+msgstr "Les assets Apple Speech sont gérés par macOS. Soufflé ne les supprime pas."

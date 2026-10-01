@@ -1,3 +1,4 @@
+pub mod apple_speech;
 pub mod batch_windows;
 pub mod kyutai;
 pub mod parakeet;
@@ -19,6 +20,9 @@ pub const CANDLE_BACKEND_ID: &str = "candle";
 pub const WHISPER_RS_BACKEND_ID: &str = "whisper-rs";
 pub const CTRANSLATE2_BACKEND_ID: &str = "ctranslate2";
 pub const ORT_BACKEND_ID: &str = "onnx-ort";
+pub const APPLE_SPEECH_ENGINE_ID: &str = "apple-speech";
+pub const APPLE_SPEECH_MODEL_ID: &str = "system-locale";
+pub const APPLE_SPEECH_BACKEND_ID: &str = "speech-analyzer";
 
 const KYUTAI_1B_CANDLE_ARTIFACT_ID: &str = "hf-candle-stt-1b-en-fr";
 const KYUTAI_2_6B_CANDLE_ARTIFACT_ID: &str = "hf-candle-stt-2-6b-en";
@@ -119,6 +123,28 @@ pub struct ModelArtifactDescriptor {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ModelAssetSource {
+    Files {
+        artifacts: Vec<ModelArtifactDescriptor>,
+    },
+    SystemSpeech {
+        locale: String,
+    },
+}
+
+#[derive(Debug, Clone)]
+pub enum ModelLocation {
+    Files(PathBuf),
+    SystemSpeech { locale: String },
+}
+impl From<PathBuf> for ModelLocation {
+    fn from(path: PathBuf) -> Self {
+        Self::Files(path)
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 pub struct TranscriptionRuntimeBackendDescriptor {
     pub id: String,
     pub label: String,
@@ -126,7 +152,7 @@ pub struct TranscriptionRuntimeBackendDescriptor {
     pub recommended: bool,
     pub available_in_app: bool,
     pub availability_note: Option<String>,
-    pub artifacts: Vec<ModelArtifactDescriptor>,
+    pub assets: ModelAssetSource,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
@@ -177,7 +203,7 @@ pub enum TranscriptionRuntimePhase {
 pub struct TranscriptionRuntimeStatus {
     pub profile: TranscriptionProfile,
     pub phase: TranscriptionRuntimePhase,
-    pub model_dir: String,
+    pub model_dir: Option<String>,
 }
 
 pub fn transcription_runtime_phase(downloaded: bool, loaded: bool) -> TranscriptionRuntimePhase {
@@ -205,6 +231,11 @@ pub struct ContextWindowStats {
 /// created, used, and dropped on the engine actor thread only.
 pub trait TranscriptionEngine {
     fn load_model(&mut self, model_path: &Path) -> Result<(), EngineError>;
+    fn load_system_assets(&mut self, _locale: &str) -> Result<(), EngineError> {
+        Err(EngineError::InferenceError(
+            "This engine requires app-managed model files".into(),
+        ))
+    }
     fn unload_model(&mut self) -> Result<(), EngineError>;
     fn transcribe(
         &mut self,
@@ -403,6 +434,11 @@ pub fn transcription_engine_catalog() -> Vec<TranscriptionEngineDescriptor> {
             description: "NVIDIA speech recognition family with fast multilingual transcription, punctuation, and capitalization.".to_string(),
             models: vec![parakeet_tdt_06b_v3_model_descriptor()],
         },
+        TranscriptionEngineDescriptor {
+            id: APPLE_SPEECH_ENGINE_ID.into(), label: "Apple Speech".into(),
+            description: "On-device transcription using system-managed SpeechAnalyzer assets.".into(),
+            models: vec![apple_speech_model_descriptor()],
+        },
     ]
 }
 
@@ -448,6 +484,17 @@ pub fn resolve_transcription_profile(
             format!("Unknown transcription model '{model_id}' for engine '{engine_id}'")
         })?;
 
+    if !model.available_in_app {
+        return Err(format!(
+            "{} is not available: {}. Select another transcription model.",
+            engine.label,
+            model
+                .availability_note
+                .as_deref()
+                .unwrap_or("unsupported build, device or locale")
+        ));
+    }
+
     let backend_id = backend_id
         .map(str::trim)
         .filter(|value| !value.is_empty())
@@ -491,6 +538,18 @@ pub fn resolve_transcription_selection(
 pub fn resolve_transcription_artifact(
     profile: &TranscriptionProfile,
 ) -> Result<ModelArtifactDescriptor, String> {
+    match resolve_model_assets(profile)? {
+        ModelAssetSource::Files { artifacts } => artifacts
+            .into_iter()
+            .next()
+            .ok_or_else(|| "No model files registered".into()),
+        ModelAssetSource::SystemSpeech { locale } => Err(format!(
+            "System Speech assets for {locale} have no app-managed files"
+        )),
+    }
+}
+
+pub fn resolve_model_assets(profile: &TranscriptionProfile) -> Result<ModelAssetSource, String> {
     let catalog = transcription_engine_catalog();
     let engine = catalog
         .iter()
@@ -516,11 +575,7 @@ pub fn resolve_transcription_artifact(
                 profile.backend_id, profile.engine_id, profile.model_id
             )
         })?;
-    backend
-        .artifacts
-        .first()
-        .cloned()
-        .ok_or_else(|| format!("No artifacts registered for '{}'", backend.id))
+    Ok(backend.assets.clone())
 }
 
 pub fn create_engine(
@@ -530,10 +585,62 @@ pub fn create_engine(
         (KYUTAI_ENGINE_ID, CANDLE_BACKEND_ID) => Ok(Box::new(kyutai::KyutaiEngine::new())),
         (WHISPER_ENGINE_ID, WHISPER_RS_BACKEND_ID) => Ok(Box::new(whisper::WhisperEngine::new())),
         (PARAKEET_ENGINE_ID, ORT_BACKEND_ID) => Ok(Box::new(parakeet::ParakeetEngine::new())),
+        (APPLE_SPEECH_ENGINE_ID, APPLE_SPEECH_BACKEND_ID) => {
+            resolve_transcription_selection(&profile.selection())?;
+            Ok(Box::new(apple_speech::AppleSpeechEngine::default()))
+        }
         _ => Err(format!(
             "No runtime implementation registered for '{}:{}'",
             profile.engine_id, profile.backend_id
         )),
+    }
+}
+
+fn apple_speech_model_descriptor() -> TranscriptionModelDescriptor {
+    let availability = apple_speech::availability();
+    TranscriptionModelDescriptor {
+        id: APPLE_SPEECH_MODEL_ID.into(),
+        label: "System Speech".into(),
+        description:
+            "Assets managed by macOS; installation may be required. No app-managed model download."
+                .into(),
+        download_size_bytes: None,
+        recommended_memory_bytes: None,
+        supported_languages: availability
+            .locale()
+            .into_iter()
+            .map(str::to_owned)
+            .collect(),
+        capabilities: TranscriptionCapabilities {
+            supports_streaming: true,
+            supports_batch_transcription: false,
+            supports_language_auto_detect: false,
+            supports_word_timestamps: false,
+            supports_partial_results: false,
+        },
+        audio_input: AudioInputRequirements {
+            sample_rate_hz: 16000,
+            channels: 1,
+            chunk_size_samples: 1600,
+        },
+        available_in_app: availability.is_available(),
+        availability_note: availability.reason().map(str::to_owned),
+        backends: availability
+            .locale()
+            .into_iter()
+            .map(|locale| TranscriptionRuntimeBackendDescriptor {
+                id: APPLE_SPEECH_BACKEND_ID.into(),
+                label: "SpeechAnalyzer".into(),
+                description: "Native macOS system assets".into(),
+                recommended: true,
+                available_in_app: availability.is_available(),
+                availability_note: availability.reason().map(str::to_owned),
+                assets: ModelAssetSource::SystemSpeech {
+                    locale: locale.to_owned(),
+                },
+            })
+            .collect(),
+        recommended_backend_id: APPLE_SPEECH_BACKEND_ID.into(),
     }
 }
 
@@ -614,17 +721,19 @@ fn kyutai_candle_backend(
         recommended: true,
         available_in_app: true,
         availability_note: None,
-        artifacts: vec![ModelArtifactDescriptor {
-            id: artifact_id.to_string(),
-            label: "Hugging Face".to_string(),
-            description: artifact_description.to_string(),
-            provider: "huggingface".to_string(),
-            repository: repository.to_string(),
-            revision: None,
-            file_format: "safetensors".to_string(),
-            download_size_bytes,
-            required_files: vec!["config.json".to_string(), "model.safetensors".to_string()],
-        }],
+        assets: ModelAssetSource::Files {
+            artifacts: vec![ModelArtifactDescriptor {
+                id: artifact_id.to_string(),
+                label: "Hugging Face".to_string(),
+                description: artifact_description.to_string(),
+                provider: "huggingface".to_string(),
+                repository: repository.to_string(),
+                revision: None,
+                file_format: "safetensors".to_string(),
+                download_size_bytes,
+                required_files: vec!["config.json".to_string(), "model.safetensors".to_string()],
+            }],
+        },
     }
 }
 
@@ -665,17 +774,19 @@ fn whisper_rs_backend() -> TranscriptionRuntimeBackendDescriptor {
         recommended: true,
         available_in_app: true,
         availability_note: None,
-        artifacts: vec![ModelArtifactDescriptor {
-            id: WHISPER_TURBO_GGML_ARTIFACT_ID.to_string(),
-            label: "Hugging Face".to_string(),
-            description: "GGML F16 weights for whisper-large-v3-turbo.".to_string(),
-            provider: "huggingface".to_string(),
-            repository: "ggerganov/whisper.cpp".to_string(),
-            revision: None,
-            file_format: "ggml".to_string(),
-            download_size_bytes: Some(1_620_000_000),
-            required_files: vec!["ggml-large-v3-turbo.bin".to_string()],
-        }],
+        assets: ModelAssetSource::Files {
+            artifacts: vec![ModelArtifactDescriptor {
+                id: WHISPER_TURBO_GGML_ARTIFACT_ID.to_string(),
+                label: "Hugging Face".to_string(),
+                description: "GGML F16 weights for whisper-large-v3-turbo.".to_string(),
+                provider: "huggingface".to_string(),
+                repository: "ggerganov/whisper.cpp".to_string(),
+                revision: None,
+                file_format: "ggml".to_string(),
+                download_size_bytes: Some(1_620_000_000),
+                required_files: vec!["ggml-large-v3-turbo.bin".to_string()],
+            }],
+        },
     }
 }
 
@@ -715,21 +826,24 @@ fn parakeet_ort_backend() -> TranscriptionRuntimeBackendDescriptor {
         recommended: true,
         available_in_app: true,
         availability_note: None,
-        artifacts: vec![ModelArtifactDescriptor {
-            id: PARAKEET_TDT_06B_V3_ONNX_ARTIFACT_ID.to_string(),
-            label: "Hugging Face".to_string(),
-            description: "Community ONNX export (int8) of NVIDIA parakeet-tdt-0.6b-v3.".to_string(),
-            provider: "huggingface".to_string(),
-            repository: "istupakov/parakeet-tdt-0.6b-v3-onnx".to_string(),
-            revision: None,
-            file_format: "onnx".to_string(),
-            download_size_bytes: Some(672_000_000),
-            required_files: vec![
-                "encoder-model.int8.onnx".to_string(),
-                "decoder_joint-model.int8.onnx".to_string(),
-                "vocab.txt".to_string(),
-            ],
-        }],
+        assets: ModelAssetSource::Files {
+            artifacts: vec![ModelArtifactDescriptor {
+                id: PARAKEET_TDT_06B_V3_ONNX_ARTIFACT_ID.to_string(),
+                label: "Hugging Face".to_string(),
+                description: "Community ONNX export (int8) of NVIDIA parakeet-tdt-0.6b-v3."
+                    .to_string(),
+                provider: "huggingface".to_string(),
+                repository: "istupakov/parakeet-tdt-0.6b-v3-onnx".to_string(),
+                revision: None,
+                file_format: "onnx".to_string(),
+                download_size_bytes: Some(672_000_000),
+                required_files: vec![
+                    "encoder-model.int8.onnx".to_string(),
+                    "decoder_joint-model.int8.onnx".to_string(),
+                    "vocab.txt".to_string(),
+                ],
+            }],
+        },
     }
 }
 

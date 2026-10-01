@@ -63,7 +63,11 @@ pub fn list_available_model_options(catalog: &TranscriptionCatalog) -> Vec<FlatM
                         engine_id: engine.id.clone(),
                         model_id: model.id.clone(),
                         backend_id: backend.id.clone(),
-                        label: format!("{} \u{2014} {}", engine.label, model.label),
+                        label: if engine.id == souffle_lib::engine::APPLE_SPEECH_ENGINE_ID {
+                            "__APPLE_SPEECH_SYSTEM__".into()
+                        } else {
+                            format!("{} \u{2014} {}", engine.label, model.label)
+                        },
                     })
                 })
         })
@@ -88,7 +92,13 @@ pub fn model_short_label(
         .iter()
         .find(|engine| engine.id == engine_id)
         .and_then(|engine| engine.models.iter().find(|m| m.id == model_id))
-        .map(|m| m.label.clone())
+        .map(|m| {
+            if engine_id == souffle_lib::engine::APPLE_SPEECH_ENGINE_ID {
+                "Apple Speech".into()
+            } else {
+                m.label.clone()
+            }
+        })
         .unwrap_or_default()
 }
 
@@ -190,6 +200,21 @@ pub fn populate_options(
     model_unload_timeout_minutes: u32,
     unload_timeout_options: &[u32],
 ) {
+    let files_deletable = catalog
+        .engines
+        .iter()
+        .find(|e| e.id == catalog.selected_engine_id)
+        .and_then(|e| e.models.iter().find(|m| m.id == catalog.selected_model_id))
+        .and_then(|m| {
+            m.backends
+                .iter()
+                .find(|b| b.id == catalog.selected_backend_id)
+        })
+        .is_some_and(|backend| match &backend.assets {
+            souffle_lib::engine::ModelAssetSource::Files { .. } => true,
+            souffle_lib::engine::ModelAssetSource::SystemSpeech { .. } => false,
+        });
+    window.set_settings_model_files_deletable(files_deletable);
     let options = list_available_model_options(catalog);
     let labels: Vec<slint::SharedString> =
         options.iter().map(|o| o.label.as_str().into()).collect();

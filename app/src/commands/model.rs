@@ -6,8 +6,7 @@ use crate::progress::ProgressChannel;
 
 use crate::engine::{
     TranscriptionCatalog, TranscriptionProfile, TranscriptionProfileSelection,
-    TranscriptionRuntimeStatus, resolve_transcription_profile, resolve_transcription_selection,
-    transcription_engine_catalog,
+    TranscriptionRuntimeStatus, resolve_transcription_selection, transcription_engine_catalog,
 };
 use crate::models;
 use crate::settings::AppSettings;
@@ -29,26 +28,17 @@ fn unload_loaded_model(
     Ok(())
 }
 
-fn selected_profile_from_settings(settings: &AppSettings) -> Result<TranscriptionProfile, String> {
-    resolve_transcription_profile(
-        Some(&settings.transcription_engine_id),
-        Some(&settings.transcription_model_id),
-        Some(&settings.transcription_backend_id),
-    )
-}
-
 /// Build the transcription catalogue from an already-observed Settings
 /// snapshot. UI clients that obtained Settings through their worker actor can
 /// use this without performing a second database read on the event thread.
 pub fn transcription_catalog_from_settings(
     settings: &AppSettings,
 ) -> Result<TranscriptionCatalog, String> {
-    let profile = selected_profile_from_settings(settings)?;
     Ok(TranscriptionCatalog {
         engines: transcription_engine_catalog(),
-        selected_engine_id: profile.engine_id,
-        selected_model_id: profile.model_id,
-        selected_backend_id: profile.backend_id,
+        selected_engine_id: settings.transcription_engine_id.clone(),
+        selected_model_id: settings.transcription_model_id.clone(),
+        selected_backend_id: settings.transcription_backend_id.clone(),
     })
 }
 
@@ -64,7 +54,10 @@ pub fn get_model_status(
     selection: TranscriptionProfileSelection,
 ) -> Result<TranscriptionRuntimeStatus, String> {
     let profile = resolve_transcription_selection(&selection)?;
-    let model_dir = models::model_dir(&profile);
+    let model_dir = match models::model_location(&profile)? {
+        crate::engine::ModelLocation::Files(path) => Some(path.display().to_string()),
+        crate::engine::ModelLocation::SystemSpeech { .. } => None,
+    };
 
     // Derive phase from the state machine
     let machine = state.current_machine_state()?;
@@ -73,7 +66,7 @@ pub fn get_model_status(
     Ok(TranscriptionRuntimeStatus {
         profile: profile.clone(),
         phase,
-        model_dir: model_dir.display().to_string(),
+        model_dir,
     })
 }
 
@@ -240,7 +233,7 @@ pub fn load_model(
     selection: TranscriptionProfileSelection,
 ) -> Result<(), String> {
     let profile = resolve_transcription_selection(&selection)?;
-    let model_dir = models::model_dir(&profile);
+    let model_dir = models::model_location(&profile)?;
     if !models::model_exists(&profile) {
         return Err("Model not downloaded yet".into());
     }
@@ -283,7 +276,7 @@ pub fn load_model(
         })?;
     }
 
-    info!(path = %model_dir.display(), "Loading model");
+    info!(location = ?model_dir, "Loading model");
     if let Err(e) = state.engine_actor.load_model(profile, model_dir) {
         state.apply_transition(StateAction::Fail { message: e.clone() })?;
         return Err(e);
@@ -301,6 +294,12 @@ pub fn delete_model(
     selection: TranscriptionProfileSelection,
 ) -> Result<(), String> {
     let profile = resolve_transcription_selection(&selection)?;
+
+    if !models::can_delete_model_files(&profile) {
+        return Err(
+            "Apple Speech assets are managed by macOS and cannot be deleted by Soufflé.".into(),
+        );
+    }
 
     let machine = state.current_machine_state()?;
     if model_delete_blocked_by_transition(&machine) {
