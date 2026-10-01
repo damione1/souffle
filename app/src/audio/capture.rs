@@ -273,7 +273,7 @@ impl AudioQueueBudget {
 
     fn reserve(self: &Arc<Self>, lanes: usize) -> Option<Arc<AudioQueuePermit>> {
         self.reserved
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |used| {
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |used| {
                 used.checked_add(lanes)
                     .filter(|next| *next <= self.capacity)
             })
