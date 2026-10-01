@@ -7230,11 +7230,14 @@ name = "souffle-slint"
 version = "0.0.0"
 dependencies = [
  "arboard",
+ "block2 0.6.2",
  "chrono",
  "cpal",
  "crossbeam-channel",
  "i-slint-backend-testing",
  "lucide-slint",
+ "objc2 0.6.4",
+ "objc2-app-kit 0.3.2",
  "serde_json",
  "slint",
  "slint-build",

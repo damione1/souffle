@@ -42,7 +42,7 @@ const MAX_FEEDBACK_THREADS: usize = 4;
 /// never overshoots under concurrent callers.
 fn try_reserve_slot(in_flight: &AtomicUsize, max: usize) -> bool {
     in_flight
-        .fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
+        .try_update(Ordering::AcqRel, Ordering::Acquire, |current| {
             (current < max).then_some(current + 1)
         })
         .is_ok()

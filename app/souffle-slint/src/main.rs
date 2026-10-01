@@ -10,6 +10,7 @@ mod audio_ui;
 mod data_ui;
 mod edit_learning;
 mod ia_ui;
+mod keyboard_layout;
 mod lists_ui;
 mod markdown;
 mod meeting_idle_ui;
@@ -26,6 +27,7 @@ mod settings_log;
 mod settings_ui;
 mod settings_values;
 mod shortcut_capture;
+mod shortcut_label;
 mod summary;
 mod timeline;
 mod transcript;
@@ -92,16 +94,21 @@ struct TranscriptState {
     mounted_end: usize,
 }
 
-// Port of src/lib/utils/format.ts::formatShortcutLabel.
-fn format_shortcut_label(shortcut: &str) -> String {
-    if shortcut.is_empty() {
-        return String::new();
+/// What the shortcut recorder says about a refused key press (#360).
+fn rejection_notice(rejection: shortcut_capture::Rejection) -> ShortcutNotice {
+    match rejection {
+        shortcut_capture::Rejection::MissingModifier => ShortcutNotice::MissingModifier,
+        shortcut_capture::Rejection::UnusableKey => ShortcutNotice::UnusableKey,
     }
-    shortcut
-        .replace("CommandOrControl", "\u{2318}")
-        .replace("Shift", "\u{21e7}")
-        .replace("Alt", "\u{2325}")
-        .replace('+', " ")
+}
+
+/// What the shortcut recorder says once a binding is saved.
+fn saved_notice(swallows_character: bool) -> ShortcutNotice {
+    if swallows_character {
+        ShortcutNotice::TypesCharacter
+    } else {
+        ShortcutNotice::None
+    }
 }
 
 /// Builds and persists one shortcut candidate without exposing rejected
@@ -2863,8 +2870,10 @@ fn show_onboarding_step(
         }
         OnboardingStep::Shortcut => {
             let guard = ob.borrow();
-            window.set_onboarding_toggle_shortcut_label(
-                format_shortcut_label(&guard.toggle_shortcut).into(),
+            shortcut_label::project(
+                window,
+                shortcut_label::LabelSlot::OnboardingToggle,
+                &guard.toggle_shortcut,
             );
             window.set_onboarding_accessibility_granted(
                 permissions.status().accessibility == PermState::Granted,
@@ -2969,42 +2978,52 @@ fn wire_onboarding_callbacks(
         if let Some(window) = weak.upgrade() {
             window.set_onboarding_shortcut_recording(true);
             window.set_onboarding_shortcut_error("".into());
+            window.set_onboarding_shortcut_notice(ShortcutNotice::None);
         }
     });
 
     let weak = window.as_weak();
     let handle = tauri_handle.clone();
     let ob_for_capture = ob.clone();
-    window.on_onboarding_shortcut_captured(move |text, ctrl, shift, alt, meta| {
+    window.on_onboarding_shortcut_captured(move |_text, ctrl, shift, alt, meta| {
         let Some(window) = weak.upgrade() else {
             return;
         };
-        let modifiers = shortcut_capture::Modifiers { control: ctrl, shift, alt, meta };
-        if let Some(name) = shortcut_capture::modifier_only_shortcut(&text) {
-            ob_for_capture.borrow_mut().pending_modifier = Some(name.to_string());
-            return;
-        }
-        ob_for_capture.borrow_mut().pending_modifier = None;
-        if shortcut_capture::missing_modifier(&text, modifiers) {
-            window.set_onboarding_shortcut_error(
-                "Le raccourci doit inclure une touche de modification (Cmd, Ctrl, Maj, Alt) ou être une touche de fonction.".into(),
-            );
-            return;
-        }
-        let Some(value) = shortcut_capture::format_combo(&text, modifiers) else {
+        let Some(key) = shortcut_capture::take_pressed_key() else {
             return;
         };
-        apply_onboarding_shortcut(&handle, &window, &ob_for_capture, value);
+        let modifiers = shortcut_capture::Modifiers::from_slint(ctrl, shift, alt, meta);
+        match shortcut_capture::classify(key, modifiers) {
+            shortcut_capture::Capture::Modifier(name) => {
+                ob_for_capture.borrow_mut().pending_modifier = Some(name.to_string());
+            }
+            shortcut_capture::Capture::Rejected(rejection) => {
+                ob_for_capture.borrow_mut().pending_modifier = None;
+                window.set_onboarding_shortcut_error("".into());
+                window.set_onboarding_shortcut_notice(rejection_notice(rejection));
+            }
+            shortcut_capture::Capture::Save {
+                accelerator,
+                swallows_character,
+            } => {
+                ob_for_capture.borrow_mut().pending_modifier = None;
+                if apply_onboarding_shortcut(&handle, &window, &ob_for_capture, accelerator) {
+                    window.set_onboarding_shortcut_notice(saved_notice(swallows_character));
+                }
+            }
+        }
     });
 
     let weak = window.as_weak();
     let handle = tauri_handle.clone();
     let ob_for_release = ob.clone();
-    window.on_onboarding_shortcut_released(move |text, _ctrl, _shift, _alt, _meta| {
+    window.on_onboarding_shortcut_released(move |_text, _ctrl, _shift, _alt, _meta| {
         let Some(window) = weak.upgrade() else {
             return;
         };
-        let Some(name) = shortcut_capture::modifier_only_shortcut(&text) else {
+        let Some(name) =
+            shortcut_capture::take_pressed_key().and_then(shortcut_capture::released_modifier)
+        else {
             return;
         };
         let mut pending = ob_for_release.borrow_mut();
@@ -3033,6 +3052,7 @@ fn wire_onboarding_callbacks(
         if let Some(window) = weak.upgrade() {
             window.set_onboarding_shortcut_recording(false);
             window.set_onboarding_shortcut_error("".into());
+            window.set_onboarding_shortcut_notice(ShortcutNotice::None);
         }
     });
 
@@ -3261,12 +3281,13 @@ fn advance_onboarding_step(
     permissions.sync_activity();
 }
 
+/// Saves the onboarding toggle binding; true when it was saved.
 fn apply_onboarding_shortcut(
     handle: &AppHandle,
     window: &MainWindow,
     ob: &Rc<RefCell<OnboardingState>>,
     value: String,
-) {
+) -> bool {
     window.set_onboarding_shortcut_recording(false);
     ob.borrow_mut().toggle_shortcut = value.clone();
     let state = Arc::clone(handle);
@@ -3276,12 +3297,19 @@ fn apply_onboarding_shortcut(
     match souffle_lib::commands::save_shortcuts(state, shortcuts) {
         Ok(()) => {
             window.set_onboarding_shortcut_error("".into());
+            window.set_onboarding_shortcut_notice(ShortcutNotice::None);
             let guard = ob.borrow();
-            window.set_onboarding_toggle_shortcut_label(
-                format_shortcut_label(&guard.toggle_shortcut).into(),
+            shortcut_label::project(
+                window,
+                shortcut_label::LabelSlot::OnboardingToggle,
+                &guard.toggle_shortcut,
             );
+            true
         }
-        Err(e) => window.set_onboarding_shortcut_error(e.into()),
+        Err(e) => {
+            window.set_onboarding_shortcut_error(e.into());
+            false
+        }
     }
 }
 
@@ -4860,6 +4888,7 @@ fn wire_callbacks(
                     if let Some(window) = weak.upgrade() {
                         window.set_settings_recording_field(ShortcutField::None);
                         window.set_settings_shortcut_error("".into());
+                        window.set_settings_shortcut_notice(ShortcutNotice::None);
                         refresh_upcoming(&window, &handle, upcoming);
                     }
                 }
@@ -4923,13 +4952,14 @@ fn wire_callbacks(
     // saves the whole thing (this also re-registers the global shortcut and
     // syncs the native modifier tap), then commits the cache/projection only
     // on success. The recording UI state is cleared regardless of outcome.
+    // True when the binding was saved.
     fn apply_shortcut(
         handle: &AppHandle,
         shortcuts_state: &Rc<RefCell<Option<ShortcutSettings>>>,
         window: &MainWindow,
         field: ShortcutField,
         value: String,
-    ) {
+    ) -> bool {
         window.set_settings_recording_field(ShortcutField::None);
         let state = Arc::clone(handle);
         match persist_shortcut_candidate(shortcuts_state, field, value, move |candidate| {
@@ -4937,13 +4967,18 @@ fn wire_callbacks(
         }) {
             Ok(Some(shortcuts)) => {
                 window.set_settings_shortcut_error("".into());
+                window.set_settings_shortcut_notice(ShortcutNotice::None);
                 let natives = souffle_lib::commands::get_native_shortcuts();
                 let tap_installed =
                     souffle_lib::commands::get_modifier_tap_status().map(|s| s.installed);
                 settings_ui::populate_shortcuts(window, &shortcuts, &natives, tap_installed);
+                true
             }
-            Ok(None) => {}
-            Err(e) => window.set_settings_shortcut_error(e.into()),
+            Ok(None) => false,
+            Err(e) => {
+                window.set_settings_shortcut_error(e.into());
+                false
+            }
         }
     }
 
@@ -6591,6 +6626,7 @@ fn wire_callbacks(
         if let Some(window) = weak.upgrade() {
             window.set_settings_recording_field(field);
             window.set_settings_shortcut_error("".into());
+            window.set_settings_shortcut_notice(ShortcutNotice::None);
         }
     });
 
@@ -6598,45 +6634,56 @@ fn wire_callbacks(
     let handle = tauri_handle.clone();
     let shortcuts_state_for_capture = shortcuts_state.clone();
     let pending_modifier_for_capture = pending_modifier.clone();
-    window.on_settings_shortcut_captured(move |field, text, ctrl, shift, alt, meta| {
+    window.on_settings_shortcut_captured(move |field, _text, ctrl, shift, alt, meta| {
         let Some(window) = weak.upgrade() else {
             return;
         };
-        let modifiers = shortcut_capture::Modifiers {
-            control: ctrl,
-            shift,
-            alt,
-            meta,
-        };
-        if let Some(name) = shortcut_capture::modifier_only_shortcut(&text) {
-            // Wait for the matching key-released event (see
-            // `on_settings_shortcut_released`) instead of committing now -
-            // a real key pressed while this is still held wins instead.
-            *pending_modifier_for_capture.borrow_mut() = Some(name.to_string());
-            return;
-        }
-        *pending_modifier_for_capture.borrow_mut() = None;
-        if shortcut_capture::missing_modifier(&text, modifiers) {
-            window.set_settings_shortcut_error(
-                "Le raccourci doit inclure une touche de modification (Cmd, Ctrl, Maj, Alt) ou être une touche de fonction.".into(),
-            );
-            return;
-        }
-        let Some(value) = shortcut_capture::format_combo(&text, modifiers) else {
+        let Some(key) = shortcut_capture::take_pressed_key() else {
             return;
         };
-        apply_shortcut(&handle, &shortcuts_state_for_capture, &window, field, value);
+        let modifiers = shortcut_capture::Modifiers::from_slint(ctrl, shift, alt, meta);
+        match shortcut_capture::classify(key, modifiers) {
+            shortcut_capture::Capture::Modifier(name) => {
+                // Wait for the matching key-released event (see
+                // `on_settings_shortcut_released`) instead of committing now -
+                // a real key pressed while this is still held wins instead.
+                *pending_modifier_for_capture.borrow_mut() = Some(name.to_string());
+            }
+            shortcut_capture::Capture::Rejected(rejection) => {
+                // Recording stays on so the user can press another key.
+                *pending_modifier_for_capture.borrow_mut() = None;
+                window.set_settings_shortcut_error("".into());
+                window.set_settings_shortcut_notice(rejection_notice(rejection));
+            }
+            shortcut_capture::Capture::Save {
+                accelerator,
+                swallows_character,
+            } => {
+                *pending_modifier_for_capture.borrow_mut() = None;
+                if apply_shortcut(
+                    &handle,
+                    &shortcuts_state_for_capture,
+                    &window,
+                    field,
+                    accelerator,
+                ) {
+                    window.set_settings_shortcut_notice(saved_notice(swallows_character));
+                }
+            }
+        }
     });
 
     let weak = window.as_weak();
     let handle = tauri_handle.clone();
     let shortcuts_state_for_release = shortcuts_state.clone();
     let pending_modifier_for_release = pending_modifier.clone();
-    window.on_settings_shortcut_released(move |field, text, _ctrl, _shift, _alt, _meta| {
+    window.on_settings_shortcut_released(move |field, _text, _ctrl, _shift, _alt, _meta| {
         let Some(window) = weak.upgrade() else {
             return;
         };
-        let Some(name) = shortcut_capture::modifier_only_shortcut(&text) else {
+        let Some(name) =
+            shortcut_capture::take_pressed_key().and_then(shortcut_capture::released_modifier)
+        else {
             return;
         };
         let mut pending = pending_modifier_for_release.borrow_mut();
@@ -6679,6 +6726,7 @@ fn wire_callbacks(
         if let Some(window) = weak.upgrade() {
             window.set_settings_recording_field(ShortcutField::None);
             window.set_settings_shortcut_error("".into());
+            window.set_settings_shortcut_notice(ShortcutNotice::None);
         }
     });
 
@@ -7129,8 +7177,10 @@ fn main() {
                         let dark =
                             project_startup_settings(&window, &startup.settings, &onboarding_state);
                         souffle_lib::native::appearance::apply_resolved(dark);
-                        window.set_dictation_shortcut(
-                            format_shortcut_label(&startup.shortcuts.toggle).into(),
+                        shortcut_label::project(
+                            &window,
+                            shortcut_label::LabelSlot::DictationHint,
+                            &startup.shortcuts.toggle,
                         );
                         let unload_timeout_options =
                             souffle_lib::settings::SettingsOptions::current()
@@ -7261,7 +7311,13 @@ fn wire_window_activity(
 
     let weak_activity = Rc::downgrade(activity);
     let weak_permissions = Rc::downgrade(permissions);
+    let weak_window = window.as_weak();
     window.window().on_winit_window_event(move |_, event| {
+        // #360: the shortcut recorder reads the physical key of this event,
+        // which Slint's `KeyEvent` does not carry.
+        if let WindowEvent::KeyboardInput { event, .. } = event {
+            shortcut_capture::observe_key_event(event);
+        }
         if let WindowEvent::Occluded(occluded) = event
             && let Some(activity) = weak_activity.upgrade()
         {
@@ -7272,9 +7328,60 @@ fn wire_window_activity(
         {
             permissions.refresh();
         }
+        // #360: a keyboard layout switched while the app was in the
+        // background changes what the shortcut labels should say.
+        if matches!(event, WindowEvent::Focused(true))
+            && let Some(window) = weak_window.upgrade()
+        {
+            shortcut_label::refresh(&window);
+        }
         EventResult::Propagate
     });
     WINDOW_ACTIVITY.with(|slot| *slot.borrow_mut() = Some(Rc::clone(activity)));
+    wire_unusable_key_monitor(window);
+}
+
+/// Caps Lock and Fn/Globe only produce a `flagsChanged` event that winit
+/// does not turn into a key press, so the recorder's `FocusScope` never
+/// hears about them and pressing one used to do nothing. An AppKit local
+/// monitor (this app's own events, no permission involved) sees that event
+/// first and shows "can't be used" while a recorder is listening (#360).
+/// The event itself is passed on untouched.
+fn wire_unusable_key_monitor(window: &MainWindow) {
+    use std::ptr::NonNull;
+
+    use objc2_app_kit::{NSEvent, NSEventMask};
+
+    let weak = window.as_weak();
+    let handler = block2::RcBlock::new(move |event: NonNull<NSEvent>| -> *mut NSEvent {
+        // SAFETY: AppKit hands the monitor a valid event for the duration of
+        // the call.
+        let key_code = unsafe { event.as_ref() }.keyCode();
+        if shortcut_capture::is_unusable_flags_key(key_code)
+            && let Some(window) = weak.upgrade()
+        {
+            if window.get_settings_recording_field() != ShortcutField::None {
+                window.set_settings_shortcut_error("".into());
+                window.set_settings_shortcut_notice(ShortcutNotice::UnusableKey);
+            }
+            if window.get_onboarding_shortcut_recording() {
+                window.set_onboarding_shortcut_error("".into());
+                window.set_onboarding_shortcut_notice(ShortcutNotice::UnusableKey);
+            }
+        }
+        event.as_ptr()
+    });
+    // SAFETY: the block takes one `NSEvent*` and returns that same valid
+    // event, as `addLocalMonitorForEventsMatchingMask:handler:` requires.
+    // Local monitors run on the main thread, inside `-[NSApplication
+    // sendEvent:]`, so the Slint window is only touched from its own
+    // thread. AppKit keeps the monitor (and its copy of the block) until
+    // `removeMonitor:`; it is meant to live as long as the app, so the
+    // returned token is deliberately leaked, like `power.rs`'s observers.
+    let monitor = unsafe {
+        NSEvent::addLocalMonitorForEventsMatchingMask_handler(NSEventMask::FlagsChanged, &handler)
+    };
+    std::mem::forget(monitor);
 }
 
 /// Shows the main window and marks it visible: winit does not reliably send

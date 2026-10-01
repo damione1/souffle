@@ -16,7 +16,7 @@ import { TimelineDayGroup, UpcomingEvent } from "components/timeline_section.sli
 import { TranscriptBlock } from "components/transcript_section.slint";
 import { TranscriptWord } from "components/transcript_words.slint";
 import { StructuredActionItem } from "components/summary_section.slint";
-import { RecordingMode, LiveSystemAudio, MicStall, MeetingIdleBanner, WakeResumeNotice,SpeakerRole, TimelineFilter, TimelineKind, NotesSaveState, ModelPhase, TranscriptionPhase, UpcomingPhase, SettingsTab, SettingsInteraction, AppTheme, AppLocale, PasteMethod, MeetingLanguage, LogLevel, AudioRetention, AccessState, PermissionKind, ShortcutField, SummaryProvider, AppleIntelligenceUnavailableReason, OnboardingStep, UpdatePhase, InstallBlockReason, MeetingExportFormat } from "types.slint";
+import { RecordingMode, LiveSystemAudio, MicStall, MeetingIdleBanner, WakeResumeNotice,SpeakerRole, TimelineFilter, TimelineKind, NotesSaveState, ModelPhase, TranscriptionPhase, UpcomingPhase, SettingsTab, SettingsInteraction, AppTheme, AppLocale, PasteMethod, MeetingLanguage, LogLevel, AudioRetention, AccessState, PermissionKind, ShortcutField, ShortcutNotice, SummaryProvider, AppleIntelligenceUnavailableReason, OnboardingStep, UpdatePhase, InstallBlockReason, MeetingExportFormat } from "types.slint";
 export { SettingsTab, SettingsInteraction, AppTheme, AppLocale, PasteMethod, MeetingLanguage, LogLevel, AudioRetention, AccessState, PermissionKind, ShortcutField, SummaryProvider, AppleIntelligenceUnavailableReason, SpeakerRole }
 import { Theme } from "theme.slint";
 // Re-exported (not just imported) so Slint's codegen generates a Rust
@@ -227,6 +227,7 @@ export component MainWindow inherits Window {
     in property <bool> settings-native-tap-warning-visible;
     in-out property <ShortcutField> settings-recording-field: ShortcutField.none;
     in-out property <string> settings-shortcut-error: "";
+    in-out property <ShortcutNotice> settings-shortcut-notice: ShortcutNotice.none;
     in property <string> settings-save-error;
     in property <bool> settings-save-error-unavailable;
     in property <string> settings-draft-save-error;
@@ -525,6 +526,7 @@ export component MainWindow inherits Window {
     in property <string> onboarding-toggle-shortcut-label;
     in-out property <bool> onboarding-shortcut-recording: false;
     in-out property <string> onboarding-shortcut-error: "";
+    in-out property <ShortcutNotice> onboarding-shortcut-notice: ShortcutNotice.none;
     in property <bool> onboarding-accessibility-granted;
     in property <bool> onboarding-busy;
     in property <bool> onboarding-continue-enabled: true;
@@ -773,6 +775,7 @@ export component MainWindow inherits Window {
         native-tap-warning-visible: root.settings-native-tap-warning-visible;
         recording-field <=> root.settings-recording-field;
         shortcut-error <=> root.settings-shortcut-error;
+        shortcut-notice: root.settings-shortcut-notice;
         save-error: root.settings-save-error;
         save-error-unavailable: root.settings-save-error-unavailable;
         draft-save-error: root.settings-draft-save-error;
@@ -1012,6 +1015,7 @@ export component MainWindow inherits Window {
         toggle-shortcut-label: root.onboarding-toggle-shortcut-label;
         shortcut-recording: root.onboarding-shortcut-recording;
         shortcut-error: root.onboarding-shortcut-error;
+        shortcut-notice: root.onboarding-shortcut-notice;
         accessibility-granted: root.onboarding-accessibility-granted;
         busy: root.onboarding-busy;
         continue-enabled: root.onboarding-continue-enabled;
