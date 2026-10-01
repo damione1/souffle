@@ -19,8 +19,9 @@
 //!   spacer-before/spacer-after paddings standing in for everything else.
 
 use crate::transcript::visible_window;
-use crate::{DictionaryRow, MainWindow, SnippetRow};
+use crate::{DictionaryRow, DictionarySuggestionRow, MainWindow, SnippetRow};
 use slint::{ComponentHandle, Model, VecModel};
+use souffle_lib::db::dictionary::DictionarySuggestion;
 use souffle_lib::db::snippets::SnippetEntry;
 use souffle_lib::filter::DictionaryEntry;
 use std::cell::Cell;
@@ -75,6 +76,9 @@ pub(crate) struct SettingsListModels {
     snippets_view: Rc<VecModel<SnippetRow>>,
     dictionary_mounted: Cell<(usize, usize)>,
     snippets_mounted: Cell<(usize, usize)>,
+    suggestions: Rc<VecModel<DictionarySuggestionRow>>,
+    suggestions_view: Rc<VecModel<DictionarySuggestionRow>>,
+    suggestions_mounted: Cell<(usize, usize)>,
 }
 
 impl SettingsListModels {
@@ -87,9 +91,13 @@ impl SettingsListModels {
             snippets_view: Rc::new(VecModel::default()),
             dictionary_mounted: Cell::new((usize::MAX, usize::MAX)),
             snippets_mounted: Cell::new((usize::MAX, usize::MAX)),
+            suggestions: Rc::new(VecModel::default()),
+            suggestions_view: Rc::new(VecModel::default()),
+            suggestions_mounted: Cell::new((usize::MAX, usize::MAX)),
         });
         window.set_settings_dictionary_entries(models.dictionary_view.clone().into());
         window.set_settings_snippets(models.snippets_view.clone().into());
+        window.set_settings_dictionary_suggestions(models.suggestions_view.clone().into());
 
         // Slint's expression language can't do the windowing math, so Rust
         // re-windows whenever the Flickable scroll position actually changes
@@ -112,6 +120,13 @@ impl SettingsListModels {
                 models.update_snippets_window(&window, false);
             }
         });
+        let weak = window.as_weak();
+        let models_weak = Rc::downgrade(&models);
+        window.on_settings_dictionary_suggestion_scroll_changed(move |_| {
+            if let (Some(window), Some(models)) = (weak.upgrade(), models_weak.upgrade()) {
+                models.update_suggestions_window(&window, false);
+            }
+        });
         models
     }
 
@@ -121,6 +136,45 @@ impl SettingsListModels {
         if let Some(window) = self.window.upgrade() {
             self.update_dictionary_window(&window, true);
         }
+    }
+
+    pub(crate) fn populate_suggestions(&self, suggestions: &[DictionarySuggestion]) {
+        let rows = suggestions
+            .iter()
+            .map(|suggestion| DictionarySuggestionRow {
+                id: suggestion.id as i32,
+                misspelling: suggestion.misspelling.as_str().into(),
+                term: suggestion.term.as_str().into(),
+            })
+            .collect();
+        sync_rows_by_id(&self.suggestions, rows, |row| row.id);
+        if let Some(window) = self.window.upgrade() {
+            self.update_suggestions_window(&window, true);
+        }
+    }
+
+    fn update_suggestions_window(&self, window: &MainWindow, force: bool) {
+        let offsets = cumulative_offsets(&vec![64.0; self.suggestions.row_count()]);
+        let win = visible_window(
+            &offsets,
+            -window.get_settings_dictionary_suggestion_scroll_top_px(),
+            240.0,
+            480.0,
+        );
+        if !force && self.suggestions_mounted.get() == (win.start, win.end) {
+            return;
+        }
+        self.suggestions_mounted.set((win.start, win.end));
+        let rows = (win.start..win.end)
+            .filter_map(|index| self.suggestions.row_data(index))
+            .collect();
+        sync_rows_by_id(&self.suggestions_view, rows, |row| row.id);
+        window.set_settings_dictionary_suggestion_count(self.suggestions.row_count() as i32);
+        window.set_settings_dictionary_suggestion_content_height(
+            offsets.last().copied().unwrap_or(0.0),
+        );
+        window.set_settings_dictionary_suggestion_spacer_before(win.spacer_before);
+        window.set_settings_dictionary_suggestion_spacer_after(win.spacer_after);
     }
 
     pub(crate) fn populate_snippets(&self, entries: &[SnippetEntry], editing_id: Option<i64>) {
@@ -398,6 +452,17 @@ mod tests {
             .collect();
         models.populate_dictionary(&dictionary);
         models.populate_snippets(&snippets, None);
+        let suggestions = (1..=500)
+            .map(|id| DictionarySuggestion {
+                id,
+                misspelling: format!("misspelling {id}"),
+                term: format!("term {id}"),
+            })
+            .collect::<Vec<_>>();
+        models.populate_suggestions(&suggestions);
+        assert_eq!(models.suggestions_view.row_data(0).unwrap().id, 1);
+        assert_eq!(window.get_settings_dictionary_suggestion_count(), 500);
+        assert!(models.suggestions_view.row_count() < 25);
 
         let first_dictionary_id = || models.dictionary_view.row_data(0).map(|row| row.id);
         let first_snippet_id = || models.snippets_view.row_data(0).map(|row| row.id);
@@ -410,6 +475,7 @@ mod tests {
         // the middle of their content.
         window.set_settings_dictionary_scroll_top(-250.0 * DICTIONARY_ROW_HEIGHT_PX);
         window.set_settings_snippets_scroll_top(-250.0 * SNIPPET_ROW_HEIGHT_PX);
+        window.set_settings_dictionary_suggestion_scroll_top(-250.0 * 64.0);
         slint::platform::update_timers_and_animations();
 
         let dictionary_start = first_dictionary_id().expect("dictionary slice mounted");
@@ -426,6 +492,9 @@ mod tests {
         assert!(window.get_settings_snippets_spacer_before() > 0.0);
         assert!(models.dictionary_view.row_count() < 50);
         assert!(models.snippets_view.row_count() < 50);
+        assert!(models.suggestions_view.row_data(0).unwrap().id > 200);
+        assert!(models.suggestions_view.row_count() < 25);
+        assert!(window.get_settings_dictionary_suggestion_spacer_before() > 0.0);
 
         // Back to the top re-windows again.
         window.set_settings_dictionary_scroll_top(0.0);

@@ -12,13 +12,13 @@ use serde::{Deserialize, Serialize};
 
 pub mod paragraphs;
 
-/// Schema version 16: `meetings.system_audio` holds what the system-audio
-/// leg did over the recording, so a mic-only meeting still says why.
+/// Schema version 17 adds the local dictionary suggestion queue. Meeting
+/// and dictation columns consumed by the read-only sidecar stay compatible.
 ///
 /// Both the writer (`db::schema` in the app) and the reader (`souffle-mcp`)
 /// build against this number. The sidecar refuses to serve a database whose
 /// stored version is higher, because the columns it reads may have moved.
-pub const SCHEMA_VERSION: i64 = 16;
+pub const SCHEMA_VERSION: i64 = 17;
 
 /// Who produced a segment in a meeting: the microphone is the local user
 /// (`Me`), system audio is everyone else (`Them`). `None` = single-stream

@@ -212,6 +212,18 @@ impl Database {
                     .map_err(|e| format!("Update schema version v16: {e}"))?;
             }
 
+            if current_version < 17 {
+                let tx = conn
+                    .transaction()
+                    .map_err(|e| format!("Begin v17 migration: {e}"))?;
+                tx.execute_batch(schema::CREATE_DICTIONARY_SUGGESTIONS)
+                    .map_err(|e| format!("Schema migration v17 (dictionary suggestions): {e}"))?;
+                tx.execute("UPDATE schema_version SET version = 17", [])
+                    .map_err(|e| format!("Update schema version v17: {e}"))?;
+                tx.commit()
+                    .map_err(|e| format!("Commit v17 migration: {e}"))?;
+            }
+
             info!("Schema migration complete");
         }
 

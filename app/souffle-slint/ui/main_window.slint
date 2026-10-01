@@ -10,13 +10,13 @@ import { UpdateAvailableDialog } from "components/onboarding/update_available_di
 import { MarkdownBlock } from "components/onboarding/markdown_block.slint";
 import { CalendarRow } from "components/settings/calendar_section.slint";
 import { MicrophoneRow } from "components/settings/microphone_section.slint";
-import { DictionaryRow } from "components/settings/dictionary_section.slint";
+import { DictionaryRow, DictionarySuggestionRow, DictionaryLearningOption } from "components/settings/dictionary_section.slint";
 import { SnippetRow } from "components/settings/snippets_section.slint";
 import { TimelineDayGroup, UpcomingEvent } from "components/timeline_section.slint";
 import { TranscriptBlock } from "components/transcript_section.slint";
 import { TranscriptWord } from "components/transcript_words.slint";
 import { StructuredActionItem } from "components/summary_section.slint";
-import { RecordingMode, LiveSystemAudio, MicStall, MeetingIdleBanner, WakeResumeNotice,SpeakerRole, TimelineFilter, TimelineKind, NotesSaveState, ModelPhase, TranscriptionPhase, UpcomingPhase, SettingsTab, SettingsInteraction, AppTheme, AppLocale, PasteMethod, MeetingLanguage, LogLevel, AudioRetention, AccessState, PermissionKind, ShortcutField, SummaryProvider, AppleIntelligenceUnavailableReason, OnboardingStep, UpdatePhase, InstallBlockReason, MeetingExportFormat } from "types.slint";
+import { RecordingMode, LiveSystemAudio, MicStall, MeetingIdleBanner, WakeResumeNotice,SpeakerRole, TimelineFilter, TimelineKind, NotesSaveState, ModelPhase, TranscriptionPhase, UpcomingPhase, SettingsTab, SettingsInteraction, AppTheme, AppLocale, PasteMethod, MeetingLanguage, LogLevel, AudioRetention, AccessState, PermissionKind, ShortcutField, SummaryProvider, AppleIntelligenceUnavailableReason, OnboardingStep, UpdatePhase, InstallBlockReason, MeetingExportFormat, DictionaryLearningMode } from "types.slint";
 export { SettingsTab, SettingsInteraction, AppTheme, AppLocale, PasteMethod, MeetingLanguage, LogLevel, AudioRetention, AccessState, PermissionKind, ShortcutField, SummaryProvider, AppleIntelligenceUnavailableReason, SpeakerRole }
 import { Theme } from "theme.slint";
 // Re-exported (not just imported) so Slint's codegen generates a Rust
@@ -331,7 +331,21 @@ export component MainWindow inherits Window {
     in property <string> settings-unload-timeout-label;
     in property <string> settings-model-error-message;
     in property <string> settings-model-delete-error;
-    in property <bool> settings-dictation-learn-from-edit;
+    in property <DictionaryLearningMode> settings-dictionary-learning-mode;
+    in property <[DictionaryLearningOption]> settings-dictionary-learning-options;
+    in property <[DictionarySuggestionRow]> settings-dictionary-suggestions;
+    in property <int> settings-dictionary-suggestion-count;
+    in property <float> settings-dictionary-suggestion-content-height;
+    in property <float> settings-dictionary-suggestion-spacer-before;
+    in property <float> settings-dictionary-suggestion-spacer-after;
+    in-out property <length> settings-dictionary-suggestion-scroll-top;
+    out property <float> settings-dictionary-suggestion-scroll-top-px: root.settings-dictionary-suggestion-scroll-top / 1px;
+    in property <string> settings-dictionary-suggestion-error;
+    in property <bool> settings-dictionary-suggestion-busy;
+    callback settings-dictionary-suggestion-scroll-changed(float);
+    changed settings-dictionary-suggestion-scroll-top => {
+        root.settings-dictionary-suggestion-scroll-changed(self.settings-dictionary-suggestion-scroll-top / 1px);
+    }
     // Windowed slice of the dictionary, not the full list (SOU-229) - same
     // spacer/scroll-mirror plumbing as `meeting-detail-transcript-*` above:
     // `lists_ui.rs` reads the `-px` mirror on `settings-dictionary-scroll-changed`
@@ -448,7 +462,9 @@ export component MainWindow inherits Window {
     callback settings-model-changed(string);
     callback settings-unload-timeout-changed(string);
     callback settings-delete-model-requested();
-    callback settings-dictation-learn-from-edit-changed(bool);
+    callback settings-dictionary-learning-mode-changed(DictionaryLearningMode);
+    callback settings-dictionary-suggestion-accept-requested(int);
+    callback settings-dictionary-suggestion-dismiss-requested(int);
     callback settings-dictionary-add-requested(string, string, string);
     callback settings-dictionary-delete-requested(int);
     callback settings-snippet-add-requested(string, string);
@@ -870,7 +886,16 @@ export component MainWindow inherits Window {
         unload-timeout-label: root.settings-unload-timeout-label;
         model-error-message: root.settings-model-error-message;
         model-delete-error: root.settings-model-delete-error;
-        dictation-learn-from-edit: root.settings-dictation-learn-from-edit;
+        dictionary-learning-mode: root.settings-dictionary-learning-mode;
+        dictionary-learning-options: root.settings-dictionary-learning-options;
+        dictionary-suggestions: root.settings-dictionary-suggestions;
+        dictionary-suggestion-count: root.settings-dictionary-suggestion-count;
+        dictionary-suggestion-content-height: root.settings-dictionary-suggestion-content-height;
+        dictionary-suggestion-spacer-before: root.settings-dictionary-suggestion-spacer-before;
+        dictionary-suggestion-spacer-after: root.settings-dictionary-suggestion-spacer-after;
+        dictionary-suggestion-scroll-top <=> root.settings-dictionary-suggestion-scroll-top;
+        dictionary-suggestion-error: root.settings-dictionary-suggestion-error;
+        dictionary-suggestion-busy: root.settings-dictionary-suggestion-busy;
         dictionary-entries: root.settings-dictionary-entries;
         dictionary-entry-count: root.settings-dictionary-count;
         dictionary-list-content-height: root.settings-dictionary-content-height;
@@ -973,7 +998,9 @@ export component MainWindow inherits Window {
         model-changed(value) => { root.settings-model-changed(value); }
         unload-timeout-changed(value) => { root.settings-unload-timeout-changed(value); }
         delete-model-requested => { root.settings-delete-model-requested(); }
-        dictation-learn-from-edit-changed(value) => { root.settings-dictation-learn-from-edit-changed(value); }
+        dictionary-learning-mode-changed(value) => { root.settings-dictionary-learning-mode-changed(value); }
+        dictionary-suggestion-accept-requested(id) => { root.settings-dictionary-suggestion-accept-requested(id); }
+        dictionary-suggestion-dismiss-requested(id) => { root.settings-dictionary-suggestion-dismiss-requested(id); }
         dictionary-add-requested(term, pronunciation, category) => { root.settings-dictionary-add-requested(term, pronunciation, category); }
         dictionary-delete-requested(id) => { root.settings-dictionary-delete-requested(id); }
         snippet-add-requested(trigger, expansion) => { root.settings-snippet-add-requested(trigger, expansion); }

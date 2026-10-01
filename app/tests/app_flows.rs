@@ -196,6 +196,129 @@ fn collecting_channel() -> (
 }
 
 #[tokio::test]
+async fn dictionary_learning_modes_keep_live_session_and_manual_aliases_immediate() {
+    use souffle_lib::engine::Speaker;
+    use souffle_lib::settings::DictionaryLearningMode;
+
+    for mode in DictionaryLearningMode::ALL {
+        let segment = TranscriptionSegment {
+            text: "use Kubernetis".into(),
+            start_time: 3.0,
+            end_time: 4.0,
+            is_final: true,
+            language: Some("en".into()),
+            confidence: Some(0.9),
+            speaker: Some(Speaker::Me),
+        };
+        let h =
+            build_harness(MockEngine::new().with_transcribe_response(Ok(vec![segment.clone()]), 1));
+        let mut settings = AppSettings::load(&h.db).unwrap();
+        settings.dictionary_learning_mode = mode;
+        settings.dictionary_correction = true;
+        settings.save(&h.db).unwrap();
+        let (collected, channel) = collecting_channel();
+        commands::start_meeting_recording(h.state.clone(), "Learning".into(), None, channel)
+            .await
+            .unwrap();
+        let (session_id, meeting_id) = match h.state.current_machine_state().unwrap() {
+            AppStateMachine::RecordingMeeting {
+                session_id,
+                meeting_id,
+                ..
+            } => (session_id, meeting_id),
+            other => panic!("expected recording meeting, got {other:?}"),
+        };
+        let other = TranscriptionSegment {
+            text: "other speaker".into(),
+            start_time: 4.5,
+            end_time: 5.5,
+            speaker: Some(Speaker::Them),
+            ..segment.clone()
+        };
+        {
+            let mut acc = h.state.meeting_accumulator.lock().unwrap();
+            acc.as_mut().unwrap().new_segments = vec![segment.clone(), other.clone()];
+        }
+        commands::apply_live_paragraph_edit(
+            h.state.clone(),
+            meeting_id.clone(),
+            vec![0],
+            "use Kubernetes".into(),
+        )
+        .unwrap();
+        {
+            let acc = h.state.meeting_accumulator.lock().unwrap();
+            let segments = &acc.as_ref().unwrap().new_segments;
+            assert_eq!(segments[0].text, "use Kubernetes");
+            assert_eq!(
+                (
+                    segments[0].start_time,
+                    segments[0].end_time,
+                    segments[0].speaker
+                ),
+                (segment.start_time, segment.end_time, segment.speaker)
+            );
+            assert_eq!(
+                (
+                    segments[1].text.as_str(),
+                    segments[1].start_time,
+                    segments[1].end_time,
+                    segments[1].speaker
+                ),
+                (
+                    other.text.as_str(),
+                    other.start_time,
+                    other.end_time,
+                    other.speaker
+                )
+            );
+        }
+        assert!(h.db.list_dictionary_entries().unwrap().is_empty());
+        let pending_count = match mode {
+            DictionaryLearningMode::Suggestions => 1,
+            DictionaryLearningMode::Disabled | DictionaryLearningMode::Automatic => 0,
+        };
+        assert_eq!(
+            h.db.list_dictionary_suggestions().unwrap().len(),
+            pending_count
+        );
+        commands::add_dictionary_entry(
+            h.state.clone(),
+            "Manual".into(),
+            Some("manuel".into()),
+            None,
+        )
+        .unwrap();
+        assert_eq!(
+            h.db.list_dictionary_entries().unwrap()[0]
+                .pronunciation
+                .as_deref(),
+            Some("manuel")
+        );
+        h.audio_msg_tx.send(audio_chunk(session_id)).unwrap();
+        h.audio_msg_tx
+            .send(AudioMessage::EndOfStream { session_id })
+            .unwrap();
+        commands::stop_meeting_recording(h.state.clone())
+            .await
+            .unwrap();
+        wait_until_ready(&h.state).await;
+        assert!(
+            collected
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|segment| segment.text == "use Kubernetes"),
+            "session correction must apply immediately in {mode:?}"
+        );
+        assert_eq!(
+            h.db.list_dictionary_suggestions().unwrap().len(),
+            pending_count
+        );
+    }
+}
+
+#[tokio::test]
 async fn meeting_stop_persists_meeting() {
     let mock = MockEngine::new().with_transcribe_response(
         Ok(vec![TranscriptionSegment {

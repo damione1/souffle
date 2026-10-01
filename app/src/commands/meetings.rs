@@ -148,7 +148,7 @@ pub fn apply_live_paragraph_edit(
     // put stale words over a newer edit.
     let _serialized = state.live_edit_lock.acquire()?;
 
-    let (previous_texts, db_updates, corrections) = {
+    let (previous_texts, db_updates, corrections, original_text) = {
         let mut acc = state.meeting_accumulator.acquire()?;
         let Some(meeting) = acc.as_mut() else {
             return Err("No meeting is recording".into());
@@ -200,7 +200,7 @@ pub fn apply_live_paragraph_edit(
             })
             .collect();
 
-        (previous_texts, db_updates, corrections)
+        (previous_texts, db_updates, corrections, original_text)
     };
 
     // The accumulator drives the summary and the rows still to be flushed, so
@@ -221,6 +221,17 @@ pub fn apply_live_paragraph_edit(
             tracing::warn!(error = %e, "Live paragraph edit could not register its session correction");
             break;
         }
+    }
+
+    // The edit and its immediate session corrections already landed. A queue
+    // failure must not make the caller undo the committed transcript.
+    if let Err(error) = super::dictionary::collect_edit_corrections(
+        &state.db,
+        &original_text,
+        &new_text,
+        crate::db::dictionary::DictionaryCorrectionSource::LiveMeeting,
+    ) {
+        tracing::warn!(%error, "Live edit could not collect dictionary suggestions");
     }
 
     Ok(())
