@@ -74,6 +74,7 @@ export component ThemedComboBox inherits Rectangle {
         width: parent.width - 36px;
         height: parent.height;
         text: root.current-value == "__AUTOMATIC__" ? @tr("Automatique")
+            : root.current-value == "__APPLE_SPEECH_SYSTEM__" ? @tr("Apple Speech — assets système")
             : root.current-value == "__FOLLOW_DEFAULT__" ? @tr("Suivre l'appareil par défaut")
             : root.current-value == "__CLAMSHELL_DEVICE_UNAVAILABLE__" ? @tr("Appareil personnalisé (indisponible)")
             : root.current-value == "__NEVER__" ? @tr("Jamais")
@@ -232,6 +233,7 @@ export component ThemedComboBox inherits Rectangle {
                             width: parent.width - 20px;
                             height: parent.height;
                             text: item == "__AUTOMATIC__" ? @tr("Automatique")
+                                : item == "__APPLE_SPEECH_SYSTEM__" ? @tr("Apple Speech — assets système")
                                 : item == "__FOLLOW_DEFAULT__" ? @tr("Suivre l'appareil par défaut")
                                 : item == "__NEVER__" ? @tr("Jamais")
                                 : item == "__DEFAULT__" ? @tr("Par défaut")
