@@ -18,7 +18,7 @@ import { SnippetsSection, SnippetRow } from "components/settings/snippets_sectio
 import { Theme } from "theme.slint";
 import { LucideIcon, IconSet } from "components/lucide_icon.slint";
 import { SettingsTabBar, SettingsTabPage } from "components/settings/settings_tabs.slint";
-import { TranscriptionPhase, AppTheme, AppLocale, PasteMethod, MeetingLanguage, LogLevel, AudioRetention, AccessState, ShortcutField, SummaryProvider, AppleIntelligenceUnavailableReason, SettingsTab } from "types.slint";
+import { TranscriptionPhase, AppTheme, AppLocale, PasteMethod, MeetingLanguage, LogLevel, AudioRetention, AccessState, ShortcutField, ShortcutNotice, SummaryProvider, AppleIntelligenceUnavailableReason, SettingsTab } from "types.slint";
 
 // Port of components/SettingsView.svelte's tab shell (SOU-188). Svelte
 // groups its 17 sections into 6 tabs (Transcription / IA / Audio / Interface
@@ -58,6 +58,7 @@ export component SettingsView inherits Rectangle {
     in property <bool> native-tap-warning-visible;
     in property <ShortcutField> recording-field: ShortcutField.none;
     in-out property <string> shortcut-error: "";
+    in property <ShortcutNotice> shortcut-notice;
     in property <string> save-error;
     // True when `save-error` covers a `SettingsSaveOutcome::Unavailable`
     // (the durable state could not be re-read after saving), so the wrapper
@@ -569,6 +570,7 @@ export component SettingsView inherits Rectangle {
                             ptt-shortcut-label: root.ptt-shortcut-label;
                             recording-field: root.recording-field;
                             shortcut-error: root.shortcut-error;
+                            shortcut-notice: root.shortcut-notice;
                             native-tap-warning-visible: root.native-tap-warning-visible;
                             pill-hidden: root.pill-hidden;
                             pill-hidden-in-captures: root.pill-hidden-in-captures;

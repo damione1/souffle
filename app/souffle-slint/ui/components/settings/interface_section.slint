@@ -5,14 +5,31 @@ import { ThemedSwitch } from "../themed_switch.slint";
 import { ThemedButton, ThemedButtonKind } from "../themed_button.slint";
 import { ThemedComboBox } from "../themed_combo.slint";
 import { ThemedSpinBox } from "../themed_spin.slint";
-import { AppTheme, AppLocale, PasteMethod, ShortcutField } from "../../types.slint";
+import { AppTheme, AppLocale, PasteMethod, ShortcutField, ShortcutNotice } from "../../types.slint";
+
+// The recorder's message for each `ShortcutNotice`, declared once for Settings
+// and onboarding (#360).
+export global ShortcutNoticeText {
+    public pure function text(notice: ShortcutNotice) -> string {
+        if notice == ShortcutNotice.missing-modifier { return @tr("Le raccourci doit inclure une touche de modification (Cmd, Ctrl, Maj, Alt) ou être une touche de fonction."); }
+        if notice == ShortcutNotice.unusable-key { return @tr("Cette touche ne peut pas servir de raccourci."); }
+        if notice == ShortcutNotice.types-character { return @tr("Ce raccourci n'utilise que ⌥ (ou ⌥⇧) : le caractère que cette combinaison tape, par exemple | avec ⌥⇧L en AZERTY, ne pourra plus être saisi dans aucune app."); }
+        // ShortcutNotice.none: nothing to say.
+        return "";
+    }
+
+    // A warning is saved anyway; the others refused the key.
+    public pure function is-warning(notice: ShortcutNotice) -> bool {
+        return notice == ShortcutNotice.types-character;
+    }
+}
 
 // Captures the next key press as a shortcut accelerator. Slint's `KeyEvent`
-// only hands over a produced character (or one of i-slint-common's
-// private-use code points for named/modifier keys), not a DOM physical
-// `code`, so the actual accelerator-string parsing happens in Rust
-// (`shortcut_capture.rs`) from the raw `text`/modifier booleans forwarded
-// here - this component only owns focus/recording UI state. Exported so
+// only hands over a produced character, not the physical key, so the
+// accelerator is built in Rust (`shortcut_capture.rs`) from the physical key
+// the winit hook recorded for this event plus the modifier booleans
+// forwarded here; `text` is forwarded but not used for the key (#360). This
+// component only owns focus/recording UI state. Exported so
 // `onboarding_view.slint`'s shortcut step (SOU-190) reuses it instead of a
 // second FocusScope implementation.
 export component ShortcutRecorderButton inherits FocusScope {
@@ -93,6 +110,7 @@ export component InterfaceSection inherits VerticalLayout {
     in property <string> ptt-shortcut-label;
     in property <ShortcutField> recording-field;
     in property <string> shortcut-error;
+    in property <ShortcutNotice> shortcut-notice;
     in property <bool> native-tap-warning-visible;
     in property <bool> pill-hidden;
     in property <bool> pill-hidden-in-captures;
@@ -341,6 +359,21 @@ export component InterfaceSection inherits VerticalLayout {
                 Text {
                     text: root.shortcut-error;
                     color: Theme.danger;
+                    font-size: 12px;
+                    wrap: word-wrap;
+                }
+            }
+        }
+
+        if root.shortcut-notice != ShortcutNotice.none: Rectangle {
+            background: ShortcutNoticeText.is-warning(root.shortcut-notice) ? Theme.warning.with-alpha(0.1) : Theme.danger.with-alpha(0.1);
+
+            VerticalLayout {
+                padding: 12px;
+
+                Text {
+                    text: ShortcutNoticeText.text(root.shortcut-notice);
+                    color: ShortcutNoticeText.is-warning(root.shortcut-notice) ? Theme.warning : Theme.danger;
                     font-size: 12px;
                     wrap: word-wrap;
                 }

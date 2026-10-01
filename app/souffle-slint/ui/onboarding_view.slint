@@ -1,9 +1,9 @@
 import { ThemedComboBox } from "components/themed_combo.slint";
 import { PermissionsStep, PermissionRow } from "components/onboarding/permissions_step.slint";
-import { ShortcutRecorderButton } from "components/settings/interface_section.slint";
+import { ShortcutRecorderButton, ShortcutNoticeText } from "components/settings/interface_section.slint";
 import { LucideIcon, IconSet } from "components/lucide_icon.slint";
 import { StatusBanner } from "components/status_banner.slint";
-import { AppLocale, ModelPhase, OnboardingStep, PermissionKind } from "types.slint";
+import { AppLocale, ModelPhase, OnboardingStep, PermissionKind, ShortcutNotice } from "types.slint";
 import { Theme } from "theme.slint";
 import { ThemedButton, ThemedButtonKind } from "components/themed_button.slint";
 
@@ -45,6 +45,7 @@ export component OnboardingView inherits Rectangle {
     in property <string> toggle-shortcut-label;
     in property <bool> shortcut-recording;
     in property <string> shortcut-error;
+    in property <ShortcutNotice> shortcut-notice;
     in property <bool> accessibility-granted;
 
     in property <bool> busy;
@@ -325,6 +326,13 @@ export component OnboardingView inherits Rectangle {
                     if root.shortcut-error != "": Text {
                         text: root.shortcut-error;
                         color: Theme.danger;
+                        font-size: 12px;
+                        wrap: word-wrap;
+                    }
+
+                    if root.shortcut-notice != ShortcutNotice.none: Text {
+                        text: ShortcutNoticeText.text(root.shortcut-notice);
+                        color: ShortcutNoticeText.is-warning(root.shortcut-notice) ? Theme.warning : Theme.danger;
                         font-size: 12px;
                         wrap: word-wrap;
                     }
