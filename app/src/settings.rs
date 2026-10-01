@@ -77,6 +77,7 @@ impl From<String> for PreparedSettingsSaveError {
     }
 }
 const DICTATION_LEARN_FROM_EDIT_KEY: &str = "dictation_learn_from_edit";
+const DICTIONARY_LEARNING_MODE_KEY: &str = "dictionary_learning_mode";
 const DICTATION_CEILING_SECONDS_KEY: &str = "dictation_ceiling_seconds";
 const MEETING_AUDIO_RETENTION_KEY: &str = "meeting_audio_retention";
 const MEETING_TRANSCRIPTION_LANGUAGE_KEY: &str = "meeting_transcription_language";
@@ -89,6 +90,20 @@ pub enum PasteMethod {
     Type,
     /// Set the focused element's selected text via Accessibility.
     Ax,
+}
+
+/// Persistence policy for admissible recognition corrections.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum DictionaryLearningMode {
+    Disabled,
+    Suggestions,
+    #[default]
+    Automatic,
+}
+
+impl DictionaryLearningMode {
+    pub const ALL: [Self; 3] = [Self::Disabled, Self::Suggestions, Self::Automatic];
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -239,9 +254,8 @@ pub struct AppSettings {
     pub dictation_polish_template_id: String,
     /// User-editable polish prompt templates.
     pub dictation_polish_templates: Vec<DictationPolishTemplate>,
-    /// After auto-paste, persist word-level edits from the focused field
-    /// into the custom dictionary.
-    pub dictation_learn_from_edit: bool,
+    /// How recognition corrections enter the persistent dictionary.
+    pub dictionary_learning_mode: DictionaryLearningMode,
     /// Hard failsafe: stop dictation after this many seconds.
     pub dictation_ceiling_seconds: u32,
     /// Active default meeting-summary template id: used by the Generate
@@ -362,7 +376,7 @@ impl Default for AppSettings {
             dictation_polish_enabled: true,
             dictation_polish_template_id: crate::summary::TEMPLATE_CLEAN.to_string(),
             dictation_polish_templates: crate::summary::default_polish_templates(),
-            dictation_learn_from_edit: true,
+            dictionary_learning_mode: DictionaryLearningMode::Automatic,
             dictation_ceiling_seconds: 300,
             default_summary_template_id: crate::summary::TEMPLATE_SUMMARY_DEFAULT.to_string(),
             summary_templates: crate::summary::default_summary_templates(),
@@ -579,11 +593,14 @@ impl AppSettings {
             settings.dictation_polish_templates =
                 crate::summary::merge_polish_templates(dictation_polish_templates);
         }
-        if let Some(dictation_learn_from_edit) =
-            read_json_setting::<bool>(db, DICTATION_LEARN_FROM_EDIT_KEY)?
-        {
-            settings.dictation_learn_from_edit = dictation_learn_from_edit;
-        }
+        settings.dictionary_learning_mode =
+            match read_json_setting::<DictionaryLearningMode>(db, DICTIONARY_LEARNING_MODE_KEY)? {
+                Some(mode) => mode,
+                None => match read_json_setting::<bool>(db, DICTATION_LEARN_FROM_EDIT_KEY)? {
+                    Some(false) => DictionaryLearningMode::Disabled,
+                    Some(true) | None => DictionaryLearningMode::Automatic,
+                },
+            };
         if let Some(dictation_ceiling_seconds) =
             read_json_setting::<u32>(db, DICTATION_CEILING_SECONDS_KEY)?
         {
@@ -1081,8 +1098,8 @@ impl AppSettings {
             )?;
             write_json_setting_in_transaction(
                 transaction,
-                DICTATION_LEARN_FROM_EDIT_KEY,
-                &normalized.dictation_learn_from_edit,
+                DICTIONARY_LEARNING_MODE_KEY,
+                &normalized.dictionary_learning_mode,
             )?;
             write_json_setting_in_transaction(
                 transaction,
@@ -1365,6 +1382,28 @@ fn delete_setting_in_transaction(
 
 #[cfg(test)]
 mod tests {
+    use super::DictionaryLearningMode;
+    #[test]
+    fn dictionary_learning_migrates_legacy_choice_and_keeps_new_mode() {
+        let (db, _dir) = crate::test_helpers::fixtures::test_db();
+        for (legacy, expected) in [("true", "automatic"), ("false", "disabled")] {
+            db.set_setting("dictation_learn_from_edit", legacy).unwrap();
+            let settings = super::AppSettings::load(&db).unwrap();
+            assert_eq!(
+                serde_json::to_value(settings).unwrap()["dictionary_learning_mode"],
+                expected
+            );
+        }
+        db.set_setting("dictionary_learning_mode", "\"suggestions\"")
+            .unwrap();
+        let settings = super::AppSettings::load(&db).unwrap();
+        settings.save(&db).unwrap();
+        assert_eq!(
+            serde_json::to_value(super::AppSettings::load(&db).unwrap()).unwrap()["dictionary_learning_mode"],
+            "suggestions"
+        );
+    }
+
     use super::{
         AUDIO_DEVICE_KEY, AppSettings, CLAMSHELL_AUDIO_DEVICE_KEY, MeetingAudioRetention,
         PasteMethod, SettingsOptions, ShortcutSettings, SummaryProviderChoice, Theme,
@@ -1469,7 +1508,7 @@ mod tests {
             dictation_polish_enabled: true,
             dictation_polish_template_id: "email".into(),
             dictation_polish_templates: crate::summary::default_polish_templates(),
-            dictation_learn_from_edit: true,
+            dictionary_learning_mode: DictionaryLearningMode::Automatic,
             dictation_ceiling_seconds: 120,
             default_summary_template_id: crate::summary::TEMPLATE_SUMMARY_BRIEF.into(),
             summary_templates: crate::summary::default_summary_templates(),

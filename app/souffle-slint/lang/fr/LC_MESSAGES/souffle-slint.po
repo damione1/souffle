@@ -1,4 +1,45 @@
 #
+
+msgctxt "DictionarySection"
+msgid "Apprentissage depuis les corrections"
+msgstr "Apprentissage depuis les corrections"
+
+msgctxt "DictionarySection"
+msgid "Suggestions propose les corrections après collage et en réunion. Automatique apprend après collage. Les corrections de session restent immédiates."
+msgstr "Suggestions propose les corrections après collage et en réunion. Automatique apprend après collage. Les corrections de session restent immédiates."
+
+msgctxt "DictionarySection"
+msgid "Désactivé"
+msgstr "Désactivé"
+
+msgctxt "DictionarySection"
+msgid "Suggestions"
+msgstr "Suggestions"
+
+msgctxt "DictionarySection"
+msgid "Automatique"
+msgstr "Automatique"
+
+msgctxt "DictionarySection"
+msgid "CORRECTIONS À VALIDER"
+msgstr "CORRECTIONS À VALIDER"
+
+msgctxt "DictionarySection"
+msgid "Aucune suggestion en attente."
+msgstr "Aucune suggestion en attente."
+
+msgctxt "DictionarySection"
+msgid "Correction : {} → {}"
+msgstr "Correction : {} → {}"
+
+msgctxt "DictionarySection"
+msgid "Accepter"
+msgstr "Accepter"
+
+msgctxt "DictionarySection"
+msgid "Ignorer"
+msgstr "Ignorer"
+
 msgid ""
 msgstr ""
 "POT-Creation-Date: 2026-09-22 21:45+0000\n"
