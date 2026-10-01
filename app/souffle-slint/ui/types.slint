@@ -63,6 +63,12 @@ export enum UpdatePhase { idle, downloading, ready, failed }
 // variant here.
 export enum InstallBlockReason { recording-dictation, recording-meeting, stopping, downloading, loading, unloading }
 
+// Where Settings > "Mises à jour" is in its check -> download -> install
+// flow. Mirrors `update_ui::UpdateRow` (which carries the version, error,
+// progress and block payloads); `update_ui::project_update_row` is the one
+// writer, with an exhaustive `match`.
+export enum UpdateRowStatus { unchecked, checking, up-to-date, check-failed, available, downloading, ready, installing, failed }
+
 // A pre-parsed Markdown block's kind (`markdown.rs`). Rendering branches on
 // it in `markdown_view.slint`; adding a variant must update that file.
 export enum MarkdownBlockKind { heading, bullet, paragraph, link }
