@@ -419,6 +419,8 @@ pub async fn generate_stream(
     let needed = prompt_tokens.saturating_add(budget.num_predict);
     let num_ctx = resolve_num_ctx(native, budget.num_ctx, needed);
     let num_predict = cap_num_predict(num_ctx, prompt_tokens, budget.num_predict);
+    let measurement = super::metrics::context()
+        .map(|context| context.start("ollama", temperature, Some(num_ctx), Some(num_predict)));
     if needed > num_ctx {
         tracing::warn!(
             model,
@@ -465,6 +467,7 @@ pub async fn generate_stream(
 
         while let Some(pos) = buf.iter().position(|&b| b == b'\n') {
             let line: Vec<u8> = buf.drain(..=pos).collect();
+            record_measured_tokens(&line, measurement.as_ref());
             handle_ndjson_line(
                 &line,
                 &mut full_text,
@@ -475,6 +478,7 @@ pub async fn generate_stream(
             );
         }
     }
+    record_measured_tokens(&buf, measurement.as_ref());
     handle_ndjson_line(
         &buf,
         &mut full_text,
@@ -484,10 +488,23 @@ pub async fn generate_stream(
         num_ctx,
     );
 
-    Ok(GenerateOutput {
+    let result = Ok(GenerateOutput {
         text: full_text,
         eval_count,
-    })
+    });
+    if let Some(measurement) = measurement {
+        measurement.finish(&result);
+    }
+    result
+}
+
+fn record_measured_tokens(line: &[u8], measurement: Option<&super::metrics::CallGuard>) {
+    if let Some(measurement) = measurement
+        && let Ok(chunk) = serde_json::from_slice::<GenerateChunk>(line)
+        && chunk.done
+    {
+        measurement.tokens(chunk.prompt_eval_count, chunk.eval_count);
+    }
 }
 
 pub fn validate_model(model: &str) -> Result<(), String> {

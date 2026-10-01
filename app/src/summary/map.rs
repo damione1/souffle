@@ -97,6 +97,8 @@ where
         "Map stage still empty after retry; splitting the excerpt in two"
     );
 
+    super::metrics::update(|metrics| metrics.map_splits += 1);
+
     let left_out = map_until_varied(part, total, &left, &generate).await?;
     let right_out = map_until_varied(part, total, &right, &generate).await?;
     match (left_out, right_out) {
@@ -126,6 +128,9 @@ where
 {
     let mut attempt = MapAttempt::First;
     loop {
+        if attempt == MapAttempt::Varied {
+            super::metrics::update(|metrics| metrics.map_retries += 1);
+        }
         let output = generate(
             map_user_prompt(chunk, part, total, attempt),
             attempt.temperature(),
