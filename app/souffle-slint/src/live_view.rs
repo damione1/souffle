@@ -10,31 +10,33 @@ use std::sync::{Arc, Mutex};
 use souffle_lib::engine::TranscriptionSegment;
 
 use crate::live_transcript::{LiveTranscript, provisional_words};
-use crate::{MainWindow, TranscriptBlock, TranscriptWord};
+use crate::{MainWindow, RecordingMode, TranscriptBlock, TranscriptWord};
 use slint::{Model, ModelRc, VecModel};
 
 pub type LiveTranscriptState = Arc<Mutex<LiveTranscript>>;
 
-/// Routes one streamed segment into the view. Speaker-tagged segments
-/// (meetings) go through the paragraph model; untagged ones (dictation) feed
-/// the flat `live-text`/`live-tentative` buffers. Must run on the Slint
-/// main thread.
+/// Routes by session mode: diarization is segment data, not a session kind.
+/// Must run on the Slint main thread.
 pub fn apply_live_segment(
     window: &MainWindow,
     live_state: &LiveTranscriptState,
     segment: &TranscriptionSegment,
 ) {
-    if segment.speaker.is_some() {
-        {
-            let mut live = live_state.lock().unwrap();
-            if segment.is_final {
-                live.push_final(segment);
-            } else {
-                live.push_tentative(segment);
+    match window.get_recording_mode() {
+        RecordingMode::Idle => return,
+        RecordingMode::Meeting => {
+            {
+                let mut live = live_state.lock().unwrap();
+                if segment.is_final {
+                    live.push_final(segment);
+                } else {
+                    live.push_tentative(segment);
+                }
             }
+            push_live_blocks(window, live_state);
+            return;
         }
-        push_live_blocks(window, live_state);
-        return;
+        RecordingMode::Dictation => {}
     }
     if segment.is_final {
         let mut text = window.get_live_text().to_string();
@@ -55,6 +57,19 @@ pub fn apply_live_segment(
         window.set_live_tentative(segment.text.trim().into());
     }
     push_dictation_words(window);
+}
+
+/// Queued updates from a cleared/stopped session cannot reach its successor.
+/// The generation check and application both run on the UI thread.
+pub fn apply_live_segment_for_generation(
+    window: &MainWindow,
+    live_state: &LiveTranscriptState,
+    generation: u64,
+    segment: &TranscriptionSegment,
+) {
+    if live_state.lock().unwrap().generation() == generation {
+        apply_live_segment(window, live_state, segment);
+    }
 }
 
 /// The dictation text as words, the word the engine still holds last and
@@ -159,6 +174,161 @@ mod tests {
         window.set_onboarding_open(false);
         window.set_recording_mode(RecordingMode::Meeting);
         window
+    }
+
+    #[test]
+    fn mono_meeting_final_is_visible_without_a_speaker_label() {
+        let window = meeting_window();
+        let live_state = Arc::new(Mutex::new(LiveTranscript::new()));
+        let mut segment = final_seg("Bonjour monde", 0.0, Speaker::Me);
+        segment.speaker = None;
+        apply_live_segment(&window, &live_state, &segment);
+        settle();
+        text_element(&window, "Bonjour");
+        text_element(&window, "monde");
+        assert!(!window.get_live_transcript_empty());
+        assert!(
+            window
+                .get_live_transcript_blocks()
+                .iter()
+                .all(|b| !b.has_speaker)
+        );
+        assert!(window.get_live_dictation_words().row_count() == 0);
+    }
+
+    #[test]
+    fn stopped_session_publications_cannot_pollute_a_new_session() {
+        let window = meeting_window();
+        let live_state = Arc::new(Mutex::new(LiveTranscript::new()));
+        let previous = live_state.lock().unwrap().generation();
+        live_state.lock().unwrap().clear();
+        let mut segment = final_seg("Ancien aperçu", 0.0, Speaker::Me);
+        segment.speaker = None;
+        for is_final in [false, true] {
+            segment.is_final = is_final;
+            apply_live_segment_for_generation(&window, &live_state, previous, &segment);
+            assert!(live_state.lock().unwrap().is_empty());
+        }
+        let current = live_state.lock().unwrap().generation();
+        apply_live_segment_for_generation(&window, &live_state, current, &segment);
+        assert!(!live_state.lock().unwrap().is_empty());
+        live_state.lock().unwrap().clear();
+        window.set_recording_mode(RecordingMode::Idle);
+        apply_live_segment(&window, &live_state, &segment);
+        assert!(live_state.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn dictation_snapshot_revisions_and_withdrawal_do_not_append_finals() {
+        let window = meeting_window();
+        window.set_recording_mode(RecordingMode::Dictation);
+        let live_state = Arc::new(Mutex::new(LiveTranscript::new()));
+        let mut segment = final_seg("Premier texte. Deuxième phrase.", 0.0, Speaker::Me);
+        segment.speaker = None;
+        segment.is_final = false;
+        apply_live_segment(&window, &live_state, &segment);
+        segment.text = "Nouvelle hypothèse complète.".into();
+        apply_live_segment(&window, &live_state, &segment);
+        assert!(window.get_live_text().is_empty());
+        assert_eq!(
+            window.get_live_tentative().as_str(),
+            "Nouvelle hypothèse complète."
+        );
+        assert!(
+            window
+                .get_live_dictation_words()
+                .iter()
+                .all(|w| w.provisional && !w.clickable)
+        );
+        segment.text.clear();
+        apply_live_segment(&window, &live_state, &segment);
+        assert_eq!(window.get_live_dictation_words().row_count(), 0);
+        segment.text = "Texte définitif".into();
+        segment.is_final = true;
+        apply_live_segment(&window, &live_state, &segment);
+        assert_eq!(window.get_live_text().as_str(), "Texte définitif");
+        assert!(window.get_live_tentative().is_empty());
+    }
+
+    #[test]
+    fn controlled_batch_decoder_renders_before_1600ms_in_both_session_modes() {
+        use souffle_lib::engine::{TranscriptionEngine, mock::BatchPreviewDecoder};
+        use std::time::{Duration, Instant};
+        for mode in [RecordingMode::Dictation, RecordingMode::Meeting] {
+            let window = meeting_window();
+            window.set_recording_mode(mode);
+            let live = Arc::new(Mutex::new(LiveTranscript::new()));
+            let clock = Instant::now();
+            let mut decoder = BatchPreviewDecoder::new(clock);
+            let hop = decoder.audio_requirements().chunk_size_samples as usize;
+            for tick in 1..=30 {
+                decoder.set_clock(clock + Duration::from_millis(tick * 100));
+                let segments = decoder.transcribe(&vec![0.1; hop], None).unwrap();
+                if tick < 15 {
+                    assert!(segments.is_empty());
+                }
+                for segment in segments {
+                    assert!(!segment.is_final);
+                    apply_live_segment(&window, &live, &segment);
+                }
+                if tick == 15 {
+                    settle();
+                    text_element(&window, "Hypothèse");
+                    text_element(&window, "24000");
+                }
+            }
+            settle();
+            text_element(&window, "48000");
+            assert!(
+                live.lock().unwrap().tail.is_empty(),
+                "revisions do not grow finals"
+            );
+            assert!(window.get_live_text().is_empty());
+            match mode {
+                RecordingMode::Meeting => {
+                    let blocks = window.get_live_transcript_blocks();
+                    assert_eq!(blocks.row_count(), 1);
+                    assert!(!blocks.row_data(0).unwrap().has_speaker);
+                }
+                RecordingMode::Dictation => {
+                    assert_eq!(window.get_live_tentative().as_str(), "Hypothèse 48000")
+                }
+                RecordingMode::Idle => unreachable!("only active session modes tested"),
+            }
+        }
+    }
+
+    #[test]
+    fn mono_meeting_first_preview_and_revision_replace_one_another() {
+        let window = meeting_window();
+        let live_state = Arc::new(Mutex::new(LiveTranscript::new()));
+        let mut segment = final_seg("Provisoire", 0.0, Speaker::Me);
+        segment.speaker = None;
+        segment.is_final = false;
+        apply_live_segment(&window, &live_state, &segment);
+        settle();
+        text_element(&window, "Provisoire");
+        segment.text = "Révision complète".into();
+        apply_live_segment(&window, &live_state, &segment);
+        settle();
+        let blocks = window.get_live_transcript_blocks();
+        assert_eq!(blocks.row_count(), 1);
+        let block = blocks.row_data(0).unwrap();
+        assert!(!block.has_speaker);
+        assert_eq!(block.text.as_str(), "Révision complète");
+        assert!(block.words.iter().all(|w| w.provisional && !w.clickable));
+        assert!(live_state.lock().unwrap().tail.is_empty());
+        segment.is_final = true;
+        apply_live_segment(&window, &live_state, &segment);
+        assert!(
+            window
+                .get_live_transcript_blocks()
+                .row_data(0)
+                .unwrap()
+                .words
+                .iter()
+                .all(|w| !w.provisional)
+        );
     }
 
     fn final_seg(text: &str, start: f64, speaker: Speaker) -> TranscriptionSegment {

@@ -212,6 +212,14 @@ pub trait TranscriptionEngine {
         language: Option<&str>,
     ) -> Result<Vec<TranscriptionSegment>, EngineError>;
     fn flush(&mut self) -> Result<Vec<TranscriptionSegment>, EngineError>;
+    /// Optional batch snapshots are suppressed during catch-up and stop.
+    /// All inference still runs synchronously on the existing actor thread.
+    fn set_preview_enabled(&mut self, _enabled: bool) {}
+    /// Retention floor independent of delivery hop. Batch engines preserve
+    /// their pre-preview VAD drain/lookback duration when feeding smaller hops.
+    fn minimum_vad_hold_seconds(&self) -> f64 {
+        0.0
+    }
     /// Stop-only salvage after a failed flush. Returns already decoded words,
     /// never performs inference or repairs state, and consumes them once.
     /// The caller must retain/report the flush error separately.
@@ -643,12 +651,12 @@ fn whisper_turbo_model_descriptor() -> TranscriptionModelDescriptor {
             supports_batch_transcription: true,
             supports_language_auto_detect: true,
             supports_word_timestamps: true,
-            supports_partial_results: false,
+            supports_partial_results: true,
         },
         audio_input: AudioInputRequirements {
             sample_rate_hz: 16_000,
             channels: 1,
-            chunk_size_samples: 16_000 * 5,
+            chunk_size_samples: batch_windows::CHUNK_SAMPLES as u32,
         },
         available_in_app: true,
         availability_note: None,
@@ -692,12 +700,12 @@ fn parakeet_tdt_06b_v3_model_descriptor() -> TranscriptionModelDescriptor {
             supports_batch_transcription: true,
             supports_language_auto_detect: true,
             supports_word_timestamps: true,
-            supports_partial_results: false,
+            supports_partial_results: true,
         },
         audio_input: AudioInputRequirements {
             sample_rate_hz: 16_000,
             channels: 1,
-            chunk_size_samples: 16_000 * 5,
+            chunk_size_samples: batch_windows::CHUNK_SAMPLES as u32,
         },
         available_in_app: true,
         availability_note: None,
@@ -940,7 +948,7 @@ mod tests {
         let engine = create_engine(&profile).unwrap();
         let reqs = engine.audio_requirements();
         assert_eq!(reqs.sample_rate_hz, 16_000);
-        assert_eq!(reqs.chunk_size_samples, 16_000 * 5);
+        assert_eq!(reqs.chunk_size_samples, batch_windows::CHUNK_SAMPLES as u32);
     }
 
     #[test]
