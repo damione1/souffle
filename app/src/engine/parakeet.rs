@@ -4,7 +4,7 @@ use parakeet_rs::{ParakeetTDT, TimestampMode, Transcriber};
 use tracing::{debug, info};
 
 use super::batch_windows::{
-    CHUNK_SAMPLES, SAMPLE_RATE as PARAKEET_SAMPLE_RATE, drain_ready_windows,
+    CHUNK_SAMPLES, PreviewPolicy, SAMPLE_RATE as PARAKEET_SAMPLE_RATE, drain_ready_windows,
 };
 use super::{
     AudioInputRequirements, EngineError, TranscriptionEngine, TranscriptionSegment,
@@ -16,7 +16,7 @@ const MIN_INFERENCE_SAMPLES: usize = PARAKEET_SAMPLE_RATE as usize / 2;
 
 /// NVIDIA Parakeet TDT engine via parakeet-rs (ONNX Runtime, CPU).
 /// Batch-oriented: same silence-gap windows as Whisper ([4 s, 7 s], else 7 s).
-/// Pipeline hop stays [`CHUNK_SAMPLES`] (5 s).
+/// Revisable snapshots share the loaded model; final windows remain unchanged.
 ///
 /// Uses the bundled ONNX Runtime dylib through ort's load-dynamic mode —
 /// see `crate::ort_runtime` for why static linking is forbidden here.
@@ -26,6 +26,7 @@ pub struct ParakeetEngine {
     /// Samples already sent to inference this session. Token timestamps are
     /// relative to each window; this offsets them to session time.
     consumed_samples: usize,
+    preview: PreviewPolicy,
 }
 
 impl Default for ParakeetEngine {
@@ -40,6 +41,7 @@ impl ParakeetEngine {
             model: None,
             audio_buffer: Vec::new(),
             consumed_samples: 0,
+            preview: PreviewPolicy::default(),
         }
     }
 
@@ -50,6 +52,7 @@ impl ParakeetEngine {
     /// and must keep the window-timestamp offset continuous.
     fn reset_buffer(&mut self, preserve_timeline: bool) {
         self.audio_buffer.clear();
+        self.preview.reset();
         if !preserve_timeline {
             self.consumed_samples = 0;
         }
@@ -68,7 +71,7 @@ impl ParakeetEngine {
         audio: Vec<f32>,
         offset: f64,
     ) -> Result<Vec<TranscriptionSegment>, EngineError> {
-        if audio.is_empty() {
+        if audio.is_empty() || audio.iter().all(|s| *s == 0.0) {
             return Ok(vec![]);
         }
 
@@ -158,11 +161,28 @@ impl TranscriptionEngine for ParakeetEngine {
 
         let mut all_segments = Vec::new();
         let windows = drain_ready_windows(&mut self.audio_buffer);
+        let finalized = !windows.is_empty();
+        if !windows.is_empty() {
+            all_segments.extend(
+                self.preview
+                    .clear(self.consumed_samples as f64 / PARAKEET_SAMPLE_RATE as f64),
+            );
+        }
         for to_process in windows {
             let offset = self.take_window_offset(to_process.len());
             let model = self.model.as_mut().ok_or(EngineError::NotInitialized)?;
             all_segments.extend(Self::run_inference(model, to_process, offset)?);
         }
+        if finalized {
+            return Ok(all_segments);
+        }
+        let model = self.model.as_mut().ok_or(EngineError::NotInitialized)?;
+        all_segments.extend(self.preview.decode(
+            &self.audio_buffer,
+            self.consumed_samples,
+            std::time::Instant::now(),
+            |pcm, offset| Self::run_inference(model, pcm.to_vec(), offset),
+        ));
         Ok(all_segments)
     }
 
@@ -206,6 +226,14 @@ impl TranscriptionEngine for ParakeetEngine {
         }
     }
 
+    fn set_preview_enabled(&mut self, enabled: bool) {
+        self.preview.set_enabled(enabled);
+    }
+
+    fn minimum_vad_hold_seconds(&self) -> f64 {
+        super::batch_windows::VAD_HOLD_SECONDS
+    }
+
     fn normalize_text(&self, text: &str) -> String {
         collapse_whitespace(text)
     }
@@ -234,19 +262,20 @@ mod tests {
     }
 
     #[test]
-    fn audio_requirements_are_16khz_5s_windows() {
+    fn audio_requirements_are_16khz_100ms_hops() {
         let engine = ParakeetEngine::new();
         let reqs = engine.audio_requirements();
         assert_eq!(reqs.sample_rate_hz, 16_000);
         assert_eq!(reqs.channels, 1);
-        assert_eq!(reqs.chunk_size_samples, 80_000);
+        assert_eq!(reqs.chunk_size_samples, CHUNK_SAMPLES as u32);
     }
 
     #[test]
     fn five_second_boundary_does_not_cut_mid_phrase() {
         // Continuous speech through 5 s — the old knife-edge that split
         // "The next | checkpoint" and made TDT invent a completion.
-        let pcm: Vec<f32> = (0..CHUNK_SAMPLES)
+        let five_seconds = PARAKEET_SAMPLE_RATE as usize * 5;
+        let pcm: Vec<f32> = (0..five_seconds)
             .map(|i| (i as f32 * 0.02).sin() * 0.3)
             .collect();
         assert_eq!(
@@ -256,9 +285,9 @@ mod tests {
         );
 
         let mut longer = pcm;
-        longer.extend((0..CHUNK_SAMPLES).map(|i| (i as f32 * 0.02).sin() * 0.3));
+        longer.extend((0..five_seconds).map(|i| (i as f32 * 0.02).sin() * 0.3));
         let cut = crate::engine::batch_windows::find_cut_samples(&longer).unwrap();
-        assert!(cut > CHUNK_SAMPLES);
+        assert!(cut > five_seconds);
         assert_eq!(cut, 16_000 * 7);
     }
 
@@ -287,7 +316,7 @@ mod tests {
         assert_eq!(reader.spec().sample_rate, 16_000);
         let mut samples: Vec<f32> = reader.samples::<f32>().filter_map(|s| s.ok()).collect();
         // Pad to a full window so transcribe() triggers inference
-        samples.resize(CHUNK_SAMPLES, 0.0);
+        samples.resize(PARAKEET_SAMPLE_RATE as usize * 5, 0.0);
 
         let mut engine = ParakeetEngine::new();
         engine.load_model(&model_dir).expect("load model");
