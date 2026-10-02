@@ -148,6 +148,7 @@ impl TentativeSlot {
 /// The live transcript state machine. All mutations happen on the Slint
 /// main thread (called from `invoke_from_event_loop`), so no locking needed.
 pub struct LiveTranscript {
+    generation: u64,
     /// Committed paragraphs (immutable once past tail window).
     pub committed: Vec<LivePara>,
     /// Tail: active paragraphs still within the tail window.
@@ -163,6 +164,7 @@ pub struct LiveTranscript {
 impl LiveTranscript {
     pub fn new() -> Self {
         Self {
+            generation: 0,
             committed: Vec::new(),
             tail: Vec::new(),
             tentative_me: TentativeSlot::default(),
@@ -267,10 +269,13 @@ impl LiveTranscript {
             .enumerate()
             .map(|(i, para)| {
                 let suffix = match para.speaker {
-                    Some(Speaker::Me) if Some(i) == last_me_idx => tentative_me,
-                    Some(Speaker::Them) if Some(i) == last_them_idx => tentative_them,
-                    None if Some(i) == last_none_idx => tentative_none,
-                    _ => None,
+                    Some(Speaker::Me) => (Some(i) == last_me_idx).then_some(tentative_me).flatten(),
+                    Some(Speaker::Them) => (Some(i) == last_them_idx)
+                        .then_some(tentative_them)
+                        .flatten(),
+                    None => (Some(i) == last_none_idx)
+                        .then_some(tentative_none)
+                        .flatten(),
                 };
                 para.to_slint_block(suffix)
             })
@@ -308,6 +313,16 @@ impl LiveTranscript {
             });
         }
 
+        if let Some(text) = tentative_none.filter(|_| last_none_idx.is_none()) {
+            blocks.push(TranscriptBlock {
+                has_speaker: false,
+                text: text.into(),
+                words: live_words("", Some(text)),
+                recording_session_index: -1,
+                ..Default::default()
+            });
+        }
+
         blocks
     }
 
@@ -322,17 +337,48 @@ impl LiveTranscript {
 
     /// Reset everything (called by `clear_live_transcript`).
     pub fn clear(&mut self) {
+        self.generation = self.generation.wrapping_add(1);
         self.committed.clear();
         self.tail.clear();
         self.tentative_me.clear();
         self.tentative_them.clear();
         self.tentative_none.clear();
     }
+
+    pub fn generation(&self) -> u64 {
+        self.generation
+    }
 }
 
 #[cfg(test)]
 pub mod tests {
     use super::*;
+
+    #[test]
+    fn first_mono_tentative_has_a_block_without_finals() {
+        use slint::Model;
+        let mut live = LiveTranscript::new();
+        live.push_tentative(&TranscriptionSegment {
+            text: "Premier aperçu".into(),
+            start_time: 0.0,
+            end_time: 1.5,
+            is_final: false,
+            language: None,
+            confidence: None,
+            speaker: None,
+        });
+        let blocks = live.build_blocks();
+        assert_eq!(blocks.len(), 1);
+        assert!(!blocks[0].has_speaker);
+        assert_eq!(blocks[0].text.as_str(), "Premier aperçu");
+        assert!(
+            blocks[0]
+                .words
+                .iter()
+                .all(|w| w.provisional && !w.clickable)
+        );
+        assert!(live.tail.is_empty());
+    }
 
     fn seg(
         text: &str,
