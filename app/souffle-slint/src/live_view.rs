@@ -219,6 +219,86 @@ mod tests {
     }
 
     #[test]
+    fn dictation_snapshot_revisions_and_withdrawal_do_not_append_finals() {
+        let window = meeting_window();
+        window.set_recording_mode(RecordingMode::Dictation);
+        let live_state = Arc::new(Mutex::new(LiveTranscript::new()));
+        let mut segment = final_seg("Premier texte. Deuxième phrase.", 0.0, Speaker::Me);
+        segment.speaker = None;
+        segment.is_final = false;
+        apply_live_segment(&window, &live_state, &segment);
+        segment.text = "Nouvelle hypothèse complète.".into();
+        apply_live_segment(&window, &live_state, &segment);
+        assert!(window.get_live_text().is_empty());
+        assert_eq!(
+            window.get_live_tentative().as_str(),
+            "Nouvelle hypothèse complète."
+        );
+        assert!(
+            window
+                .get_live_dictation_words()
+                .iter()
+                .all(|w| w.provisional && !w.clickable)
+        );
+        segment.text.clear();
+        apply_live_segment(&window, &live_state, &segment);
+        assert_eq!(window.get_live_dictation_words().row_count(), 0);
+        segment.text = "Texte définitif".into();
+        segment.is_final = true;
+        apply_live_segment(&window, &live_state, &segment);
+        assert_eq!(window.get_live_text().as_str(), "Texte définitif");
+        assert!(window.get_live_tentative().is_empty());
+    }
+
+    #[test]
+    fn controlled_batch_decoder_renders_before_1600ms_in_both_session_modes() {
+        use souffle_lib::engine::{TranscriptionEngine, mock::BatchPreviewDecoder};
+        use std::time::{Duration, Instant};
+        for mode in [RecordingMode::Dictation, RecordingMode::Meeting] {
+            let window = meeting_window();
+            window.set_recording_mode(mode);
+            let live = Arc::new(Mutex::new(LiveTranscript::new()));
+            let clock = Instant::now();
+            let mut decoder = BatchPreviewDecoder::new(clock);
+            let hop = decoder.audio_requirements().chunk_size_samples as usize;
+            for tick in 1..=30 {
+                decoder.set_clock(clock + Duration::from_millis(tick * 100));
+                let segments = decoder.transcribe(&vec![0.1; hop], None).unwrap();
+                if tick < 15 {
+                    assert!(segments.is_empty());
+                }
+                for segment in segments {
+                    assert!(!segment.is_final);
+                    apply_live_segment(&window, &live, &segment);
+                }
+                if tick == 15 {
+                    settle();
+                    text_element(&window, "Hypothèse");
+                    text_element(&window, "24000");
+                }
+            }
+            settle();
+            text_element(&window, "48000");
+            assert!(
+                live.lock().unwrap().tail.is_empty(),
+                "revisions do not grow finals"
+            );
+            assert!(window.get_live_text().is_empty());
+            match mode {
+                RecordingMode::Meeting => {
+                    let blocks = window.get_live_transcript_blocks();
+                    assert_eq!(blocks.row_count(), 1);
+                    assert!(!blocks.row_data(0).unwrap().has_speaker);
+                }
+                RecordingMode::Dictation => {
+                    assert_eq!(window.get_live_tentative().as_str(), "Hypothèse 48000")
+                }
+                RecordingMode::Idle => unreachable!("only active session modes tested"),
+            }
+        }
+    }
+
+    #[test]
     fn mono_meeting_first_preview_and_revision_replace_one_another() {
         let window = meeting_window();
         let live_state = Arc::new(Mutex::new(LiveTranscript::new()));
