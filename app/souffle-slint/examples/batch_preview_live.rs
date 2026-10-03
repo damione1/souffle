@@ -45,6 +45,13 @@ fn main() {
         &std::fs::read(std::env::var("SOU273_PCM").expect("set SOU273_PCM")).unwrap(),
     )
     .unwrap();
+    let system_pcm: Option<Vec<f32>> = std::env::var("SOU274_SYSTEM_PCM")
+        .ok()
+        .map(|path| serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap());
+    if let Some(system) = &system_pcm {
+        assert_eq!(system.len(), pcm.len());
+    }
+    let dual = system_pcm.is_some();
     let engine = std::env::var("SOU273_ENGINE").expect("set SOU273_ENGINE");
     let profile =
         souffle_lib::engine::resolve_transcription_profile(Some(&engine), None, None).unwrap();
@@ -66,14 +73,14 @@ fn main() {
         let callback_weak = weak.clone();
         actor.start_session(273, SessionConfig {
             pipeline_config: PipelineConfig { vad_enabled: true, vad_model_path: Some(resolve_vad_model_path().unwrap()), filler_removal_enabled: true, stutter_collapse_enabled: true, dictionary_correction_enabled: false },
-            dictionary_entries: vec![], session_terms: vec![], session_corrections: vec![], diarize: false,
+            dictionary_entries: vec![], session_terms: vec![], session_corrections: vec![], diarize: dual,
             idle_config: None, meeting_transcription_language: souffle_lib::settings::MeetingTranscriptionLanguage::Auto,
         }, Box::new(move |segment| {
             let published = Instant::now();
             let elapsed = callback_started.lock().unwrap().elapsed().as_secs_f64();
             let live = callback_live.clone();
             let _ = callback_weak.upgrade_in_event_loop(move |window| {
-                eprintln!("UI segment final={} actor_at={elapsed:.3}s slint_queue={:.3}s text={:?}", segment.is_final, published.elapsed().as_secs_f64(), segment.text);
+                eprintln!("UI segment speaker={:?} final={} actor_at={elapsed:.3}s slint_queue={:.3}s text={:?}", segment.speaker, segment.is_final, published.elapsed().as_secs_f64(), segment.text);
                 live_view::apply_live_segment_for_generation(&window, &live, generation, &segment);
             });
         })).unwrap();
@@ -84,14 +91,23 @@ fn main() {
                 (start + Duration::from_millis((i as u64 + 1) * 100))
                     .saturating_duration_since(Instant::now()),
             );
-            tx.send(AudioMessage::Chunk(AudioChunk {
-                queue_permit: None,
-                session_id: 273,
-                samples: chunk.to_vec(),
-                captured_at: Instant::now(),
-                speaker: None,
-            }))
-            .unwrap();
+            let message = match &system_pcm {
+                Some(system) => AudioMessage::DiarizedPair {
+                    queue_permit: None,
+                    session_id: 273,
+                    me: chunk.to_vec(),
+                    them: system[i * 1600..i * 1600 + chunk.len()].to_vec(),
+                    captured_at: Instant::now(),
+                },
+                None => AudioMessage::Chunk(AudioChunk {
+                    queue_permit: None,
+                    session_id: 273,
+                    samples: chunk.to_vec(),
+                    captured_at: Instant::now(),
+                    speaker: None,
+                }),
+            };
+            tx.send(message).unwrap();
         }
         tx.send(AudioMessage::EndOfStream { session_id: 273 })
             .unwrap();

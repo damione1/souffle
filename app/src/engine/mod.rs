@@ -1,3 +1,4 @@
+mod batch_session;
 pub mod batch_windows;
 pub mod kyutai;
 pub mod parakeet;
@@ -271,9 +272,8 @@ pub trait TranscriptionEngine {
     }
 
     /// Whether this engine can transcribe two synchronized audio streams (mic +
-    /// system audio) and label each segment by speaker. Only streaming engines
-    /// that support a batch dimension (Kyutai/moshi) can; others run meetings as
-    /// a single mixed stream with no Me/Them labels.
+    /// system audio) and label each segment by capture source. Streaming engines
+    /// may batch both lanes; batch engines serialize them on one loaded model.
     fn supports_diarization(&self) -> bool {
         false
     }
