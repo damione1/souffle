@@ -177,6 +177,134 @@ mod tests {
     }
 
     #[test]
+    fn batch_sources_render_live_then_round_trip_callback_db_detail_and_export() {
+        use souffle_lib::{
+            db::Database, engine::TranscriptionEngine, engine::mock::BatchSourceDecoder,
+            progress::ProgressChannel, state::MeetingAccumulator,
+        };
+        let window = meeting_window();
+        let live = Arc::new(Mutex::new(LiveTranscript::new()));
+        let directory = tempfile::tempdir().unwrap();
+        let db = Arc::new(Database::open(&directory.path().join("meeting.db")).unwrap());
+        let started = chrono::Utc::now();
+        let acc = Arc::new(Mutex::new(Some(MeetingAccumulator {
+            id: "two-sources".into(),
+            title: "Two sources".into(),
+            existing_segments: vec![],
+            new_segments: vec![],
+            recording_sessions: vec![],
+            session_started_at: started,
+            transcription_profile: souffle_lib::engine::default_transcription_profile(),
+            summary: None,
+            summary_is_stale: false,
+            summary_model: None,
+            summary_generated_at: None,
+            structured_summary: None,
+            notes: None,
+            calendar_event_id: None,
+            participants: vec![],
+            persisted_new_count: 0,
+        })));
+        let publications = Arc::new(Mutex::new(Vec::new()));
+        let sink = publications.clone();
+        let callback = souffle_lib::commands::meeting_callback_for_test(
+            ProgressChannel::new(move |s| sink.lock().unwrap().push(s)),
+            acc.clone(),
+            db.clone(),
+        );
+        let clock = std::time::Instant::now();
+        let mut decoder = BatchSourceDecoder::new(clock);
+        for hop in 1..=16 {
+            decoder.set_clock(clock + std::time::Duration::from_millis(hop * 100));
+            for s in decoder.transcribe_dual(&[0.1; 1600], &[0.2; 1600]).unwrap() {
+                callback(s);
+            }
+        }
+        for s in publications.lock().unwrap().drain(..) {
+            apply_live_segment(&window, &live, &s);
+        }
+        settle();
+        text_element(&window, "Micro");
+        text_element(&window, "Système");
+        assert!(live.lock().unwrap().tail.is_empty());
+        let blocks = window.get_live_transcript_blocks();
+        assert_eq!(blocks.row_count(), 2);
+        assert!(
+            blocks
+                .iter()
+                .all(|b| b.has_speaker && b.words.iter().all(|w| w.provisional && !w.clickable))
+        );
+        // Withdrawal on Me must preserve the simultaneous system hypothesis.
+        let mut withdrawal = final_seg("", 0.0, Speaker::Me);
+        withdrawal.is_final = false;
+        callback(withdrawal.clone());
+        apply_live_segment(&window, &live, &withdrawal);
+        assert!(
+            window.get_live_transcript_blocks().iter().any(|b| b.speaker
+                == crate::SpeakerRole::Them
+                && b.text.as_str() == "Système 25600")
+        );
+        // Both short remainders become finals; repeated Stop/flush adds nothing.
+        for s in decoder.flush().unwrap() {
+            callback(s);
+        }
+        assert!(decoder.flush().unwrap().is_empty());
+        for s in publications.lock().unwrap().drain(..) {
+            apply_live_segment(&window, &live, &s);
+        }
+        let saved = acc
+            .lock()
+            .unwrap()
+            .take()
+            .unwrap()
+            .into_transcript(started + chrono::Duration::seconds(2));
+        assert_eq!(saved.segments.len(), 2);
+        assert!(saved.segments.iter().all(|s| s.is_final));
+        db.save_meeting(&saved).unwrap();
+        let restored = db.load_meeting("two-sources").unwrap();
+        assert_eq!(
+            serde_json::to_value(&restored.segments).unwrap(),
+            serde_json::to_value(&saved.segments).unwrap()
+        );
+        let details = crate::transcript::build_transcript_blocks(
+            &restored.segments,
+            &restored.recording_sessions,
+        );
+        assert_eq!(details.len(), 2);
+        assert_eq!(details[0].speaker, crate::SpeakerRole::Me);
+        assert_eq!(details[1].speaker, crate::SpeakerRole::Them);
+        assert!(details.iter().all(|b| b.has_speaker && b.start_time == 0.0));
+        let export = souffle_lib::export::render_meeting(
+            &restored,
+            souffle_lib::export::ExportFormat::Markdown,
+        )
+        .unwrap();
+        assert!(export.contains("**Me** [0:00] Micro"));
+        assert!(export.contains("**Them** [0:00] Système"));
+        // Short Them window arrives first, then an earlier-start long Me
+        // window. Both live and saved views must still sort by session time.
+        live.lock().unwrap().clear();
+        let later = final_seg("Système court", 4.0, Speaker::Them);
+        let earlier = final_seg("Micro long", 1.0, Speaker::Me);
+        apply_live_segment(&window, &live, &later);
+        apply_live_segment(&window, &live, &earlier);
+        let blocks = window.get_live_transcript_blocks();
+        assert_eq!(blocks.row_data(0).unwrap().text.as_str(), "Micro long");
+        assert_eq!(blocks.row_data(1).unwrap().text.as_str(), "Système court");
+        let mut out_of_order = restored;
+        out_of_order.recording_sessions.clear();
+        out_of_order.segments = vec![later, earlier];
+        let details = crate::transcript::build_transcript_blocks(&out_of_order.segments, &[]);
+        assert_eq!(details[0].speaker, crate::SpeakerRole::Me);
+        let export = souffle_lib::export::render_meeting(
+            &out_of_order,
+            souffle_lib::export::ExportFormat::Markdown,
+        )
+        .unwrap();
+        assert!(export.find("Micro long").unwrap() < export.find("Système court").unwrap());
+    }
+
+    #[test]
     fn mono_meeting_final_is_visible_without_a_speaker_label() {
         let window = meeting_window();
         let live_state = Arc::new(Mutex::new(LiveTranscript::new()));
