@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 
 use souffle_lib::audio::{AudioChunk, AudioMessage, Resampler};
 use souffle_lib::engine::{
-    self, AudioInputRequirements, EngineError, TranscriptionEngine, TranscriptionSegment,
+    self, AudioInputRequirements, EngineError, Speaker, TranscriptionEngine, TranscriptionSegment,
 };
 use souffle_lib::filter::{PipelineConfig, resolve_vad_model_path};
 use souffle_lib::pipeline::{EngineActorHandle, SessionConfig};
@@ -30,6 +30,9 @@ struct Metrics {
     first_output_inference_s: Option<f64>,
     raw_segments: usize,
     samples_fed: usize,
+    system_samples_fed: usize,
+    me_revisions: Vec<f64>,
+    them_revisions: Vec<f64>,
     first_filtered_s: Option<f64>,
     revisions: Vec<f64>,
     segments: Vec<TranscriptionSegment>,
@@ -66,6 +69,42 @@ impl TranscriptionEngine for MeasuredEngine {
     }
     fn normalize_text(&self, t: &str) -> String {
         self.inner.normalize_text(t)
+    }
+    fn supports_diarization(&self) -> bool {
+        self.inner.supports_diarization()
+    }
+    fn set_diarization(&mut self, enabled: bool) {
+        self.inner.set_diarization(enabled);
+    }
+    fn transcribe_dual(
+        &mut self,
+        mic: &[f32],
+        system: &[f32],
+    ) -> Result<Vec<TranscriptionSegment>, EngineError> {
+        let start = Instant::now();
+        let since_start = self.started.lock().unwrap().elapsed().as_secs_f64();
+        let result = self.inner.transcribe_dual(mic, system);
+        let mut m = self.metrics.lock().unwrap();
+        let sample_clock_s = (m.samples_fed + mic.len()) as f64 / 16_000.0;
+        m.max_frame_lag_s = m
+            .max_frame_lag_s
+            .max((since_start - sample_clock_s).max(0.0));
+        m.calls += 1;
+        m.samples_fed += mic.len();
+        m.system_samples_fed += system.len();
+        m.first_call_s.get_or_insert(since_start);
+        m.decode_s += start.elapsed().as_secs_f64();
+        if let Ok(segments) = &result {
+            m.raw_segments += segments.len();
+            if segments.iter().any(|s| !s.text.is_empty()) {
+                m.first_output_call_s.get_or_insert(since_start);
+                m.first_output_inference_s
+                    .get_or_insert(start.elapsed().as_secs_f64());
+                m.first_raw_s
+                    .get_or_insert(self.started.lock().unwrap().elapsed().as_secs_f64());
+            }
+        }
+        result
     }
     fn transcribe(
         &mut self,
@@ -185,7 +224,7 @@ fn weight_backed_batch_final_equivalence_and_silence() {
                 .count();
             finals.extend(segments.into_iter().filter(|s| s.is_final));
         }
-        finals.extend(decoder.flush().unwrap());
+        finals.extend(decoder.flush().unwrap().into_iter().filter(|s| s.is_final));
         assert!(
             decoder.flush().unwrap().is_empty(),
             "flush duplicates finals"
@@ -219,6 +258,107 @@ fn weight_backed_batch_final_equivalence_and_silence() {
 }
 
 #[test]
+#[ignore = "requires catalogue weights and independent lane VAD"]
+fn weight_backed_sources_preserve_finals_and_reject_recorded_background() {
+    whisper_rs::install_logging_hooks();
+    let engine_id = std::env::var("SOU273_ENGINE").unwrap();
+    let profile = engine::resolve_transcription_profile(Some(&engine_id), None, None).unwrap();
+    let mut decoder = engine::create_engine(&profile).unwrap();
+    decoder
+        .load_model(&souffle_lib::models::model_dir(&profile))
+        .unwrap();
+    decoder.set_diarization(true);
+    let mic = fixture("sou-030/hesitation-a-gap0400ms.wav");
+    let system = fixture("sou-184/ecorp-q4-intro.wav");
+    let background = fixture("sou-274/washing-machine.wav");
+    assert!(background.iter().any(|s| *s != 0.0));
+    let mut baseline = Vec::new();
+    for previews in [false, true] {
+        decoder.reset_state().unwrap();
+        decoder.set_preview_enabled(previews);
+        let mut finals = Vec::new();
+        let mut snapshots = [0; 2];
+        for hop in 0..143 {
+            let a: Vec<_> = (0..1600)
+                .map(|i| mic[(hop * 1600 + i) % mic.len()])
+                .collect();
+            let b: Vec<_> = (0..1600)
+                .map(|i| system[(hop * 1600 + i) % system.len()])
+                .collect();
+            for s in decoder.transcribe_dual(&a, &b).unwrap() {
+                if s.is_final {
+                    finals.push(s);
+                } else if !s.text.is_empty() {
+                    match s.speaker {
+                        Some(Speaker::Me) => snapshots[0] += 1,
+                        Some(Speaker::Them) => snapshots[1] += 1,
+                        None => panic!("untagged dual preview"),
+                    }
+                }
+            }
+        }
+        finals.extend(decoder.flush().unwrap().into_iter().filter(|s| s.is_final));
+        assert!(decoder.flush().unwrap().is_empty());
+        assert!(finals.iter().any(|s| s.speaker == Some(Speaker::Me)));
+        assert!(finals.iter().any(|s| s.speaker == Some(Speaker::Them)));
+        if previews {
+            assert_same_finals(&baseline, &finals);
+            assert!(snapshots.iter().all(|n| *n > 0));
+        } else {
+            baseline = finals;
+        }
+    }
+    for quiet_me in [true, false] {
+        for recorded in [false, true] {
+            decoder.reset_state().unwrap();
+            let mut words = Vec::new();
+            for hop in 0..75 {
+                let speech: Vec<_> = (0..1600)
+                    .map(|i| mic[(hop * 1600 + i) % mic.len()])
+                    .collect();
+                let quiet: Vec<_> = (0..1600)
+                    .map(|i| {
+                        if recorded {
+                            background[(hop * 1600 + i) % background.len()]
+                        } else {
+                            0.0
+                        }
+                    })
+                    .collect();
+                words.extend(
+                    if quiet_me {
+                        decoder.transcribe_dual(&quiet, &speech)
+                    } else {
+                        decoder.transcribe_dual(&speech, &quiet)
+                    }
+                    .unwrap(),
+                );
+            }
+            words.extend(decoder.flush().unwrap());
+            let silent = if quiet_me { Speaker::Me } else { Speaker::Them };
+            assert!(
+                words
+                    .iter()
+                    .filter(|s| s.speaker == Some(silent))
+                    .all(|s| s.text.is_empty()),
+                "silent lane hallucinated: {words:?}"
+            );
+            assert!(
+                words
+                    .iter()
+                    .any(|s| s.speaker != Some(silent) && !s.text.is_empty())
+            );
+            println!(
+                "{engine_id}: quiet={silent:?} recorded_background={recorded}, other source remains audible; no quiet words"
+            );
+        }
+    }
+    println!(
+        "{engine_id}: dual final text/language/speaker/timestamps identical with/without snapshots and short tails"
+    );
+}
+
+#[test]
 #[ignore = "requires Whisper/Parakeet weights; optional ten-minute paced replay"]
 fn production_batch_preview_replay() {
     whisper_rs::install_logging_hooks();
@@ -236,6 +376,7 @@ fn production_batch_preview_replay() {
         .unwrap_or_else(|_| "30".into())
         .parse()
         .unwrap();
+    let dual = std::env::var("SOU274_DUAL").as_deref() == Ok("1");
     let paced = std::env::var("SOU273_PACED").as_deref() == Ok("1");
     let previews = std::env::var("SOU273_PREVIEWS").as_deref() != Ok("0");
     let mut source = fixture("sou-030/hesitation-a-gap0400ms.wav");
@@ -246,8 +387,43 @@ fn production_batch_preview_replay() {
         .cycle()
         .take(seconds * 16_000)
         .collect();
+    // Different voices and utterances, independently repeating on a common
+    // capture clock. Include alternation, overlap, pauses and nonzero tone.
+    let system_source = fixture("sou-184/ecorp-q4-intro.wav");
+    let micro_source = fixture("sou-030/hesitation-a-gap0400ms.wav");
+    let lane_pcm = |source: &[f32], is_micro: bool| -> Vec<f32> {
+        (0..pcm.len())
+            .map(|i| {
+                let phase = (i / 16_000) % 40;
+                let speech = if is_micro {
+                    phase < 12 || (20..32).contains(&phase)
+                } else {
+                    (8..22).contains(&phase) || (28..38).contains(&phase)
+                };
+                if speech {
+                    source[i % source.len()]
+                } else if phase < 20 {
+                    0.0
+                } else {
+                    (i as f32 * 0.018).sin() * 0.002
+                }
+            })
+            .collect()
+    };
+    let system_pcm = lane_pcm(&system_source, false);
+    let pcm = if dual {
+        lane_pcm(&micro_source, true)
+    } else {
+        pcm
+    };
     if let Ok(path) = std::env::var("SOU273_PCM") {
         std::fs::write(path, serde_json::to_vec(&pcm).unwrap()).unwrap();
+    }
+    if let Ok(path) = std::env::var("SOU274_SYSTEM_PCM") {
+        std::fs::write(path, serde_json::to_vec(&system_pcm).unwrap()).unwrap();
+    }
+    if std::env::var("SOU274_PCM_ONLY").as_deref() == Ok("1") {
+        return;
     }
     let started = Arc::new(Mutex::new(Instant::now()));
     let metrics = Arc::new(Mutex::new(Metrics::default()));
@@ -292,7 +468,7 @@ fn production_batch_preview_replay() {
                 dictionary_entries: vec![],
                 session_terms: vec![],
                 session_corrections: vec![],
-                diarize: false,
+                diarize: dual,
                 idle_config: None,
                 meeting_transcription_language:
                     souffle_lib::settings::MeetingTranscriptionLanguage::Auto,
@@ -305,6 +481,11 @@ fn production_batch_preview_replay() {
                 }
                 if !s.is_final && !s.text.is_empty() {
                     m.revisions.push(elapsed);
+                    match s.speaker {
+                        Some(Speaker::Me) => m.me_revisions.push(elapsed),
+                        Some(Speaker::Them) => m.them_revisions.push(elapsed),
+                        None => {}
+                    }
                 }
                 m.segments.push(s);
             }),
@@ -318,13 +499,23 @@ fn production_batch_preview_replay() {
             let due = start + Duration::from_millis((i as u64 + 1) * 100);
             std::thread::sleep(due.saturating_duration_since(Instant::now()));
         }
-        let message = AudioMessage::Chunk(AudioChunk {
-            queue_permit: None,
-            session_id: 273,
-            samples: chunk.to_vec(),
-            captured_at: Instant::now(),
-            speaker: None,
-        });
+        let message = if dual {
+            AudioMessage::DiarizedPair {
+                queue_permit: None,
+                session_id: 273,
+                me: chunk.to_vec(),
+                them: system_pcm[i * 1600..i * 1600 + chunk.len()].to_vec(),
+                captured_at: Instant::now(),
+            }
+        } else {
+            AudioMessage::Chunk(AudioChunk {
+                queue_permit: None,
+                session_id: 273,
+                samples: chunk.to_vec(),
+                captured_at: Instant::now(),
+                speaker: None,
+            })
+        };
         if paced {
             if tx.try_send(message).is_err() {
                 dropped.fetch_add(1, Ordering::Relaxed);
@@ -373,6 +564,39 @@ fn production_batch_preview_replay() {
         m.samples_fed,
         pcm.len().saturating_sub(m.samples_fed)
     );
+    if dual {
+        assert_eq!(m.samples_fed, pcm.len(), "microphone PCM lost");
+        assert_eq!(m.system_samples_fed, system_pcm.len(), "system PCM lost");
+        for speaker in [Speaker::Me, Speaker::Them] {
+            assert!(
+                finals.iter().any(|s| s.speaker == Some(speaker)),
+                "missing lane {speaker:?}"
+            );
+        }
+        println!(
+            "system_captured_samples={} system_engine_samples={} lane_finals_me={} lane_finals_them={}",
+            system_pcm.len(),
+            m.system_samples_fed,
+            finals
+                .iter()
+                .filter(|s| s.speaker == Some(Speaker::Me))
+                .count(),
+            finals
+                .iter()
+                .filter(|s| s.speaker == Some(Speaker::Them))
+                .count()
+        );
+        for (label, times) in [("Me", &m.me_revisions), ("Them", &m.them_revisions)] {
+            let intervals: Vec<_> = times.windows(2).map(|t| t[1] - t[0]).collect();
+            println!(
+                "lane={label} first_preview={:?} previews={} interval_p50={:?} p95={:?}",
+                times.first(),
+                times.len(),
+                percentile(intervals.clone(), 0.5),
+                percentile(intervals, 0.95)
+            );
+        }
+    }
     println!(
         "first_output_audio_wait={:?} first_output_engine_cost={:?}",
         m.first_output_call_s, m.first_output_inference_s

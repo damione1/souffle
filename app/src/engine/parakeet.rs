@@ -3,9 +3,8 @@ use std::path::Path;
 use parakeet_rs::{ParakeetTDT, TimestampMode, Transcriber};
 use tracing::{debug, info};
 
-use super::batch_windows::{
-    CHUNK_SAMPLES, PreviewPolicy, SAMPLE_RATE as PARAKEET_SAMPLE_RATE, drain_ready_windows,
-};
+use super::batch_session::BatchSession;
+use super::batch_windows::{CHUNK_SAMPLES, SAMPLE_RATE as PARAKEET_SAMPLE_RATE};
 use super::{
     AudioInputRequirements, EngineError, TranscriptionEngine, TranscriptionSegment,
     collapse_whitespace,
@@ -22,11 +21,7 @@ const MIN_INFERENCE_SAMPLES: usize = PARAKEET_SAMPLE_RATE as usize / 2;
 /// see `crate::ort_runtime` for why static linking is forbidden here.
 pub struct ParakeetEngine {
     model: Option<ParakeetTDT>,
-    audio_buffer: Vec<f32>,
-    /// Samples already sent to inference this session. Token timestamps are
-    /// relative to each window; this offsets them to session time.
-    consumed_samples: usize,
-    preview: PreviewPolicy,
+    session: BatchSession,
 }
 
 impl Default for ParakeetEngine {
@@ -39,31 +34,8 @@ impl ParakeetEngine {
     pub fn new() -> Self {
         Self {
             model: None,
-            audio_buffer: Vec::new(),
-            consumed_samples: 0,
-            preview: PreviewPolicy::default(),
+            session: BatchSession::default(),
         }
-    }
-
-    /// Shared implementation for `reset_state` and
-    /// `reset_state_preserving_timeline`: both must drop the buffered audio
-    /// a wedged engine choked on. Only a plain reset also drops
-    /// `consumed_samples`, since a stall-recovery reset happens mid-session
-    /// and must keep the window-timestamp offset continuous.
-    fn reset_buffer(&mut self, preserve_timeline: bool) {
-        self.audio_buffer.clear();
-        self.preview.reset();
-        if !preserve_timeline {
-            self.consumed_samples = 0;
-        }
-    }
-
-    /// Session-time offset (seconds) for the next inference window,
-    /// then advance by the window length.
-    fn take_window_offset(&mut self, window_len: usize) -> f64 {
-        let offset = self.consumed_samples as f64 / PARAKEET_SAMPLE_RATE as f64;
-        self.consumed_samples += window_len;
-        offset
     }
 
     fn run_inference(
@@ -143,7 +115,7 @@ impl TranscriptionEngine for ParakeetEngine {
 
     fn unload_model(&mut self) -> Result<(), EngineError> {
         self.model = None;
-        self.audio_buffer.clear();
+        self.session.reset(false);
         info!("Parakeet TDT model unloaded");
         Ok(())
     }
@@ -153,68 +125,42 @@ impl TranscriptionEngine for ParakeetEngine {
         audio: &[f32],
         _language: Option<&str>,
     ) -> Result<Vec<TranscriptionSegment>, EngineError> {
-        if self.model.is_none() {
-            return Err(EngineError::NotInitialized);
-        }
-
-        self.audio_buffer.extend_from_slice(audio);
-
-        let mut all_segments = Vec::new();
-        let windows = drain_ready_windows(&mut self.audio_buffer);
-        let finalized = !windows.is_empty();
-        if !windows.is_empty() {
-            all_segments.extend(
-                self.preview
-                    .clear(self.consumed_samples as f64 / PARAKEET_SAMPLE_RATE as f64),
-            );
-        }
-        for to_process in windows {
-            let offset = self.take_window_offset(to_process.len());
-            let model = self.model.as_mut().ok_or(EngineError::NotInitialized)?;
-            all_segments.extend(Self::run_inference(model, to_process, offset)?);
-        }
-        if finalized {
-            return Ok(all_segments);
-        }
         let model = self.model.as_mut().ok_or(EngineError::NotInitialized)?;
-        all_segments.extend(self.preview.decode(
-            &self.audio_buffer,
-            self.consumed_samples,
-            std::time::Instant::now(),
-            |pcm, offset| Self::run_inference(model, pcm.to_vec(), offset),
-        ));
-        Ok(all_segments)
+        self.session.transcribe(audio, None, |pcm, _, _| {
+            Ok((Self::run_inference(model, pcm.to_vec(), 0.0)?, None))
+        })
+    }
+
+    fn transcribe_dual(
+        &mut self,
+        mic: &[f32],
+        system: &[f32],
+    ) -> Result<Vec<TranscriptionSegment>, EngineError> {
+        let model = self.model.as_mut().ok_or(EngineError::NotInitialized)?;
+        self.session.dual(mic, system, |pcm, _, _| {
+            Ok((Self::run_inference(model, pcm.to_vec(), 0.0)?, None))
+        })
     }
 
     fn flush(&mut self) -> Result<Vec<TranscriptionSegment>, EngineError> {
-        if self.model.is_none() {
-            return Err(EngineError::NotInitialized);
-        }
-
-        if self.audio_buffer.is_empty() {
-            return Ok(vec![]);
-        }
-
-        let mut remaining: Vec<f32> = std::mem::take(&mut self.audio_buffer);
-        let original_len = remaining.len();
-
-        if original_len < MIN_INFERENCE_SAMPLES {
-            remaining.resize(MIN_INFERENCE_SAMPLES, 0.0);
-        }
-
-        let offset = self.take_window_offset(original_len);
         let model = self.model.as_mut().ok_or(EngineError::NotInitialized)?;
-        Self::run_inference(model, remaining, offset)
+        self.session.flush(MIN_INFERENCE_SAMPLES, |pcm, _, _| {
+            Ok((Self::run_inference(model, pcm.to_vec(), 0.0)?, None))
+        })
     }
 
+    fn supports_diarization(&self) -> bool {
+        true
+    }
+    fn set_diarization(&mut self, enabled: bool) {
+        self.session.set_dual(enabled);
+    }
     fn reset_state(&mut self) -> Result<(), EngineError> {
-        // TDT inference is stateless per window; only our buffer carries over.
-        self.reset_buffer(false);
+        self.session.reset(false);
         Ok(())
     }
-
     fn reset_state_preserving_timeline(&mut self) -> Result<(), EngineError> {
-        self.reset_buffer(true);
+        self.session.reset(true);
         Ok(())
     }
 
@@ -227,7 +173,7 @@ impl TranscriptionEngine for ParakeetEngine {
     }
 
     fn set_preview_enabled(&mut self, enabled: bool) {
-        self.preview.set_enabled(enabled);
+        self.session.set_preview_enabled(enabled);
     }
 
     fn minimum_vad_hold_seconds(&self) -> f64 {
@@ -242,6 +188,12 @@ impl TranscriptionEngine for ParakeetEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn batch_engines_support_source_lanes() {
+        assert!(ParakeetEngine::new().supports_diarization());
+        assert!(crate::engine::whisper::WhisperEngine::new().supports_diarization());
+    }
 
     #[test]
     fn transcribe_without_load_returns_error() {

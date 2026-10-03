@@ -49,6 +49,7 @@ pub type EngineFactory =
 pub struct EngineInfo {
     pub audio: AudioInputRequirements,
     pub mic_gain: f32,
+    pub supports_diarization: bool,
 }
 
 /// Per-session statistics returned when a session stops.
@@ -742,6 +743,7 @@ impl EngineActor {
         let info = EngineInfo {
             audio: engine.audio_requirements(),
             mic_gain: engine.mic_gain(),
+            supports_diarization: engine.supports_diarization(),
         };
         self.engine = Some(engine);
         self.publish_engine_info(Some(info.clone()));
@@ -877,6 +879,7 @@ impl EngineActor {
         let info = EngineInfo {
             audio: engine.audio_requirements(),
             mic_gain: engine.mic_gain(),
+            supports_diarization: engine.supports_diarization(),
         };
         let sample_rate = info.audio.sample_rate_hz;
 
@@ -909,7 +912,8 @@ impl EngineActor {
 
         // No Silero VAD in diarized mode: the two lanes must step together
         // every frame to stay aligned in the batch, so we can't drop a silent
-        // frame from one side. Kyutai's own semantic VAD handles pauses.
+        // frame from one side. Kyutai handles pauses internally; batch engines
+        // classify their retained windows with independent source VAD state.
         let mut mode: Box<dyn SessionMode> = if diarize {
             Box::new(DiarizedMode::new())
         } else {
@@ -1608,6 +1612,9 @@ impl SessionMode for DiarizedMode {
         self.arm_padding(chunk_size);
         let me_frame = Self::take_frame_or_silence(&mut self.me_buf, chunk_size);
         let them_frame = Self::take_frame_or_silence(&mut self.them_buf, chunk_size);
+        if self.frame_ready(chunk_size) {
+            engine.set_preview_enabled(false);
+        }
         engine
             .transcribe_dual(&me_frame, &them_frame)
             .map(Some)
@@ -2408,6 +2415,138 @@ mod tests {
             *fed.lock().unwrap(),
             expected,
             "slow preview cannot drop or reorder final PCM"
+        );
+        let calls = calls.lock().unwrap();
+        assert!(calls[0], "live frame allows optional work");
+        assert!(
+            calls[1..].iter().all(|enabled| !enabled),
+            "backlog/stop must not queue previews: {calls:?}"
+        );
+        actor.shutdown().unwrap();
+    }
+
+    #[test]
+    fn slow_dual_preview_coalesces_backlog_and_stop_preserves_both_sources() {
+        use crate::engine::{AudioInputRequirements, EngineError, TranscriptionEngine};
+        struct SlowEngine {
+            inner: MockEngine,
+            entered: Sender<()>,
+            release: crossbeam_channel::Receiver<()>,
+            enabled: bool,
+            calls: Arc<Mutex<Vec<bool>>>,
+        }
+        impl TranscriptionEngine for SlowEngine {
+            fn load_model(&mut self, p: &std::path::Path) -> Result<(), EngineError> {
+                self.inner.load_model(p)
+            }
+            fn unload_model(&mut self) -> Result<(), EngineError> {
+                self.inner.unload_model()
+            }
+            fn reset_state(&mut self) -> Result<(), EngineError> {
+                self.inner.reset_state()
+            }
+            fn audio_requirements(&self) -> AudioInputRequirements {
+                self.inner.audio_requirements()
+            }
+            fn flush(&mut self) -> Result<Vec<TranscriptionSegment>, EngineError> {
+                self.inner.flush()
+            }
+            fn set_preview_enabled(&mut self, enabled: bool) {
+                self.enabled = enabled;
+            }
+            fn supports_diarization(&self) -> bool {
+                true
+            }
+            fn set_diarization(&mut self, enabled: bool) {
+                self.inner.set_diarization(enabled);
+            }
+            fn transcribe(
+                &mut self,
+                _: &[f32],
+                _: Option<&str>,
+            ) -> Result<Vec<TranscriptionSegment>, EngineError> {
+                panic!("dual source fell back to mixture")
+            }
+            fn transcribe_dual(
+                &mut self,
+                me: &[f32],
+                them: &[f32],
+            ) -> Result<Vec<TranscriptionSegment>, EngineError> {
+                let first = self.calls.lock().unwrap().is_empty();
+                self.calls.lock().unwrap().push(self.enabled);
+                if first {
+                    self.entered.send(()).unwrap();
+                    self.release.recv_timeout(Duration::from_secs(5)).unwrap();
+                }
+                self.inner.transcribe_dual(me, them)
+            }
+        }
+        let inner = MockEngine::new();
+        let fed = inner.fed_dual_handle();
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let (entered_tx, entered_rx) = crossbeam_channel::bounded(1);
+        let (release_tx, release_rx) = crossbeam_channel::bounded(1);
+        let cell = Mutex::new(Some(SlowEngine {
+            inner,
+            entered: entered_tx,
+            release: release_rx,
+            enabled: false,
+            calls: calls.clone(),
+        }));
+        let (tx, rx) = unbounded();
+        let actor = EngineActorHandle::spawn(
+            rx,
+            Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            Arc::new(Mutex::new(None)),
+            Box::new(move |_| Ok(Box::new(cell.lock().unwrap().take().unwrap()))),
+        )
+        .unwrap();
+        actor
+            .load_model(default_transcription_profile(), PathBuf::from("/tmp"))
+            .unwrap();
+        actor
+            .start_session(
+                273,
+                {
+                    let mut c = session_config();
+                    c.diarize = true;
+                    c
+                },
+                Box::new(|_| {}),
+            )
+            .unwrap();
+        let mut expected = Vec::new();
+        for index in 0..41 {
+            let samples = vec![
+                index as f32;
+                if index == 40 {
+                    MIMI_FRAME_SIZE / 3
+                } else {
+                    MIMI_FRAME_SIZE
+                }
+            ];
+            let system: Vec<_> = samples.iter().map(|s| s + 100.0).collect();
+            expected.push((samples.clone(), system.clone()));
+            tx.send(AudioMessage::DiarizedPair {
+                queue_permit: None,
+                session_id: 273,
+                me: samples,
+                them: system,
+                captured_at: Instant::now(),
+            })
+            .unwrap();
+            if index == 0 {
+                entered_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+            }
+        }
+        tx.send(end_of_stream(273)).unwrap();
+        release_tx.send(()).unwrap();
+        let summary = actor.stop_session(Duration::from_secs(5)).unwrap();
+        assert_eq!(summary.dropped_chunks, 0);
+        assert_eq!(
+            *fed.lock().unwrap(),
+            expected,
+            "slow preview cannot drop or reorder either source PCM"
         );
         let calls = calls.lock().unwrap();
         assert!(calls[0], "live frame allows optional work");
