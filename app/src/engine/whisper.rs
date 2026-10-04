@@ -351,6 +351,58 @@ mod tests {
     use crate::engine::batch_session::remember_detected_language;
 
     #[test]
+    #[ignore = "requires catalogue Whisper weights; real timestamps across a pause"]
+    fn weight_backed_whisper_timestamps_respect_captured_audio() {
+        whisper_rs::install_logging_hooks();
+        let profile =
+            crate::engine::resolve_transcription_profile(Some("whisper"), None, None).unwrap();
+        let mut engine = WhisperEngine::new();
+        engine
+            .load_model(&crate::models::model_dir(&profile))
+            .unwrap();
+        engine.set_preview_enabled(false);
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("fixtures/audio/sou-030/hesitation-a-gap0400ms.wav");
+        let mut reader = hound::WavReader::open(path).unwrap();
+        let rate = reader.spec().sample_rate;
+        assert_eq!(reader.spec().channels, 1);
+        let source: Vec<f32> = reader
+            .samples::<i16>()
+            .map(|sample| sample.unwrap() as f32 / 32768.0)
+            .collect();
+        let mut resampler = crate::audio::Resampler::new(rate, 1, WHISPER_SAMPLE_RATE, 1.0);
+        let mut speech = resampler.process(&source);
+        speech.extend(resampler.flush());
+        let speech: Vec<f32> = speech.into_iter().cycle().take(5 * 16000).collect();
+        let mut pcm = speech.clone();
+        pcm.resize(8 * 16000, 0.0);
+        pcm.extend(speech);
+        let mut finals = Vec::new();
+        for (index, chunk) in pcm.chunks(1600).enumerate() {
+            let captured = ((index + 1) * 1600) as f64 / WHISPER_SAMPLE_RATE as f64;
+            for segment in engine.transcribe(chunk, None).unwrap() {
+                if segment.is_final {
+                    assert!(
+                        segment.end_time <= captured,
+                        "{segment:?} exceeds {captured}s capture"
+                    );
+                    finals.push(segment);
+                }
+            }
+        }
+        finals.extend(engine.flush().unwrap().into_iter().filter(|s| s.is_final));
+        assert!(!finals.is_empty());
+        assert!(finals.iter().all(|s| s.start_time >= 0.0
+            && s.start_time <= s.end_time
+            && s.end_time <= pcm.len() as f64 / WHISPER_SAMPLE_RATE as f64));
+        assert!(
+            finals.iter().any(|s| s.start_time >= 8.0),
+            "post-pause speech has no later timestamp: {finals:?}"
+        );
+        assert!(engine.flush().unwrap().is_empty());
+    }
+
+    #[test]
     fn strip_special_tokens_removes_timing_tokens() {
         let input = "[_BEG_] Le cuisinier secoue les nouilles.[_TT_150]";
         assert_eq!(

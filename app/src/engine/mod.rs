@@ -204,6 +204,12 @@ pub struct ContextWindowStats {
 
 /// Methods take &mut self and there is no Send/Sync bound: engines are
 /// created, used, and dropped on the engine actor thread only.
+///
+/// All decoding strategies publish the same [`TranscriptionSegment`]
+/// contract. Native streaming emits it directly; chunk decoders pass through
+/// `batch_session::BatchSession`, which converts window-local timestamps to
+/// the captured session timeline. Meeting consumers must not branch on an
+/// engine/model id or infer turns from the size/order of returned batches.
 pub trait TranscriptionEngine {
     fn load_model(&mut self, model_path: &Path) -> Result<(), EngineError>;
     fn unload_model(&mut self) -> Result<(), EngineError>;
@@ -316,7 +322,22 @@ pub trait TranscriptionEngine {
 /// keep addressing it as `engine::Speaker`.
 pub use souffle_schema::Speaker;
 
-/// A piece of transcribed text with metadata
+/// Engine-independent transcript stream contract, consumed by the pipeline,
+/// meeting callback, live grouper and persistence.
+///
+/// - Times are seconds on the captured session timeline, including silence,
+///   never callback arrival time. `0 <= start_time <= end_time`; decoding
+///   padding does not extend the audio span. Zero-duration pending words are
+///   valid. Native words and batch phrases may have different granularity.
+/// - A final appends immutable text in its source lane's emission order.
+///   Cross-lane delivery may be late, and small same-lane timestamp jitter
+///   must not reorder words. Consumers group by audio time, not callback order.
+/// - A non-final replaces that lane's current preview; empty text retracts
+///   it. The next final clears only that lane's preview. Previews are never
+///   persisted and must retain their times through the UI boundary.
+/// - Speaker identifies capture source, not a guessed voice identity. One
+///   shared paragraph policy handles interruptions, pauses and length limits
+///   for all engines; engine adapters never manufacture paragraphs.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TranscriptionSegment {
     pub text: String,

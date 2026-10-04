@@ -74,6 +74,28 @@ impl Default for BatchSession {
     }
 }
 type DecodeResult = Result<(Vec<TranscriptionSegment>, Option<String>), EngineError>;
+
+/// Decoder times are local to this captured window, regardless of the
+/// model's internal frame size or the inference padding on a short tail.
+/// Normalize before adding the shared session offset. Valid times retain
+/// their precision; malformed times cannot poison chronological grouping.
+fn normalize_window_timestamps(segments: &mut [TranscriptionSegment], samples: usize) {
+    let duration = samples as f64 / SAMPLE_RATE as f64;
+    for segment in segments {
+        let start = if segment.start_time.is_finite() {
+            segment.start_time.clamp(0.0, duration)
+        } else {
+            0.0
+        };
+        let end = if segment.end_time.is_finite() {
+            segment.end_time.clamp(start, duration)
+        } else {
+            start
+        };
+        segment.start_time = start;
+        segment.end_time = end;
+    }
+}
 /// Cache auto-detected language only from a window that kept real speech.
 /// A filtered leading hallucination must not lock the session to the
 /// wrong language for later windows.
@@ -264,6 +286,7 @@ impl BatchSession {
         }
         let (mut segments, detected) =
             decode(pcm, original, language.or(lane.language.as_deref()))?;
+        normalize_window_timestamps(&mut segments, original.len());
         remember_detected_language(&mut lane.language, language, detected, &segments);
         for s in &mut segments {
             s.start_time += offset;
@@ -287,6 +310,7 @@ impl BatchSession {
                     return Ok(vec![]);
                 }
                 let (mut segments, _) = decode(pcm, pcm, lang)?;
+                normalize_window_timestamps(&mut segments, pcm.len());
                 for s in &mut segments {
                     s.start_time += offset;
                     s.end_time += offset;
@@ -351,6 +375,111 @@ impl BatchSession {
 mod tests {
     use super::*;
     use std::time::Duration;
+
+    fn timed_segment(start: f64, end: f64) -> TranscriptionSegment {
+        TranscriptionSegment {
+            text: "Recognized speech".into(),
+            start_time: start,
+            end_time: end,
+            is_final: true,
+            speaker: None,
+            language: Some("fr".into()),
+            confidence: Some(0.9),
+        }
+    }
+
+    #[test]
+    fn decoded_window_bounds_keep_valid_times_and_repair_invalid_times() {
+        let mut segments = vec![
+            timed_segment(1.75, 4.2),
+            timed_segment(0.0, 30.0),
+            timed_segment(-0.5, 30.0),
+            timed_segment(3.0, 1.5),
+            timed_segment(6.0, 30.0),
+            timed_segment(f64::NAN, f64::INFINITY),
+        ];
+        normalize_window_timestamps(&mut segments, 5 * SAMPLE_RATE as usize);
+        let bounds: Vec<_> = segments
+            .iter()
+            .map(|s| (s.start_time, s.end_time))
+            .collect();
+        assert_eq!(
+            bounds,
+            vec![
+                (1.75, 4.2),
+                (0.0, 5.0),
+                (0.0, 5.0),
+                (3.0, 3.0),
+                (5.0, 5.0),
+                (0.0, 0.0)
+            ]
+        );
+        assert!(segments.iter().all(|s| s.text == "Recognized speech"
+            && s.is_final
+            && s.language.as_deref() == Some("fr")
+            && s.confidence == Some(0.9)));
+    }
+
+    #[test]
+    fn decoded_final_bounds_use_original_tail_before_session_offset() {
+        let mut lane = Lane {
+            consumed: 8 * SAMPLE_RATE as usize,
+            ..Lane::default()
+        };
+        let original = [0.1; 3200];
+        let padded = [0.1; 16000];
+        let mut decoder =
+            |_: &[f32], _: &[f32], _: Option<&str>| Ok((vec![timed_segment(0.05, 30.0)], None));
+        let finals = BatchSession::finish_window(
+            &mut lane,
+            Some(Speaker::Them),
+            None,
+            &padded,
+            &original,
+            &mut decoder,
+        )
+        .unwrap();
+        assert_eq!(finals[0].start_time, 8.05);
+        assert_eq!(finals[0].end_time, 8.2);
+        assert_eq!(finals[0].speaker, Some(Speaker::Them));
+        assert_eq!(lane.consumed, 8 * SAMPLE_RATE as usize + original.len());
+    }
+
+    #[test]
+    fn decoded_preview_and_final_share_bounds_without_consuming_preview_pcm() {
+        let mut lane = Lane {
+            consumed: 8 * SAMPLE_RATE as usize,
+            pcm: vec![0.1; 2 * SAMPLE_RATE as usize],
+            ..Lane::default()
+        };
+        let mut decoder =
+            |_: &[f32], _: &[f32], _: Option<&str>| Ok((vec![timed_segment(0.25, 30.0)], None));
+        let preview = BatchSession::preview(
+            &mut lane,
+            Some(Speaker::Me),
+            None,
+            Instant::now(),
+            &mut decoder,
+        )
+        .unwrap();
+        assert!(!preview.is_final);
+        assert_eq!((preview.start_time, preview.end_time), (8.0, 10.0));
+        assert_eq!(preview.speaker, Some(Speaker::Me));
+        assert_eq!(lane.consumed, 8 * SAMPLE_RATE as usize);
+        assert_eq!(lane.pcm.len(), 2 * SAMPLE_RATE as usize);
+        let pcm = lane.pcm.clone();
+        let finals = BatchSession::finish_window(
+            &mut lane,
+            Some(Speaker::Me),
+            None,
+            &pcm,
+            &pcm,
+            &mut decoder,
+        )
+        .unwrap();
+        assert_eq!((finals[0].start_time, finals[0].end_time), (8.25, 10.0));
+        assert_eq!(lane.consumed, 10 * SAMPLE_RATE as usize);
+    }
 
     #[test]
     fn dual_recovery_preserves_both_capture_clocks_and_cached_languages() {
