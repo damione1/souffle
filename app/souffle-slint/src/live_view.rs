@@ -226,7 +226,7 @@ mod tests {
         settle();
         text_element(&window, "Micro");
         text_element(&window, "Système");
-        assert!(live.lock().unwrap().tail.is_empty());
+        assert!(live.lock().unwrap().finals.is_empty());
         let blocks = window.get_live_transcript_blocks();
         assert_eq!(blocks.row_count(), 2);
         assert!(
@@ -302,6 +302,85 @@ mod tests {
         )
         .unwrap();
         assert!(export.find("Micro long").unwrap() < export.find("Système court").unwrap());
+    }
+
+    #[test]
+    fn word_and_chunk_streams_share_dialogue_in_live_database_detail_and_export() {
+        use souffle_lib::{db::Database, transcript::MeetingTranscript};
+        let window = meeting_window();
+        let live = Arc::new(Mutex::new(LiveTranscript::new()));
+        let directory = tempfile::tempdir().unwrap();
+        let db = Database::open(&directory.path().join("dialogue.db")).unwrap();
+        // The consumer receives only the segment contract, with no model id
+        // or decoding strategy. Both granularities represent the same turns.
+        for word_stream in [true, false] {
+            live.lock().unwrap().clear();
+            let mut finals = Vec::new();
+            for (text, start, speaker) in [
+                ("First question.", 10.0, Speaker::Me),
+                ("The answer.", 11.1, Speaker::Them),
+                ("Next question.", 12.2, Speaker::Me),
+                ("Another answer.", 13.3, Speaker::Them),
+            ] {
+                let parts: Vec<_> = if word_stream {
+                    text.split_whitespace().collect()
+                } else {
+                    vec![text]
+                };
+                for (i, text) in parts.iter().enumerate() {
+                    let offset = i as f64 / parts.len() as f64;
+                    let mut segment = final_seg(text, start + offset, speaker);
+                    segment.end_time = start + (i + 1) as f64 / parts.len() as f64;
+                    segment.is_final = false;
+                    apply_live_segment(&window, &live, &segment);
+                    let provisional = window.get_live_transcript_blocks();
+                    let last = provisional.row_data(provisional.row_count() - 1).unwrap();
+                    assert_eq!(
+                        last.speaker,
+                        crate::transcript::speaker_fields(Some(speaker)).1
+                    );
+                    assert_eq!(
+                        last.timestamp.as_str(),
+                        crate::timeline::format_duration(start)
+                    );
+                    segment.is_final = true;
+                    apply_live_segment(&window, &live, &segment);
+                    finals.push(segment);
+                }
+            }
+            let blocks = window.get_live_transcript_blocks();
+            assert_eq!(blocks.row_count(), 4);
+            let meeting: MeetingTranscript = serde_json::from_value(serde_json::json!({
+                "id": "shared-stream", "title": "Dialogue", "started_at": "2026-10-04T12:00:00Z",
+                "ended_at": "2026-10-04T12:00:15Z", "duration_seconds": 15.0,
+                "segments": finals,
+            }))
+            .unwrap();
+            db.save_meeting(&meeting).unwrap();
+            let restored = db.load_meeting("shared-stream").unwrap();
+            assert_eq!(
+                serde_json::to_value(&restored.segments).unwrap(),
+                serde_json::to_value(&meeting.segments).unwrap()
+            );
+            let detail = crate::transcript::build_transcript_blocks(&restored.segments, &[]);
+            assert_eq!(detail.len(), 4);
+            let exported = souffle_lib::export::render_meeting(
+                &restored,
+                souffle_lib::export::ExportFormat::Markdown,
+            )
+            .unwrap();
+            let mut previous = 0;
+            for (i, saved) in detail.iter().enumerate() {
+                let shown = blocks.row_data(i).unwrap();
+                assert_eq!(shown.text, saved.text);
+                assert_eq!(shown.timestamp, saved.timestamp);
+                assert_eq!(shown.speaker, saved.speaker);
+                assert!(shown.words.iter().all(|w| !w.provisional));
+                let position = exported.find(shown.text.as_str()).unwrap();
+                assert!(position >= previous);
+                previous = position;
+            }
+        }
     }
 
     #[test]
@@ -408,7 +487,7 @@ mod tests {
             settle();
             text_element(&window, "48000");
             assert!(
-                live.lock().unwrap().tail.is_empty(),
+                live.lock().unwrap().finals.is_empty(),
                 "revisions do not grow finals"
             );
             assert!(window.get_live_text().is_empty());
@@ -445,7 +524,7 @@ mod tests {
         assert!(!block.has_speaker);
         assert_eq!(block.text.as_str(), "Révision complète");
         assert!(block.words.iter().all(|w| w.provisional && !w.clickable));
-        assert!(live_state.lock().unwrap().tail.is_empty());
+        assert!(live_state.lock().unwrap().finals.is_empty());
         segment.is_final = true;
         apply_live_segment(&window, &live_state, &segment);
         assert!(

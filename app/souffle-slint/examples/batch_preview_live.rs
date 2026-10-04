@@ -1,6 +1,9 @@
 //! Weight-backed native live-view QA for SOU-273, without touching user data
 //! or microphone permissions. Feed SOU273_PCM (16 kHz mono JSON samples from
 //! batch_preview_replay), choose SOU273_ENGINE and optionally SOU273_DICTATION=1.
+//! SOU275_PCM_RATE overrides the input fixture rate; the engine contract
+//! determines resampling, delivery hop and pacing. SOU275_HOLD_SECONDS keeps
+//! the finished fixture transcript visible for native screenshot inspection.
 //! Run from app/ so the bundled VAD/ORT resources resolve.
 
 slint::include_modules!();
@@ -17,11 +20,23 @@ mod timeline;
 #[path = "../src/transcript.rs"]
 mod transcript;
 
-use souffle_lib::audio::{AudioChunk, AudioMessage};
+use slint::Model;
+use souffle_lib::audio::{AudioChunk, AudioMessage, Resampler};
 use souffle_lib::filter::{PipelineConfig, resolve_vad_model_path};
 use souffle_lib::pipeline::{EngineActorHandle, SessionConfig};
 use std::sync::{Arc, Mutex, atomic::AtomicU64};
 use std::time::{Duration, Instant};
+
+fn resample_fixture(pcm: Vec<f32>, source_rate: u32, target_rate: u32) -> Vec<f32> {
+    let samples = (pcm.len() as u64 * u64::from(target_rate) / u64::from(source_rate)) as usize;
+    let mut resampler = Resampler::new(source_rate, 1, target_rate, 1.0);
+    let mut output = resampler.process(&pcm);
+    output.extend(resampler.flush());
+    // The production resampler pads its last FFT frame. The fixture's known
+    // duration supplies the exact common clock for both replayed sources.
+    output.resize(samples, 0.0);
+    output
+}
 
 fn main() {
     slint::BackendSelector::new()
@@ -55,6 +70,29 @@ fn main() {
     let engine = std::env::var("SOU273_ENGINE").expect("set SOU273_ENGINE");
     let profile =
         souffle_lib::engine::resolve_transcription_profile(Some(&engine), None, None).unwrap();
+    let audio_input = souffle_lib::engine::create_engine(&profile)
+        .unwrap()
+        .audio_requirements();
+    let source_rate: u32 = std::env::var("SOU275_PCM_RATE")
+        .unwrap_or_else(|_| "16000".into())
+        .parse()
+        .unwrap();
+    assert!(source_rate > 0 && audio_input.sample_rate_hz > 0);
+    let hop = audio_input.chunk_size_samples as usize;
+    assert!(hop > 0);
+    let pcm = resample_fixture(pcm, source_rate, audio_input.sample_rate_hz);
+    let system_pcm =
+        system_pcm.map(|system| resample_fixture(system, source_rate, audio_input.sample_rate_hz));
+    let hold_seconds: u64 = std::env::var("SOU275_HOLD_SECONDS")
+        .unwrap_or_else(|_| "2".into())
+        .parse()
+        .unwrap();
+    eprintln!(
+        "Fixture audio source_hz={source_rate} engine_hz={} hop={hop} samples={} duration={:.3}s dual={dual}",
+        audio_input.sample_rate_hz,
+        pcm.len(),
+        pcm.len() as f64 / f64::from(audio_input.sample_rate_hz)
+    );
     let (tx, rx) = crossbeam_channel::bounded(200);
     let actor = EngineActorHandle::spawn(
         rx,
@@ -80,23 +118,30 @@ fn main() {
             let elapsed = callback_started.lock().unwrap().elapsed().as_secs_f64();
             let live = callback_live.clone();
             let _ = callback_weak.upgrade_in_event_loop(move |window| {
-                eprintln!("UI segment speaker={:?} final={} actor_at={elapsed:.3}s slint_queue={:.3}s text={:?}", segment.speaker, segment.is_final, published.elapsed().as_secs_f64(), segment.text);
+                eprintln!("UI segment speaker={:?} final={} start={:.3}s end={:.3}s actor_at={elapsed:.3}s slint_queue={:.3}s text={:?}", segment.speaker, segment.is_final, segment.start_time, segment.end_time, published.elapsed().as_secs_f64(), segment.text);
                 live_view::apply_live_segment_for_generation(&window, &live, generation, &segment);
+                let blocks = window.get_live_transcript_blocks();
+                eprintln!("UI blocks={} timeline={:?}", blocks.row_count(), blocks.iter().map(|block|
+                    format!("{:?}@{}", block.speaker, block.timestamp)).collect::<Vec<_>>());
             });
         })).unwrap();
         *started.lock().unwrap() = Instant::now();
         let start = Instant::now();
-        for (i, chunk) in pcm.chunks(1600).enumerate() {
+        for (i, chunk) in pcm.chunks(hop).enumerate() {
+            let end_sample = i * hop + chunk.len();
             std::thread::sleep(
-                (start + Duration::from_millis((i as u64 + 1) * 100))
-                    .saturating_duration_since(Instant::now()),
+                (start
+                    + Duration::from_secs_f64(
+                        end_sample as f64 / f64::from(audio_input.sample_rate_hz),
+                    ))
+                .saturating_duration_since(Instant::now()),
             );
             let message = match &system_pcm {
                 Some(system) => AudioMessage::DiarizedPair {
                     queue_permit: None,
                     session_id: 273,
                     me: chunk.to_vec(),
-                    them: system[i * 1600..i * 1600 + chunk.len()].to_vec(),
+                    them: system[i * hop..end_sample].to_vec(),
                     captured_at: Instant::now(),
                 },
                 None => AudioMessage::Chunk(AudioChunk {
@@ -114,13 +159,7 @@ fn main() {
         let summary = actor.stop_session(Duration::from_secs(60)).unwrap();
         eprintln!("Stopped: {summary:?}");
         actor.shutdown().unwrap();
-        let _ = weak.upgrade_in_event_loop(move |window| {
-            live.lock().unwrap().clear();
-            live_view::push_live_blocks(&window, &live);
-            window.set_live_tentative("".into());
-            live_view::push_dictation_words(&window);
-        });
-        std::thread::sleep(Duration::from_secs(2));
+        std::thread::sleep(Duration::from_secs(hold_seconds));
         slint::quit_event_loop().unwrap();
     });
     window.run().unwrap();
