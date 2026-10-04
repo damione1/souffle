@@ -1,20 +1,15 @@
 //! Live transcript state for a meeting in progress.
 //!
-//! The live view uses a deliberately simpler, incremental paragraph rule
-//! than the canonical grouper in `souffle_schema::paragraphs`: a final
-//! segment appends to the most recent tail paragraph of the same speaker
-//! when the gap since that paragraph's last end is within the shared pause
-//! threshold, and otherwise opens a new paragraph. The canonical grouper
-//! splits a turn based on a *later* interrupter, so it cannot run
-//! incrementally without re-cutting paragraphs already on screen. The
-//! post-meeting view (`transcript.rs`) re-groups the finished meeting with
-//! the canonical algorithm; only the pause threshold is shared.
+//! Live and saved transcripts share the canonical paragraph grouper. Only
+//! a bounded window is regrouped, so delayed lanes can complete an interruption
+//! without a model-specific latency horizon or rescanning an entire meeting.
+//! Previews retain their audio timestamps and join that pass alongside finals.
 
 use souffle_lib::engine::{Speaker, TranscriptionSegment};
-use souffle_schema::paragraphs::PAUSE_THRESHOLD_SECONDS;
+use souffle_schema::paragraphs::{PAUSE_THRESHOLD_SECONDS, group_into_paragraph_segments};
 
 use crate::transcript::{build_words, speaker_fields};
-use crate::{SpeakerRole, TranscriptBlock, TranscriptWord, timeline};
+use crate::{TranscriptBlock, TranscriptWord, timeline};
 
 /// `TranscriptBlock.words` for a live paragraph (SOU-256 AC5): finalized
 /// text tokenized like the post-meeting transcript, so its words open the
@@ -46,50 +41,33 @@ fn live_words(finalized: &str, provisional: Option<&str>) -> slint::ModelRc<Tran
     )))
 }
 
-/// Tail window before a paragraph is committed (immutable).
-const TAIL_WINDOW_S: f64 = 8.0;
-/// Committed paragraphs kept in memory for the live view.
+/// Paragraphs shown in the live view. One preceding paragraph is retained
+/// as grouping context when the oldest visible paragraph follows a handoff.
 const LIVE_PARAGRAPH_WINDOW: usize = 30;
 
-/// One in-progress or committed paragraph in the live view.
-#[derive(Clone)]
-pub struct LivePara {
-    pub speaker: Option<Speaker>,
-    /// `format_duration(first.start_time)` - fixed at creation, never updated.
-    pub timestamp: String,
-    pub start_time: f64,
-    /// Last segment end-time seen (for pause detection).
-    pub last_end: f64,
+/// One paragraph produced by the shared grouping policy.
+struct LivePara {
+    speaker: Option<Speaker>,
+    /// The first segment's audio timestamp, never wall-clock arrival time.
+    timestamp: String,
+    start_time: f64,
     /// Committed words, space-joined.
-    pub text: String,
-    /// Whether this paragraph is committed (past the tail window).
-    pub committed: bool,
+    text: String,
 }
 
 impl LivePara {
-    fn new(seg: &TranscriptionSegment) -> Self {
-        let trimmed = seg.text.trim().to_owned();
+    fn from_segments(segments: &[&TranscriptionSegment]) -> Self {
+        let first = segments[0];
         Self {
-            speaker: seg.speaker,
-            timestamp: timeline::format_duration(seg.start_time),
-            start_time: seg.start_time,
-            last_end: seg.end_time.max(seg.start_time),
-            text: trimmed,
-            committed: false,
-        }
-    }
-
-    fn append(&mut self, seg: &TranscriptionSegment) {
-        let trimmed = seg.text.trim();
-        if !trimmed.is_empty() {
-            if !self.text.is_empty() {
-                self.text.push(' ');
-            }
-            self.text.push_str(trimmed);
-        }
-        let seg_end = seg.end_time.max(seg.start_time);
-        if seg_end > self.last_end {
-            self.last_end = seg_end;
+            speaker: first.speaker,
+            timestamp: timeline::format_duration(first.start_time),
+            start_time: first.start_time,
+            text: segments
+                .iter()
+                .filter(|s| s.is_final)
+                .map(|s| s.text.trim())
+                .collect::<Vec<_>>()
+                .join(" "),
         }
     }
 
@@ -110,7 +88,7 @@ impl LivePara {
             has_speaker,
             speaker,
             timestamp: self.timestamp.clone().into(),
-            text: text.clone().into(),
+            text: text.into(),
             words: live_words(&self.text, tentative_suffix),
             recording_session_index: -1,
             start_time: self.start_time as f32,
@@ -120,38 +98,35 @@ impl LivePara {
     }
 }
 
-/// The word a lane's engine is still holding. It stays on screen, dimmed,
-/// until the engine confirms it (the final replaces it) or opens the next
-/// word: Damien, 2026-09-24, a pending word that vanished after 5 s and came
-/// back at the end of the meeting read as a lost word. The engine always
-/// emits a final for every pending word (next word, end of word, or flush),
-/// so nothing is left dangling.
+/// One revisable word or phrase per source, with its audio position. It
+/// stays visible until that lane publishes a revision, final or explicit
+/// withdrawal; wall-clock expiry previously made pending words disappear.
 #[derive(Default)]
 pub struct TentativeSlot {
-    text: String,
+    segment: Option<TranscriptionSegment>,
 }
 
 impl TentativeSlot {
-    fn set(&mut self, text: String) {
-        self.text = text;
+    fn set(&mut self, segment: &TranscriptionSegment) {
+        self.segment = (!segment.text.trim().is_empty()).then(|| segment.clone());
     }
 
     fn clear(&mut self) {
-        self.text.clear();
+        self.segment = None;
     }
 
     fn active_text(&self) -> Option<&str> {
-        (!self.text.is_empty()).then_some(self.text.as_str())
+        self.segment.as_ref().map(|s| s.text.trim())
     }
 }
 
 /// The live transcript state machine. All mutations happen on the Slint
 /// main thread (called from `invoke_from_event_loop`), so no locking needed.
 pub struct LiveTranscript {
-    /// Committed paragraphs (immutable once past tail window).
-    pub committed: Vec<LivePara>,
-    /// Tail: active paragraphs still within the tail window.
-    pub tail: Vec<LivePara>,
+    generation: u64,
+    /// Finals in emission order, bounded by the visible paragraph window.
+    /// Text is immutable; grouping can still change for a delayed other lane.
+    pub(crate) finals: Vec<TranscriptionSegment>,
     /// Pending-word slot for Me lane.
     pub tentative_me: TentativeSlot,
     /// Pending-word slot for Them lane.
@@ -163,8 +138,8 @@ pub struct LiveTranscript {
 impl LiveTranscript {
     pub fn new() -> Self {
         Self {
-            committed: Vec::new(),
-            tail: Vec::new(),
+            generation: 0,
+            finals: Vec::new(),
             tentative_me: TentativeSlot::default(),
             tentative_them: TentativeSlot::default(),
             tentative_none: TentativeSlot::default(),
@@ -181,140 +156,75 @@ impl LiveTranscript {
             None => self.tentative_none.clear(),
         }
 
-        // Commit tail paragraphs that are past the tail window.
-        let tail_cutoff = seg.start_time - TAIL_WINDOW_S;
-        let mut newly_committed: Vec<LivePara> = Vec::new();
-        let mut i = 0;
-        while i < self.tail.len() {
-            if self.tail[i].last_end <= tail_cutoff {
-                let mut p = self.tail.remove(i);
-                p.committed = true;
-                newly_committed.push(p);
-            } else {
-                i += 1;
-            }
-        }
-        self.committed.extend(newly_committed);
-        // Keep committed list bounded.
-        let max_committed = LIVE_PARAGRAPH_WINDOW.saturating_sub(1);
-        if self.committed.len() > max_committed {
-            let drop = self.committed.len() - max_committed;
-            self.committed.drain(0..drop);
-        }
-
-        // Find or create the paragraph in the tail.
-        let trimmed = seg.text.trim();
-        if trimmed.is_empty() {
+        if seg.text.trim().is_empty() {
             return;
         }
-
-        // Find the most recent tail paragraph of the same speaker to append to.
-        let idx = self.tail.iter().rposition(|p| {
-            p.speaker == seg.speaker && (seg.start_time - p.last_end) <= PAUSE_THRESHOLD_SECONDS
-        });
-
-        match idx {
-            Some(i) => self.tail[i].append(seg),
-            None => self.tail.push(LivePara::new(seg)),
-        }
+        self.finals.push(seg.clone());
+        self.trim_history();
     }
 
     /// Push a tentative (non-final) word for a speaker lane.
     pub fn push_tentative(&mut self, seg: &TranscriptionSegment) {
-        let text = seg.text.trim().to_owned();
         match seg.speaker {
-            Some(Speaker::Me) => self.tentative_me.set(text),
-            Some(Speaker::Them) => self.tentative_them.set(text),
-            None => self.tentative_none.set(text),
+            Some(Speaker::Me) => self.tentative_me.set(seg),
+            Some(Speaker::Them) => self.tentative_them.set(seg),
+            None => self.tentative_none.set(seg),
         }
     }
 
-    /// Build the Slint model: committed + tail paragraphs, with the active
-    /// tentative text appended as a greyed suffix on the last paragraph of
-    /// each speaker lane. Bounded to `LIVE_PARAGRAPH_WINDOW` entries.
-    pub fn build_blocks(&self) -> Vec<TranscriptBlock> {
-        // Merge committed + tail into a single chronological list, ordered
-        // by paragraph start like the post-meeting grouper. Committed-then-
-        // tail order alone is by commit time: a short interjection committed
-        // before a still-running monologue jumped above it (SOU-256). The
-        // sort is stable, so equal starts keep their creation order.
-        let mut all: Vec<&LivePara> = self.committed.iter().chain(self.tail.iter()).collect();
-        all.sort_by(|a, b| {
-            a.start_time
-                .partial_cmp(&b.start_time)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
-
-        // Take the last LIVE_PARAGRAPH_WINDOW entries.
-        let start = all.len().saturating_sub(LIVE_PARAGRAPH_WINDOW);
-        let window = &all[start..];
-
-        // Find the last paragraph index for each speaker to attach tentative.
-        let last_me_idx = window.iter().rposition(|p| p.speaker == Some(Speaker::Me));
-        let last_them_idx = window
+    fn trim_history(&mut self) {
+        let groups = group_into_paragraph_segments(&self.finals, PAUSE_THRESHOLD_SECONDS);
+        let count = groups.len().saturating_sub(LIVE_PARAGRAPH_WINDOW + 1);
+        if count == 0 {
+            return;
+        }
+        let consumed: std::collections::HashSet<*const TranscriptionSegment> = groups[..count]
             .iter()
-            .rposition(|p| p.speaker == Some(Speaker::Them));
-        let last_none_idx = window.iter().rposition(|p| p.speaker.is_none());
-
-        let tentative_me = self.tentative_me.active_text();
-        let tentative_them = self.tentative_them.active_text();
-        let tentative_none = self.tentative_none.active_text();
-
-        // Build orphan blocks for tentatives that have no committed paragraph yet.
-        // These go after all committed paragraphs.
-        let mut blocks: Vec<TranscriptBlock> = window
-            .iter()
-            .enumerate()
-            .map(|(i, para)| {
-                let suffix = match para.speaker {
-                    Some(Speaker::Me) if Some(i) == last_me_idx => tentative_me,
-                    Some(Speaker::Them) if Some(i) == last_them_idx => tentative_them,
-                    None if Some(i) == last_none_idx => tentative_none,
-                    _ => None,
-                };
-                para.to_slint_block(suffix)
-            })
+            .flatten()
+            .map(|s| std::ptr::from_ref(*s))
             .collect();
+        // Compute membership before retain moves any elements.
+        let keep: Vec<_> = self
+            .finals
+            .iter()
+            .map(|s| !consumed.contains(&std::ptr::from_ref(s)))
+            .collect();
+        let mut keep = keep.into_iter();
+        self.finals.retain(|_| keep.next().unwrap_or(false));
+    }
 
-        // If a speaker has a tentative but no paragraph in the window, add an orphan block.
-        if tentative_me.is_some() && last_me_idx.is_none() {
-            let text = tentative_me.unwrap_or("");
-            blocks.push(TranscriptBlock {
-                is_session_break: false,
-                has_speaker: true,
-                speaker: SpeakerRole::Me,
-                timestamp: "".into(),
-                text: text.into(),
-                words: live_words("", Some(text)),
-                recording_session_index: -1,
-                start_time: 0.0,
-                end_label: "".into(),
-                start_label: "".into(),
-            });
+    /// Render timestamped previews through the same grouper as finals.
+    /// A preview can open a new turn; it never mutates finalized text.
+    /// The visible window can be recut by a delayed lane or a revision.
+    pub fn build_blocks(&self) -> Vec<TranscriptBlock> {
+        let mut segments = self.finals.clone();
+        segments.extend(
+            [
+                &self.tentative_me,
+                &self.tentative_them,
+                &self.tentative_none,
+            ]
+            .into_iter()
+            .filter_map(|slot| slot.segment.clone()),
+        );
+        let mut blocks = Vec::new();
+        for group in group_into_paragraph_segments(&segments, PAUSE_THRESHOLD_SECONDS) {
+            let provisional = group
+                .iter()
+                .filter(|s| !s.is_final)
+                .map(|s| s.text.trim())
+                .collect::<Vec<_>>()
+                .join(" ");
+            blocks.push(LivePara::from_segments(&group).to_slint_block(Some(&provisional)));
         }
-        if tentative_them.is_some() && last_them_idx.is_none() {
-            let text = tentative_them.unwrap_or("");
-            blocks.push(TranscriptBlock {
-                is_session_break: false,
-                has_speaker: true,
-                speaker: SpeakerRole::Them,
-                timestamp: "".into(),
-                text: text.into(),
-                words: live_words("", Some(text)),
-                recording_session_index: -1,
-                start_time: 0.0,
-                end_label: "".into(),
-                start_label: "".into(),
-            });
-        }
-
+        let overflow = blocks.len().saturating_sub(LIVE_PARAGRAPH_WINDOW);
+        blocks.drain(..overflow);
         blocks
     }
 
     /// True if there is nothing to show (no blocks, no tentative).
     pub fn is_empty(&self) -> bool {
-        self.committed.is_empty()
-            && self.tail.is_empty()
+        self.finals.is_empty()
             && self.tentative_me.active_text().is_none()
             && self.tentative_them.active_text().is_none()
             && self.tentative_none.active_text().is_none()
@@ -322,17 +232,101 @@ impl LiveTranscript {
 
     /// Reset everything (called by `clear_live_transcript`).
     pub fn clear(&mut self) {
-        self.committed.clear();
-        self.tail.clear();
+        self.generation = self.generation.wrapping_add(1);
+        self.finals.clear();
         self.tentative_me.clear();
         self.tentative_them.clear();
         self.tentative_none.clear();
+    }
+
+    pub fn generation(&self) -> u64 {
+        self.generation
     }
 }
 
 #[cfg(test)]
 pub mod tests {
     use super::*;
+    use crate::SpeakerRole;
+
+    #[test]
+    fn resumed_preview_opens_a_timestamped_turn_after_the_other_speaker() {
+        let mut live = LiveTranscript::new();
+        live.push_final(&seg("My first turn.", 0.0, 1.0, true, Some(Speaker::Me)));
+        live.push_final(&seg("Your answer.", 2.0, 3.0, true, Some(Speaker::Them)));
+        live.push_tentative(&seg("My next turn", 5.0, 6.0, false, Some(Speaker::Me)));
+        let blocks = live.build_blocks();
+        assert_eq!(blocks.len(), 3);
+        assert_eq!(blocks[0].text.as_str(), "My first turn.");
+        assert_eq!(blocks[2].timestamp.as_str(), "0:05");
+        assert_eq!(blocks[2].start_time, 5.0);
+        live.push_final(&seg("My next turn.", 5.0, 6.0, true, Some(Speaker::Me)));
+        assert_eq!(live.build_blocks().len(), 3);
+    }
+
+    #[test]
+    fn interrupted_monologue_matches_the_saved_dialogue() {
+        let segments = vec![
+            seg("Let me explain", 0.0, 0.5, true, Some(Speaker::Me)),
+            seg("in detail because it is", 0.6, 1.1, true, Some(Speaker::Me)),
+            seg("wait", 1.2, 1.7, true, Some(Speaker::Them)),
+            seg("complicated.", 1.8, 2.3, true, Some(Speaker::Me)),
+            seg("So let us start", 3.0, 3.5, true, Some(Speaker::Me)),
+        ];
+        let mut live = LiveTranscript::new();
+        for segment in &segments {
+            live.push_final(segment);
+        }
+        let saved =
+            souffle_schema::paragraphs::group_into_paragraphs(&segments, PAUSE_THRESHOLD_SECONDS);
+        let blocks = live.build_blocks();
+        assert_eq!(blocks.len(), 3);
+        assert_eq!(
+            blocks.iter().map(|b| b.text.as_str()).collect::<Vec<_>>(),
+            saved.iter().map(|p| p.text.as_str()).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn live_monologue_breaks_after_four_sentences() {
+        let mut live = LiveTranscript::new();
+        for i in 0..9 {
+            live.push_final(&seg(
+                "One sentence.",
+                f64::from(i),
+                f64::from(i) + 0.8,
+                true,
+                Some(Speaker::Me),
+            ));
+        }
+        assert_eq!(live.build_blocks().len(), 3);
+    }
+
+    #[test]
+    fn first_mono_tentative_has_a_block_without_finals() {
+        use slint::Model;
+        let mut live = LiveTranscript::new();
+        live.push_tentative(&TranscriptionSegment {
+            text: "Premier aperçu".into(),
+            start_time: 0.0,
+            end_time: 1.5,
+            is_final: false,
+            language: None,
+            confidence: None,
+            speaker: None,
+        });
+        let blocks = live.build_blocks();
+        assert_eq!(blocks.len(), 1);
+        assert!(!blocks[0].has_speaker);
+        assert_eq!(blocks[0].text.as_str(), "Premier aperçu");
+        assert!(
+            blocks[0]
+                .words
+                .iter()
+                .all(|w| w.provisional && !w.clickable)
+        );
+        assert!(live.finals.is_empty());
+    }
 
     fn seg(
         text: &str,
@@ -456,48 +450,248 @@ pub mod tests {
         assert_eq!(ts1.as_str(), "1:05");
     }
 
-    // AC1 equivalence: committed paragraphs are immutable.
+    // Final text remains immutable when a later turn arrives.
     #[test]
-    fn committed_paragraphs_are_immutable() {
+    fn later_turns_do_not_mutate_final_text() {
         let mut lt = LiveTranscript::new();
-        // First paragraph at t=0
         lt.push_final(&seg("Alpha", 0.0, 1.0, true, Some(Speaker::Me)));
-        // Second paragraph well beyond tail window (>8s later) → first is committed.
         lt.push_final(&seg("Beta", 20.0, 21.0, true, Some(Speaker::Me)));
-        // The committed block's text must still be just "Alpha".
-        assert!(!lt.committed.is_empty());
-        assert_eq!(lt.committed[0].text, "Alpha");
+        assert_eq!(lt.build_blocks()[0].text.as_str(), "Alpha");
     }
 
     // SOU-256 (reported live by Damien): a short Me interjection during a
     // long Them monologue showed under it, then jumped above it once Me's
     // paragraph was committed first - committed paragraphs were listed
     // before tail ones regardless of time. Paragraphs are ordered by start
-    // time, like the post-meeting grouper, and never move once shown.
+    // time, like the post-meeting grouper. Continuing after the interjection
+    // now opens a third turn rather than extending the initial monologue.
     #[test]
-    fn committing_a_paragraph_does_not_reorder_the_view() {
+    fn continued_monologue_stays_after_the_interjection() {
         let mut lt = LiveTranscript::new();
         let order = |lt: &LiveTranscript| -> Vec<SpeakerRole> {
             lt.build_blocks().iter().map(|b| b.speaker).collect()
         };
-        // Them talks without a pause from 0:05 to 0:40 (one paragraph);
-        // Me says one thing at 0:17, long enough ago by the end to have
-        // left the tail window and been committed.
+        // Them talks without a pause from 0:05 to 0:40. Me's interjection
+        // at 0:17 must stay between the two parts of Them's monologue.
         let mut me_spoke = false;
         for i in 0..30 {
             let t = 5.0 + f64::from(i) * 1.2;
             lt.push_final(&seg("et encore", t, t + 1.0, true, Some(Speaker::Them)));
             if t >= 17.0 && !me_spoke {
                 lt.push_final(&seg("Un deux trois", 17.0, 18.0, true, Some(Speaker::Me)));
-                assert_eq!(order(&lt), vec![SpeakerRole::Them, SpeakerRole::Me]);
+                assert_eq!(
+                    order(&lt),
+                    vec![SpeakerRole::Them, SpeakerRole::Me, SpeakerRole::Them]
+                );
                 me_spoke = true;
             }
         }
-        assert!(
-            !lt.committed.is_empty(),
-            "Me's paragraph should be committed"
+        assert_eq!(
+            order(&lt),
+            vec![SpeakerRole::Them, SpeakerRole::Me, SpeakerRole::Them]
         );
-        assert_eq!(order(&lt), vec![SpeakerRole::Them, SpeakerRole::Me]);
+    }
+
+    #[test]
+    fn delayed_lane_and_preview_revisions_keep_the_canonical_turns() {
+        use slint::Model;
+        let mut live = LiveTranscript::new();
+        // Batch decoding can deliver Me's next window before Them's answer.
+        let finals = [
+            seg("The proposal.", 10.0, 11.0, true, Some(Speaker::Me)),
+            seg("Let us continue.", 12.0, 13.0, true, Some(Speaker::Me)),
+            seg("Wait.", 11.4, 11.8, true, Some(Speaker::Them)),
+        ];
+        for segment in &finals {
+            live.push_final(segment);
+        }
+        live.push_tentative(&seg(
+            "Earlier reply",
+            14.0,
+            14.5,
+            false,
+            Some(Speaker::Them),
+        ));
+        live.push_tentative(&seg("Next reply", 17.0, 18.0, false, Some(Speaker::Me)));
+        live.push_tentative(&seg(
+            "Revised reply",
+            14.0,
+            15.0,
+            false,
+            Some(Speaker::Them),
+        ));
+        let blocks = live.build_blocks();
+        assert_eq!(blocks.len(), 5);
+        assert_eq!(blocks[3].text.as_str(), "Revised reply");
+        assert_eq!(blocks[3].timestamp.as_str(), "0:14");
+        assert_eq!(blocks[4].text.as_str(), "Next reply");
+        assert!(
+            blocks[4]
+                .words
+                .iter()
+                .all(|w| w.provisional && !w.clickable)
+        );
+        // Retraction removes only Them's preview and leaves every final intact.
+        live.push_tentative(&seg("", 14.0, 15.0, false, Some(Speaker::Them)));
+        let blocks = live.build_blocks();
+        assert_eq!(blocks.len(), 4);
+        let saved =
+            souffle_schema::paragraphs::group_into_paragraphs(&finals, PAUSE_THRESHOLD_SECONDS);
+        assert_eq!(
+            blocks[..3]
+                .iter()
+                .map(|b| b.text.as_str())
+                .collect::<Vec<_>>(),
+            saved.iter().map(|p| p.text.as_str()).collect::<Vec<_>>()
+        );
+        assert_eq!(blocks[3].text.as_str(), "Next reply");
+    }
+
+    #[test]
+    fn preview_only_turns_sort_by_audio_time_and_never_default_to_zero() {
+        let mut live = LiveTranscript::new();
+        live.push_tentative(&seg("Me", 30.0, 31.0, false, Some(Speaker::Me)));
+        live.push_tentative(&seg("Them", 25.0, 26.0, false, Some(Speaker::Them)));
+        let blocks = live.build_blocks();
+        assert_eq!(blocks[0].speaker, SpeakerRole::Them);
+        assert_eq!(blocks[0].timestamp.as_str(), "0:25");
+        assert_eq!(blocks[1].timestamp.as_str(), "0:30");
+    }
+
+    #[test]
+    fn bounded_tail_keeps_long_dialogue_equal_to_saved_window() {
+        let mut live = LiveTranscript::new();
+        let mut finals = Vec::new();
+        for i in 0..300 {
+            let speaker = if i % 2 == 0 {
+                Speaker::Me
+            } else {
+                Speaker::Them
+            };
+            let start = f64::from(i) * 2.0;
+            let segment = seg(
+                &format!("Turn {i}."),
+                start,
+                start + 0.5,
+                true,
+                Some(speaker),
+            );
+            live.push_final(&segment);
+            finals.push(segment);
+            assert!(live.finals.len() <= LIVE_PARAGRAPH_WINDOW + 1);
+            let saved =
+                souffle_schema::paragraphs::group_into_paragraphs(&finals, PAUSE_THRESHOLD_SECONDS);
+            let skip = saved.len().saturating_sub(LIVE_PARAGRAPH_WINDOW);
+            let blocks = live.build_blocks();
+            assert_eq!(
+                blocks
+                    .iter()
+                    .map(|b| (b.timestamp.as_str(), b.text.as_str()))
+                    .collect::<Vec<_>>(),
+                saved[skip..]
+                    .iter()
+                    .map(|p| (p.timestamp.as_str(), p.text.as_str()))
+                    .collect::<Vec<_>>()
+            );
+        }
+    }
+
+    #[test]
+    fn a_late_lane_can_split_visible_history_beyond_eight_seconds() {
+        let mut live = LiveTranscript::new();
+        let mut finals = Vec::new();
+        for i in 0..40 {
+            let t = f64::from(i) * 3.0;
+            let speaker = if i % 2 == 0 {
+                Speaker::Them
+            } else {
+                Speaker::Me
+            };
+            let s = seg(
+                &format!("Earlier turn {i}."),
+                t,
+                t + 0.5,
+                true,
+                Some(speaker),
+            );
+            live.push_final(&s);
+            finals.push(s);
+        }
+        for s in [
+            seg("The long opening.", 120.0, 127.0, true, Some(Speaker::Me)),
+            seg("The continuation.", 127.0, 134.0, true, Some(Speaker::Me)),
+            seg("After a pause.", 138.0, 139.0, true, Some(Speaker::Me)),
+            seg(
+                "A delayed interruption.",
+                123.0,
+                124.0,
+                true,
+                Some(Speaker::Them),
+            ),
+        ] {
+            live.push_final(&s);
+            finals.push(s);
+        }
+        let blocks = live.build_blocks();
+        let saved =
+            souffle_schema::paragraphs::group_into_paragraphs(&finals, PAUSE_THRESHOLD_SECONDS);
+        let last = &saved[saved.len() - LIVE_PARAGRAPH_WINDOW..];
+        assert_eq!(
+            blocks.iter().map(|b| b.text.as_str()).collect::<Vec<_>>(),
+            last.iter().map(|p| p.text.as_str()).collect::<Vec<_>>()
+        );
+        assert_eq!(blocks[27].text.as_str(), "A delayed interruption.");
+    }
+
+    #[test]
+    fn long_jittered_monologue_keeps_sentence_boundaries_after_eviction() {
+        let mut live = LiveTranscript::new();
+        let mut finals = Vec::new();
+        for i in 0..160 {
+            let t = f64::from(i);
+            for s in [
+                seg(
+                    &format!("Sentence{i}"),
+                    t + 0.1,
+                    t + 0.5,
+                    true,
+                    Some(Speaker::Me),
+                ),
+                seg("ends.", t, t + 0.8, true, Some(Speaker::Me)),
+            ] {
+                live.push_final(&s);
+                finals.push(s);
+            }
+        }
+        let before = live.build_blocks();
+        let retained = live.finals.len();
+        live.push_tentative(&seg(
+            "Speculative interruption",
+            151.0,
+            152.0,
+            false,
+            Some(Speaker::Them),
+        ));
+        live.build_blocks();
+        live.push_tentative(&seg("", 151.0, 152.0, false, Some(Speaker::Them)));
+        assert_eq!(live.finals.len(), retained);
+        let saved =
+            souffle_schema::paragraphs::group_into_paragraphs(&finals, PAUSE_THRESHOLD_SECONDS);
+        let last = &saved[saved.len() - LIVE_PARAGRAPH_WINDOW..];
+        assert_eq!(
+            before.iter().map(|b| b.text.as_str()).collect::<Vec<_>>(),
+            last.iter().map(|p| p.text.as_str()).collect::<Vec<_>>()
+        );
+        assert_eq!(
+            live.build_blocks()
+                .iter()
+                .map(|b| b.text.to_string())
+                .collect::<Vec<_>>(),
+            before
+                .iter()
+                .map(|b| b.text.to_string())
+                .collect::<Vec<_>>()
+        );
     }
 
     // SOU-256: the very first partial of a meeting, before any final,

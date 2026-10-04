@@ -1,0 +1,8 @@
+washing-machine.wav is a five-second recorded background-noise fixture.
+Original: Washing Machine.wav by Walter_Odington, CC0 (public domain).
+https://freesound.org/people/Walter_Odington/sounds/32373/
+Source clip: ESC-50 audio/1-32373-A-35.wav
+https://github.com/karolpiczak/ESC-50/blob/master/audio/1-32373-A-35.wav
+Individual clip licensing: https://github.com/karolpiczak/ESC-50/blob/master/LICENSE
+Converted from 44.1 kHz to mono 16 kHz signed PCM16 with macOS afconvert.
+Used only for automated non-speech/VAD QA; not included in the app bundle.

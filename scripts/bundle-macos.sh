@@ -76,11 +76,16 @@ app_version="$(sed -n 's/^version = "\(.*\)"/\1/p' app/Cargo.toml | head -1)"
 
 if [[ "$nightly" -eq 1 ]]; then
   app_name="Soufflé Nightly"
+  update_asset_name="Souffle-Nightly.app.tar.gz"
   bundle_id="com.souffle.desktop.nightly"
   entitlements="app/entitlements.nightly.plist"
   [[ -f "$entitlements" ]] || entitlements="app/entitlements.plist"
 else
   app_name="Soufflé"
+  # GitHub rewrites non-ASCII release asset names on upload (`Soufflé.app.tar.gz`
+  # is stored as `Souffle.app.tar.gz`), so the update archive gets an ASCII
+  # name up front: latest.json must point at the name GitHub actually serves.
+  update_asset_name="Souffle.app.tar.gz"
   bundle_id="com.souffle.desktop"
   entitlements="app/entitlements.plist"
 fi
@@ -271,7 +276,14 @@ if [[ "$sign_updater" -eq 1 ]]; then
   fi
   update_dir="app/target/${profile}/bundle/updater"
   mkdir -p "$update_dir"
-  tar_path="${update_dir}/${app_name// /-}.app.tar.gz"
+  if [[ ! "$update_asset_name" =~ ^[A-Za-z0-9._-]+$ ]]; then
+    echo "error: update asset name '$update_asset_name' is not plain ASCII; GitHub would rename it and latest.json would 404" >&2
+    exit 1
+  fi
+  tar_path="${update_dir}/${update_asset_name}"
+  # A previous build of the other naming must not be uploaded by the
+  # release workflow's *.tar.gz glob next to this one.
+  rm -f "$update_dir"/*.app.tar.gz "$update_dir"/*.app.tar.gz.sig
   echo "==> Building update artifact ${tar_path}"
   tar -C "$bundle_root" -czf "$tar_path" "${app_name}.app"
 

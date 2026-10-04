@@ -1884,19 +1884,13 @@ async fn ensure_model_ready(handle: &AppHandle) -> Result<(), String> {
     .map_err(|error| format!("Join ensure_model_ready task: {error}"))?
 }
 
-/// Pushes each transcribed segment into the window's `live-text`/
-/// `live-tentative` properties. Runs on the engine-actor thread, not the
-/// Slint main thread, so every update is marshaled via
-/// `invoke_from_event_loop` - the same reasoning as `run_on_main_thread`,
-/// just fire-and-forget instead of awaited. Milestone 5 scope: a single
-/// running text block for both dictation and meetings, not the full
-/// paragraph-grouped/speaker-lane rendering LiveSessionCard.svelte does -
-/// that's real, separate work (windowing, speaker lanes, inline edit),
-/// deliberately deferred and noted here rather than half-built.
+/// Marshal actor segments onto Slint, retaining the originating session's
+/// generation even when publication waits until after stop/new-session.
 fn live_segment_channel(
     weak: slint::Weak<MainWindow>,
     live_state: LiveTranscriptState,
 ) -> ProgressChannel<TranscriptionSegment> {
+    let generation = live_state.lock().unwrap().generation();
     ProgressChannel::new(move |segment: TranscriptionSegment| {
         let weak = weak.clone();
         let live_state = live_state.clone();
@@ -1904,7 +1898,12 @@ fn live_segment_channel(
             let Some(window) = weak.upgrade() else {
                 return;
             };
-            live_view::apply_live_segment(&window, &live_state, &segment);
+            live_view::apply_live_segment_for_generation(
+                &window,
+                &live_state,
+                generation,
+                &segment,
+            );
         });
     })
 }
@@ -3485,70 +3484,66 @@ fn wire_update_dialogs(
     });
 
     let weak = window.as_weak();
+    let handle = tauri_handle.clone();
+    let settings_drafts_for_download = settings_drafts.clone();
     window.on_update_download_requested(move || {
-        let Some(window) = weak.upgrade() else {
-            return;
-        };
-        window.set_update_phase(UpdatePhase::Downloading);
-        window.set_update_error_message("".into());
-        let weak = weak.clone();
-        slint::spawn_local(async move {
-            // `download_update` awaits a `reqwest` fetch, which needs an
-            // ambient Tokio reactor that `slint::spawn_local`'s own executor
-            // doesn't provide - route it through the global Tokio runtime
-            // (see `refresh_summary_providers`'s identical fix).
-            let result =
-                souffle_lib::async_runtime::spawn(souffle_lib::commands::download_update())
-                    .await
-                    .map_err(|e| format!("Join download_update task: {e}"))
-                    .and_then(|r| r);
-            let Some(window) = weak.upgrade() else {
-                return;
-            };
-            // `download_update` only returns once the pipeline has settled
-            // (Ready, Failed, or Idle after a cancel), so its own phase is
-            // the truth - not a guess derived from `error.is_none()`.
-            match result {
-                Ok(status) => {
-                    window.set_update_phase(update_ui::update_phase_to_slint(status.phase));
-                    window.set_update_error_message(status.error.unwrap_or_default().into());
-                }
-                Err(e) => {
-                    window.set_update_phase(UpdatePhase::Failed);
-                    window.set_update_error_message(e.into());
-                }
-            }
-        })
-        .expect("slint event loop not running");
+        if let Some(window) = weak.upgrade() {
+            // The dialog keeps its explicit "Install and restart" step.
+            start_update_download(
+                &window,
+                handle.clone(),
+                settings_drafts_for_download.clone(),
+                false,
+            );
+        }
     });
 
     let weak = window.as_weak();
     let handle = tauri_handle.clone();
     let settings_drafts_for_install = settings_drafts.clone();
     window.on_update_install_requested(move || {
-        let weak = weak.clone();
-        let handle = handle.clone();
-        let settings_drafts_for_install = settings_drafts_for_install.clone();
-        // SOU-226 AC1: route through the same flush barrier as native quit
-        // (`SettingsDraftController::flush_before_exit`) instead of calling
-        // `install_update` directly - a pending/retained Settings draft is
-        // written (or its failure surfaced, reopening Settings) before the
-        // process exits as part of `install_and_relaunch`'s relaunch.
-        let install: Rc<dyn Fn()> = Rc::new(move || {
-            let weak = weak.clone();
-            let handle = handle.clone();
-            slint::spawn_local(async move {
-                let state = Arc::clone(&handle);
-                if let Err(e) = souffle_lib::commands::install_update(state).await
-                    && let Some(window) = weak.upgrade()
-                {
-                    window.set_update_error_message(e.into());
+        if let Some(window) = weak.upgrade() {
+            request_update_install(&window, &handle, &settings_drafts_for_install);
+        }
+    });
+
+    // Settings > "Mises à jour": one button that walks check -> download ->
+    // install and restart. Rust decides what the click means from the row
+    // (`update_ui::update_row_click`); Slint only renders it.
+    let weak = window.as_weak();
+    let handle = tauri_handle.clone();
+    let settings_drafts_for_row = settings_drafts.clone();
+    window.on_settings_update_action_requested(move || {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        match update_ui::update_row_click(&update_ui::current_update_row()) {
+            update_ui::UpdateRowClick::Check => start_update_check(&window),
+            update_ui::UpdateRowClick::Download => start_update_download(
+                &window,
+                handle.clone(),
+                settings_drafts_for_row.clone(),
+                true,
+            ),
+            update_ui::UpdateRowClick::Install { version } => {
+                // Re-read: a recording or model load may have started or
+                // ended since the package became ready.
+                let blocked = souffle_lib::commands::get_update_install_block(Arc::clone(&handle))
+                    .ok()
+                    .flatten();
+                match blocked {
+                    Some(reason) => update_ui::set_update_row(
+                        &window,
+                        update_ui::UpdateRow::Ready {
+                            version,
+                            blocked: Some(reason),
+                        },
+                    ),
+                    None => request_update_install(&window, &handle, &settings_drafts_for_row),
                 }
-                // On success the process restarts itself; nothing left to update here.
-            })
-            .expect("slint event loop not running");
-        });
-        settings_drafts_for_install.flush_before_exit(install);
+            }
+            update_ui::UpdateRowClick::Ignore => {}
+        }
     });
 
     let weak = window.as_weak();
@@ -3577,6 +3572,190 @@ fn wire_update_dialogs(
             let _ = souffle_lib::commands::open_release_page(url.to_string());
         }
     });
+}
+
+/// The release the update surfaces are about: the row's, or the one the
+/// Update Available dialog was opened for when Settings never checked.
+fn update_row_version(window: &MainWindow) -> String {
+    update_ui::current_update_row()
+        .version()
+        .map(str::to_owned)
+        .unwrap_or_else(|| window.get_update_latest_version().to_string())
+}
+
+/// Settings > "Mises à jour" check. The download state is read too, so a
+/// download the dialog already started or finished is not forgotten.
+fn start_update_check(window: &MainWindow) {
+    update_ui::set_update_row(window, update_ui::UpdateRow::Checking);
+    let weak = window.as_weak();
+    slint::spawn_local(async move {
+        let result = souffle_lib::commands::check_for_updates().await;
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        let row = match souffle_lib::commands::get_update_download_status() {
+            Ok(download) => update_ui::update_row_from_check(result, &download),
+            Err(error) => update_ui::UpdateRow::CheckFailed { error },
+        };
+        update_ui::set_update_row(&window, row);
+    })
+    .expect("slint event loop not running");
+}
+
+/// How often the Settings row re-reads download progress.
+const UPDATE_PROGRESS_POLL: Duration = Duration::from_millis(250);
+
+/// Download and verify the update, for both the Update Available dialog and
+/// the Settings row; both surfaces are projected from the result, so they
+/// never disagree. `install_when_ready`: the row's one-click flow installs as
+/// soon as an unblocked package is ready, the dialog keeps its own
+/// "Install and restart" step.
+fn start_update_download(
+    window: &MainWindow,
+    handle: AppHandle,
+    settings_drafts: Rc<settings_drafts::SettingsDraftController>,
+    install_when_ready: bool,
+) {
+    let version = update_row_version(window);
+    window.set_update_phase(UpdatePhase::Downloading);
+    window.set_update_error_message("".into());
+    update_ui::set_update_row(
+        window,
+        update_ui::UpdateRow::Downloading {
+            version: version.clone(),
+            percent: None,
+        },
+    );
+
+    // `download_update` reports progress only through the shared status;
+    // poll it while the download runs. Moved into the task below, which
+    // stops it once the download settles.
+    let progress = slint::Timer::default();
+    let weak = window.as_weak();
+    progress.start(
+        slint::TimerMode::Repeated,
+        UPDATE_PROGRESS_POLL,
+        move || {
+            let Some(window) = weak.upgrade() else {
+                return;
+            };
+            let Ok(status) = souffle_lib::commands::get_update_download_status() else {
+                return;
+            };
+            if let Some(row) =
+                update_ui::update_row_with_progress(&update_ui::current_update_row(), &status)
+            {
+                update_ui::set_update_row(&window, row);
+            }
+        },
+    );
+
+    let weak = window.as_weak();
+    slint::spawn_local(async move {
+        // `download_update` awaits a `reqwest` fetch, which needs an
+        // ambient Tokio reactor that `slint::spawn_local`'s own executor
+        // doesn't provide - route it through the global Tokio runtime
+        // (see `refresh_summary_providers`'s identical fix).
+        let result = souffle_lib::async_runtime::spawn(souffle_lib::commands::download_update())
+            .await
+            .map_err(|e| format!("Join download_update task: {e}"))
+            .and_then(|r| r);
+        progress.stop();
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        // `download_update` only returns once the pipeline has settled
+        // (Ready, Failed, or Idle after a cancel), so its own phase is
+        // the truth - not a guess derived from `error.is_none()`.
+        match &result {
+            Ok(status) => {
+                window.set_update_phase(update_ui::update_phase_to_slint(status.phase));
+                window.set_update_error_message(status.error.clone().unwrap_or_default().into());
+            }
+            Err(e) => {
+                window.set_update_phase(UpdatePhase::Failed);
+                window.set_update_error_message(e.as_str().into());
+            }
+        }
+        let blocked = souffle_lib::commands::get_update_install_block(Arc::clone(&handle))
+            .ok()
+            .flatten();
+        update_ui::project_install_block(&window, blocked);
+        let row = update_ui::update_row_from_download(
+            version,
+            result.as_ref().map_err(String::as_str),
+            blocked,
+        );
+        let install = install_when_ready && update_ui::should_auto_install(&row);
+        update_ui::set_update_row(&window, row);
+        if install {
+            request_update_install(&window, &handle, &settings_drafts);
+        }
+    })
+    .expect("slint event loop not running");
+}
+
+/// "Install and restart", for both the dialog and the Settings row.
+///
+/// SOU-226 AC1: routed through the same flush barrier as native quit
+/// (`SettingsDraftController::flush_before_exit`) instead of calling
+/// `install_update` directly - a pending/retained Settings draft is written
+/// (or its failure surfaced, reopening Settings) before the process exits as
+/// part of the relaunch. The barrier hides the window, so a refused or
+/// failed install shows it again: an error on a hidden window is the
+/// "nothing happens" this flow must never do.
+fn request_update_install(
+    window: &MainWindow,
+    handle: &AppHandle,
+    settings_drafts: &Rc<settings_drafts::SettingsDraftController>,
+) {
+    let weak = window.as_weak();
+    let handle = handle.clone();
+    let install: Rc<dyn Fn()> = Rc::new(move || {
+        let weak = weak.clone();
+        let handle = handle.clone();
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        let version = update_row_version(&window);
+        update_ui::set_update_row(
+            &window,
+            update_ui::UpdateRow::Installing {
+                version: version.clone(),
+            },
+        );
+        slint::spawn_local(async move {
+            // On success the process restarts itself and this never returns.
+            let Err(error) = souffle_lib::commands::install_update(Arc::clone(&handle)).await
+            else {
+                return;
+            };
+            let Some(window) = weak.upgrade() else {
+                return;
+            };
+            let _ = show_main_window(&window);
+            window.set_update_error_message(error.as_str().into());
+            let status = souffle_lib::commands::get_update_download_status();
+            if let Ok(status) = &status {
+                window.set_update_phase(update_ui::update_phase_to_slint(status.phase));
+            }
+            let blocked = souffle_lib::commands::get_update_install_block(Arc::clone(&handle))
+                .ok()
+                .flatten();
+            update_ui::project_install_block(&window, blocked);
+            // A refusal (still recording) leaves the package ready: the row
+            // shows why. A failed swap marked the download failed: the row
+            // shows the error and offers a retry.
+            let row = update_ui::update_row_from_download(
+                version,
+                status.as_ref().map_err(String::as_str),
+                blocked,
+            );
+            update_ui::set_update_row(&window, row);
+        })
+        .expect("slint event loop not running");
+    });
+    settings_drafts.flush_before_exit(install);
 }
 
 fn apply_startup_update_dialogs(
@@ -3625,7 +3804,9 @@ fn apply_startup_update_dialogs(
                 return;
             };
             if result.update_available && result.check_error.is_none() {
-                window.set_update_latest_version(result.latest_version.unwrap_or_default().into());
+                let latest_version = result.latest_version.unwrap_or_default();
+                update_ui::announce_update(&window, latest_version.clone());
+                window.set_update_latest_version(latest_version.into());
                 let notes = result
                     .release_notes
                     .unwrap_or_else(|| "Voir les notes de version sur GitHub.".to_string());
@@ -5820,36 +6001,6 @@ fn wire_callbacks(
     });
 
     let weak = window.as_weak();
-    window.on_settings_check_updates_requested(move || {
-        let Some(window) = weak.upgrade() else {
-            return;
-        };
-        window.set_settings_checking_updates(true);
-        window.set_settings_update_status("".into());
-        slint::spawn_local(async move {
-            let result = souffle_lib::commands::check_for_updates().await;
-            window.set_settings_checking_updates(false);
-            match result {
-                Ok(update) => {
-                    let status = if let Some(err) = update.check_error {
-                        err
-                    } else if update.update_available {
-                        format!(
-                            "Mise à jour disponible : v{}",
-                            update.latest_version.unwrap_or_default()
-                        )
-                    } else {
-                        "À jour.".to_string()
-                    };
-                    window.set_settings_update_status(status.into());
-                }
-                Err(e) => window.set_settings_update_status(e.into()),
-            }
-        })
-        .expect("slint event loop not running");
-    });
-
-    let weak = window.as_weak();
     let handle = tauri_handle.clone();
     let settings_io_for_provider = settings_io.clone();
     let settings_state_for_provider = settings_state.clone();
@@ -6961,6 +7112,8 @@ fn dispatch_native_action(
             release_notes,
             release_url,
         } => {
+            // The Settings row learns about it even when no dialog opens.
+            update_ui::announce_update(window, latest_version.clone());
             if window.get_whats_new_open() || window.get_update_available_open() {
                 return;
             }

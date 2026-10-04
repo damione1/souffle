@@ -75,6 +75,7 @@ lucide-slint = "1.46.0"
 slint-build = "1.18"
 
 [dev-dependencies]
+souffle_lib = { path = "..", package = "souffle", features = ["test-support"] }
 tempfile = "3"
 # SOU-256: element lookup by id + geometry, so a test can assert the live
 # meeting transcript really gets laid out at a usable height. Already in the

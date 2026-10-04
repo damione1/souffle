@@ -184,3 +184,26 @@ jobs:
             "app/target/release/bundle/updater/"*.tar.gz.sig \
             "app/target/release/bundle/updater/latest.json" \
             --clobber
+
+      # The in-app updater downloads exactly the URL latest.json names. GitHub
+      # renames assets on upload (non-ASCII is rewritten), so a manifest
+      # pointing at the pre-upload file name 404s for every user (v0.16.0 to
+      # v0.16.2). The release is still a draft here, so the public URL cannot
+      # be fetched yet; check the name against the uploaded assets instead.
+      - name: Check latest.json points at an uploaded asset
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          url="$(jq -r '.platforms["darwin-aarch64"].url' app/target/release/bundle/updater/latest.json)"
+          expected_prefix="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/"
+          if [[ "$url" != "${expected_prefix}"* ]]; then
+            echo "::error::latest.json url '$url' is not under ${expected_prefix}"
+            exit 1
+          fi
+          asset="${url#"$expected_prefix"}"
+          if ! gh release view "${GITHUB_REF_NAME}" --json assets -q '.assets[].name' | grep -qxF "$asset"; then
+            echo "::error::latest.json points at '$asset', which is not an asset of ${GITHUB_REF_NAME}"
+            gh release view "${GITHUB_REF_NAME}" --json assets -q '.assets[].name'
+            exit 1
+          fi
+          echo "latest.json -> $asset (uploaded)"
