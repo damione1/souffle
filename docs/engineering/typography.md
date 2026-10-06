@@ -2,6 +2,8 @@
 
 The shipped Slint UI and native macOS HUD share `app/souffle-typography`. This Rust crate owns the Inter assets, their identities, nine weights, slants and role styles. Its build-time projections generate the Slint library and Swift declarations into `OUT_DIR`; generated files are never edited or checked in. `TypefaceWeight` is generated from the Rust enum, re-exported by `types.slint`, and converted exhaustively at the Rust callback boundary. Role names are compile-time global members, never string callback arguments.
 
+The Slint build uses `compile_with_output_path` and tracks the returned source dependencies, translation directory and compiler environment settings. The generated `OUT_DIR/typography.slint` is excluded from those input dependencies: rewriting it after Cargo's build-start timestamp would otherwise invalidate the next invocation, including CI's test run immediately after `--no-run`. Its source contract is tracked through the `souffle-typography` build dependency; authored UI, translations and bundled font assets remain tracked.
+
 ## Fonts and resolution
 
 The assets are unmodified static text fonts from the [official Inter 4.1 release](https://github.com/rsms/inter/releases/tag/v4.1). The archive hash and SIL Open Font License are in `app/souffle-typography/assets/README.md` and `LICENSE.txt`. There are eighteen embedded faces: weights 100–900, each upright and true italic. No optical Display fonts, Archivo or JetBrains Mono remain in the active bundle. The bundle also contains the Inter license and provenance under `Contents/Resources/licenses/Inter`.
