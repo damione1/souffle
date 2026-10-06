@@ -3044,3 +3044,31 @@ msgstr "Redémarrage…"
 msgctxt "AboutSection"
 msgid "Réessayer"
 msgstr "Réessayer"
+
+msgctxt "RecordingView"
+msgid "Corriger"
+msgstr "Corriger"
+
+msgctxt "LiveParagraphEditor"
+msgid "Corriger le paragraphe"
+msgstr "Corriger le paragraphe"
+
+msgctxt "LiveParagraphEditor"
+msgid "Seul le texte confirmé est modifié. L’enregistrement continue."
+msgstr "Seul le texte confirmé est modifié. L’enregistrement continue."
+
+msgctxt "LiveParagraphEditor"
+msgid "Texte du paragraphe"
+msgstr "Texte du paragraphe"
+
+msgctxt "LiveParagraphEditor"
+msgid "Correction impossible. Fermez puis rouvrez le paragraphe pour réessayer."
+msgstr "Correction impossible. Fermez puis rouvrez le paragraphe pour réessayer."
+
+msgctxt "LiveParagraphEditor"
+msgid "Annuler"
+msgstr "Annuler"
+
+msgctxt "LiveParagraphEditor"
+msgid "Enregistrer"
+msgstr "Enregistrer"

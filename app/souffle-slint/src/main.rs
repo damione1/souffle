@@ -12,6 +12,7 @@ mod edit_learning;
 mod ia_ui;
 mod keyboard_layout;
 mod lists_ui;
+mod live_edit;
 mod markdown;
 mod meeting_idle_ui;
 mod mic_stall_ui;
@@ -1930,6 +1931,8 @@ fn merge_recovery_text(existing: &str, incoming: &str) -> String {
 }
 
 fn clear_live_transcript(window: &MainWindow, live_state: &LiveTranscriptState) {
+    window.set_live_edit_open(false);
+    window.set_live_edit_busy(false);
     let buffers = reset_live_buffers(DictationTextBuffers {
         live: window.get_live_text().to_string(),
         tentative: window.get_live_tentative().to_string(),
@@ -1963,49 +1966,6 @@ fn save_dictionary_alias(handle: &AppHandle, term: &str, pronunciation: &str) {
     {
         eprintln!("Failed to add dictionary alias: {e}");
     }
-}
-
-fn mutate_dictionary_suggestion(
-    weak: slint::Weak<MainWindow>,
-    handle: AppHandle,
-    models: Rc<lists_ui::SettingsListModels>,
-    id: i64,
-    accept: bool,
-) {
-    let Some(window) = weak.upgrade() else {
-        return;
-    };
-    if window.get_settings_dictionary_suggestion_busy() {
-        return;
-    }
-    window.set_settings_dictionary_suggestion_busy(true);
-    let worker = souffle_lib::async_runtime::spawn_blocking(move || {
-        if accept {
-            souffle_lib::commands::accept_dictionary_suggestion(handle.clone(), id)?;
-        } else {
-            souffle_lib::commands::dismiss_dictionary_suggestion(handle.clone(), id)?;
-        }
-        let entries = souffle_lib::commands::list_dictionary(handle.clone())?;
-        let suggestions = souffle_lib::commands::list_dictionary_suggestions(handle)?;
-        Ok::<_, String>((entries, suggestions))
-    });
-    slint::spawn_local(async move {
-        let result = worker.await;
-        let Some(window) = weak.upgrade() else {
-            return;
-        };
-        window.set_settings_dictionary_suggestion_busy(false);
-        match result {
-            Ok(Ok((entries, suggestions))) => {
-                window.set_settings_dictionary_suggestion_error("".into());
-                models.populate_dictionary(&entries);
-                models.populate_suggestions(&suggestions);
-            }
-            Ok(Err(error)) => window.set_settings_dictionary_suggestion_error(error.into()),
-            Err(error) => window.set_settings_dictionary_suggestion_error(error.to_string().into()),
-        }
-    })
-    .expect("dictionary suggestion future on UI thread");
 }
 
 /// SOU-258: shows the recording view on the click, before the session
@@ -3889,6 +3849,7 @@ fn wire_callbacks(
     live_state: LiveTranscriptState,
 ) {
     let lists_models = lists_ui::SettingsListModels::install(window);
+    live_edit::wire_callbacks(window, tauri_handle.clone(), live_state.clone());
 
     // Shared with load_meeting_audio/stop_audio_player/open_meeting_detail
     // and the play-pause/seek callbacks below - one loaded player at a
@@ -5040,6 +5001,7 @@ fn wire_callbacks(
             },
         );
         let dictionary_handle = handle.clone();
+        let dictionary_revision = lists_models_for_open.dictionary_revision();
         spawn_settings_load_stage(
             weak.clone(),
             settings_io_for_open.clone(),
@@ -5054,8 +5016,11 @@ fn wire_callbacks(
             {
                 let lists_models = lists_models_for_open.clone();
                 move |_window, (entries, suggestions)| {
-                    lists_models.populate_dictionary(&entries);
-                    lists_models.populate_suggestions(&suggestions);
+                    lists_models.populate_dictionary_snapshot(
+                        dictionary_revision,
+                        &entries,
+                        &suggestions,
+                    );
                 }
             },
         );
@@ -6618,7 +6583,7 @@ fn wire_callbacks(
     let handle = tauri_handle.clone();
     let models = lists_models.clone();
     window.on_settings_dictionary_suggestion_accept_requested(move |id| {
-        mutate_dictionary_suggestion(
+        lists_ui::mutate_dictionary_suggestion(
             weak.clone(),
             handle.clone(),
             models.clone(),
@@ -6630,7 +6595,7 @@ fn wire_callbacks(
     let handle = tauri_handle.clone();
     let models = lists_models.clone();
     window.on_settings_dictionary_suggestion_dismiss_requested(move |id| {
-        mutate_dictionary_suggestion(
+        lists_ui::mutate_dictionary_suggestion(
             weak.clone(),
             handle.clone(),
             models.clone(),

@@ -112,6 +112,7 @@ pub fn push_live_blocks(window: &MainWindow, live_state: &LiveTranscriptState) {
 /// are clickable.
 fn same_rendering(a: &TranscriptBlock, b: &TranscriptBlock) -> bool {
     a.text == b.text
+        && a.can_edit == b.can_edit
         && a.has_speaker == b.has_speaker
         && a.speaker == b.speaker
         && a.timestamp == b.timestamp

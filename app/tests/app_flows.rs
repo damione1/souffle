@@ -239,13 +239,47 @@ async fn dictionary_learning_modes_keep_live_session_and_manual_aliases_immediat
             let mut acc = h.state.meeting_accumulator.lock().unwrap();
             acc.as_mut().unwrap().new_segments = vec![segment.clone(), other.clone()];
         }
-        commands::apply_live_paragraph_edit(
+        let session_started_at = h
+            .state
+            .meeting_accumulator
+            .lock()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .session_started_at;
+        for context in [
+            commands::LiveParagraphEditContext {
+                session_started_at: session_started_at - chrono::Duration::seconds(1),
+                original_text: segment.text.clone(),
+            },
+            commands::LiveParagraphEditContext {
+                session_started_at,
+                original_text: "stale editor text".into(),
+            },
+        ] {
+            assert!(
+                commands::apply_live_paragraph_edit_checked(
+                    h.state.clone(),
+                    meeting_id.clone(),
+                    vec![0],
+                    "bad stale update".into(),
+                    context,
+                )
+                .is_err()
+            );
+        }
+        let updates = commands::apply_live_paragraph_edit_checked(
             h.state.clone(),
             meeting_id.clone(),
             vec![0],
             "use Kubernetes".into(),
+            commands::LiveParagraphEditContext {
+                session_started_at,
+                original_text: segment.text.clone(),
+            },
         )
         .unwrap();
+        assert_eq!(updates, vec![(0, "use Kubernetes".into())]);
         {
             let acc = h.state.meeting_accumulator.lock().unwrap();
             let segments = &acc.as_ref().unwrap().new_segments;

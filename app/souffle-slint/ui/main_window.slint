@@ -26,6 +26,7 @@ import { Theme } from "theme.slint";
 // to reach the global at all.
 export { Theme }
 import { AppHeader } from "components/app_header.slint";
+import { LiveParagraphEditor } from "components/live_paragraph_editor.slint";
 
 // Self-hosted variable fonts from src/app.css, instantiated to static
 // per-weight TTFs (scripts/... none checked in - see the ticket notes: Slint
@@ -91,6 +92,10 @@ export component MainWindow inherits Window {
     in-out property <string> dictation-recovery-text;
     in property <[TranscriptBlock]> live-transcript-blocks;
     in property <bool> live-transcript-empty: true;
+    in property <bool> live-edit-open;
+    in property <bool> live-edit-busy;
+    in property <bool> live-edit-failed;
+    in-out property <string> live-edit-text;
     in property <int> live-elapsed-offset-seconds: 0;
     in property <float> audio-level: 0.0;
     // SOU-282: false while the window is closed or fully covered (winit
@@ -508,6 +513,9 @@ export component MainWindow inherits Window {
     callback meeting-detail-transcript-alias-save-requested(string, string);
     // Same save as above, from a word clicked in the live meeting view.
     callback live-transcript-alias-save-requested(string, string);
+    callback live-paragraph-edit-requested(int);
+    callback live-paragraph-edit-saved(string);
+    callback live-paragraph-edit-cancelled();
     callback meeting-detail-export-requested(MeetingExportFormat);
     callback meeting-detail-export-audio-requested();
     callback meeting-detail-copy-transcript-requested();
@@ -754,6 +762,7 @@ export component MainWindow inherits Window {
         wake-resume-notice-dismissed => { root.wake-resume-notice-dismissed(); }
         stop-requested => { root.stop-requested(); }
         alias-save-requested(term, pronunciation) => { root.live-transcript-alias-save-requested(term, pronunciation); }
+        paragraph-edit-requested(row) => { root.live-paragraph-edit-requested(row); }
         
         
     }
@@ -1073,6 +1082,16 @@ export component MainWindow inherits Window {
         review-accessibility-requested => { root.onboarding-review-accessibility-requested(); }
         back-requested => { root.onboarding-back-requested(); }
         continue-requested => { root.onboarding-continue-requested(); }
+    }
+
+    if root.live-edit-open && root.recording-mode == RecordingMode.meeting && !root.recording-stop-pending: LiveParagraphEditor {
+        width: 100%;
+        height: 100%;
+        text <=> root.live-edit-text;
+        busy: root.live-edit-busy;
+        failed: root.live-edit-failed;
+        close-requested => { root.live-paragraph-edit-cancelled(); }
+        save-requested(text) => { root.live-paragraph-edit-saved(text); }
     }
 
     if root.settings-permissions-dialog-open: SettingsPermissionsDialog {

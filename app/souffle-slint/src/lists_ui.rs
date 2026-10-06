@@ -27,6 +27,65 @@ use souffle_lib::filter::DictionaryEntry;
 use std::cell::Cell;
 use std::rc::Rc;
 
+pub(crate) fn mutate_dictionary_suggestion(
+    weak: slint::Weak<MainWindow>,
+    handle: std::sync::Arc<souffle_lib::state::AppState>,
+    models: Rc<SettingsListModels>,
+    id: i64,
+    accept: bool,
+) {
+    let Some(window) = weak.upgrade() else { return };
+    if window.get_settings_dictionary_suggestion_busy() {
+        return;
+    }
+    window.set_settings_dictionary_suggestion_busy(true);
+    let mutation_handle = handle.clone();
+    let worker = souffle_lib::async_runtime::spawn_blocking(move || {
+        if accept {
+            souffle_lib::commands::accept_dictionary_suggestion(mutation_handle, id).map(|_| ())
+        } else {
+            souffle_lib::commands::dismiss_dictionary_suggestion(mutation_handle, id)
+        }
+    });
+    slint::spawn_local(async move {
+        let outcome = match worker.await {
+            Ok(result) => result,
+            Err(error) => Err(error.to_string()),
+        };
+        let mut outcome = outcome;
+        // Other dictionary actions remain usable. If one publishes while our
+        // read is in flight, read again rather than overwriting its result.
+        while outcome.is_ok() {
+            let revision = models.dictionary_revision();
+            let read_handle = handle.clone();
+            let read = souffle_lib::async_runtime::spawn_blocking(move || {
+                let entries = souffle_lib::commands::list_dictionary(read_handle.clone())?;
+                let suggestions = souffle_lib::commands::list_dictionary_suggestions(read_handle)?;
+                Ok::<_, String>((entries, suggestions))
+            })
+            .await;
+            if weak.upgrade().is_none() {
+                return;
+            }
+            match read {
+                Ok(Ok((entries, suggestions))) => {
+                    if models.populate_dictionary_snapshot(revision, &entries, &suggestions) {
+                        break;
+                    }
+                }
+                Ok(Err(error)) => outcome = Err(error),
+                Err(error) => outcome = Err(error.to_string()),
+            }
+        }
+        if let Some(window) = weak.upgrade() {
+            window.set_settings_dictionary_suggestion_busy(false);
+            window
+                .set_settings_dictionary_suggestion_error(outcome.err().unwrap_or_default().into());
+        }
+    })
+    .expect("dictionary suggestion future on UI thread");
+}
+
 // Row heights mirror the explicit delegate heights in
 // `components/settings/dictionary_section.slint` /
 // `snippets_section.slint`. Like the transcript's estimates, a stale error/
@@ -79,6 +138,7 @@ pub(crate) struct SettingsListModels {
     suggestions: Rc<VecModel<DictionarySuggestionRow>>,
     suggestions_view: Rc<VecModel<DictionarySuggestionRow>>,
     suggestions_mounted: Cell<(usize, usize)>,
+    dictionary_revision: Cell<u64>,
 }
 
 impl SettingsListModels {
@@ -94,6 +154,7 @@ impl SettingsListModels {
             suggestions: Rc::new(VecModel::default()),
             suggestions_view: Rc::new(VecModel::default()),
             suggestions_mounted: Cell::new((usize::MAX, usize::MAX)),
+            dictionary_revision: Cell::new(0),
         });
         window.set_settings_dictionary_entries(models.dictionary_view.clone().into());
         window.set_settings_snippets(models.snippets_view.clone().into());
@@ -131,6 +192,8 @@ impl SettingsListModels {
     }
 
     pub(crate) fn populate_dictionary(&self, entries: &[DictionaryEntry]) {
+        self.dictionary_revision
+            .set(self.dictionary_revision.get().wrapping_add(1));
         let rows = entries.iter().map(dictionary_row).collect();
         sync_rows_by_id(&self.dictionary, rows, |row| row.id);
         if let Some(window) = self.window.upgrade() {
@@ -139,6 +202,8 @@ impl SettingsListModels {
     }
 
     pub(crate) fn populate_suggestions(&self, suggestions: &[DictionarySuggestion]) {
+        self.dictionary_revision
+            .set(self.dictionary_revision.get().wrapping_add(1));
         let rows = suggestions
             .iter()
             .map(|suggestion| DictionarySuggestionRow {
@@ -150,6 +215,27 @@ impl SettingsListModels {
         sync_rows_by_id(&self.suggestions, rows, |row| row.id);
         if let Some(window) = self.window.upgrade() {
             self.update_suggestions_window(&window, true);
+        }
+    }
+
+    pub(crate) fn dictionary_revision(&self) -> u64 {
+        self.dictionary_revision.get()
+    }
+
+    /// A settings-open snapshot cannot overwrite a mutation published while
+    /// its worker was still reading either of these two related lists.
+    pub(crate) fn populate_dictionary_snapshot(
+        &self,
+        revision: u64,
+        entries: &[DictionaryEntry],
+        suggestions: &[DictionarySuggestion],
+    ) -> bool {
+        if revision == self.dictionary_revision.get() {
+            self.populate_dictionary(entries);
+            self.populate_suggestions(suggestions);
+            true
+        } else {
+            false
         }
     }
 
@@ -416,6 +502,36 @@ mod tests {
     use slint::platform::{Platform, WindowAdapter, software_renderer::MinimalSoftwareWindow};
 
     struct TestPlatform;
+
+    #[test]
+    fn delayed_open_snapshot_cannot_restore_a_committed_suggestion() {
+        let _ = slint::platform::set_platform(Box::new(TestPlatform));
+        let window = MainWindow::new().unwrap();
+        let models = SettingsListModels::install(&window);
+        let pending = DictionarySuggestion {
+            id: 1,
+            misspelling: "Kubernetis".into(),
+            term: "Kubernetes".into(),
+        };
+        models.populate_suggestions(std::slice::from_ref(&pending));
+        let open_revision = models.dictionary_revision();
+        let accepted = DictionaryEntry {
+            id: 1,
+            term: "Kubernetes".into(),
+            pronunciation: Some("Kubernetis".into()),
+            category: None,
+            created_at: String::new(),
+        };
+        models.populate_dictionary(std::slice::from_ref(&accepted));
+        models.populate_suggestions(&[]);
+        models.populate_dictionary_snapshot(open_revision, &[], &[pending]);
+        assert_eq!(models.dictionary.row_count(), 1);
+        assert_eq!(
+            models.dictionary.row_data(0).unwrap().term.as_str(),
+            accepted.term
+        );
+        assert_eq!(models.suggestions.row_count(), 0);
+    }
 
     impl Platform for TestPlatform {
         fn create_window_adapter(&self) -> Result<Rc<dyn WindowAdapter>, slint::PlatformError> {
