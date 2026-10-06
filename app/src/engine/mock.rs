@@ -2,7 +2,8 @@
 #![cfg(any(test, feature = "test-support"))]
 
 use super::{
-    AudioInputRequirements, EngineError, Speaker, TranscriptionEngine, TranscriptionSegment,
+    AudioInputRequirements, EngineError, SilenceHandling, Speaker, TranscriptionEngine,
+    TranscriptionSegment,
 };
 use std::collections::VecDeque;
 use std::path::Path;
@@ -163,6 +164,7 @@ impl TranscriptionEngine for BatchPreviewDecoder {
 /// Push responses into `transcribe_responses` and `flush_responses` queues;
 /// calls to `transcribe()` / `flush()` will pop from the front.
 pub struct MockEngine {
+    silence_handling: SilenceHandling,
     diarize: bool,
     loaded: bool,
     pub transcribe_responses: VecDeque<Result<Vec<TranscriptionSegment>, EngineError>>,
@@ -217,6 +219,7 @@ impl MockEngine {
     pub fn new() -> Self {
         Self {
             diarize: false,
+            silence_handling: SilenceHandling::Gate,
             loaded: false,
             transcribe_responses: VecDeque::new(),
             flush_responses: VecDeque::new(),
@@ -279,6 +282,12 @@ impl MockEngine {
     /// before the mock is moved into the actor's factory closure.
     pub fn reset_state_preserving_count_handle(&self) -> Arc<AtomicUsize> {
         Arc::clone(&self.reset_state_preserving_count)
+    }
+
+    /// Select the production VAD policy for source-clock regression tests.
+    pub fn with_silence_handling(mut self, handling: SilenceHandling) -> Self {
+        self.silence_handling = handling;
+        self
     }
 
     /// Configure the value returned by `emission_delay_seconds()`.
@@ -384,6 +393,10 @@ impl TranscriptionEngine for MockEngine {
 
     fn emission_delay_seconds(&self) -> f64 {
         self.emission_delay_seconds
+    }
+
+    fn silence_handling(&self) -> SilenceHandling {
+        self.silence_handling
     }
 
     fn tail_drained(&self) -> bool {

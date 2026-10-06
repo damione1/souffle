@@ -228,6 +228,16 @@ pub struct ContextWindowStats {
     pub refresh_count: u64,
 }
 
+/// Whether VAD may remove silence from the engine's input clock.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SilenceHandling {
+    /// Bounded synchronous emission supports the pipeline's lookback/gap offset.
+    Gate,
+    /// Asynchronous results may arrive after any pause; preserve source time
+    /// by feeding every sample, including silence, until the final flush.
+    Continuous,
+}
+
 /// Methods take &mut self and there is no Send/Sync bound: engines are
 /// created, used, and dropped on the engine actor thread only.
 ///
@@ -237,6 +247,9 @@ pub struct ContextWindowStats {
 /// the captured session timeline. Meeting consumers must not branch on an
 /// engine/model id or infer turns from the size/order of returned batches.
 pub trait TranscriptionEngine {
+    fn silence_handling(&self) -> SilenceHandling {
+        SilenceHandling::Gate
+    }
     fn load_model(&mut self, model_path: &Path) -> Result<(), EngineError>;
     fn load_system_assets(&mut self, _locale: &str) -> Result<(), EngineError> {
         Err(EngineError::InferenceError(

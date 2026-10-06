@@ -43,6 +43,8 @@ private actor SpeechSessions {
         let input: AsyncStream<AnalyzerInput>.Continuation
         let task: Task<Void, Never>
         let format: AVAudioFormat
+        let inputFormat: AVAudioFormat
+        let converter: AVAudioConverter?
         var samples: Int64 = 0
         var results: [[String: Any]] = []
         var error: String?
@@ -55,7 +57,14 @@ private actor SpeechSessions {
         guard let supported = await SpeechTranscriber.supportedLocale(equivalentTo: locale) else { throw SpeechFailure("unsupported locale") }
         let transcriber = SpeechTranscriber(locale: supported, transcriptionOptions: [], reportingOptions: [], attributeOptions: [.audioTimeRange])
         guard await AssetInventory.status(forModules: [transcriber]) == .installed else { throw SpeechFailure("Apple Speech system assets are not installed") }
-        guard let format = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [transcriber]), format.commonFormat == .pcmFormatFloat32, !format.isInterleaved, format.channelCount == 1 else { throw SpeechFailure("Apple Speech has no compatible float32 mono audio format") }
+        guard let format = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [transcriber]), format.channelCount == 1, format.sampleRate > 0,
+              let inputFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: format.sampleRate, channels: 1, interleaved: false) else { throw SpeechFailure("Apple Speech has no compatible mono audio format") }
+        // Speech may negotiate int16 PCM. Rust supplies float32 at the
+        // negotiated rate; convert representation without resampling or
+        // changing the number of samples in the session clock.
+        let needsConversion = !format.isEqual(inputFormat)
+        let converter = needsConversion ? AVAudioConverter(from: inputFormat, to: format) : nil
+        guard !needsConversion || converter != nil else { throw SpeechFailure("Apple Speech PCM converter unavailable") }
         let analyzer = SpeechAnalyzer(modules: [transcriber])
         let (sequence, continuation) = AsyncStream<AnalyzerInput>.makeStream(bufferingPolicy: .bufferingOldest(64))
         let id = next; next += 1
@@ -69,7 +78,7 @@ private actor SpeechSessions {
                 }
             } catch { self.fail(id, error: String(describing: error)) }
         }
-        sessions[id] = Session(analyzer: analyzer, input: continuation, task: task, format: format)
+        sessions[id] = Session(analyzer: analyzer, input: continuation, task: task, format: format, inputFormat: inputFormat, converter: converter)
         do {
             try await analyzer.prepareToAnalyze(in: format)
             try await analyzer.start(inputSequence: sequence)
@@ -86,9 +95,16 @@ private actor SpeechSessions {
         guard var session = sessions[id] else { throw SpeechFailure("unknown Speech session") }
         if let error = session.error { throw SpeechFailure(error) }
         if !samples.isEmpty {
-            guard let buffer = AVAudioPCMBuffer(pcmFormat: session.format, frameCapacity: AVAudioFrameCount(samples.count)), let channel = buffer.floatChannelData?[0] else { throw SpeechFailure("Speech buffer allocation failed") }
-            buffer.frameLength = AVAudioFrameCount(samples.count)
+            guard let inputBuffer = AVAudioPCMBuffer(pcmFormat: session.inputFormat, frameCapacity: AVAudioFrameCount(samples.count)), let channel = inputBuffer.floatChannelData?[0] else { throw SpeechFailure("Speech buffer allocation failed") }
+            inputBuffer.frameLength = AVAudioFrameCount(samples.count)
             samples.withUnsafeBufferPointer { channel.update(from: $0.baseAddress!, count: $0.count) }
+            let buffer: AVAudioPCMBuffer
+            if let converter = session.converter {
+                guard let converted = AVAudioPCMBuffer(pcmFormat: session.format, frameCapacity: inputBuffer.frameLength) else { throw SpeechFailure("Speech conversion buffer allocation failed") }
+                try converter.convert(to: converted, from: inputBuffer)
+                guard converted.frameLength == inputBuffer.frameLength else { throw SpeechFailure("Speech PCM conversion changed the sample clock") }
+                buffer = converted
+            } else { buffer = inputBuffer }
             let at = CMTime(value: session.samples, timescale: CMTimeScale(session.format.sampleRate))
             switch session.input.yield(AnalyzerInput(buffer: buffer, bufferStartTime: at)) {
             case .enqueued: break

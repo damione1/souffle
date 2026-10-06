@@ -132,6 +132,16 @@ pub struct AppleSpeechEngine {
     consumed_samples: u64,
 }
 impl AppleSpeechEngine {
+    fn reset_preserving_with(
+        &mut self,
+        begin: impl FnOnce(&mut Self) -> Result<(), EngineError>,
+    ) -> Result<(), EngineError> {
+        // Consume this interval before a fallible restart. Retrying after a
+        // failed begin must not carry the same samples into the clock twice.
+        let consumed = std::mem::take(&mut self.consumed_samples);
+        self.timeline_offset += consumed as f64 / f64::from(self.sample_rate.max(1));
+        begin(self)
+    }
     fn begin(&mut self) -> Result<(), EngineError> {
         self.cancel()?;
         let locale = CString::new(self.locale.as_deref().ok_or(EngineError::NotInitialized)?)
@@ -213,6 +223,9 @@ impl AppleSpeechEngine {
     }
 }
 impl TranscriptionEngine for AppleSpeechEngine {
+    fn silence_handling(&self) -> super::SilenceHandling {
+        super::SilenceHandling::Continuous
+    }
     fn load_model(&mut self, _path: &Path) -> Result<(), EngineError> {
         Err(EngineError::InferenceError(
             "Apple Speech loads system assets, not model files".into(),
@@ -270,8 +283,7 @@ impl TranscriptionEngine for AppleSpeechEngine {
         self.begin()
     }
     fn reset_state_preserving_timeline(&mut self) -> Result<(), EngineError> {
-        self.timeline_offset += self.consumed_samples as f64 / f64::from(self.sample_rate.max(1));
-        self.begin()
+        self.reset_preserving_with(Self::begin)
     }
     fn audio_requirements(&self) -> AudioInputRequirements {
         AudioInputRequirements {
@@ -294,6 +306,30 @@ impl Drop for AppleSpeechEngine {
 mod tests {
     use super::*;
     #[test]
+    fn failed_restart_carries_samples_only_once() {
+        let mut engine = AppleSpeechEngine {
+            locale: None,
+            session: None,
+            sample_rate: 16000,
+            consumed_samples: 48000,
+            timeline_offset: 7.0,
+        };
+        assert!(
+            engine
+                .reset_preserving_with(|_| Err(EngineError::NotInitialized))
+                .is_err()
+        );
+        assert_eq!(engine.timeline_offset, 10.0);
+        assert_eq!(engine.consumed_samples, 0);
+        engine.reset_preserving_with(|_| Ok(())).unwrap();
+        let value = serde_json::json!({"segments":[{"text":"after recovery","start_time":0.5,"end_time":1.0}]});
+        let segments = engine.segments(value).unwrap();
+        assert_eq!((segments[0].start_time, segments[0].end_time), (10.5, 11.0));
+        engine.consumed_samples = 16000;
+        engine.reset_preserving_with(|_| Ok(())).unwrap();
+        assert_eq!(engine.timeline_offset, 11.0);
+    }
+    #[test]
     fn system_assets_never_load_from_app_files() {
         let mut engine = AppleSpeechEngine::default();
         assert!(
@@ -310,6 +346,72 @@ mod tests {
         let status = status();
         println!("{status:?}");
         assert!(status.is_available() && status.locale().is_some());
+    }
+
+    #[test]
+    #[ignore = "opt-in installed en_US assets and SOUFFLE_SPEECH_TEST_WAV synthetic known phrase"]
+    fn real_bridge_known_phrase_and_session_resets() {
+        let status = status();
+        assert!(status.is_installed_for("en_US"), "{status:?}");
+        let path = std::env::var("SOUFFLE_SPEECH_TEST_WAV").expect("synthetic mono int16 WAV");
+        let mut reader = hound::WavReader::open(path).unwrap();
+        let spec = reader.spec();
+        assert_eq!(spec.channels, 1);
+        assert_eq!(spec.bits_per_sample, 16);
+        let samples: Vec<f32> = reader
+            .samples::<i16>()
+            .map(|s| f32::from(s.unwrap()) / 32768.0)
+            .collect();
+        let mut engine = AppleSpeechEngine::default();
+        engine.load_system_assets("en_US").unwrap();
+        let requirements = engine.audio_requirements();
+        let mut resampler =
+            crate::audio::Resampler::new(spec.sample_rate, 1, requirements.sample_rate_hz, 1.0);
+        let mut pcm = resampler.process(&samples);
+        pcm.extend(resampler.flush());
+        pcm.resize(pcm.len() + requirements.sample_rate_hz as usize, 0.0);
+        let duration = pcm.len() as f64 / f64::from(requirements.sample_rate_hz);
+        for run in 0..3 {
+            let offset = match run {
+                0 => 0.0,
+                1 => {
+                    engine.reset_state_preserving_timeline().unwrap();
+                    duration
+                }
+                2 => {
+                    engine.reset_state().unwrap();
+                    0.0
+                }
+                _ => unreachable!(),
+            };
+            let mut segments = Vec::new();
+            for chunk in pcm.chunks(requirements.chunk_size_samples as usize) {
+                segments.extend(engine.transcribe(chunk, None).unwrap());
+                // Avoid manufacturing producer overflow in this lifecycle probe.
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+            segments.extend(engine.flush().unwrap());
+            let text = segments
+                .iter()
+                .map(|s| s.text.as_str())
+                .collect::<Vec<_>>()
+                .join(" ")
+                .to_lowercase();
+            println!(
+                "run={run} rate={} offset={offset:.3} text={text:?} segments={segments:?}",
+                requirements.sample_rate_hz
+            );
+            assert!(text.contains("quick brown fox"), "{text}");
+            assert!(!segments.is_empty());
+            for segment in segments {
+                assert!(segment.is_final && segment.speaker.is_none());
+                assert!(
+                    segment.start_time >= offset && segment.end_time <= offset + duration + 0.1
+                );
+            }
+        }
+        engine.unload_model().unwrap();
+        assert!(engine.transcribe(&[], None).is_err());
     }
 }
 

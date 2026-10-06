@@ -21,7 +21,7 @@ use tracing::{debug, error, info, warn};
 use crate::app_events::MeetingIdleReason;
 use crate::audio::{AudioChunk, AudioMessage};
 use crate::engine::{
-    AudioInputRequirements, Speaker, TranscriptionEngine, TranscriptionProfile,
+    AudioInputRequirements, SilenceHandling, Speaker, TranscriptionEngine, TranscriptionProfile,
     TranscriptionSegment,
 };
 use crate::filter::{
@@ -1407,6 +1407,10 @@ impl SessionMode for SingleMode {
             engine.set_preview_enabled(false);
         }
         let speech = self.audio_filters.process(&frame);
+        let may_gate = match engine.silence_handling() {
+            SilenceHandling::Gate => true,
+            SilenceHandling::Continuous => false,
+        };
         let mut segments = Vec::new();
         if speech {
             self.frames_since_speech = 0;
@@ -1416,7 +1420,9 @@ impl SessionMode for SingleMode {
             }
         } else {
             self.frames_since_speech += 1;
-            if self.tail_drained || self.frames_since_speech > self.drain_window_frames {
+            if may_gate
+                && (self.tail_drained || self.frames_since_speech > self.drain_window_frames)
+            {
                 self.vad_skipped += 1;
                 self.push_lookback(frame);
                 return Ok(None); // Gated: buffered in the lookback ring instead of dropped.
@@ -3626,6 +3632,59 @@ mod tests {
         speech.store(true, Ordering::SeqCst);
         mode.ingest(make_frame());
         assert!(matches!(mode.step(&mut engine, chunk_size), Ok(Some(_))));
+    }
+
+    #[test]
+    fn continuous_engine_keeps_delayed_results_on_source_time_through_pause_and_stop() {
+        use crate::engine::{SilenceHandling, TranscriptionEngine};
+        use crate::filter::AudioFilterChain;
+        use std::sync::atomic::AtomicBool;
+        let speech = Arc::new(AtomicBool::new(true));
+        let chain = AudioFilterChain::new(vec![Box::new(ToggleVad(Arc::clone(&speech)))]);
+        let mut mode = SingleMode::new(chain, 3, 5, 16000);
+        let mut engine = MockEngine::new().with_silence_handling(SilenceHandling::Continuous);
+        let fed = engine.fed_audio_handle();
+        let chunk_size = MIMI_FRAME_SIZE;
+        let old_result = TranscriptionSegment {
+            text: "before the pause".into(),
+            start_time: 0.01,
+            end_time: 0.05,
+            is_final: true,
+            speaker: None,
+            language: None,
+            confidence: None,
+        };
+        // Far beyond both the drain window and lookback: a final for the
+        // initial utterance arrives only after a long pause.
+        for frame in 0..100 {
+            if frame == 1 {
+                speech.store(false, Ordering::SeqCst);
+            }
+            if frame == 99 {
+                engine
+                    .transcribe_responses
+                    .push_back(Ok(vec![old_result.clone()]));
+            }
+            mode.ingest(AudioChunk {
+                queue_permit: None,
+                session_id: 1,
+                samples: vec![0.0; chunk_size],
+                captured_at: Instant::now(),
+                speaker: None,
+            });
+            let result = mode.step(&mut engine, chunk_size).unwrap().unwrap();
+            if frame == 99 {
+                assert_eq!((result[0].start_time, result[0].end_time), (0.01, 0.05));
+            }
+        }
+        assert_eq!(fed.lock().unwrap().len(), 100 * chunk_size);
+        assert_eq!(mode.vad_skipped, 0);
+        assert_eq!(mode.eviction_offset_seconds, 0.0);
+        assert!(mode.drain_withheld(&mut engine).unwrap().is_empty());
+        assert!(mode.finish_tail(&mut engine).unwrap().is_empty());
+        engine.flush_responses.push_back(Ok(vec![old_result]));
+        let at_stop = engine.flush().unwrap();
+        assert_eq!((at_stop[0].start_time, at_stop[0].end_time), (0.01, 0.05));
     }
 
     #[test]
