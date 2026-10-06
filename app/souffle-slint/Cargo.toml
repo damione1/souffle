@@ -54,12 +54,28 @@ arboard = "3.6"
 # SOU-188: new custom summary-template/dictionary-entry/snippet ids, same
 # crate/version the main `souffle` crate already uses (src/state.rs).
 uuid = { version = "1", features = ["v4"] }
+# #360: the shortcut recorder reads the raw keyCode of the current NSEvent
+# (winit 0.30 folds the ISO key into Backquote), watches Caps Lock / Fn with
+# a local NSEvent monitor, and needs a `MainThreadMarker` for the
+# keyboard-layout label lookup. Same versions the
+# main `souffle` crate already uses.
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "block2", "NSApplication", "NSEvent", "NSResponder"] }
+# #360: the Caps Lock / Fn monitor handler (see `wire_unusable_key_monitor`).
+block2 = "0.6"
+
+[[test]]
+# #360: the keyboard-layout FFI (TIS/UCKeyTranslate) must run on the main
+# thread, which libtest does not give its tests; this harness runs `main`.
+name = "keyboard_layout_main_thread"
+harness = false
 
 [build-dependencies]
 lucide-slint = "1.46.0"
 slint-build = "1.18"
 
 [dev-dependencies]
+souffle_lib = { path = "..", package = "souffle", features = ["test-support"] }
 tempfile = "3"
 # SOU-256: element lookup by id + geometry, so a test can assert the live
 # meeting transcript really gets laid out at a usable height. Already in the

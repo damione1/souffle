@@ -2480,33 +2480,33 @@ msgctxt "MarkdownView"
 msgid "•"
 msgstr "•"
 
-#: app/souffle-slint/ui/components/onboarding/update_available_dialog.slint:39
-msgctxt "UpdateAvailableDialog"
+#: app/souffle-slint/ui/components/update_copy.slint
+msgctxt "UpdateCopy"
 msgid "Terminez la dictée avant d'installer."
 msgstr "Finish dictation before installing."
 
-#: app/souffle-slint/ui/components/onboarding/update_available_dialog.slint:40
-msgctxt "UpdateAvailableDialog"
+#: app/souffle-slint/ui/components/update_copy.slint
+msgctxt "UpdateCopy"
 msgid "Arrêtez la réunion avant d'installer."
 msgstr "Stop the meeting before installing."
 
-#: app/souffle-slint/ui/components/onboarding/update_available_dialog.slint:41
-msgctxt "UpdateAvailableDialog"
+#: app/souffle-slint/ui/components/update_copy.slint
+msgctxt "UpdateCopy"
 msgid "Attendez la fin de l'arrêt de l'enregistrement."
 msgstr "Wait for recording to finish stopping."
 
-#: app/souffle-slint/ui/components/onboarding/update_available_dialog.slint:42
-msgctxt "UpdateAvailableDialog"
+#: app/souffle-slint/ui/components/update_copy.slint
+msgctxt "UpdateCopy"
 msgid "Attendez la fin du téléchargement du modèle."
 msgstr "Wait for the model download to finish."
 
-#: app/souffle-slint/ui/components/onboarding/update_available_dialog.slint:43
-msgctxt "UpdateAvailableDialog"
+#: app/souffle-slint/ui/components/update_copy.slint
+msgctxt "UpdateCopy"
 msgid "Attendez la fin du chargement du modèle."
 msgstr "Wait for the model to finish loading."
 
-#: app/souffle-slint/ui/components/onboarding/update_available_dialog.slint:44
-msgctxt "UpdateAvailableDialog"
+#: app/souffle-slint/ui/components/update_copy.slint
+msgctxt "UpdateCopy"
 msgid "Attendez la fin du déchargement du modèle."
 msgstr "Wait for the model to finish unloading."
 
@@ -2905,3 +2905,93 @@ msgid ""
 "La mise en veille a interrompu cette réunion. Reprenez l'enregistrement pour "
 "continuer."
 msgstr "Sleep interrupted this meeting. Resume recording to continue."
+
+#: app/souffle-slint/ui/components/settings/interface_section.slint:14
+msgctxt "ShortcutNoticeText"
+msgid "Le raccourci doit inclure une touche de modification (Cmd, Ctrl, Maj, Alt) ou être une touche de fonction."
+msgstr "The shortcut must include a modifier key (Cmd, Ctrl, Shift, Option) or be a function key."
+
+#: app/souffle-slint/ui/components/settings/interface_section.slint:15
+msgctxt "ShortcutNoticeText"
+msgid "Cette touche ne peut pas servir de raccourci."
+msgstr "This key can't be used as a shortcut."
+
+#: app/souffle-slint/ui/components/settings/interface_section.slint:16
+msgctxt "ShortcutNoticeText"
+msgid "Ce raccourci n'utilise que ⌥ (ou ⌥⇧) : le caractère que cette combinaison tape, par exemple | avec ⌥⇧L en AZERTY, ne pourra plus être saisi dans aucune app."
+msgstr "This shortcut only uses ⌥ (or ⌥⇧): the character this combination types, for example | with ⌥⇧L on AZERTY, can no longer be typed in any app."
+
+#: app/souffle-slint/ui/components/settings/about_section.slint
+msgctxt "AboutSection"
+msgid "Recherche d'une nouvelle version…"
+msgstr "Looking for a new version…"
+
+#: app/souffle-slint/ui/components/settings/about_section.slint
+msgctxt "AboutSection"
+msgid "Soufflé est à jour."
+msgstr "Soufflé is up to date."
+
+#: app/souffle-slint/ui/components/settings/about_section.slint
+msgctxt "AboutSection"
+msgid "Vérification impossible : {}"
+msgstr "Couldn't check for updates: {}"
+
+#: app/souffle-slint/ui/components/settings/about_section.slint
+msgctxt "AboutSection"
+msgid "La version {} est disponible."
+msgstr "Version {} is available."
+
+#: app/souffle-slint/ui/components/settings/about_section.slint
+msgctxt "AboutSection"
+msgid "Téléchargement de la version {} : {} %"
+msgstr "Downloading version {}: {}%"
+
+#: app/souffle-slint/ui/components/settings/about_section.slint
+msgctxt "AboutSection"
+msgid "Téléchargement de la version {}…"
+msgstr "Downloading version {}…"
+
+#: app/souffle-slint/ui/components/settings/about_section.slint
+msgctxt "AboutSection"
+msgid "La version {} est prête à être installée."
+msgstr "Version {} is ready to install."
+
+#: app/souffle-slint/ui/components/settings/about_section.slint
+msgctxt "AboutSection"
+msgid "Installation de la version {}. Soufflé va redémarrer."
+msgstr "Installing version {}. Soufflé will restart."
+
+#: app/souffle-slint/ui/components/settings/about_section.slint
+msgctxt "AboutSection"
+msgid "La mise à jour a échoué : {}"
+msgstr "The update failed: {}"
+
+#: app/souffle-slint/ui/components/settings/about_section.slint
+msgctxt "AboutSection"
+msgid "Installer la mise à jour"
+msgstr "Install update"
+
+#: app/souffle-slint/ui/components/settings/about_section.slint
+msgctxt "AboutSection"
+msgid "Téléchargement… {} %"
+msgstr "Downloading… {}%"
+
+#: app/souffle-slint/ui/components/settings/about_section.slint
+msgctxt "AboutSection"
+msgid "Téléchargement…"
+msgstr "Downloading…"
+
+#: app/souffle-slint/ui/components/settings/about_section.slint
+msgctxt "AboutSection"
+msgid "Installer et redémarrer"
+msgstr "Install and restart"
+
+#: app/souffle-slint/ui/components/settings/about_section.slint
+msgctxt "AboutSection"
+msgid "Redémarrage…"
+msgstr "Restarting…"
+
+#: app/souffle-slint/ui/components/settings/about_section.slint
+msgctxt "AboutSection"
+msgid "Réessayer"
+msgstr "Try again"

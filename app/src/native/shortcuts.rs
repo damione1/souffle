@@ -297,4 +297,45 @@ mod tests {
     fn escape_parses_as_a_hotkey() {
         assert!(HotKey::from_str(ESCAPE).is_ok());
     }
+
+    /// #360: the recorder stores Command as `CommandOrControl` and the
+    /// physical Control key as `Control`; both must reach the Carbon hotkey,
+    /// and neither may stand in for the other.
+    #[test]
+    fn command_and_control_register_as_distinct_modifiers() {
+        use global_hotkey::hotkey::{Code, Modifiers};
+
+        let hyper = HotKey::from_str("CommandOrControl+Control+Shift+Alt+T").unwrap();
+        assert_eq!(
+            hyper.mods,
+            Modifiers::SUPER | Modifiers::CONTROL | Modifiers::SHIFT | Modifiers::ALT
+        );
+        assert_eq!(hyper.key, Code::KeyT);
+
+        let control_space = HotKey::from_str("Control+Space").unwrap();
+        assert_eq!(control_space.mods, Modifiers::CONTROL);
+        assert_eq!(control_space.key, Code::Space);
+
+        let command_space = HotKey::from_str("CommandOrControl+Space").unwrap();
+        assert_eq!(command_space.mods, Modifiers::SUPER);
+    }
+
+    /// Every key name the recorder can store parses to the physical key it
+    /// names, so the hotkey fires on the key that was pressed.
+    #[test]
+    fn recorded_key_names_parse_to_their_physical_key() {
+        use global_hotkey::hotkey::Code;
+
+        for (name, code) in [
+            ("CommandOrControl+Q", Code::KeyQ),
+            ("CommandOrControl+1", Code::Digit1),
+            ("CommandOrControl+Minus", Code::Minus),
+            ("CommandOrControl+Backquote", Code::Backquote),
+            ("CommandOrControl+Numpad5", Code::Numpad5),
+            ("CommandOrControl+ArrowUp", Code::ArrowUp),
+            ("F13", Code::F13),
+        ] {
+            assert_eq!(HotKey::from_str(name).unwrap().key, code, "{name}");
+        }
+    }
 }

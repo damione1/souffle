@@ -16,7 +16,7 @@ import { TimelineDayGroup, UpcomingEvent } from "components/timeline_section.sli
 import { TranscriptBlock } from "components/transcript_section.slint";
 import { TranscriptWord } from "components/transcript_words.slint";
 import { StructuredActionItem } from "components/summary_section.slint";
-import { RecordingMode, LiveSystemAudio, MicStall, MeetingIdleBanner, WakeResumeNotice,SpeakerRole, TimelineFilter, TimelineKind, NotesSaveState, ModelPhase, TranscriptionPhase, UpcomingPhase, SettingsTab, SettingsInteraction, AppTheme, AppLocale, PasteMethod, MeetingLanguage, LogLevel, AudioRetention, AccessState, PermissionKind, ShortcutField, SummaryProvider, AppleIntelligenceUnavailableReason, OnboardingStep, UpdatePhase, InstallBlockReason, MeetingExportFormat } from "types.slint";
+import { RecordingMode, LiveSystemAudio, MicStall, MeetingIdleBanner, WakeResumeNotice,SpeakerRole, TimelineFilter, TimelineKind, NotesSaveState, ModelPhase, TranscriptionPhase, UpcomingPhase, SettingsTab, SettingsInteraction, AppTheme, AppLocale, PasteMethod, MeetingLanguage, LogLevel, AudioRetention, AccessState, PermissionKind, ShortcutField, ShortcutNotice, SummaryProvider, AppleIntelligenceUnavailableReason, OnboardingStep, UpdatePhase, InstallBlockReason, UpdateRowStatus, MeetingExportFormat } from "types.slint";
 export { SettingsTab, SettingsInteraction, AppTheme, AppLocale, PasteMethod, MeetingLanguage, LogLevel, AudioRetention, AccessState, PermissionKind, ShortcutField, SummaryProvider, AppleIntelligenceUnavailableReason, SpeakerRole }
 import { Theme } from "theme.slint";
 // Re-exported (not just imported) so Slint's codegen generates a Rust
@@ -227,6 +227,7 @@ export component MainWindow inherits Window {
     in property <bool> settings-native-tap-warning-visible;
     in-out property <ShortcutField> settings-recording-field: ShortcutField.none;
     in-out property <string> settings-shortcut-error: "";
+    in-out property <ShortcutNotice> settings-shortcut-notice: ShortcutNotice.none;
     in property <string> settings-save-error;
     in property <bool> settings-save-error-unavailable;
     in property <string> settings-draft-save-error;
@@ -278,8 +279,15 @@ export component MainWindow inherits Window {
     in property <string> settings-about-transcription-label;
     in property <string> settings-about-summary-label;
     in property <bool> settings-auto-update-check;
-    in property <bool> settings-checking-updates;
-    in property <string> settings-update-status;
+    // Settings > "Mises à jour" row: written only by
+    // `update_ui::project_update_row`, always as a set.
+    in property <UpdateRowStatus> settings-update-row: UpdateRowStatus.unchecked;
+    in property <string> settings-update-version;
+    in property <string> settings-update-error;
+    in property <bool> settings-update-has-progress;
+    in property <int> settings-update-progress;
+    in property <bool> settings-update-blocked;
+    in property <InstallBlockReason> settings-update-block-reason;
     in property <SummaryProvider> settings-summary-provider;
     in property <bool> settings-apple-intelligence-available;
     in property <AppleIntelligenceUnavailableReason> settings-apple-intelligence-reason: AppleIntelligenceUnavailableReason.unknown;
@@ -428,7 +436,7 @@ export component MainWindow inherits Window {
     callback settings-mcp-copy-desktop-snippet-requested();
     callback settings-mcp-copy-code-command-requested();
     callback settings-mcp-test-requested();
-    callback settings-check-updates-requested();
+    callback settings-update-action-requested();
     callback settings-auto-update-check-changed(bool);
     callback settings-summary-provider-changed(SummaryProvider);
     callback settings-ollama-url-changed(string);
@@ -525,6 +533,7 @@ export component MainWindow inherits Window {
     in property <string> onboarding-toggle-shortcut-label;
     in-out property <bool> onboarding-shortcut-recording: false;
     in-out property <string> onboarding-shortcut-error: "";
+    in-out property <ShortcutNotice> onboarding-shortcut-notice: ShortcutNotice.none;
     in property <bool> onboarding-accessibility-granted;
     in property <bool> onboarding-busy;
     in property <bool> onboarding-continue-enabled: true;
@@ -773,6 +782,7 @@ export component MainWindow inherits Window {
         native-tap-warning-visible: root.settings-native-tap-warning-visible;
         recording-field <=> root.settings-recording-field;
         shortcut-error <=> root.settings-shortcut-error;
+        shortcut-notice: root.settings-shortcut-notice;
         save-error: root.settings-save-error;
         save-error-unavailable: root.settings-save-error-unavailable;
         draft-save-error: root.settings-draft-save-error;
@@ -824,8 +834,13 @@ export component MainWindow inherits Window {
         about-transcription-label: root.settings-about-transcription-label;
         about-summary-label: root.settings-about-summary-label;
         auto-update-check: root.settings-auto-update-check;
-        checking-updates: root.settings-checking-updates;
-        update-status: root.settings-update-status;
+        update-row: root.settings-update-row;
+        update-version: root.settings-update-version;
+        update-error: root.settings-update-error;
+        update-has-progress: root.settings-update-has-progress;
+        update-progress: root.settings-update-progress;
+        update-blocked: root.settings-update-blocked;
+        update-block-reason: root.settings-update-block-reason;
         summary-provider: root.settings-summary-provider;
         apple-intelligence-available: root.settings-apple-intelligence-available;
         apple-intelligence-reason: root.settings-apple-intelligence-reason;
@@ -953,7 +968,7 @@ export component MainWindow inherits Window {
         mcp-copy-desktop-snippet-requested => { root.settings-mcp-copy-desktop-snippet-requested(); }
         mcp-copy-code-command-requested => { root.settings-mcp-copy-code-command-requested(); }
         mcp-test-requested => { root.settings-mcp-test-requested(); }
-        check-updates-requested => { root.settings-check-updates-requested(); }
+        update-action-requested => { root.settings-update-action-requested(); }
         auto-update-check-changed(value) => { root.settings-auto-update-check-changed(value); }
         summary-provider-changed(value) => { root.settings-summary-provider-changed(value); }
         ollama-url-changed(value) => { root.settings-ollama-url-changed(value); }
@@ -1012,6 +1027,7 @@ export component MainWindow inherits Window {
         toggle-shortcut-label: root.onboarding-toggle-shortcut-label;
         shortcut-recording: root.onboarding-shortcut-recording;
         shortcut-error: root.onboarding-shortcut-error;
+        shortcut-notice: root.onboarding-shortcut-notice;
         accessibility-granted: root.onboarding-accessibility-granted;
         busy: root.onboarding-busy;
         continue-enabled: root.onboarding-continue-enabled;
