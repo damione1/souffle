@@ -12,6 +12,7 @@ mod edit_learning;
 mod ia_ui;
 mod keyboard_layout;
 mod lists_ui;
+mod live_edit;
 mod markdown;
 mod meeting_idle_ui;
 mod mic_stall_ui;
@@ -1930,6 +1931,8 @@ fn merge_recovery_text(existing: &str, incoming: &str) -> String {
 }
 
 fn clear_live_transcript(window: &MainWindow, live_state: &LiveTranscriptState) {
+    window.set_live_edit_open(false);
+    window.set_live_edit_busy(false);
     let buffers = reset_live_buffers(DictationTextBuffers {
         live: window.get_live_text().to_string(),
         tentative: window.get_live_tentative().to_string(),
@@ -2607,7 +2610,7 @@ async fn finalize_dictation(
         }
         edit_learning::schedule(
             handle,
-            settings.dictation_learn_from_edit,
+            settings.dictionary_learning_mode,
             final_text,
             focused_app,
         );
@@ -3846,6 +3849,7 @@ fn wire_callbacks(
     live_state: LiveTranscriptState,
 ) {
     let lists_models = lists_ui::SettingsListModels::install(window);
+    live_edit::wire_callbacks(window, tauri_handle.clone(), live_state.clone());
 
     // Shared with load_meeting_audio/stop_audio_player/open_meeting_detail
     // and the play-pause/seek callbacks below - one loaded player at a
@@ -4997,17 +5001,27 @@ fn wire_callbacks(
             },
         );
         let dictionary_handle = handle.clone();
+        let dictionary_revision = lists_models_for_open.dictionary_revision();
         spawn_settings_load_stage(
             weak.clone(),
             settings_io_for_open.clone(),
             token,
             "Settings dictionary",
             souffle_lib::async_runtime::spawn_blocking(move || {
-                souffle_lib::commands::list_dictionary(dictionary_handle)
+                let entries = souffle_lib::commands::list_dictionary(dictionary_handle.clone())?;
+                let suggestions =
+                    souffle_lib::commands::list_dictionary_suggestions(dictionary_handle)?;
+                Ok((entries, suggestions))
             }),
             {
                 let lists_models = lists_models_for_open.clone();
-                move |_window, entries| lists_models.populate_dictionary(&entries)
+                move |_window, (entries, suggestions)| {
+                    lists_models.populate_dictionary_snapshot(
+                        dictionary_revision,
+                        &entries,
+                        &suggestions,
+                    );
+                }
             },
         );
         let snippets_handle = handle.clone();
@@ -6553,15 +6567,41 @@ fn wire_callbacks(
 
     let weak = window.as_weak();
     let settings_io_for_learn = settings_io.clone();
-    window.on_settings_dictation_learn_from_edit_changed(move |enabled| {
+    window.on_settings_dictionary_learning_mode_changed(move |mode| {
+        let backend_mode = settings_ui::dictionary_learning_from_slint(mode);
         save_settings_field(
             &settings_io_for_learn,
             souffle_lib::commands::SettingsSaveLane::General,
-            move |settings| settings.dictation_learn_from_edit = enabled,
+            move |settings| settings.dictionary_learning_mode = backend_mode,
         );
         if let Some(window) = weak.upgrade() {
-            window.set_settings_dictation_learn_from_edit(enabled);
+            window.set_settings_dictionary_learning_mode(mode);
         }
+    });
+
+    let weak = window.as_weak();
+    let handle = tauri_handle.clone();
+    let models = lists_models.clone();
+    window.on_settings_dictionary_suggestion_accept_requested(move |id| {
+        lists_ui::mutate_dictionary_suggestion(
+            weak.clone(),
+            handle.clone(),
+            models.clone(),
+            id as i64,
+            true,
+        );
+    });
+    let weak = window.as_weak();
+    let handle = tauri_handle.clone();
+    let models = lists_models.clone();
+    window.on_settings_dictionary_suggestion_dismiss_requested(move |id| {
+        lists_ui::mutate_dictionary_suggestion(
+            weak.clone(),
+            handle.clone(),
+            models.clone(),
+            id as i64,
+            false,
+        );
     });
 
     let weak = window.as_weak();

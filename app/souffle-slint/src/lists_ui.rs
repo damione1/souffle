@@ -19,12 +19,72 @@
 //!   spacer-before/spacer-after paddings standing in for everything else.
 
 use crate::transcript::visible_window;
-use crate::{DictionaryRow, MainWindow, SnippetRow};
+use crate::{DictionaryRow, DictionarySuggestionRow, MainWindow, SnippetRow};
 use slint::{ComponentHandle, Model, VecModel};
+use souffle_lib::db::dictionary::DictionarySuggestion;
 use souffle_lib::db::snippets::SnippetEntry;
 use souffle_lib::filter::DictionaryEntry;
 use std::cell::Cell;
 use std::rc::Rc;
+
+pub(crate) fn mutate_dictionary_suggestion(
+    weak: slint::Weak<MainWindow>,
+    handle: std::sync::Arc<souffle_lib::state::AppState>,
+    models: Rc<SettingsListModels>,
+    id: i64,
+    accept: bool,
+) {
+    let Some(window) = weak.upgrade() else { return };
+    if window.get_settings_dictionary_suggestion_busy() {
+        return;
+    }
+    window.set_settings_dictionary_suggestion_busy(true);
+    let mutation_handle = handle.clone();
+    let worker = souffle_lib::async_runtime::spawn_blocking(move || {
+        if accept {
+            souffle_lib::commands::accept_dictionary_suggestion(mutation_handle, id).map(|_| ())
+        } else {
+            souffle_lib::commands::dismiss_dictionary_suggestion(mutation_handle, id)
+        }
+    });
+    slint::spawn_local(async move {
+        let outcome = match worker.await {
+            Ok(result) => result,
+            Err(error) => Err(error.to_string()),
+        };
+        let mut outcome = outcome;
+        // Other dictionary actions remain usable. If one publishes while our
+        // read is in flight, read again rather than overwriting its result.
+        while outcome.is_ok() {
+            let revision = models.dictionary_revision();
+            let read_handle = handle.clone();
+            let read = souffle_lib::async_runtime::spawn_blocking(move || {
+                let entries = souffle_lib::commands::list_dictionary(read_handle.clone())?;
+                let suggestions = souffle_lib::commands::list_dictionary_suggestions(read_handle)?;
+                Ok::<_, String>((entries, suggestions))
+            })
+            .await;
+            if weak.upgrade().is_none() {
+                return;
+            }
+            match read {
+                Ok(Ok((entries, suggestions))) => {
+                    if models.populate_dictionary_snapshot(revision, &entries, &suggestions) {
+                        break;
+                    }
+                }
+                Ok(Err(error)) => outcome = Err(error),
+                Err(error) => outcome = Err(error.to_string()),
+            }
+        }
+        if let Some(window) = weak.upgrade() {
+            window.set_settings_dictionary_suggestion_busy(false);
+            window
+                .set_settings_dictionary_suggestion_error(outcome.err().unwrap_or_default().into());
+        }
+    })
+    .expect("dictionary suggestion future on UI thread");
+}
 
 // Row heights mirror the explicit delegate heights in
 // `components/settings/dictionary_section.slint` /
@@ -34,6 +94,8 @@ use std::rc::Rc;
 const DICTIONARY_ROW_HEIGHT_PX: f32 = 64.0;
 const DICTIONARY_ERROR_ROW_HEIGHT_PX: f32 = 88.0;
 const DICTIONARY_VIEWPORT_HEIGHT_PX: f32 = 360.0;
+const SUGGESTION_ROW_HEIGHT_PX: f32 = 64.0;
+const SUGGESTION_VIEWPORT_HEIGHT_PX: f32 = 240.0;
 const SNIPPET_ROW_HEIGHT_PX: f32 = 96.0;
 const SNIPPET_ERROR_ROW_HEIGHT_PX: f32 = 116.0;
 const SNIPPET_EDITING_ROW_HEIGHT_PX: f32 = 236.0;
@@ -75,6 +137,10 @@ pub(crate) struct SettingsListModels {
     snippets_view: Rc<VecModel<SnippetRow>>,
     dictionary_mounted: Cell<(usize, usize)>,
     snippets_mounted: Cell<(usize, usize)>,
+    suggestions: Rc<VecModel<DictionarySuggestionRow>>,
+    suggestions_view: Rc<VecModel<DictionarySuggestionRow>>,
+    suggestions_mounted: Cell<(usize, usize)>,
+    dictionary_revision: Cell<u64>,
 }
 
 impl SettingsListModels {
@@ -87,9 +153,14 @@ impl SettingsListModels {
             snippets_view: Rc::new(VecModel::default()),
             dictionary_mounted: Cell::new((usize::MAX, usize::MAX)),
             snippets_mounted: Cell::new((usize::MAX, usize::MAX)),
+            suggestions: Rc::new(VecModel::default()),
+            suggestions_view: Rc::new(VecModel::default()),
+            suggestions_mounted: Cell::new((usize::MAX, usize::MAX)),
+            dictionary_revision: Cell::new(0),
         });
         window.set_settings_dictionary_entries(models.dictionary_view.clone().into());
         window.set_settings_snippets(models.snippets_view.clone().into());
+        window.set_settings_dictionary_suggestions(models.suggestions_view.clone().into());
 
         // Slint's expression language can't do the windowing math, so Rust
         // re-windows whenever the Flickable scroll position actually changes
@@ -112,15 +183,89 @@ impl SettingsListModels {
                 models.update_snippets_window(&window, false);
             }
         });
+        let weak = window.as_weak();
+        let models_weak = Rc::downgrade(&models);
+        window.on_settings_dictionary_suggestion_scroll_changed(move |_| {
+            if let (Some(window), Some(models)) = (weak.upgrade(), models_weak.upgrade()) {
+                models.update_suggestions_window(&window, false);
+            }
+        });
         models
     }
 
     pub(crate) fn populate_dictionary(&self, entries: &[DictionaryEntry]) {
+        self.dictionary_revision
+            .set(self.dictionary_revision.get().wrapping_add(1));
         let rows = entries.iter().map(dictionary_row).collect();
         sync_rows_by_id(&self.dictionary, rows, |row| row.id);
         if let Some(window) = self.window.upgrade() {
             self.update_dictionary_window(&window, true);
         }
+    }
+
+    pub(crate) fn populate_suggestions(&self, suggestions: &[DictionarySuggestion]) {
+        self.dictionary_revision
+            .set(self.dictionary_revision.get().wrapping_add(1));
+        let rows = suggestions
+            .iter()
+            .map(|suggestion| DictionarySuggestionRow {
+                id: suggestion.id as i32,
+                misspelling: suggestion.misspelling.as_str().into(),
+                term: suggestion.term.as_str().into(),
+            })
+            .collect();
+        sync_rows_by_id(&self.suggestions, rows, |row| row.id);
+        if let Some(window) = self.window.upgrade() {
+            self.update_suggestions_window(&window, true);
+        }
+    }
+
+    pub(crate) fn dictionary_revision(&self) -> u64 {
+        self.dictionary_revision.get()
+    }
+
+    /// A settings-open snapshot cannot overwrite a mutation published while
+    /// its worker was still reading either of these two related lists.
+    pub(crate) fn populate_dictionary_snapshot(
+        &self,
+        revision: u64,
+        entries: &[DictionaryEntry],
+        suggestions: &[DictionarySuggestion],
+    ) -> bool {
+        if revision == self.dictionary_revision.get() {
+            self.populate_dictionary(entries);
+            self.populate_suggestions(suggestions);
+            true
+        } else {
+            false
+        }
+    }
+
+    fn update_suggestions_window(&self, window: &MainWindow, force: bool) {
+        let offsets = cumulative_offsets(&vec![
+            SUGGESTION_ROW_HEIGHT_PX;
+            self.suggestions.row_count()
+        ]);
+        let win = visible_window(
+            &offsets,
+            -window.get_settings_dictionary_suggestion_scroll_top_px(),
+            SUGGESTION_VIEWPORT_HEIGHT_PX,
+            SUGGESTION_VIEWPORT_HEIGHT_PX * SETTINGS_LIST_SCROLL_MARGIN_FACTOR,
+        );
+        if !force && self.suggestions_mounted.get() == (win.start, win.end) {
+            return;
+        }
+        self.suggestions_mounted.set((win.start, win.end));
+        let rows = (win.start..win.end)
+            .filter_map(|index| self.suggestions.row_data(index))
+            .collect();
+        sync_rows_by_id(&self.suggestions_view, rows, |row| row.id);
+        window.set_settings_dictionary_suggestion_count(self.suggestions.row_count() as i32);
+        window.set_settings_dictionary_suggestion_content_height(
+            offsets.last().copied().unwrap_or(0.0),
+        );
+        window.set_settings_dictionary_suggestion_spacer_before(win.spacer_before);
+        window.set_settings_dictionary_suggestion_spacer_after(win.spacer_after);
     }
 
     pub(crate) fn populate_snippets(&self, entries: &[SnippetEntry], editing_id: Option<i64>) {
@@ -363,6 +508,36 @@ mod tests {
 
     struct TestPlatform;
 
+    #[test]
+    fn delayed_open_snapshot_cannot_restore_a_committed_suggestion() {
+        let _ = slint::platform::set_platform(Box::new(TestPlatform));
+        let window = MainWindow::new().unwrap();
+        let models = SettingsListModels::install(&window);
+        let pending = DictionarySuggestion {
+            id: 1,
+            misspelling: "Kubernetis".into(),
+            term: "Kubernetes".into(),
+        };
+        models.populate_suggestions(std::slice::from_ref(&pending));
+        let open_revision = models.dictionary_revision();
+        let accepted = DictionaryEntry {
+            id: 1,
+            term: "Kubernetes".into(),
+            pronunciation: Some("Kubernetis".into()),
+            category: None,
+            created_at: String::new(),
+        };
+        models.populate_dictionary(std::slice::from_ref(&accepted));
+        models.populate_suggestions(&[]);
+        models.populate_dictionary_snapshot(open_revision, &[], &[pending]);
+        assert_eq!(models.dictionary.row_count(), 1);
+        assert_eq!(
+            models.dictionary.row_data(0).unwrap().term.as_str(),
+            accepted.term
+        );
+        assert_eq!(models.suggestions.row_count(), 0);
+    }
+
     impl Platform for TestPlatform {
         fn create_window_adapter(&self) -> Result<Rc<dyn WindowAdapter>, slint::PlatformError> {
             Ok(MinimalSoftwareWindow::new(Default::default()))
@@ -398,6 +573,17 @@ mod tests {
             .collect();
         models.populate_dictionary(&dictionary);
         models.populate_snippets(&snippets, None);
+        let suggestions = (1..=500)
+            .map(|id| DictionarySuggestion {
+                id,
+                misspelling: format!("misspelling {id}"),
+                term: format!("term {id}"),
+            })
+            .collect::<Vec<_>>();
+        models.populate_suggestions(&suggestions);
+        assert_eq!(models.suggestions_view.row_data(0).unwrap().id, 1);
+        assert_eq!(window.get_settings_dictionary_suggestion_count(), 500);
+        assert!(models.suggestions_view.row_count() < 25);
 
         let first_dictionary_id = || models.dictionary_view.row_data(0).map(|row| row.id);
         let first_snippet_id = || models.snippets_view.row_data(0).map(|row| row.id);
@@ -410,6 +596,7 @@ mod tests {
         // the middle of their content.
         window.set_settings_dictionary_scroll_top(-250.0 * DICTIONARY_ROW_HEIGHT_PX);
         window.set_settings_snippets_scroll_top(-250.0 * SNIPPET_ROW_HEIGHT_PX);
+        window.set_settings_dictionary_suggestion_scroll_top(-250.0 * 64.0);
         slint::platform::update_timers_and_animations();
 
         let dictionary_start = first_dictionary_id().expect("dictionary slice mounted");
@@ -426,6 +613,9 @@ mod tests {
         assert!(window.get_settings_snippets_spacer_before() > 0.0);
         assert!(models.dictionary_view.row_count() < 50);
         assert!(models.snippets_view.row_count() < 50);
+        assert!(models.suggestions_view.row_data(0).unwrap().id > 200);
+        assert!(models.suggestions_view.row_count() < 25);
+        assert!(window.get_settings_dictionary_suggestion_spacer_before() > 0.0);
 
         // Back to the top re-windows again.
         window.set_settings_dictionary_scroll_top(0.0);

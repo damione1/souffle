@@ -65,6 +65,7 @@ export component RecordingView inherits Rectangle {
     // (term, pronunciation) saved from a live word's alias popover - the
     // same handler as the post-meeting transcript's.
     callback alias-save-requested(string, string);
+    callback paragraph-edit-requested(int);
 
     // Live meeting autoscroll (LiveSessionCard.svelte's scheduleAutoscroll),
     // done here rather than from Rust: follow the bottom while the reader
@@ -605,6 +606,12 @@ export component RecordingView inherits Rectangle {
                                     font-family: "JetBrains Mono";
                                     font-size: 10.5px;
                                     color: Theme.text-faint;
+                                }
+                                if block.can-edit: ThemedButton {
+                                    text: @tr("Corriger");
+                                    compact: true;
+                                    enabled: !root.starting && !root.stop-pending;
+                                    clicked => { root.paragraph-edit-requested(i); }
                                 }
                             }
                             // Words of finalized text are clickable; the
