@@ -1,3 +1,4 @@
+import { AppText, AppTextInput, Typography, TypographyStyle } from "@typography";
 import { SettingsField } from "settings_field.slint";
 import { SettingsGroup } from "settings_group.slint";
 import { Theme } from "../../theme.slint";
@@ -51,12 +52,11 @@ export component ShortcutRecorderButton inherits FocusScope {
         border-radius: 4px;
         background: root.recording ? Theme.accent.with-alpha(0.16) : Theme.input;
 
-        Text {
+        AppText {
             text: root.recording ? @tr("Appuyez…") : (root.shortcut-label == "" ? @tr("Non défini") : root.shortcut-label);
             color: root.recording ? Theme.accent : (root.shortcut-label == "" ? Theme.text-muted : Theme.text-secondary);
-            font-size: 13px;
-            font-family: "JetBrains Mono";
-            font-weight: 500;
+            typography: Typography.label;
+
             horizontal-alignment: center;
             vertical-alignment: center;
             width: 100%;
@@ -333,10 +333,10 @@ export component InterfaceSection inherits VerticalLayout {
                 spacing: 10px;
                 alignment: space-between;
 
-                Text {
+                AppText {
                     text: @tr("Votre raccourci sur une seule touche ne fonctionnera pas tant que l'Accessibilité n'est pas accordée.");
                     color: Theme.warning;
-                    font-size: 12px;
+                    typography: Typography.secondary;
                     wrap: word-wrap;
                     horizontal-stretch: 1;
                     vertical-alignment: center;
@@ -356,10 +356,10 @@ export component InterfaceSection inherits VerticalLayout {
             VerticalLayout {
                 padding: 12px;
 
-                Text {
+                AppText {
                     text: root.shortcut-error;
                     color: Theme.danger;
-                    font-size: 12px;
+                    typography: Typography.secondary;
                     wrap: word-wrap;
                 }
             }
@@ -371,10 +371,10 @@ export component InterfaceSection inherits VerticalLayout {
             VerticalLayout {
                 padding: 12px;
 
-                Text {
+                AppText {
                     text: ShortcutNoticeText.text(root.shortcut-notice);
                     color: ShortcutNoticeText.is-warning(root.shortcut-notice) ? Theme.warning : Theme.danger;
-                    font-size: 12px;
+                    typography: Typography.secondary;
                     wrap: word-wrap;
                 }
             }

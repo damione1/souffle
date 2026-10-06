@@ -21,7 +21,6 @@ private let kCornerRadiusMeet: CGFloat = 22
 private let kDictationWaveformBars: Int = 24
 private let kMeetingWaveformBars: Int = 3
 private let kMaxLiveLines: Int = 5
-private let kLiveFontSize: CGFloat = 13
 private let kLiveTextAlpha: CGFloat = 0.70
 private let kLiveTextColor = NSColor.white.withAlphaComponent(kLiveTextAlpha)
 /// Words the engine heard but has not confirmed yet are drawn at this
@@ -276,8 +275,8 @@ private final class PillContentView: NSView {
     private let blurView = NSVisualEffectView()
     private let borderView = NSView()
     private let recordingDot = NSView()
-    private let modeLabel = NSTextField(labelWithString: "")
-    private let liveLabel = NSTextField(wrappingLabelWithString: "")
+    private let modeLabel = Typography.makeHUDLabel()
+    private let liveLabel = Typography.makeHUDLiveText()
     private let stopButton = FirstMouseButton()
     private let waveform = WaveformView()
     private let spinner = NSProgressIndicator()
@@ -341,14 +340,12 @@ private final class PillContentView: NSView {
         }
 
         modeLabel.textColor = NSColor.white.withAlphaComponent(0.90)
-        modeLabel.font = NSFont.systemFont(ofSize: 12, weight: .medium)
         modeLabel.isEditable = false
         modeLabel.isBezeled = false
         modeLabel.drawsBackground = false
         addSubview(modeLabel)
 
         liveLabel.textColor = kLiveTextColor
-        liveLabel.font = NSFont.systemFont(ofSize: kLiveFontSize)
         liveLabel.maximumNumberOfLines = kMaxLiveLines
         liveLabel.usesSingleLineMode = false
         liveLabel.lineBreakMode = .byWordWrapping
@@ -519,7 +516,7 @@ private final class PillContentView: NSView {
 
     func setLiveText(_ text: String, provisional: Int) {
         let expanded = !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        let font = liveLabel.font ?? NSFont.systemFont(ofSize: kLiveFontSize)
+        let font = Typography.hud_live
         let (shown, lines) = lastWrappedLines(
             text,
             width: liveTextColumnWidth(),
@@ -572,7 +569,7 @@ private final class PillContentView: NSView {
     /// second time. 2 pt slack so the last descender is not clipped (SOU-122).
     func liveTextHeight(forWidth width: CGFloat) -> CGFloat {
         guard isExpanded, !liveLabel.stringValue.isEmpty, width > 0 else { return 0 }
-        let font = liveLabel.font ?? NSFont.systemFont(ofSize: kLiveFontSize)
+        let font = Typography.hud_live
         let lineH = ceil(font.ascender - font.descender + font.leading)
         let lines = CGFloat(min(kMaxLiveLines, max(1, liveLineCount)))
         return lines * lineH + 2

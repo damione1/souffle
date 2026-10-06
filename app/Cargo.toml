@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "souffle-mcp", "souffle-schema", "souffle-slint", "tts-fixtures"]
+members = [".", "souffle-mcp", "souffle-schema", "souffle-slint", "souffle-typography", "tts-fixtures"]
 
 # The contract rule from AGENTS.md, made mechanical: a `_ =>` arm that covers
 # enum variants is exactly the pattern the rule forbids, and clippy already
@@ -38,6 +38,7 @@ harness = false
 workspace = true
 
 [dependencies]
+souffle-typography = { path = "souffle-typography" }
 souffle-schema = { path = "souffle-schema", features = ["sqlite"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -191,3 +192,6 @@ opt-level = "s"
 # Every C->Rust callback (cpal/tap) is wrapped in catch_unwind so no panic
 # unwinds across the FFI boundary (which would be UB).
 panic = "unwind"
+
+[build-dependencies]
+souffle-typography = { path = "souffle-typography" }

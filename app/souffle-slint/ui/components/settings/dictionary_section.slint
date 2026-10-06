@@ -1,10 +1,10 @@
+import { AppText, AppTextInput, Typography, TypographyStyle } from "@typography";
 import { SettingsField } from "settings_field.slint";
 import { SettingsGroup } from "settings_group.slint";
 import { Theme } from "../../theme.slint";
 import { DictionaryLearningMode } from "../../types.slint";
 import { ThemedButton, ThemedButtonKind } from "../themed_button.slint";
 import { ThemedLineEdit } from "../themed_line_edit.slint";
-
 
 // Port of DictionarySettingsSection.svelte. Simplified: aliases (comma-
 // separated pronunciations) show as plain text per entry rather than
@@ -93,12 +93,12 @@ export component DictionarySection inherits VerticalLayout {
         padding-left: Theme.settings-inset;
         padding-right: Theme.settings-inset;
         spacing: 8px;
-        Text { text: @tr("CORRECTIONS À VALIDER"); color: Theme.text-muted; font-size: 12px; }
-        if root.suggestion-count == 0: Text {
-            text: @tr("Aucune suggestion en attente."); color: Theme.text-muted; font-size: 12px;
+        AppText { text: @tr("CORRECTIONS À VALIDER"); color: Theme.text-muted; typography: Typography.secondary; }
+        if root.suggestion-count == 0: AppText {
+            text: @tr("Aucune suggestion en attente."); color: Theme.text-muted; typography: Typography.secondary;
         }
-        if root.suggestion-error != "": Text {
-            text: root.suggestion-error; color: Theme.danger; font-size: 11px; wrap: word-wrap;
+        if root.suggestion-error != "": AppText {
+            text: root.suggestion-error; color: Theme.danger; typography: Typography.caption; wrap: word-wrap;
         }
         suggestion-list := Flickable {
             height: min(root.suggestion-content-height * 1px, 240px);
@@ -114,9 +114,9 @@ export component DictionarySection inherits VerticalLayout {
                     HorizontalLayout {
                         padding: 8px;
                         spacing: 6px;
-                        Text {
+                        AppText {
                             text: @tr("Correction : {} → {}", row.misspelling, row.term);
-                            color: Theme.text-primary; font-size: 12px;
+                            color: Theme.text-primary; typography: Typography.secondary;
                             overflow: elide; horizontal-stretch: 1;
                         }
                         ThemedButton {
@@ -145,9 +145,9 @@ export component DictionarySection inherits VerticalLayout {
         padding-bottom: 8px;
         spacing: 8px;
 
-        Text {
+        AppText {
             text: @tr("Termes techniques, noms propres ou acronymes mal reconnus.");
-            font-size: 12px;
+            typography: Typography.secondary;
             color: Theme.text-muted;
             wrap: word-wrap;
         }
@@ -157,28 +157,25 @@ export component DictionarySection inherits VerticalLayout {
 
             HorizontalLayout {
                 spacing: 6px;
-                Text {
+                AppText {
                     text: @tr("TERME");
-                    font-size: 10.5px;
+                    typography: Typography.table-heading;
                     color: Theme.text-tertiary;
-                    font-family: "Archivo Bold";
-                    letter-spacing: 1px;
+
                     horizontal-stretch: 1;
                 }
-                Text {
+                AppText {
                     text: @tr("PRONONCIATION");
-                    font-size: 10.5px;
+                    typography: Typography.table-heading;
                     color: Theme.text-tertiary;
-                    font-family: "Archivo Bold";
-                    letter-spacing: 1px;
+
                     width: 110px;
                 }
-                Text {
+                AppText {
                     text: @tr("CATÉGORIE");
-                    font-size: 10.5px;
+                    typography: Typography.table-heading;
                     color: Theme.text-tertiary;
-                    font-family: "Archivo Bold";
-                    letter-spacing: 1px;
+
                     width: 100px;
                 }
                 Rectangle {
@@ -218,15 +215,15 @@ export component DictionarySection inherits VerticalLayout {
             }
         }
 
-        if root.add-error != "": Text {
+        if root.add-error != "": AppText {
             text: root.add-error;
             color: Theme.danger;
-            font-size: 11px;
+            typography: Typography.caption;
         }
 
-        if root.entry-count == 0: Text {
+        if root.entry-count == 0: AppText {
             text: @tr("Aucune entrée.");
-            font-size: 12px;
+            typography: Typography.secondary;
             color: Theme.text-muted;
         }
     }
@@ -266,15 +263,15 @@ export component DictionarySection inherits VerticalLayout {
                         VerticalLayout {
                             spacing: 1px;
                             horizontal-stretch: 1;
-                            Text {
+                            AppText {
                                 text: row.term + (row.aliases-display == "" ? "" : "  (" + row.aliases-display + ")");
-                                font-size: 12.5px;
+                                typography: Typography.hint;
                                 color: Theme.text-primary;
                                 overflow: elide;
                             }
-                            if row.category != "": Text {
+                            if row.category != "": AppText {
                                 text: row.category;
-                                font-size: 10.5px;
+                                typography: Typography.micro-detail;
                                 color: Theme.text-muted;
                                 overflow: elide;
                             }
@@ -285,10 +282,10 @@ export component DictionarySection inherits VerticalLayout {
                         }
                     }
 
-                    if root.delete-error != "" && root.delete-error-id == row.id: Text {
+                    if root.delete-error != "" && root.delete-error-id == row.id: AppText {
                         text: root.delete-error;
                         color: Theme.danger;
-                        font-size: 11px;
+                        typography: Typography.caption;
                         overflow: elide;
                     }
                 }

@@ -1,3 +1,4 @@
+import { AppText, AppTextInput, Typography, TypographyStyle } from "@typography";
 import { Theme } from "../theme.slint";
 
 // A single-select filter chip - port of `.btn.btn-sm.btn-ghost` (default) /
@@ -56,10 +57,10 @@ export component FilterChip inherits Rectangle {
         padding-right: 8px;
         alignment: center;
 
-        Text {
+        AppText {
             text: root.text;
-            font-family: "Archivo Medium";
-            font-size: 12px;
+            typography: Typography.hud-label;
+
             color: root.selected ? Theme.canvas : (area.has-hover ? Theme.text-primary : Theme.text-muted);
             vertical-alignment: center;
         }

@@ -33,7 +33,8 @@ workspace = true
 # main.rs forces `renderer_name("skia")` and the tray is the `tray-icon`
 # crate in souffle_lib::native. `accessibility` (VoiceOver) and
 # `compat-1-18` are kept explicitly.
-slint = { version = "1.18", default-features = false, features = ["std", "compat-1-18", "backend-winit", "renderer-skia", "accessibility", "gettext", "unstable-winit-030"] }
+slint = { version = "1.18", default-features = false, features = ["std", "compat-1-18", "backend-winit", "renderer-skia", "accessibility", "gettext", "unstable-winit-030", "unstable-fontique-011"] }
+souffle-typography = { path = "../souffle-typography" }
 souffle_lib = { path = "..", package = "souffle" }
 # SOU-137: the paragraph grouper and its pause threshold, declared once for
 # the export, the summary, this UI and the MCP sidecar.
@@ -71,6 +72,7 @@ name = "keyboard_layout_main_thread"
 harness = false
 
 [build-dependencies]
+souffle-typography = { path = "../souffle-typography" }
 lucide-slint = "1.46.0"
 slint-build = "1.18"
 

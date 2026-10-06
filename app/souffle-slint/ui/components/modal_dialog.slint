@@ -1,3 +1,4 @@
+import { AppText, AppTextInput, Typography, TypographyStyle } from "@typography";
 import { Theme } from "../theme.slint";
 
 // Shared chrome for the app's modal dialogs (What's New, Update available,
@@ -60,17 +61,16 @@ export component ModalDialog inherits Rectangle {
                 spacing: 4px;
                 vertical-stretch: 0;
 
-                Text {
+                AppText {
                     text: root.title;
-                    font-family: "Archivo SemiBold";
-                    font-size: 18px;
-                    font-weight: 700;
+                    typography: Typography.dialog-strong;
+
                     color: Theme.text-primary;
                     wrap: word-wrap;
                 }
-                if root.subtitle != "": Text {
+                if root.subtitle != "": AppText {
                     text: root.subtitle;
-                    font-size: 14px;
+                    typography: Typography.body;
                     color: Theme.text-muted;
                     wrap: word-wrap;
                 }

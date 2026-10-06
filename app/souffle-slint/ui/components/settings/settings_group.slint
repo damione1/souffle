@@ -1,3 +1,4 @@
+import { AppText, AppTextInput, Typography, TypographyStyle } from "@typography";
 import { Theme } from "../../theme.slint";
 
 // Port of app.css `.settings-group` + `.settings-rows`: uppercase tracking
@@ -14,11 +15,10 @@ export component SettingsGroup inherits VerticalLayout {
         padding-left: Theme.settings-inset;
         padding-right: Theme.settings-inset;
         padding-bottom: 11px;
-        Text {
+        AppText {
             text: root.title;
-            font-size: 11px;
-            font-weight: 600;
-            letter-spacing: 1.65px;
+            typography: Typography.eyebrow;
+
             color: Theme.text-muted;
             horizontal-alignment: left;
             overflow: elide;

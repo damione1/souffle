@@ -1,3 +1,4 @@
+import { AppText, AppTextInput, Typography, TypographyStyle } from "@typography";
 import { Theme } from "theme.slint";
 import { ActionHero } from "components/action_hero.slint";
 import { SearchField } from "components/search_field.slint";
@@ -107,10 +108,10 @@ export component IdleView inherits Rectangle {
             restart-requested => { root.mic-stall-restart-requested(); }
             dismissed => { root.mic-stall-dismissed(); }
         }
-        if root.dictation-finalizing: Text {
+        if root.dictation-finalizing: AppText {
             vertical-stretch: 0;
             text: @tr("Reformulation…");
-            font-size: 14px;
+            typography: Typography.body;
             color: Theme.text-muted;
         }
         if root.dictation-recovery-text != "": DictationRecovery {

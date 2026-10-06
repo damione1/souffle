@@ -25,7 +25,23 @@ fn main() {
         println!("cargo:rustc-link-arg=-Wl,-rpath,/usr/lib/swift");
     }
 
-    let library = HashMap::from([("lucide".to_string(), PathBuf::from(lucide_slint::lib()))]);
+    let ui = PathBuf::from("ui");
+    let sources = souffle_typography::validate_ui(&ui).expect("Typography contract failed");
+    for source in sources {
+        println!("cargo:rerun-if-changed={}", source.display());
+    }
+    println!("cargo:rerun-if-changed=ui");
+    let assets = souffle_typography::asset_dir();
+    souffle_typography::validate_assets(&assets).expect("Inter font validation failed");
+    println!("cargo:rerun-if-changed={}", assets.display());
+    let typography =
+        PathBuf::from(std::env::var_os("OUT_DIR").expect("OUT_DIR")).join("typography.slint");
+    std::fs::write(&typography, souffle_typography::slint_projection())
+        .expect("Typography projection failed");
+    let library = HashMap::from([
+        ("lucide".to_string(), PathBuf::from(lucide_slint::lib())),
+        ("typography".to_string(), typography),
+    ]);
     // Element ids are only kept with debug info; the layout tests in
     // `live_view.rs` look elements up by id (SOU-256). Debug builds only, so
     // release binaries stay exactly as before.

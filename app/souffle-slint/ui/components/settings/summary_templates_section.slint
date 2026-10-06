@@ -1,3 +1,4 @@
+import { AppText, AppTextInput, Typography, TypographyStyle } from "@typography";
 import { SettingsField } from "settings_field.slint";
 import { SettingsFieldVertical } from "settings_field_vertical.slint";
 import { SettingsGroup } from "settings_group.slint";
@@ -40,9 +41,9 @@ export component SummaryTemplatesSection inherits VerticalLayout {
         padding-right: Theme.settings-inset;
         padding-top: 15px;
         padding-bottom: 15px;
-        Text {
+        AppText {
             text: @tr("Le modèle par défaut est utilisé pour résumer automatiquement une réunion terminée.");
-            font-size: 12px;
+            typography: Typography.secondary;
             color: Theme.text-muted;
             wrap: word-wrap;
         }
