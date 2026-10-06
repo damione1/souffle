@@ -1,0 +1,44 @@
+process URL registration result=true error=nil
+second different-byte registration result=true
+repeat original registration result=true
+Different font bytes, same PostScript name: Inter-Regular
+Graphics collision error=nil
+repeat process URL registration=false error=Optional(Error Domain=com.apple.CoreText.CTFontManagerErrorDomain Code=105 "The file has already been registered in the specified scope." UserInfo={NSLocalizedDescription=The file has already been registered in the specified scope., CTFontManagerErrorFontURLs=(
+    "file:///tmp/sou276-conflicting-Inter-Regular.ttf"
+), NSLocalizedFailureReason=Font registration was unsuccessful.})
+Direct embedded CGFont and actual CTLine glyph run retain the original hmtx bytes after collision
+Inter registration failed: Inter-Regular: Error Domain=com.apple.CoreText.CTFontManagerErrorDomain Code=104 "(null)"
+Inter registration failed: Inter-Regular: Error Domain=com.apple.CoreText.CTFontManagerErrorDomain Code=102 "(null)"
+Inter registration failed: Inter-Regular: Error Domain=com.apple.CoreText.CTFontManagerErrorDomain Code=999 "(null)"
+Inter registration failed: Inter-Regular: Error Domain=example.other-domain Code=105 "(null)"
+Inter registration failed: Inter-Regular: CoreText returned no error
+Inter: invalid font data or internal name
+controlled CoreText collision 105: success, embedded CGFont retained
+controlled CoreText collision 305: success, embedded CGFont retained
+controlled other registration error 104: rejected, no font retained
+controlled other registration error 102: rejected, no font retained
+controlled other registration error 999: rejected, no font retained
+controlled unrelated domain with code 105: rejected
+controlled failure without CFError: rejected
+real invalid font bytes: rejected
+HUD resolved=Inter-Thin source=embedded-CGFont pointSize=13.0 glyphRuns=Inter
+HUD resolved=Inter-ThinItalic source=embedded-CGFont pointSize=13.0 glyphRuns=Inter
+HUD resolved=Inter-ExtraLight source=embedded-CGFont pointSize=13.0 glyphRuns=Inter
+HUD resolved=Inter-ExtraLightItalic source=embedded-CGFont pointSize=13.0 glyphRuns=Inter
+HUD resolved=Inter-Light source=embedded-CGFont pointSize=13.0 glyphRuns=Inter
+HUD resolved=Inter-LightItalic source=embedded-CGFont pointSize=13.0 glyphRuns=Inter
+HUD resolved=Inter-Regular source=embedded-CGFont pointSize=13.0 glyphRuns=Inter
+HUD resolved=Inter-Italic source=embedded-CGFont pointSize=13.0 glyphRuns=Inter
+HUD resolved=Inter-Medium source=embedded-CGFont pointSize=13.0 glyphRuns=Inter
+HUD resolved=Inter-MediumItalic source=embedded-CGFont pointSize=13.0 glyphRuns=Inter
+HUD resolved=Inter-SemiBold source=embedded-CGFont pointSize=13.0 glyphRuns=Inter
+HUD resolved=Inter-SemiBoldItalic source=embedded-CGFont pointSize=13.0 glyphRuns=Inter
+HUD resolved=Inter-Bold source=embedded-CGFont pointSize=13.0 glyphRuns=Inter
+HUD resolved=Inter-BoldItalic source=embedded-CGFont pointSize=13.0 glyphRuns=Inter
+HUD resolved=Inter-ExtraBold source=embedded-CGFont pointSize=13.0 glyphRuns=Inter
+HUD resolved=Inter-ExtraBoldItalic source=embedded-CGFont pointSize=13.0 glyphRuns=Inter
+HUD resolved=Inter-Black source=embedded-CGFont pointSize=13.0 glyphRuns=Inter
+HUD resolved=Inter-BlackItalic source=embedded-CGFont pointSize=13.0 glyphRuns=Inter
+HUD tail retained lines=5 width=390.0 measuredHeight=80.0 allocatedHeight=82.0
+controlled duplicate-name branch: hmtx bytes of all 18 rendered font runs equal their original embedded tables
+controlled duplicate-name branch: all 18 actual CoreText glyph runs and HUD tail metrics verified
