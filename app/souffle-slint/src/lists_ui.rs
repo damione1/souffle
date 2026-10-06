@@ -94,6 +94,8 @@ pub(crate) fn mutate_dictionary_suggestion(
 const DICTIONARY_ROW_HEIGHT_PX: f32 = 64.0;
 const DICTIONARY_ERROR_ROW_HEIGHT_PX: f32 = 88.0;
 const DICTIONARY_VIEWPORT_HEIGHT_PX: f32 = 360.0;
+const SUGGESTION_ROW_HEIGHT_PX: f32 = 64.0;
+const SUGGESTION_VIEWPORT_HEIGHT_PX: f32 = 240.0;
 const SNIPPET_ROW_HEIGHT_PX: f32 = 96.0;
 const SNIPPET_ERROR_ROW_HEIGHT_PX: f32 = 116.0;
 const SNIPPET_EDITING_ROW_HEIGHT_PX: f32 = 236.0;
@@ -240,12 +242,15 @@ impl SettingsListModels {
     }
 
     fn update_suggestions_window(&self, window: &MainWindow, force: bool) {
-        let offsets = cumulative_offsets(&vec![64.0; self.suggestions.row_count()]);
+        let offsets = cumulative_offsets(&vec![
+            SUGGESTION_ROW_HEIGHT_PX;
+            self.suggestions.row_count()
+        ]);
         let win = visible_window(
             &offsets,
             -window.get_settings_dictionary_suggestion_scroll_top_px(),
-            240.0,
-            480.0,
+            SUGGESTION_VIEWPORT_HEIGHT_PX,
+            SUGGESTION_VIEWPORT_HEIGHT_PX * SETTINGS_LIST_SCROLL_MARGIN_FACTOR,
         );
         if !force && self.suggestions_mounted.get() == (win.start, win.end) {
             return;

@@ -119,8 +119,18 @@ export component DictionarySection inherits VerticalLayout {
                             color: Theme.text-primary; font-size: 12px;
                             overflow: elide; horizontal-stretch: 1;
                         }
-                        ThemedButton { text: @tr("Accepter"); enabled: !root.suggestion-busy; clicked => { root.suggestion-accept-requested(row.id); } }
-                        ThemedButton { text: @tr("Ignorer"); enabled: !root.suggestion-busy; clicked => { root.suggestion-dismiss-requested(row.id); } }
+                        ThemedButton {
+                            text: @tr("Accepter");
+                            accessible-label: @tr("Accepter {} → {}", row.misspelling, row.term);
+                            enabled: !root.suggestion-busy;
+                            clicked => { root.suggestion-accept-requested(row.id); }
+                        }
+                        ThemedButton {
+                            text: @tr("Ignorer");
+                            accessible-label: @tr("Ignorer {} → {}", row.misspelling, row.term);
+                            enabled: !root.suggestion-busy;
+                            clicked => { root.suggestion-dismiss-requested(row.id); }
+                        }
                     }
                 }
                 Rectangle { height: root.suggestion-spacer-after * 1px; }

@@ -40,6 +40,14 @@ msgctxt "DictionarySection"
 msgid "Ignorer"
 msgstr "Ignorer"
 
+msgctxt "DictionarySection"
+msgid "Accepter {} → {}"
+msgstr "Accepter {} → {}"
+
+msgctxt "DictionarySection"
+msgid "Ignorer {} → {}"
+msgstr "Ignorer {} → {}"
+
 msgid ""
 msgstr ""
 "POT-Creation-Date: 2026-09-22 21:45+0000\n"

@@ -14,7 +14,7 @@ msgstr "Disabled"
 
 msgctxt "DictionarySection"
 msgid "Suggestions"
-msgstr "Review suggestions"
+msgstr "Suggestions"
 
 msgctxt "DictionarySection"
 msgid "Automatique"
@@ -39,6 +39,14 @@ msgstr "Accept"
 msgctxt "DictionarySection"
 msgid "Ignorer"
 msgstr "Dismiss"
+
+msgctxt "DictionarySection"
+msgid "Accepter {} → {}"
+msgstr "Accept {} → {}"
+
+msgctxt "DictionarySection"
+msgid "Ignorer {} → {}"
+msgstr "Dismiss {} → {}"
 
 msgid ""
 msgstr ""

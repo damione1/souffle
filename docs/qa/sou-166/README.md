@@ -30,3 +30,10 @@ corrections, stale editor session/text rejection, stable segment indices after s
 preview isolation and delayed dictionary snapshots. Native audio capture/post-paste into a separate
 application was not exercised by this isolated UI fixture; existing AX target/generation guards and
 post-paste collection are covered by the workspace tests.
+
+Code review follow-up: [English suggestion queue](queue-en-accessibility.png)
+shows the mode consistently named “Suggestions”. Native Accessibility inspection
+confirmed separate names for each row's actions, including
+`Accept Kubernetis → Kubernetes` / `Dismiss Kubernetis → Kubernetes` and a second
+synthetic correction. The visible button text remains Accept / Dismiss. The
+isolated process was closed after inspection; no user profile was touched.

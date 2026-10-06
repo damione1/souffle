@@ -157,6 +157,8 @@ impl Database {
         .map_err(|e| format!("Read dictionary suggestions: {e}"))
     }
 
+    /// Idempotent: retrying a dismissal, or dismissing a row already accepted
+    /// and removed by another request, succeeds without creating a new row.
     pub fn dismiss_dictionary_suggestion(&self, id: i64) -> Result<(), String> {
         let conn = self.conn.acquire()?;
         conn.execute(
