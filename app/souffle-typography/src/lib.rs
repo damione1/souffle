@@ -3,6 +3,7 @@
 use sha2::{Digest, Sha256};
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
+pub use ttf_parser::name_id::POST_SCRIPT_NAME;
 
 pub const FAMILY: &str = "Inter";
 pub const VERSION: &str = "4.1";
@@ -876,6 +877,12 @@ pub fn swift_projection() -> String {
     // The exact byte-backed CGFont is retained; neither measuring nor drawing
     // looks up an installed font by a potentially ambiguous family name.
     static var registered: [String: CGFont] = [:]
+    static func isRegistrationCollision(_ error: CFError) -> Bool {
+        guard CFEqual(CFErrorGetDomain(error), kCTFontManagerErrorDomain) else { return false }
+        let code = CFErrorGetCode(error)
+        return code == CTFontManagerError.alreadyRegistered.rawValue ||
+               code == CTFontManagerError.duplicatedName.rawValue
+    }
     static func font(_ name: String, size: CGFloat) -> NSFont {
         guard registered.count == names.count, let cgFont = registered[name] else {
             fatalError("Inter font is not registered: \(name)")
@@ -930,9 +937,17 @@ func pillTypographyRegister(_ bytes: UnsafePointer<UInt8>?, _ count: Int,
     let name = Typography.names[Int(index)]
     if Typography.registered[name] != nil { return 0 }
     var error: Unmanaged<CFError>?
-    guard CTFontManagerRegisterGraphicsFont(cgFont, &error) else {
-        fputs("Inter registration failed: \(name): \(String(describing: error?.takeRetainedValue()))\n", stderr)
-        return 2
+    if !CTFontManagerRegisterGraphicsFont(cgFont, &error) {
+        guard let failure = error?.takeRetainedValue() else {
+            fputs("Inter registration failed: \(name): CoreText returned no error\n", stderr)
+            return 2
+        }
+        guard Typography.isRegistrationCollision(failure) else {
+            fputs("Inter registration failed: \(name): \(failure)\n", stderr)
+            return 2
+        }
+        // Name collisions only affect registration for descriptor matching.
+        // Measuring and drawing still use this exact embedded CGFont below.
     }
     Typography.registered[name] = cgFont
     return 0

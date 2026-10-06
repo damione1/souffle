@@ -186,9 +186,6 @@ fn build_pill_panel_bridge() {
     let assets = souffle_typography::asset_dir();
     souffle_typography::validate_assets(&assets).expect("Inter font validation failed");
     println!("cargo:rerun-if-changed={}", assets.display());
-    let typography = out_dir.join("typography.swift");
-    std::fs::write(&typography, souffle_typography::swift_projection())
-        .expect("HUD Typography projection failed");
     // Compile the generated projection and the panel in the same module.
     let merged = out_dir.join("pill_panel.swift");
     let source = format!(

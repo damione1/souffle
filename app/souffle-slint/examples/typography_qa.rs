@@ -434,6 +434,12 @@ fn main() {
                 (PillPanelMode::Polishing, false) => "Reformulating…",
             })
             .unwrap();
+            let a11y = match mode {
+                PillPanelMode::Meeting => {
+                    CString::new(if lang == "fr" { "Réunion" } else { "Meeting" }).unwrap()
+                }
+                PillPanelMode::Dictation | PillPanelMode::Polishing => title.clone(),
+            };
             let stop = CString::new(if lang == "en" {
                 "Stop recording"
             } else {
@@ -452,7 +458,7 @@ fn main() {
             unsafe {
                 pill_panel_create();
                 pill_panel_set_capture_excluded(0);
-                pill_panel_set_mode(mode as i32, title.as_ptr(), stop.as_ptr(), title.as_ptr());
+                pill_panel_set_mode(mode as i32, title.as_ptr(), stop.as_ptr(), a11y.as_ptr());
                 pill_panel_set_live_text(live.as_ptr(), 0);
                 pill_panel_set_visible(1);
             }

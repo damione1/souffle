@@ -66,17 +66,15 @@ pub fn verify_collection(collection: &mut fontique::Collection) -> Result<Vec<St
                 return Err(format!("{}: missing glyph {ch}", asset.file));
             }
         }
-        let resolved = souffle_typography::internal_name(font.blob.as_ref(), ttf_parser_name_id())?;
+        let resolved = souffle_typography::internal_name(
+            font.blob.as_ref(),
+            souffle_typography::POST_SCRIPT_NAME,
+        )?;
         evidence.push(format!("{} | family={} | weight={} | italic={} | resolved={} | sha256={} | synthesis=none | source=embedded",
             asset.file, souffle_typography::FAMILY, asset.weight.number(), asset.slant.italic(), resolved, asset.sha256));
     }
     Ok(evidence)
 }
-// The PostScript name id is an OpenType identifier, not an application enum.
-const fn ttf_parser_name_id() -> u16 {
-    6
-}
-
 pub fn initialize(window: &MainWindow) -> Result<Vec<String>, String> {
     let proof = verify_collection(&mut slint::fontique_011::shared_collection())?;
     window
