@@ -18,7 +18,7 @@ import { SnippetsSection, SnippetRow } from "components/settings/snippets_sectio
 import { Theme } from "theme.slint";
 import { LucideIcon, IconSet } from "components/lucide_icon.slint";
 import { SettingsTabBar, SettingsTabPage } from "components/settings/settings_tabs.slint";
-import { TranscriptionPhase, AppTheme, AppLocale, PasteMethod, MeetingLanguage, LogLevel, AudioRetention, AccessState, ShortcutField, SummaryProvider, AppleIntelligenceUnavailableReason, SettingsTab } from "types.slint";
+import { TranscriptionPhase, AppTheme, AppLocale, PasteMethod, MeetingLanguage, LogLevel, AudioRetention, AccessState, ShortcutField, ShortcutNotice, SummaryProvider, AppleIntelligenceUnavailableReason, SettingsTab, InstallBlockReason, UpdateRowStatus } from "types.slint";
 
 // Port of components/SettingsView.svelte's tab shell (SOU-188). Svelte
 // groups its 17 sections into 6 tabs (Transcription / IA / Audio / Interface
@@ -58,6 +58,7 @@ export component SettingsView inherits Rectangle {
     in property <bool> native-tap-warning-visible;
     in property <ShortcutField> recording-field: ShortcutField.none;
     in-out property <string> shortcut-error: "";
+    in property <ShortcutNotice> shortcut-notice;
     in property <string> save-error;
     // True when `save-error` covers a `SettingsSaveOutcome::Unavailable`
     // (the durable state could not be re-read after saving), so the wrapper
@@ -115,8 +116,13 @@ export component SettingsView inherits Rectangle {
     in property <string> about-transcription-label;
     in property <string> about-summary-label;
     in property <bool> auto-update-check;
-    in property <bool> checking-updates;
-    in property <string> update-status;
+    in property <UpdateRowStatus> update-row: UpdateRowStatus.unchecked;
+    in property <string> update-version;
+    in property <string> update-error;
+    in property <bool> update-has-progress;
+    in property <int> update-progress;
+    in property <bool> update-blocked;
+    in property <InstallBlockReason> update-block-reason;
     in property <SummaryProvider> summary-provider;
     in property <bool> apple-intelligence-available;
     in property <AppleIntelligenceUnavailableReason> apple-intelligence-reason;
@@ -242,7 +248,7 @@ export component SettingsView inherits Rectangle {
     callback mcp-copy-desktop-snippet-requested();
     callback mcp-copy-code-command-requested();
     callback mcp-test-requested();
-    callback check-updates-requested();
+    callback update-action-requested();
     callback auto-update-check-changed(bool);
     callback summary-provider-changed(SummaryProvider);
     callback ollama-url-changed(string);
@@ -570,6 +576,7 @@ export component SettingsView inherits Rectangle {
                             ptt-shortcut-label: root.ptt-shortcut-label;
                             recording-field: root.recording-field;
                             shortcut-error: root.shortcut-error;
+                            shortcut-notice: root.shortcut-notice;
                             native-tap-warning-visible: root.native-tap-warning-visible;
                             pill-hidden: root.pill-hidden;
                             pill-hidden-in-captures: root.pill-hidden-in-captures;
@@ -681,9 +688,14 @@ export component SettingsView inherits Rectangle {
                             transcription-label: root.about-transcription-label;
                             summary-label: root.about-summary-label;
                             auto-update-check: root.auto-update-check;
-                            checking-updates: root.checking-updates;
-                            update-status: root.update-status;
-                            check-updates-requested => { root.check-updates-requested(); }
+                            update-row: root.update-row;
+                            update-version: root.update-version;
+                            update-error: root.update-error;
+                            update-has-progress: root.update-has-progress;
+                            update-progress: root.update-progress;
+                            update-blocked: root.update-blocked;
+                            update-block-reason: root.update-block-reason;
+                            update-action-requested => { root.update-action-requested(); }
                             auto-update-check-changed(value) => { root.auto-update-check-changed(value); }
                         }
                     }

@@ -13,6 +13,152 @@ use std::time::Duration;
 /// Every `transcribe_dual()` frame pair a mock received, as (me, them).
 pub type DualFrameLog = Arc<Mutex<Vec<(Vec<f32>, Vec<f32>)>>>;
 
+/// Production two-source window/snapshot scheduler with a controlled decoder.
+pub struct BatchSourceDecoder {
+    session: super::batch_session::BatchSession,
+    now: std::time::Instant,
+}
+impl BatchSourceDecoder {
+    pub fn new(now: std::time::Instant) -> Self {
+        Self {
+            session: super::batch_session::BatchSession::controlled_dual(),
+            now,
+        }
+    }
+    pub fn set_clock(&mut self, now: std::time::Instant) {
+        self.now = now;
+    }
+    fn decode(
+        pcm: &[f32],
+        _: &[f32],
+        _: Option<&str>,
+    ) -> Result<(Vec<TranscriptionSegment>, Option<String>), EngineError> {
+        let name = if pcm[0] > 0.15 { "Système" } else { "Micro" };
+        Ok((
+            vec![TranscriptionSegment {
+                text: format!("{name} {}", pcm.len()),
+                start_time: 0.0,
+                end_time: pcm.len() as f64 / 16000.0,
+                is_final: true,
+                speaker: None,
+                language: None,
+                confidence: None,
+            }],
+            None,
+        ))
+    }
+}
+impl TranscriptionEngine for BatchSourceDecoder {
+    fn load_model(&mut self, _: &Path) -> Result<(), EngineError> {
+        Ok(())
+    }
+    fn unload_model(&mut self) -> Result<(), EngineError> {
+        self.reset_state()
+    }
+    fn reset_state(&mut self) -> Result<(), EngineError> {
+        self.session.reset(false);
+        Ok(())
+    }
+    fn audio_requirements(&self) -> AudioInputRequirements {
+        AudioInputRequirements {
+            sample_rate_hz: 16000,
+            channels: 1,
+            chunk_size_samples: 1600,
+        }
+    }
+    fn supports_diarization(&self) -> bool {
+        true
+    }
+    fn set_preview_enabled(&mut self, enabled: bool) {
+        self.session.set_preview_enabled(enabled);
+    }
+    fn transcribe(
+        &mut self,
+        pcm: &[f32],
+        language: Option<&str>,
+    ) -> Result<Vec<TranscriptionSegment>, EngineError> {
+        self.session.transcribe(pcm, language, Self::decode)
+    }
+    fn transcribe_dual(
+        &mut self,
+        me: &[f32],
+        them: &[f32],
+    ) -> Result<Vec<TranscriptionSegment>, EngineError> {
+        self.session.dual_at(me, them, self.now, Self::decode)
+    }
+    fn flush(&mut self) -> Result<Vec<TranscriptionSegment>, EngineError> {
+        self.session.flush(8000, Self::decode)
+    }
+}
+
+/// Fast deterministic decoder for scheduler-to-consumer tests. It uses the
+/// same snapshot policy as Whisper/Parakeet, with an explicitly driven clock.
+pub struct BatchPreviewDecoder {
+    policy: super::batch_windows::PreviewPolicy,
+    pcm: Vec<f32>,
+    now: std::time::Instant,
+}
+
+impl BatchPreviewDecoder {
+    pub fn new(now: std::time::Instant) -> Self {
+        Self {
+            policy: Default::default(),
+            pcm: Vec::new(),
+            now,
+        }
+    }
+    pub fn set_clock(&mut self, now: std::time::Instant) {
+        self.now = now;
+    }
+}
+
+impl TranscriptionEngine for BatchPreviewDecoder {
+    fn load_model(&mut self, _path: &Path) -> Result<(), EngineError> {
+        Ok(())
+    }
+    fn unload_model(&mut self) -> Result<(), EngineError> {
+        self.reset_state()
+    }
+    fn reset_state(&mut self) -> Result<(), EngineError> {
+        self.pcm.clear();
+        self.policy.reset();
+        Ok(())
+    }
+    fn audio_requirements(&self) -> AudioInputRequirements {
+        AudioInputRequirements {
+            sample_rate_hz: super::batch_windows::SAMPLE_RATE,
+            channels: 1,
+            chunk_size_samples: super::batch_windows::CHUNK_SAMPLES as u32,
+        }
+    }
+    fn flush(&mut self) -> Result<Vec<TranscriptionSegment>, EngineError> {
+        self.pcm.clear();
+        Ok(Vec::new())
+    }
+    fn transcribe(
+        &mut self,
+        audio: &[f32],
+        _language: Option<&str>,
+    ) -> Result<Vec<TranscriptionSegment>, EngineError> {
+        self.pcm.extend_from_slice(audio);
+        Ok(self
+            .policy
+            .decode(&self.pcm, 0, self.now, |pcm, offset| {
+                Ok(vec![TranscriptionSegment {
+                    text: format!("Hypothèse {}", pcm.len()),
+                    start_time: offset,
+                    end_time: pcm.len() as f64 / 16_000.0,
+                    is_final: true,
+                    speaker: None,
+                    language: None,
+                    confidence: None,
+                }])
+            })
+            .into_iter()
+            .collect())
+    }
+}
+
 /// A configurable mock engine for testing.
 /// Push responses into `transcribe_responses` and `flush_responses` queues;
 /// calls to `transcribe()` / `flush()` will pop from the front.

@@ -17,7 +17,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use crate::db::{
-    DictationSummary, IncludeSet, McpDb, MeetingDetail, MeetingSearchHit, MeetingSummary,
+    DictationSummary, IncludeSet, McpDb, MeetingDetail, MeetingSearchHit, MeetingSection,
+    MeetingSummary,
 };
 
 const RESOURCE_URI_PREFIX: &str = "souffle://meeting/";
@@ -55,7 +56,7 @@ pub struct GetMeetingArgs {
     /// Which sections to include: any of "transcript", "summary", "notes",
     /// "metadata". Omit (or leave empty) to include everything.
     #[serde(default)]
-    pub include: Option<Vec<String>>,
+    pub include: Option<Vec<MeetingSection>>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -138,7 +139,7 @@ impl SouffleMcpServer {
         &self,
         Parameters(args): Parameters<GetMeetingArgs>,
     ) -> Result<Json<MeetingDetail>, String> {
-        let include = IncludeSet::from_names(args.include.as_deref());
+        let include = IncludeSet::from_sections(args.include.as_deref());
         self.db
             .get_meeting(&args.id, include)
             .map(Json)
@@ -306,4 +307,57 @@ fn render_meeting_resource(meeting: &MeetingDetail) -> String {
     out.push_str("\n## Transcript\n\n");
     out.push_str(transcript);
     out
+}
+
+#[cfg(test)]
+mod section_contract_tests {
+    use super::*;
+    #[test]
+    fn unknown_include_is_rejected_and_omitted_or_empty_stays_all() {
+        assert!(
+            serde_json::from_value::<GetMeetingArgs>(json!({"id":"m1","include":["transcipt"]}))
+                .is_err()
+        );
+        for value in [json!({"id":"m1"}), json!({"id":"m1","include":[]})] {
+            let args: GetMeetingArgs = serde_json::from_value(value).unwrap();
+            assert_eq!(
+                IncludeSet::from_sections(args.include.as_deref()),
+                IncludeSet::all()
+            );
+        }
+        let args: GetMeetingArgs = serde_json::from_value(
+            json!({"id":"m1","include":["transcript","summary","notes","metadata"]}),
+        )
+        .unwrap();
+        assert_eq!(
+            IncludeSet::from_sections(args.include.as_deref()),
+            IncludeSet::all()
+        );
+        for (name, section) in [
+            ("transcript", MeetingSection::Transcript),
+            ("summary", MeetingSection::Summary),
+            ("notes", MeetingSection::Notes),
+            ("metadata", MeetingSection::Metadata),
+        ] {
+            let args: GetMeetingArgs =
+                serde_json::from_value(json!({"id":"m1","include":[name]})).unwrap();
+            assert_eq!(args.include, Some(vec![section]));
+            let include = IncludeSet::from_sections(args.include.as_deref());
+            assert_eq!(
+                usize::from(include.transcript)
+                    + usize::from(include.summary)
+                    + usize::from(include.notes)
+                    + usize::from(include.metadata),
+                1
+            );
+        }
+    }
+    #[test]
+    fn mcp_schema_enumerates_exact_meeting_sections() {
+        let schema = serde_json::to_value(schemars::schema_for!(GetMeetingArgs)).unwrap();
+        assert_eq!(
+            schema["$defs"]["MeetingSection"]["enum"],
+            json!(["transcript", "summary", "notes", "metadata"])
+        );
+    }
 }

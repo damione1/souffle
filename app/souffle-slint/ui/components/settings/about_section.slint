@@ -2,28 +2,90 @@ import { SettingsField } from "settings_field.slint";
 import { SettingsGroup } from "settings_group.slint";
 import { Theme } from "../../theme.slint";
 import { ThemedSwitch } from "../themed_switch.slint";
-import { ThemedButton } from "../themed_button.slint";
+import { ThemedButton, ThemedButtonKind } from "../themed_button.slint";
+import { InstallBlockReason, UpdateRowStatus } from "../../types.slint";
+import { UpdateCopy } from "../update_copy.slint";
 
-// Port of AboutSettingsSection.svelte. `UpdateAction` (the download-progress
-// + install button shown once an update is found) is not built here - a
-// full updater UI is a standalone feature disproportionate to this tab, and
-// is left for a follow-up ticket. "Check for updates" itself is real
-// (`check_for_updates`), it just reports the result as text rather than
-// offering to install it.
+// Port of AboutSettingsSection.svelte, including `UpdateAction`: the
+// "Mises à jour" row walks check -> download (with progress) -> install and
+// restart from its one button. Rust owns the flow (`update_ui::UpdateRow`)
+// and decides what a click does from it; this file only renders the
+// projected `UpdateRowStatus` and its payload properties, which are
+// meaningful only for the statuses that carry them.
 export component AboutSection inherits VerticalLayout {
     in property <string> app-version;
     in property <string> transcription-label;
     in property <string> summary-label;
     in property <bool> auto-update-check;
-    in property <bool> checking-updates;
-    in property <string> update-status;
+    in property <UpdateRowStatus> update-row: UpdateRowStatus.unchecked;
+    in property <string> update-version;
+    in property <string> update-error;
+    // `Option<u8>` percent, split: `update-progress` is meaningful only
+    // while `update-has-progress` is true.
+    in property <bool> update-has-progress;
+    in property <int> update-progress;
+    // `Option<InstallBlockReason>` while `ready`, split the same way.
+    in property <bool> update-blocked;
+    in property <InstallBlockReason> update-block-reason;
 
-    callback check-updates-requested();
+    callback update-action-requested();
     callback auto-update-check-changed(bool);
+
+    pure function update-description() -> string {
+        if root.update-row == UpdateRowStatus.unchecked { return ""; }
+        if root.update-row == UpdateRowStatus.checking { return @tr("Recherche d'une nouvelle version…"); }
+        if root.update-row == UpdateRowStatus.up-to-date { return @tr("Soufflé est à jour."); }
+        if root.update-row == UpdateRowStatus.check-failed { return @tr("Vérification impossible : {}", root.update-error); }
+        if root.update-row == UpdateRowStatus.available { return @tr("La version {} est disponible.", root.update-version); }
+        if root.update-row == UpdateRowStatus.downloading {
+            return root.update-has-progress
+                ? @tr("Téléchargement de la version {} : {} %", root.update-version, root.update-progress)
+                : @tr("Téléchargement de la version {}…", root.update-version);
+        }
+        if root.update-row == UpdateRowStatus.ready {
+            return root.update-blocked
+                ? UpdateCopy.install-block-label(root.update-block-reason)
+                : @tr("La version {} est prête à être installée.", root.update-version);
+        }
+        if root.update-row == UpdateRowStatus.installing { return @tr("Installation de la version {}. Soufflé va redémarrer.", root.update-version); }
+        if root.update-row == UpdateRowStatus.failed { return @tr("La mise à jour a échoué : {}", root.update-error); }
+        return "";
+    }
+
+    pure function update-button-label() -> string {
+        if root.update-row == UpdateRowStatus.unchecked { return @tr("Vérifier les mises à jour"); }
+        if root.update-row == UpdateRowStatus.checking { return @tr("Vérification…"); }
+        if root.update-row == UpdateRowStatus.up-to-date { return @tr("Vérifier les mises à jour"); }
+        if root.update-row == UpdateRowStatus.check-failed { return @tr("Vérifier les mises à jour"); }
+        if root.update-row == UpdateRowStatus.available { return @tr("Installer la mise à jour"); }
+        if root.update-row == UpdateRowStatus.downloading {
+            return root.update-has-progress ? @tr("Téléchargement… {} %", root.update-progress) : @tr("Téléchargement…");
+        }
+        if root.update-row == UpdateRowStatus.ready { return @tr("Installer et redémarrer"); }
+        if root.update-row == UpdateRowStatus.installing { return @tr("Redémarrage…"); }
+        if root.update-row == UpdateRowStatus.failed { return @tr("Réessayer"); }
+        return "";
+    }
+
+    // Busy statuses ignore clicks on the Rust side too; disabling only
+    // makes that visible.
+    pure function update-button-enabled() -> bool {
+        return root.update-row != UpdateRowStatus.checking
+            && root.update-row != UpdateRowStatus.downloading
+            && root.update-row != UpdateRowStatus.installing;
+    }
+
+    pure function update-button-kind() -> ThemedButtonKind {
+        if root.update-row == UpdateRowStatus.available
+            || root.update-row == UpdateRowStatus.ready
+            || root.update-row == UpdateRowStatus.failed {
+            return ThemedButtonKind.active;
+        }
+        return ThemedButtonKind.default;
+    }
 
     spacing: 22px;
     alignment: start;
-
     SettingsGroup {
         title: @tr("À PROPOS");
 
@@ -85,12 +147,13 @@ export component AboutSection inherits VerticalLayout {
 
         SettingsField {
             label: @tr("Mises à jour");
-            description: root.update-status;
+            description: root.update-description();
 
             ThemedButton {
-                text: root.checking-updates ? @tr("Vérification…") : @tr("Vérifier les mises à jour");
-                enabled: !root.checking-updates;
-                clicked => { root.check-updates-requested(); }
+                text: root.update-button-label();
+                kind: root.update-button-kind();
+                enabled: root.update-button-enabled();
+                clicked => { root.update-action-requested(); }
             }
         }
 

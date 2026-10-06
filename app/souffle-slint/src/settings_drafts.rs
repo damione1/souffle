@@ -760,7 +760,7 @@ mod tests {
         // SOU-226 AC1: "Install and restart" must reuse the same flush
         // barrier as quit (`flush_before_exit`), not bypass it - a pending
         // draft is written (or its failure surfaced) before the caller's own
-        // exit action - standing in for `install_and_relaunch`'s
+        // exit action - standing in for `install_update`'s
         // `std::process::exit(0)` - ever runs.
         for commit in [false, true] {
             let (window, controller, io, started, release, _quit_called) =
