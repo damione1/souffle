@@ -83,3 +83,48 @@ pub struct StructuredSummary {
     #[serde(default)]
     pub open_questions: Vec<String>,
 }
+
+/// Shared on-disk/wire encoding of a full-text search source.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SearchSource {
+    Meeting,
+    Dictation,
+}
+impl SearchSource {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Meeting => "meeting",
+            Self::Dictation => "dictation",
+        }
+    }
+    /// Legacy SQL strings are an open domain: unknown values are omitted.
+    pub fn parse(raw: &str) -> Option<Self> {
+        match raw {
+            "meeting" => Some(Self::Meeting),
+            "dictation" => Some(Self::Dictation),
+            _ => None,
+        }
+    }
+}
+#[cfg(feature = "sqlite")]
+impl rusqlite::ToSql for SearchSource {
+    fn to_sql(&self) -> rusqlite::Result<rusqlite::types::ToSqlOutput<'_>> {
+        Ok(rusqlite::types::ToSqlOutput::from(self.as_str()))
+    }
+}
+#[cfg(test)]
+mod search_source_tests {
+    use super::*;
+    #[test]
+    fn shared_source_keeps_disk_and_json_encodings() {
+        for source in [SearchSource::Meeting, SearchSource::Dictation] {
+            let wire = serde_json::to_string(&source).unwrap();
+            assert_eq!(wire, format!("\"{}\"", source.as_str()));
+            assert_eq!(SearchSource::parse(source.as_str()), Some(source));
+            assert_eq!(serde_json::from_str::<SearchSource>(&wire).unwrap(), source);
+        }
+        assert_eq!(SearchSource::parse("unknown"), None);
+        assert_eq!(Speaker::parse("spk:legacy"), None);
+    }
+}

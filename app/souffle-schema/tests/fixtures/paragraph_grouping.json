@@ -244,7 +244,7 @@
       "expected": [
         {
           "timestamp": "0:00",
-          "text": "Let me explain the whole plan in detail because it's complicated.",
+          "text": "Let me explain the whole plan in detail because it's",
           "speaker": "me"
         },
         {
@@ -253,8 +253,8 @@
           "speaker": "them"
         },
         {
-          "timestamp": "0:03",
-          "text": "So let's start now",
+          "timestamp": "0:01",
+          "text": "complicated. So let's start now",
           "speaker": "me"
         }
       ]

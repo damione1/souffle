@@ -199,9 +199,12 @@ fn sidecar_get_meeting_include_filter_matches_across_the_boundary() {
     drop(app_db);
 
     let sidecar = McpDb::open(&db_path).unwrap();
-    let names = vec!["summary".to_string(), "notes".to_string()];
+    let names = vec![
+        souffle_mcp::db::MeetingSection::Summary,
+        souffle_mcp::db::MeetingSection::Notes,
+    ];
     let detail = sidecar
-        .get_meeting("contract-1", IncludeSet::from_names(Some(&names)))
+        .get_meeting("contract-1", IncludeSet::from_sections(Some(&names)))
         .unwrap();
 
     assert!(detail.transcript.is_none());

@@ -79,10 +79,18 @@ async fn fetch_manifest(client: &reqwest::Client) -> Result<(Manifest, PlatformE
             response.status()
         ));
     }
-    let manifest: Manifest = response
-        .json()
+    let text = response
+        .text()
         .await
-        .map_err(|e| format!("Parse update manifest: {e}"))?;
+        .map_err(|e| format!("Read update manifest: {e}"))?;
+    parse_manifest(&text)
+}
+
+/// Parse `latest.json` and pick this platform's entry. Pure, so the exact
+/// manifest a release publishes can be checked in a test.
+fn parse_manifest(text: &str) -> Result<(Manifest, PlatformEntry), String> {
+    let manifest: Manifest =
+        serde_json::from_str(text).map_err(|e| format!("Parse update manifest: {e}"))?;
     let entry = manifest
         .platforms
         .get(PLATFORM)
@@ -163,15 +171,21 @@ pub(crate) fn running_bundle_path() -> Result<PathBuf, String> {
         .ok_or_else(|| "Not running from an .app bundle".to_string())
 }
 
-/// Extract the downloaded `.tar.gz`, replace the running bundle with the
-/// extracted one, and relaunch. Never returns on success — the process exits
-/// as part of the relaunch. Only reached after [`download_and_verify`]
-/// already checked the signature, so `bytes` here is trusted.
-pub fn install_and_relaunch(bytes: &[u8]) -> Result<(), String> {
+/// Extract the downloaded `.tar.gz` and replace the running bundle with the
+/// extracted one. Does not relaunch: the caller shuts the engine down and
+/// then calls [`relaunch_and_exit`], so a failure here leaves the running
+/// app fully usable. Only reached after [`download_and_verify`] already
+/// checked the signature, so `bytes` here is trusted.
+pub fn install_bundle(bytes: &[u8]) -> Result<(), String> {
     let bundle_path = running_bundle_path()?;
-
     let tmp_dir = std::env::temp_dir().join(format!("souffle-update-{}", std::process::id()));
-    std::fs::create_dir_all(&tmp_dir).map_err(|e| format!("Create temp extract dir: {e}"))?;
+    let result = extract_and_swap(bytes, &bundle_path, &tmp_dir);
+    let _ = std::fs::remove_dir_all(&tmp_dir);
+    result
+}
+
+fn extract_and_swap(bytes: &[u8], bundle_path: &Path, tmp_dir: &Path) -> Result<(), String> {
+    std::fs::create_dir_all(tmp_dir).map_err(|e| format!("Create temp extract dir: {e}"))?;
     let archive_path = tmp_dir.join("update.tar.gz");
     std::fs::write(&archive_path, bytes).map_err(|e| format!("Write downloaded archive: {e}"))?;
 
@@ -179,14 +193,14 @@ pub fn install_and_relaunch(bytes: &[u8]) -> Result<(), String> {
         .arg("-xzf")
         .arg(&archive_path)
         .arg("-C")
-        .arg(&tmp_dir)
+        .arg(tmp_dir)
         .status()
         .map_err(|e| format!("Run tar: {e}"))?;
     if !status.success() {
         return Err(format!("tar extraction failed with status {status}"));
     }
 
-    let extracted_app = std::fs::read_dir(&tmp_dir)
+    let extracted_app = std::fs::read_dir(tmp_dir)
         .map_err(|e| format!("Read extracted archive dir: {e}"))?
         .filter_map(|entry| entry.ok())
         .map(|entry| entry.path())
@@ -195,22 +209,29 @@ pub fn install_and_relaunch(bytes: &[u8]) -> Result<(), String> {
 
     let backup_path = bundle_path.with_extension("app.update-backup");
     let _ = std::fs::remove_dir_all(&backup_path);
-    std::fs::rename(&bundle_path, &backup_path)
+    std::fs::rename(bundle_path, &backup_path)
         .map_err(|e| format!("Move current app aside: {e}"))?;
 
-    if let Err(e) = std::fs::rename(&extracted_app, &bundle_path) {
+    if let Err(e) = std::fs::rename(&extracted_app, bundle_path) {
         // Roll back: the app must not be left missing.
-        let _ = std::fs::rename(&backup_path, &bundle_path);
+        let _ = std::fs::rename(&backup_path, bundle_path);
         return Err(format!("Install new app bundle: {e}"));
     }
     let _ = std::fs::remove_dir_all(&backup_path);
-    let _ = std::fs::remove_dir_all(&tmp_dir);
+    Ok(())
+}
 
-    std::process::Command::new("/usr/bin/open")
-        .arg(&bundle_path)
-        .spawn()
-        .map_err(|e| format!("Relaunch after update: {e}"))?;
-
+/// Reopen the (already replaced) bundle once this process is gone, then
+/// exit. Opening it before exiting would race this instance: Launch Services
+/// can just reactivate the still-running process, or the new one finds the
+/// single-instance lock held and quits, leaving no Soufflé running at all
+/// (see `relaunch.rs`). If the relaunch cannot even be scheduled the process
+/// still exits: the new bundle is on disk and the old code must stop, so the
+/// user reopening Soufflé lands on the update.
+pub fn relaunch_and_exit() -> ! {
+    if let Err(e) = super::relaunch::relaunch_after_exit() {
+        tracing::warn!("Relaunch after update could not be scheduled: {e}");
+    }
     std::process::exit(0);
 }
 
@@ -230,6 +251,91 @@ fn verify_for_test(bytes: &[u8], sig_file_text: &str, pubkey_file_text: &str) ->
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The manifest v0.16.2 actually published (signature shortened), with
+    /// its extra `pub_date` field and multi-line notes.
+    const PUBLISHED_MANIFEST: &str = r#"{
+      "version": "0.16.2",
+      "notes": "Merge pull request #366 from damione1/develop\n\nRelease v0.16.2",
+      "pub_date": "2026-10-01T17:36:10Z",
+      "platforms": {
+        "darwin-aarch64": {
+          "signature": "dW50cnVzdGVkIGNvbW1lbnQ6",
+          "url": "https://github.com/damione1/souffle/releases/download/v0.16.2/Souffle.app.tar.gz"
+        }
+      }
+    }"#;
+
+    #[test]
+    fn the_published_manifest_shape_parses() {
+        let (manifest, entry) = parse_manifest(PUBLISHED_MANIFEST).unwrap();
+        assert_eq!(manifest.version, "0.16.2");
+        assert!(manifest.notes.unwrap().contains("Release v0.16.2"));
+        assert_eq!(entry.signature, "dW50cnVzdGVkIGNvbW1lbnQ6");
+        assert!(entry.url.ends_with("/v0.16.2/Souffle.app.tar.gz"));
+    }
+
+    #[test]
+    fn a_manifest_without_this_platform_is_an_error() {
+        let text =
+            r#"{"version":"1.0.0","platforms":{"linux-x86_64":{"signature":"x","url":"y"}}}"#;
+        let err = parse_manifest(text).unwrap_err();
+        assert!(err.contains(PLATFORM), "{err}");
+    }
+
+    fn write_fake_app(dir: &Path, name: &str, marker: &str) -> PathBuf {
+        let app = dir.join(name);
+        std::fs::create_dir_all(app.join("Contents")).unwrap();
+        std::fs::write(app.join("Contents/marker"), marker).unwrap();
+        app
+    }
+
+    fn tar_gz_of(dir: &Path, entry: &str) -> Vec<u8> {
+        let archive = dir.join("archive.tar.gz");
+        let status = std::process::Command::new("/usr/bin/tar")
+            .arg("-C")
+            .arg(dir)
+            .arg("-czf")
+            .arg(&archive)
+            .arg(entry)
+            .status()
+            .unwrap();
+        assert!(status.success());
+        std::fs::read(archive).unwrap()
+    }
+
+    #[test]
+    fn extract_and_swap_replaces_the_bundle_with_the_archived_app() {
+        let src = tempfile::tempdir().unwrap();
+        write_fake_app(src.path(), "Soufflé.app", "new");
+        let bytes = tar_gz_of(src.path(), "Soufflé.app");
+
+        let install = tempfile::tempdir().unwrap();
+        let bundle = write_fake_app(install.path(), "Soufflé.app", "old");
+        let staging = install.path().join("staging");
+
+        extract_and_swap(&bytes, &bundle, &staging).unwrap();
+
+        let marker = std::fs::read_to_string(bundle.join("Contents/marker")).unwrap();
+        assert_eq!(marker, "new");
+        assert!(!bundle.with_extension("app.update-backup").exists());
+    }
+
+    #[test]
+    fn extract_and_swap_leaves_the_bundle_alone_when_the_archive_has_no_app() {
+        let src = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(src.path().join("not-an-app")).unwrap();
+        let bytes = tar_gz_of(src.path(), "not-an-app");
+
+        let install = tempfile::tempdir().unwrap();
+        let bundle = write_fake_app(install.path(), "Soufflé.app", "old");
+        let staging = install.path().join("staging");
+
+        let err = extract_and_swap(&bytes, &bundle, &staging).unwrap_err();
+        assert!(err.contains("no .app bundle"), "{err}");
+        let marker = std::fs::read_to_string(bundle.join("Contents/marker")).unwrap();
+        assert_eq!(marker, "old");
+    }
 
     #[test]
     fn embedded_pubkey_decodes() {

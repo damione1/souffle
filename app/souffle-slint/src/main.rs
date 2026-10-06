@@ -10,6 +10,7 @@ mod audio_ui;
 mod data_ui;
 mod edit_learning;
 mod ia_ui;
+mod keyboard_layout;
 mod lists_ui;
 mod markdown;
 mod meeting_idle_ui;
@@ -26,6 +27,7 @@ mod settings_log;
 mod settings_ui;
 mod settings_values;
 mod shortcut_capture;
+mod shortcut_label;
 mod summary;
 mod timeline;
 mod transcript;
@@ -92,16 +94,21 @@ struct TranscriptState {
     mounted_end: usize,
 }
 
-// Port of src/lib/utils/format.ts::formatShortcutLabel.
-fn format_shortcut_label(shortcut: &str) -> String {
-    if shortcut.is_empty() {
-        return String::new();
+/// What the shortcut recorder says about a refused key press (#360).
+fn rejection_notice(rejection: shortcut_capture::Rejection) -> ShortcutNotice {
+    match rejection {
+        shortcut_capture::Rejection::MissingModifier => ShortcutNotice::MissingModifier,
+        shortcut_capture::Rejection::UnusableKey => ShortcutNotice::UnusableKey,
     }
-    shortcut
-        .replace("CommandOrControl", "\u{2318}")
-        .replace("Shift", "\u{21e7}")
-        .replace("Alt", "\u{2325}")
-        .replace('+', " ")
+}
+
+/// What the shortcut recorder says once a binding is saved.
+fn saved_notice(swallows_character: bool) -> ShortcutNotice {
+    if swallows_character {
+        ShortcutNotice::TypesCharacter
+    } else {
+        ShortcutNotice::None
+    }
 }
 
 /// Builds and persists one shortcut candidate without exposing rejected
@@ -1877,19 +1884,13 @@ async fn ensure_model_ready(handle: &AppHandle) -> Result<(), String> {
     .map_err(|error| format!("Join ensure_model_ready task: {error}"))?
 }
 
-/// Pushes each transcribed segment into the window's `live-text`/
-/// `live-tentative` properties. Runs on the engine-actor thread, not the
-/// Slint main thread, so every update is marshaled via
-/// `invoke_from_event_loop` - the same reasoning as `run_on_main_thread`,
-/// just fire-and-forget instead of awaited. Milestone 5 scope: a single
-/// running text block for both dictation and meetings, not the full
-/// paragraph-grouped/speaker-lane rendering LiveSessionCard.svelte does -
-/// that's real, separate work (windowing, speaker lanes, inline edit),
-/// deliberately deferred and noted here rather than half-built.
+/// Marshal actor segments onto Slint, retaining the originating session's
+/// generation even when publication waits until after stop/new-session.
 fn live_segment_channel(
     weak: slint::Weak<MainWindow>,
     live_state: LiveTranscriptState,
 ) -> ProgressChannel<TranscriptionSegment> {
+    let generation = live_state.lock().unwrap().generation();
     ProgressChannel::new(move |segment: TranscriptionSegment| {
         let weak = weak.clone();
         let live_state = live_state.clone();
@@ -1897,7 +1898,12 @@ fn live_segment_channel(
             let Some(window) = weak.upgrade() else {
                 return;
             };
-            live_view::apply_live_segment(&window, &live_state, &segment);
+            live_view::apply_live_segment_for_generation(
+                &window,
+                &live_state,
+                generation,
+                &segment,
+            );
         });
     })
 }
@@ -2906,8 +2912,10 @@ fn show_onboarding_step(
         }
         OnboardingStep::Shortcut => {
             let guard = ob.borrow();
-            window.set_onboarding_toggle_shortcut_label(
-                format_shortcut_label(&guard.toggle_shortcut).into(),
+            shortcut_label::project(
+                window,
+                shortcut_label::LabelSlot::OnboardingToggle,
+                &guard.toggle_shortcut,
             );
             window.set_onboarding_accessibility_granted(
                 permissions.status().accessibility == PermState::Granted,
@@ -3012,42 +3020,52 @@ fn wire_onboarding_callbacks(
         if let Some(window) = weak.upgrade() {
             window.set_onboarding_shortcut_recording(true);
             window.set_onboarding_shortcut_error("".into());
+            window.set_onboarding_shortcut_notice(ShortcutNotice::None);
         }
     });
 
     let weak = window.as_weak();
     let handle = tauri_handle.clone();
     let ob_for_capture = ob.clone();
-    window.on_onboarding_shortcut_captured(move |text, ctrl, shift, alt, meta| {
+    window.on_onboarding_shortcut_captured(move |_text, ctrl, shift, alt, meta| {
         let Some(window) = weak.upgrade() else {
             return;
         };
-        let modifiers = shortcut_capture::Modifiers { control: ctrl, shift, alt, meta };
-        if let Some(name) = shortcut_capture::modifier_only_shortcut(&text) {
-            ob_for_capture.borrow_mut().pending_modifier = Some(name.to_string());
-            return;
-        }
-        ob_for_capture.borrow_mut().pending_modifier = None;
-        if shortcut_capture::missing_modifier(&text, modifiers) {
-            window.set_onboarding_shortcut_error(
-                "Le raccourci doit inclure une touche de modification (Cmd, Ctrl, Maj, Alt) ou être une touche de fonction.".into(),
-            );
-            return;
-        }
-        let Some(value) = shortcut_capture::format_combo(&text, modifiers) else {
+        let Some(key) = shortcut_capture::take_pressed_key() else {
             return;
         };
-        apply_onboarding_shortcut(&handle, &window, &ob_for_capture, value);
+        let modifiers = shortcut_capture::Modifiers::from_slint(ctrl, shift, alt, meta);
+        match shortcut_capture::classify(key, modifiers) {
+            shortcut_capture::Capture::Modifier(name) => {
+                ob_for_capture.borrow_mut().pending_modifier = Some(name.to_string());
+            }
+            shortcut_capture::Capture::Rejected(rejection) => {
+                ob_for_capture.borrow_mut().pending_modifier = None;
+                window.set_onboarding_shortcut_error("".into());
+                window.set_onboarding_shortcut_notice(rejection_notice(rejection));
+            }
+            shortcut_capture::Capture::Save {
+                accelerator,
+                swallows_character,
+            } => {
+                ob_for_capture.borrow_mut().pending_modifier = None;
+                if apply_onboarding_shortcut(&handle, &window, &ob_for_capture, accelerator) {
+                    window.set_onboarding_shortcut_notice(saved_notice(swallows_character));
+                }
+            }
+        }
     });
 
     let weak = window.as_weak();
     let handle = tauri_handle.clone();
     let ob_for_release = ob.clone();
-    window.on_onboarding_shortcut_released(move |text, _ctrl, _shift, _alt, _meta| {
+    window.on_onboarding_shortcut_released(move |_text, _ctrl, _shift, _alt, _meta| {
         let Some(window) = weak.upgrade() else {
             return;
         };
-        let Some(name) = shortcut_capture::modifier_only_shortcut(&text) else {
+        let Some(name) =
+            shortcut_capture::take_pressed_key().and_then(shortcut_capture::released_modifier)
+        else {
             return;
         };
         let mut pending = ob_for_release.borrow_mut();
@@ -3076,6 +3094,7 @@ fn wire_onboarding_callbacks(
         if let Some(window) = weak.upgrade() {
             window.set_onboarding_shortcut_recording(false);
             window.set_onboarding_shortcut_error("".into());
+            window.set_onboarding_shortcut_notice(ShortcutNotice::None);
         }
     });
 
@@ -3304,12 +3323,13 @@ fn advance_onboarding_step(
     permissions.sync_activity();
 }
 
+/// Saves the onboarding toggle binding; true when it was saved.
 fn apply_onboarding_shortcut(
     handle: &AppHandle,
     window: &MainWindow,
     ob: &Rc<RefCell<OnboardingState>>,
     value: String,
-) {
+) -> bool {
     window.set_onboarding_shortcut_recording(false);
     ob.borrow_mut().toggle_shortcut = value.clone();
     let state = Arc::clone(handle);
@@ -3319,12 +3339,19 @@ fn apply_onboarding_shortcut(
     match souffle_lib::commands::save_shortcuts(state, shortcuts) {
         Ok(()) => {
             window.set_onboarding_shortcut_error("".into());
+            window.set_onboarding_shortcut_notice(ShortcutNotice::None);
             let guard = ob.borrow();
-            window.set_onboarding_toggle_shortcut_label(
-                format_shortcut_label(&guard.toggle_shortcut).into(),
+            shortcut_label::project(
+                window,
+                shortcut_label::LabelSlot::OnboardingToggle,
+                &guard.toggle_shortcut,
             );
+            true
         }
-        Err(e) => window.set_onboarding_shortcut_error(e.into()),
+        Err(e) => {
+            window.set_onboarding_shortcut_error(e.into());
+            false
+        }
     }
 }
 
@@ -3500,70 +3527,66 @@ fn wire_update_dialogs(
     });
 
     let weak = window.as_weak();
+    let handle = tauri_handle.clone();
+    let settings_drafts_for_download = settings_drafts.clone();
     window.on_update_download_requested(move || {
-        let Some(window) = weak.upgrade() else {
-            return;
-        };
-        window.set_update_phase(UpdatePhase::Downloading);
-        window.set_update_error_message("".into());
-        let weak = weak.clone();
-        slint::spawn_local(async move {
-            // `download_update` awaits a `reqwest` fetch, which needs an
-            // ambient Tokio reactor that `slint::spawn_local`'s own executor
-            // doesn't provide - route it through the global Tokio runtime
-            // (see `refresh_summary_providers`'s identical fix).
-            let result =
-                souffle_lib::async_runtime::spawn(souffle_lib::commands::download_update())
-                    .await
-                    .map_err(|e| format!("Join download_update task: {e}"))
-                    .and_then(|r| r);
-            let Some(window) = weak.upgrade() else {
-                return;
-            };
-            // `download_update` only returns once the pipeline has settled
-            // (Ready, Failed, or Idle after a cancel), so its own phase is
-            // the truth - not a guess derived from `error.is_none()`.
-            match result {
-                Ok(status) => {
-                    window.set_update_phase(update_ui::update_phase_to_slint(status.phase));
-                    window.set_update_error_message(status.error.unwrap_or_default().into());
-                }
-                Err(e) => {
-                    window.set_update_phase(UpdatePhase::Failed);
-                    window.set_update_error_message(e.into());
-                }
-            }
-        })
-        .expect("slint event loop not running");
+        if let Some(window) = weak.upgrade() {
+            // The dialog keeps its explicit "Install and restart" step.
+            start_update_download(
+                &window,
+                handle.clone(),
+                settings_drafts_for_download.clone(),
+                false,
+            );
+        }
     });
 
     let weak = window.as_weak();
     let handle = tauri_handle.clone();
     let settings_drafts_for_install = settings_drafts.clone();
     window.on_update_install_requested(move || {
-        let weak = weak.clone();
-        let handle = handle.clone();
-        let settings_drafts_for_install = settings_drafts_for_install.clone();
-        // SOU-226 AC1: route through the same flush barrier as native quit
-        // (`SettingsDraftController::flush_before_exit`) instead of calling
-        // `install_update` directly - a pending/retained Settings draft is
-        // written (or its failure surfaced, reopening Settings) before the
-        // process exits as part of `install_and_relaunch`'s relaunch.
-        let install: Rc<dyn Fn()> = Rc::new(move || {
-            let weak = weak.clone();
-            let handle = handle.clone();
-            slint::spawn_local(async move {
-                let state = Arc::clone(&handle);
-                if let Err(e) = souffle_lib::commands::install_update(state).await
-                    && let Some(window) = weak.upgrade()
-                {
-                    window.set_update_error_message(e.into());
+        if let Some(window) = weak.upgrade() {
+            request_update_install(&window, &handle, &settings_drafts_for_install);
+        }
+    });
+
+    // Settings > "Mises à jour": one button that walks check -> download ->
+    // install and restart. Rust decides what the click means from the row
+    // (`update_ui::update_row_click`); Slint only renders it.
+    let weak = window.as_weak();
+    let handle = tauri_handle.clone();
+    let settings_drafts_for_row = settings_drafts.clone();
+    window.on_settings_update_action_requested(move || {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        match update_ui::update_row_click(&update_ui::current_update_row()) {
+            update_ui::UpdateRowClick::Check => start_update_check(&window),
+            update_ui::UpdateRowClick::Download => start_update_download(
+                &window,
+                handle.clone(),
+                settings_drafts_for_row.clone(),
+                true,
+            ),
+            update_ui::UpdateRowClick::Install { version } => {
+                // Re-read: a recording or model load may have started or
+                // ended since the package became ready.
+                let blocked = souffle_lib::commands::get_update_install_block(Arc::clone(&handle))
+                    .ok()
+                    .flatten();
+                match blocked {
+                    Some(reason) => update_ui::set_update_row(
+                        &window,
+                        update_ui::UpdateRow::Ready {
+                            version,
+                            blocked: Some(reason),
+                        },
+                    ),
+                    None => request_update_install(&window, &handle, &settings_drafts_for_row),
                 }
-                // On success the process restarts itself; nothing left to update here.
-            })
-            .expect("slint event loop not running");
-        });
-        settings_drafts_for_install.flush_before_exit(install);
+            }
+            update_ui::UpdateRowClick::Ignore => {}
+        }
     });
 
     let weak = window.as_weak();
@@ -3592,6 +3615,190 @@ fn wire_update_dialogs(
             let _ = souffle_lib::commands::open_release_page(url.to_string());
         }
     });
+}
+
+/// The release the update surfaces are about: the row's, or the one the
+/// Update Available dialog was opened for when Settings never checked.
+fn update_row_version(window: &MainWindow) -> String {
+    update_ui::current_update_row()
+        .version()
+        .map(str::to_owned)
+        .unwrap_or_else(|| window.get_update_latest_version().to_string())
+}
+
+/// Settings > "Mises à jour" check. The download state is read too, so a
+/// download the dialog already started or finished is not forgotten.
+fn start_update_check(window: &MainWindow) {
+    update_ui::set_update_row(window, update_ui::UpdateRow::Checking);
+    let weak = window.as_weak();
+    slint::spawn_local(async move {
+        let result = souffle_lib::commands::check_for_updates().await;
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        let row = match souffle_lib::commands::get_update_download_status() {
+            Ok(download) => update_ui::update_row_from_check(result, &download),
+            Err(error) => update_ui::UpdateRow::CheckFailed { error },
+        };
+        update_ui::set_update_row(&window, row);
+    })
+    .expect("slint event loop not running");
+}
+
+/// How often the Settings row re-reads download progress.
+const UPDATE_PROGRESS_POLL: Duration = Duration::from_millis(250);
+
+/// Download and verify the update, for both the Update Available dialog and
+/// the Settings row; both surfaces are projected from the result, so they
+/// never disagree. `install_when_ready`: the row's one-click flow installs as
+/// soon as an unblocked package is ready, the dialog keeps its own
+/// "Install and restart" step.
+fn start_update_download(
+    window: &MainWindow,
+    handle: AppHandle,
+    settings_drafts: Rc<settings_drafts::SettingsDraftController>,
+    install_when_ready: bool,
+) {
+    let version = update_row_version(window);
+    window.set_update_phase(UpdatePhase::Downloading);
+    window.set_update_error_message("".into());
+    update_ui::set_update_row(
+        window,
+        update_ui::UpdateRow::Downloading {
+            version: version.clone(),
+            percent: None,
+        },
+    );
+
+    // `download_update` reports progress only through the shared status;
+    // poll it while the download runs. Moved into the task below, which
+    // stops it once the download settles.
+    let progress = slint::Timer::default();
+    let weak = window.as_weak();
+    progress.start(
+        slint::TimerMode::Repeated,
+        UPDATE_PROGRESS_POLL,
+        move || {
+            let Some(window) = weak.upgrade() else {
+                return;
+            };
+            let Ok(status) = souffle_lib::commands::get_update_download_status() else {
+                return;
+            };
+            if let Some(row) =
+                update_ui::update_row_with_progress(&update_ui::current_update_row(), &status)
+            {
+                update_ui::set_update_row(&window, row);
+            }
+        },
+    );
+
+    let weak = window.as_weak();
+    slint::spawn_local(async move {
+        // `download_update` awaits a `reqwest` fetch, which needs an
+        // ambient Tokio reactor that `slint::spawn_local`'s own executor
+        // doesn't provide - route it through the global Tokio runtime
+        // (see `refresh_summary_providers`'s identical fix).
+        let result = souffle_lib::async_runtime::spawn(souffle_lib::commands::download_update())
+            .await
+            .map_err(|e| format!("Join download_update task: {e}"))
+            .and_then(|r| r);
+        progress.stop();
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        // `download_update` only returns once the pipeline has settled
+        // (Ready, Failed, or Idle after a cancel), so its own phase is
+        // the truth - not a guess derived from `error.is_none()`.
+        match &result {
+            Ok(status) => {
+                window.set_update_phase(update_ui::update_phase_to_slint(status.phase));
+                window.set_update_error_message(status.error.clone().unwrap_or_default().into());
+            }
+            Err(e) => {
+                window.set_update_phase(UpdatePhase::Failed);
+                window.set_update_error_message(e.as_str().into());
+            }
+        }
+        let blocked = souffle_lib::commands::get_update_install_block(Arc::clone(&handle))
+            .ok()
+            .flatten();
+        update_ui::project_install_block(&window, blocked);
+        let row = update_ui::update_row_from_download(
+            version,
+            result.as_ref().map_err(String::as_str),
+            blocked,
+        );
+        let install = install_when_ready && update_ui::should_auto_install(&row);
+        update_ui::set_update_row(&window, row);
+        if install {
+            request_update_install(&window, &handle, &settings_drafts);
+        }
+    })
+    .expect("slint event loop not running");
+}
+
+/// "Install and restart", for both the dialog and the Settings row.
+///
+/// SOU-226 AC1: routed through the same flush barrier as native quit
+/// (`SettingsDraftController::flush_before_exit`) instead of calling
+/// `install_update` directly - a pending/retained Settings draft is written
+/// (or its failure surfaced, reopening Settings) before the process exits as
+/// part of the relaunch. The barrier hides the window, so a refused or
+/// failed install shows it again: an error on a hidden window is the
+/// "nothing happens" this flow must never do.
+fn request_update_install(
+    window: &MainWindow,
+    handle: &AppHandle,
+    settings_drafts: &Rc<settings_drafts::SettingsDraftController>,
+) {
+    let weak = window.as_weak();
+    let handle = handle.clone();
+    let install: Rc<dyn Fn()> = Rc::new(move || {
+        let weak = weak.clone();
+        let handle = handle.clone();
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        let version = update_row_version(&window);
+        update_ui::set_update_row(
+            &window,
+            update_ui::UpdateRow::Installing {
+                version: version.clone(),
+            },
+        );
+        slint::spawn_local(async move {
+            // On success the process restarts itself and this never returns.
+            let Err(error) = souffle_lib::commands::install_update(Arc::clone(&handle)).await
+            else {
+                return;
+            };
+            let Some(window) = weak.upgrade() else {
+                return;
+            };
+            let _ = show_main_window(&window);
+            window.set_update_error_message(error.as_str().into());
+            let status = souffle_lib::commands::get_update_download_status();
+            if let Ok(status) = &status {
+                window.set_update_phase(update_ui::update_phase_to_slint(status.phase));
+            }
+            let blocked = souffle_lib::commands::get_update_install_block(Arc::clone(&handle))
+                .ok()
+                .flatten();
+            update_ui::project_install_block(&window, blocked);
+            // A refusal (still recording) leaves the package ready: the row
+            // shows why. A failed swap marked the download failed: the row
+            // shows the error and offers a retry.
+            let row = update_ui::update_row_from_download(
+                version,
+                status.as_ref().map_err(String::as_str),
+                blocked,
+            );
+            update_ui::set_update_row(&window, row);
+        })
+        .expect("slint event loop not running");
+    });
+    settings_drafts.flush_before_exit(install);
 }
 
 fn apply_startup_update_dialogs(
@@ -3640,7 +3847,9 @@ fn apply_startup_update_dialogs(
                 return;
             };
             if result.update_available && result.check_error.is_none() {
-                window.set_update_latest_version(result.latest_version.unwrap_or_default().into());
+                let latest_version = result.latest_version.unwrap_or_default();
+                update_ui::announce_update(&window, latest_version.clone());
+                window.set_update_latest_version(latest_version.into());
                 let notes = result
                     .release_notes
                     .unwrap_or_else(|| "Voir les notes de version sur GitHub.".to_string());
@@ -4909,6 +5118,7 @@ fn wire_callbacks(
                     if let Some(window) = weak.upgrade() {
                         window.set_settings_recording_field(ShortcutField::None);
                         window.set_settings_shortcut_error("".into());
+                        window.set_settings_shortcut_notice(ShortcutNotice::None);
                         refresh_upcoming(&window, &handle, upcoming);
                     }
                 }
@@ -4972,13 +5182,14 @@ fn wire_callbacks(
     // saves the whole thing (this also re-registers the global shortcut and
     // syncs the native modifier tap), then commits the cache/projection only
     // on success. The recording UI state is cleared regardless of outcome.
+    // True when the binding was saved.
     fn apply_shortcut(
         handle: &AppHandle,
         shortcuts_state: &Rc<RefCell<Option<ShortcutSettings>>>,
         window: &MainWindow,
         field: ShortcutField,
         value: String,
-    ) {
+    ) -> bool {
         window.set_settings_recording_field(ShortcutField::None);
         let state = Arc::clone(handle);
         match persist_shortcut_candidate(shortcuts_state, field, value, move |candidate| {
@@ -4986,13 +5197,18 @@ fn wire_callbacks(
         }) {
             Ok(Some(shortcuts)) => {
                 window.set_settings_shortcut_error("".into());
+                window.set_settings_shortcut_notice(ShortcutNotice::None);
                 let natives = souffle_lib::commands::get_native_shortcuts();
                 let tap_installed =
                     souffle_lib::commands::get_modifier_tap_status().map(|s| s.installed);
                 settings_ui::populate_shortcuts(window, &shortcuts, &natives, tap_installed);
+                true
             }
-            Ok(None) => {}
-            Err(e) => window.set_settings_shortcut_error(e.into()),
+            Ok(None) => false,
+            Err(e) => {
+                window.set_settings_shortcut_error(e.into());
+                false
+            }
         }
     }
 
@@ -5834,36 +6050,6 @@ fn wire_callbacks(
     });
 
     let weak = window.as_weak();
-    window.on_settings_check_updates_requested(move || {
-        let Some(window) = weak.upgrade() else {
-            return;
-        };
-        window.set_settings_checking_updates(true);
-        window.set_settings_update_status("".into());
-        slint::spawn_local(async move {
-            let result = souffle_lib::commands::check_for_updates().await;
-            window.set_settings_checking_updates(false);
-            match result {
-                Ok(update) => {
-                    let status = if let Some(err) = update.check_error {
-                        err
-                    } else if update.update_available {
-                        format!(
-                            "Mise à jour disponible : v{}",
-                            update.latest_version.unwrap_or_default()
-                        )
-                    } else {
-                        "À jour.".to_string()
-                    };
-                    window.set_settings_update_status(status.into());
-                }
-                Err(e) => window.set_settings_update_status(e.into()),
-            }
-        })
-        .expect("slint event loop not running");
-    });
-
-    let weak = window.as_weak();
     let handle = tauri_handle.clone();
     let settings_io_for_provider = settings_io.clone();
     let settings_state_for_provider = settings_state.clone();
@@ -6666,6 +6852,7 @@ fn wire_callbacks(
         if let Some(window) = weak.upgrade() {
             window.set_settings_recording_field(field);
             window.set_settings_shortcut_error("".into());
+            window.set_settings_shortcut_notice(ShortcutNotice::None);
         }
     });
 
@@ -6673,45 +6860,56 @@ fn wire_callbacks(
     let handle = tauri_handle.clone();
     let shortcuts_state_for_capture = shortcuts_state.clone();
     let pending_modifier_for_capture = pending_modifier.clone();
-    window.on_settings_shortcut_captured(move |field, text, ctrl, shift, alt, meta| {
+    window.on_settings_shortcut_captured(move |field, _text, ctrl, shift, alt, meta| {
         let Some(window) = weak.upgrade() else {
             return;
         };
-        let modifiers = shortcut_capture::Modifiers {
-            control: ctrl,
-            shift,
-            alt,
-            meta,
-        };
-        if let Some(name) = shortcut_capture::modifier_only_shortcut(&text) {
-            // Wait for the matching key-released event (see
-            // `on_settings_shortcut_released`) instead of committing now -
-            // a real key pressed while this is still held wins instead.
-            *pending_modifier_for_capture.borrow_mut() = Some(name.to_string());
-            return;
-        }
-        *pending_modifier_for_capture.borrow_mut() = None;
-        if shortcut_capture::missing_modifier(&text, modifiers) {
-            window.set_settings_shortcut_error(
-                "Le raccourci doit inclure une touche de modification (Cmd, Ctrl, Maj, Alt) ou être une touche de fonction.".into(),
-            );
-            return;
-        }
-        let Some(value) = shortcut_capture::format_combo(&text, modifiers) else {
+        let Some(key) = shortcut_capture::take_pressed_key() else {
             return;
         };
-        apply_shortcut(&handle, &shortcuts_state_for_capture, &window, field, value);
+        let modifiers = shortcut_capture::Modifiers::from_slint(ctrl, shift, alt, meta);
+        match shortcut_capture::classify(key, modifiers) {
+            shortcut_capture::Capture::Modifier(name) => {
+                // Wait for the matching key-released event (see
+                // `on_settings_shortcut_released`) instead of committing now -
+                // a real key pressed while this is still held wins instead.
+                *pending_modifier_for_capture.borrow_mut() = Some(name.to_string());
+            }
+            shortcut_capture::Capture::Rejected(rejection) => {
+                // Recording stays on so the user can press another key.
+                *pending_modifier_for_capture.borrow_mut() = None;
+                window.set_settings_shortcut_error("".into());
+                window.set_settings_shortcut_notice(rejection_notice(rejection));
+            }
+            shortcut_capture::Capture::Save {
+                accelerator,
+                swallows_character,
+            } => {
+                *pending_modifier_for_capture.borrow_mut() = None;
+                if apply_shortcut(
+                    &handle,
+                    &shortcuts_state_for_capture,
+                    &window,
+                    field,
+                    accelerator,
+                ) {
+                    window.set_settings_shortcut_notice(saved_notice(swallows_character));
+                }
+            }
+        }
     });
 
     let weak = window.as_weak();
     let handle = tauri_handle.clone();
     let shortcuts_state_for_release = shortcuts_state.clone();
     let pending_modifier_for_release = pending_modifier.clone();
-    window.on_settings_shortcut_released(move |field, text, _ctrl, _shift, _alt, _meta| {
+    window.on_settings_shortcut_released(move |field, _text, _ctrl, _shift, _alt, _meta| {
         let Some(window) = weak.upgrade() else {
             return;
         };
-        let Some(name) = shortcut_capture::modifier_only_shortcut(&text) else {
+        let Some(name) =
+            shortcut_capture::take_pressed_key().and_then(shortcut_capture::released_modifier)
+        else {
             return;
         };
         let mut pending = pending_modifier_for_release.borrow_mut();
@@ -6754,6 +6952,7 @@ fn wire_callbacks(
         if let Some(window) = weak.upgrade() {
             window.set_settings_recording_field(ShortcutField::None);
             window.set_settings_shortcut_error("".into());
+            window.set_settings_shortcut_notice(ShortcutNotice::None);
         }
     });
 
@@ -6988,6 +7187,8 @@ fn dispatch_native_action(
             release_notes,
             release_url,
         } => {
+            // The Settings row learns about it even when no dialog opens.
+            update_ui::announce_update(window, latest_version.clone());
             if window.get_whats_new_open() || window.get_update_available_open() {
                 return;
             }
@@ -7204,8 +7405,10 @@ fn main() {
                         let dark =
                             project_startup_settings(&window, &startup.settings, &onboarding_state);
                         souffle_lib::native::appearance::apply_resolved(dark);
-                        window.set_dictation_shortcut(
-                            format_shortcut_label(&startup.shortcuts.toggle).into(),
+                        shortcut_label::project(
+                            &window,
+                            shortcut_label::LabelSlot::DictationHint,
+                            &startup.shortcuts.toggle,
                         );
                         let unload_timeout_options =
                             souffle_lib::settings::SettingsOptions::current()
@@ -7336,7 +7539,13 @@ fn wire_window_activity(
 
     let weak_activity = Rc::downgrade(activity);
     let weak_permissions = Rc::downgrade(permissions);
+    let weak_window = window.as_weak();
     window.window().on_winit_window_event(move |_, event| {
+        // #360: the shortcut recorder reads the physical key of this event,
+        // which Slint's `KeyEvent` does not carry.
+        if let WindowEvent::KeyboardInput { event, .. } = event {
+            shortcut_capture::observe_key_event(event);
+        }
         if let WindowEvent::Occluded(occluded) = event
             && let Some(activity) = weak_activity.upgrade()
         {
@@ -7347,9 +7556,60 @@ fn wire_window_activity(
         {
             permissions.refresh();
         }
+        // #360: a keyboard layout switched while the app was in the
+        // background changes what the shortcut labels should say.
+        if matches!(event, WindowEvent::Focused(true))
+            && let Some(window) = weak_window.upgrade()
+        {
+            shortcut_label::refresh(&window);
+        }
         EventResult::Propagate
     });
     WINDOW_ACTIVITY.with(|slot| *slot.borrow_mut() = Some(Rc::clone(activity)));
+    wire_unusable_key_monitor(window);
+}
+
+/// Caps Lock and Fn/Globe only produce a `flagsChanged` event that winit
+/// does not turn into a key press, so the recorder's `FocusScope` never
+/// hears about them and pressing one used to do nothing. An AppKit local
+/// monitor (this app's own events, no permission involved) sees that event
+/// first and shows "can't be used" while a recorder is listening (#360).
+/// The event itself is passed on untouched.
+fn wire_unusable_key_monitor(window: &MainWindow) {
+    use std::ptr::NonNull;
+
+    use objc2_app_kit::{NSEvent, NSEventMask};
+
+    let weak = window.as_weak();
+    let handler = block2::RcBlock::new(move |event: NonNull<NSEvent>| -> *mut NSEvent {
+        // SAFETY: AppKit hands the monitor a valid event for the duration of
+        // the call.
+        let key_code = unsafe { event.as_ref() }.keyCode();
+        if shortcut_capture::is_unusable_flags_key(key_code)
+            && let Some(window) = weak.upgrade()
+        {
+            if window.get_settings_recording_field() != ShortcutField::None {
+                window.set_settings_shortcut_error("".into());
+                window.set_settings_shortcut_notice(ShortcutNotice::UnusableKey);
+            }
+            if window.get_onboarding_shortcut_recording() {
+                window.set_onboarding_shortcut_error("".into());
+                window.set_onboarding_shortcut_notice(ShortcutNotice::UnusableKey);
+            }
+        }
+        event.as_ptr()
+    });
+    // SAFETY: the block takes one `NSEvent*` and returns that same valid
+    // event, as `addLocalMonitorForEventsMatchingMask:handler:` requires.
+    // Local monitors run on the main thread, inside `-[NSApplication
+    // sendEvent:]`, so the Slint window is only touched from its own
+    // thread. AppKit keeps the monitor (and its copy of the block) until
+    // `removeMonitor:`; it is meant to live as long as the app, so the
+    // returned token is deliberately leaked, like `power.rs`'s observers.
+    let monitor = unsafe {
+        NSEvent::addLocalMonitorForEventsMatchingMask_handler(NSEventMask::FlagsChanged, &handler)
+    };
+    std::mem::forget(monitor);
 }
 
 /// Shows the main window and marks it visible: winit does not reliably send

@@ -63,6 +63,12 @@ export enum UpdatePhase { idle, downloading, ready, failed }
 // variant here.
 export enum InstallBlockReason { recording-dictation, recording-meeting, stopping, downloading, loading, unloading }
 
+// Where Settings > "Mises à jour" is in its check -> download -> install
+// flow. Mirrors `update_ui::UpdateRow` (which carries the version, error,
+// progress and block payloads); `update_ui::project_update_row` is the one
+// writer, with an exhaustive `match`.
+export enum UpdateRowStatus { unchecked, checking, up-to-date, check-failed, available, downloading, ready, installing, failed }
+
 // A pre-parsed Markdown block's kind (`markdown.rs`). Rendering branches on
 // it in `markdown_view.slint`; adding a variant must update that file.
 export enum MarkdownBlockKind { heading, bullet, paragraph, link }
@@ -101,6 +107,13 @@ export enum AccessState { granted, denied, unknown, unsupported, no-device }
 export enum PermissionKind { microphone, system-audio, accessibility, calendar }
 
 export enum ShortcutField { none, toggle, ptt }
+
+// What the shortcut recorder tells the user about the last key press (#360).
+// Converted from `shortcut_capture::Capture` by one exhaustive match in
+// main.rs (`shortcut_notice`). `none` is a real state: nothing to say.
+// `types-character` is a warning shown after a successful save, the others
+// are refusals.
+export enum ShortcutNotice { none, missing-modifier, unusable-key, types-character }
 
 // Mirrors souffle_lib::export::ExportFormat at the UI boundary
 // (`export_format_from_slint` in main.rs, exhaustive match). Used by

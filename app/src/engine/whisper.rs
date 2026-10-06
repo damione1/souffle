@@ -3,9 +3,8 @@ use std::path::{Path, PathBuf};
 use tracing::{debug, info};
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 
-use super::batch_windows::{
-    CHUNK_SAMPLES, SAMPLE_RATE as WHISPER_SAMPLE_RATE, drain_ready_windows, pcm_rms,
-};
+use super::batch_session::BatchSession;
+use super::batch_windows::{CHUNK_SAMPLES, SAMPLE_RATE as WHISPER_SAMPLE_RATE, pcm_rms};
 use super::{
     AudioInputRequirements, EngineError, TranscriptionEngine, TranscriptionSegment,
     collapse_whitespace,
@@ -118,18 +117,11 @@ struct LoadedWhisperModel {
 
 /// Whisper STT engine via whisper-rs (whisper.cpp bindings).
 /// Batch-oriented: accumulates audio, cuts on a silence gap in [4 s, 7 s]
-/// (else 7 s). Pipeline hop stays [`CHUNK_SAMPLES`] (5 s).
+/// (else 7 s), with revisable snapshots of the remainder every 1.5 s.
+/// This is batch re-inference, not native streaming decoding.
 pub struct WhisperEngine {
     model: Option<LoadedWhisperModel>,
-    /// Audio buffer — accumulates until chunk threshold
-    audio_buffer: Vec<f32>,
-    /// Cached language from first auto-detect inference.
-    /// Subsequent chunks reuse the detected language for stable decoding.
-    detected_language: Option<String>,
-    /// Samples already sent to inference this session. whisper.cpp timestamps
-    /// are relative to each window; this offsets them to session time so
-    /// pauses and [H:MM] markers are meaningful across windows.
-    consumed_samples: usize,
+    session: BatchSession,
 }
 
 impl Default for WhisperEngine {
@@ -142,31 +134,7 @@ impl WhisperEngine {
     pub fn new() -> Self {
         Self {
             model: None,
-            audio_buffer: Vec::new(),
-            detected_language: None,
-            consumed_samples: 0,
-        }
-    }
-
-    /// Session-time offset (seconds) for the next inference window,
-    /// then advance by the window length.
-    fn take_window_offset(&mut self, window_len: usize) -> f64 {
-        let offset = self.consumed_samples as f64 / WHISPER_SAMPLE_RATE as f64;
-        self.consumed_samples += window_len;
-        offset
-    }
-
-    /// Shared implementation for `reset_state` and
-    /// `reset_state_preserving_timeline`: both must drop the buffered audio
-    /// a wedged engine choked on. Only a plain reset also drops
-    /// `consumed_samples` and `detected_language`, since a stall-recovery
-    /// reset happens mid-session against the same speaker and must keep the
-    /// window-timestamp offset and cached language continuous.
-    fn reset_buffer(&mut self, preserve_timeline: bool) {
-        self.audio_buffer.clear();
-        if !preserve_timeline {
-            self.detected_language = None;
-            self.consumed_samples = 0;
+            session: BatchSession::default(),
         }
     }
 
@@ -178,7 +146,7 @@ impl WhisperEngine {
         rms_audio: &[f32],
         language: Option<&str>,
     ) -> Result<(Vec<TranscriptionSegment>, Option<String>), EngineError> {
-        if audio.is_empty() {
+        if audio.is_empty() || pcm_rms(rms_audio) < SILENCE_RMS_FLOOR {
             return Ok((vec![], None));
         }
 
@@ -265,24 +233,6 @@ impl WhisperEngine {
     }
 }
 
-/// Cache auto-detected language only from a window that kept real speech.
-/// A filtered leading hallucination must not lock the session to the
-/// wrong language for later windows.
-fn remember_detected_language(
-    cached: &mut Option<String>,
-    requested: Option<&str>,
-    detected: Option<String>,
-    surviving_segments: &[TranscriptionSegment],
-) {
-    if requested.is_some() || cached.is_some() || surviving_segments.is_empty() {
-        return;
-    }
-    if let Some(lang) = detected {
-        info!(language = %lang, "Whisper auto-detected language, caching for session");
-        *cached = Some(lang);
-    }
-}
-
 impl TranscriptionEngine for WhisperEngine {
     fn load_model(&mut self, model_path: &Path) -> Result<(), EngineError> {
         let bin_path = if model_path.extension().is_some_and(|ext| ext == "bin") {
@@ -322,7 +272,7 @@ impl TranscriptionEngine for WhisperEngine {
 
     fn unload_model(&mut self) -> Result<(), EngineError> {
         self.model = None;
-        self.audio_buffer.clear();
+        self.session.reset(false);
 
         info!("Whisper model unloaded");
         Ok(())
@@ -333,79 +283,44 @@ impl TranscriptionEngine for WhisperEngine {
         audio: &[f32],
         language: Option<&str>,
     ) -> Result<Vec<TranscriptionSegment>, EngineError> {
-        if self.model.is_none() {
-            return Err(EngineError::NotInitialized);
-        }
+        let loaded = self.model.as_ref().ok_or(EngineError::NotInitialized)?;
+        self.session
+            .transcribe(audio, language, |pcm, original, language| {
+                Self::run_inference(&loaded.ctx, pcm, original, language)
+            })
+    }
 
-        self.audio_buffer.extend_from_slice(audio);
-
-        let mut all_segments = Vec::new();
-        let windows = drain_ready_windows(&mut self.audio_buffer);
-
-        for to_process in windows {
-            let offset = self.take_window_offset(to_process.len());
-            let effective_lang = if language.is_some() {
-                language.map(String::from)
-            } else {
-                self.detected_language.clone()
-            };
-            let (mut segments, detected) = {
-                let loaded = self.model.as_ref().ok_or(EngineError::NotInitialized)?;
-                Self::run_inference(
-                    &loaded.ctx,
-                    &to_process,
-                    &to_process,
-                    effective_lang.as_deref().or(language),
-                )?
-            };
-            for seg in &mut segments {
-                seg.start_time += offset;
-                seg.end_time += offset;
-            }
-            remember_detected_language(&mut self.detected_language, language, detected, &segments);
-            all_segments.extend(segments);
-        }
-
-        Ok(all_segments)
+    fn transcribe_dual(
+        &mut self,
+        mic: &[f32],
+        system: &[f32],
+    ) -> Result<Vec<TranscriptionSegment>, EngineError> {
+        let loaded = self.model.as_ref().ok_or(EngineError::NotInitialized)?;
+        self.session.dual(mic, system, |pcm, original, language| {
+            Self::run_inference(&loaded.ctx, pcm, original, language)
+        })
     }
 
     fn flush(&mut self) -> Result<Vec<TranscriptionSegment>, EngineError> {
-        if self.model.is_none() {
-            return Err(EngineError::NotInitialized);
-        }
-
-        if self.audio_buffer.is_empty() {
-            return Ok(vec![]);
-        }
-
-        let mut remaining: Vec<f32> = std::mem::take(&mut self.audio_buffer);
-        let original_len = remaining.len();
-        if original_len < MIN_INFERENCE_SAMPLES {
-            remaining.resize(MIN_INFERENCE_SAMPLES, 0.0);
-        }
-
-        let offset = self.take_window_offset(original_len);
         let loaded = self.model.as_ref().ok_or(EngineError::NotInitialized)?;
-        let (mut segments, _) = Self::run_inference(
-            &loaded.ctx,
-            &remaining,
-            &remaining[..original_len],
-            self.detected_language.as_deref(),
-        )?;
-        for seg in &mut segments {
-            seg.start_time += offset;
-            seg.end_time += offset;
-        }
-        Ok(segments)
+        self.session
+            .flush(MIN_INFERENCE_SAMPLES, |pcm, original, language| {
+                Self::run_inference(&loaded.ctx, pcm, original, language)
+            })
     }
 
+    fn supports_diarization(&self) -> bool {
+        true
+    }
+    fn set_diarization(&mut self, enabled: bool) {
+        self.session.set_dual(enabled);
+    }
     fn reset_state(&mut self) -> Result<(), EngineError> {
-        self.reset_buffer(false);
+        self.session.reset(false);
         Ok(())
     }
-
     fn reset_state_preserving_timeline(&mut self) -> Result<(), EngineError> {
-        self.reset_buffer(true);
+        self.session.reset(true);
         Ok(())
     }
 
@@ -417,6 +332,14 @@ impl TranscriptionEngine for WhisperEngine {
         }
     }
 
+    fn set_preview_enabled(&mut self, enabled: bool) {
+        self.session.set_preview_enabled(enabled);
+    }
+
+    fn minimum_vad_hold_seconds(&self) -> f64 {
+        super::batch_windows::VAD_HOLD_SECONDS
+    }
+
     fn normalize_text(&self, text: &str) -> String {
         strip_special_tokens(text)
     }
@@ -425,6 +348,59 @@ impl TranscriptionEngine for WhisperEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::engine::batch_session::remember_detected_language;
+
+    #[test]
+    #[ignore = "requires catalogue Whisper weights; real timestamps across a pause"]
+    fn weight_backed_whisper_timestamps_respect_captured_audio() {
+        whisper_rs::install_logging_hooks();
+        let profile =
+            crate::engine::resolve_transcription_profile(Some("whisper"), None, None).unwrap();
+        let mut engine = WhisperEngine::new();
+        engine
+            .load_model(&crate::models::model_dir(&profile))
+            .unwrap();
+        engine.set_preview_enabled(false);
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("fixtures/audio/sou-030/hesitation-a-gap0400ms.wav");
+        let mut reader = hound::WavReader::open(path).unwrap();
+        let rate = reader.spec().sample_rate;
+        assert_eq!(reader.spec().channels, 1);
+        let source: Vec<f32> = reader
+            .samples::<i16>()
+            .map(|sample| sample.unwrap() as f32 / 32768.0)
+            .collect();
+        let mut resampler = crate::audio::Resampler::new(rate, 1, WHISPER_SAMPLE_RATE, 1.0);
+        let mut speech = resampler.process(&source);
+        speech.extend(resampler.flush());
+        let speech: Vec<f32> = speech.into_iter().cycle().take(5 * 16000).collect();
+        let mut pcm = speech.clone();
+        pcm.resize(8 * 16000, 0.0);
+        pcm.extend(speech);
+        let mut finals = Vec::new();
+        for (index, chunk) in pcm.chunks(1600).enumerate() {
+            let captured = ((index + 1) * 1600) as f64 / WHISPER_SAMPLE_RATE as f64;
+            for segment in engine.transcribe(chunk, None).unwrap() {
+                if segment.is_final {
+                    assert!(
+                        segment.end_time <= captured,
+                        "{segment:?} exceeds {captured}s capture"
+                    );
+                    finals.push(segment);
+                }
+            }
+        }
+        finals.extend(engine.flush().unwrap().into_iter().filter(|s| s.is_final));
+        assert!(!finals.is_empty());
+        assert!(finals.iter().all(|s| s.start_time >= 0.0
+            && s.start_time <= s.end_time
+            && s.end_time <= pcm.len() as f64 / WHISPER_SAMPLE_RATE as f64));
+        assert!(
+            finals.iter().any(|s| s.start_time >= 8.0),
+            "post-pause speech has no later timestamp: {finals:?}"
+        );
+        assert!(engine.flush().unwrap().is_empty());
+    }
 
     #[test]
     fn strip_special_tokens_removes_timing_tokens() {
@@ -600,7 +576,7 @@ mod tests {
     }
 
     #[test]
-    fn audio_requirements_keep_5s_pipeline_hop() {
+    fn audio_requirements_deliver_100ms_without_shortening_final_windows() {
         let engine = WhisperEngine::new();
         let reqs = engine.audio_requirements();
         assert_eq!(reqs.sample_rate_hz, 16_000);
@@ -609,7 +585,7 @@ mod tests {
 
     #[test]
     fn five_second_speech_waits_for_gap_or_seven() {
-        let pcm: Vec<f32> = (0..CHUNK_SAMPLES)
+        let pcm: Vec<f32> = (0..WHISPER_SAMPLE_RATE as usize * 5)
             .map(|i| (i as f32 * 0.02).sin() * 0.3)
             .collect();
         assert_eq!(

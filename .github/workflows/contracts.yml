@@ -22,9 +22,11 @@ concurrency:
 jobs:
   rust:
     runs-on: macos-latest
-    # Warm cache: ~5 min. Without a cap, a hung step runs to GitHub's 6 h
-    # default, and macOS minutes bill at 10x.
-    timeout-minutes: 30
+    # Warm cache: ~5 min. Cold cache (new stable Rust, Cargo.lock change):
+    # ~35 min, and a cancelled run never saves the cache, so the cap must
+    # leave room for a cold run. Without a cap, a hung step runs to GitHub's
+    # 6 h default, and macOS minutes bill at 10x.
+    timeout-minutes: 50
 
     steps:
       - uses: actions/checkout@v6.0.1

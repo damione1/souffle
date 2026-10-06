@@ -215,15 +215,13 @@ pub fn populate_shortcuts(
     native_shortcuts: &[String],
     tap_installed: Option<bool>,
 ) {
-    let toggle_label = crate::format_shortcut_label(&shortcuts.toggle);
-    window.set_settings_toggle_shortcut_label(toggle_label.as_str().into());
+    use crate::shortcut_label::{LabelSlot, project};
+    project(window, LabelSlot::SettingsToggle, &shortcuts.toggle);
     // ActionHero reads the root property, not the Settings label. Keep both
     // projections in one successful-load/save path so returning home never
     // shows the startup shortcut after it has changed.
-    window.set_dictation_shortcut(toggle_label.into());
-    window.set_settings_ptt_shortcut_label(
-        crate::format_shortcut_label(&shortcuts.push_to_talk).into(),
-    );
+    project(window, LabelSlot::DictationHint, &shortcuts.toggle);
+    project(window, LabelSlot::SettingsPtt, &shortcuts.push_to_talk);
 
     let native_bound =
         |value: &str| !value.is_empty() && native_shortcuts.iter().any(|n| n == value);

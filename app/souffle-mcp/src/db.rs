@@ -17,8 +17,8 @@ use std::time::Duration;
 use rusqlite::{Connection, OpenFlags, params};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use souffle_schema::Speaker;
 use souffle_schema::paragraphs::{PAUSE_THRESHOLD_SECONDS, SegmentLike, group_into_paragraphs};
+use souffle_schema::{SearchSource, Speaker};
 use thiserror::Error;
 
 /// Must match `constants::APP_IDENTIFIER` in the main crate.
@@ -131,7 +131,16 @@ fn bundle_id_from_info_plist_xml(plist: &str) -> Option<String> {
     id.starts_with("com.souffle.").then(|| id.to_string())
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum MeetingSection {
+    Transcript,
+    Summary,
+    Notes,
+    Metadata,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct IncludeSet {
     pub transcript: bool,
     pub summary: bool,
@@ -152,19 +161,28 @@ impl IncludeSet {
     /// `None` or an empty list both mean "everything" — an MCP client asking
     /// for a meeting with no `include` filter almost always wants the full
     /// picture, not nothing.
-    pub fn from_names(names: Option<&[String]>) -> Self {
+    pub fn from_sections(names: Option<&[MeetingSection]>) -> Self {
         let Some(names) = names else {
             return Self::all();
         };
         if names.is_empty() {
             return Self::all();
         }
-        Self {
-            transcript: names.iter().any(|n| n == "transcript"),
-            summary: names.iter().any(|n| n == "summary"),
-            notes: names.iter().any(|n| n == "notes"),
-            metadata: names.iter().any(|n| n == "metadata"),
+        let mut include = Self {
+            transcript: false,
+            summary: false,
+            notes: false,
+            metadata: false,
+        };
+        for section in names {
+            match section {
+                MeetingSection::Transcript => include.transcript = true,
+                MeetingSection::Summary => include.summary = true,
+                MeetingSection::Notes => include.notes = true,
+                MeetingSection::Metadata => include.metadata = true,
+            }
         }
+        include
     }
 }
 
@@ -303,30 +321,6 @@ pub struct McpDb {
     /// Taken once at open. `Err` makes every tool call refuse with the same
     /// explanation instead of querying columns that may have moved.
     schema: Result<i64, SchemaVerdict>,
-}
-
-/// Mirror of the app's `db::search::SearchSource`. The sidecar is a standalone
-/// binary that depends on neither `souffle` nor `tauri`, so the enum is
-/// restated here rather than imported. Only `Meeting` is needed: the sidecar
-/// never reads dictation rows out of the full-text index. The string is the
-/// on-disk encoding of `text_search.source_type` and must match the app's.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SearchSource {
-    Meeting,
-}
-
-impl SearchSource {
-    const fn as_str(self) -> &'static str {
-        match self {
-            SearchSource::Meeting => "meeting",
-        }
-    }
-}
-
-impl rusqlite::ToSql for SearchSource {
-    fn to_sql(&self) -> rusqlite::Result<rusqlite::types::ToSqlOutput<'_>> {
-        Ok(rusqlite::types::ToSqlOutput::from(self.as_str()))
-    }
 }
 
 impl McpDb {
@@ -1160,7 +1154,7 @@ mod tests {
             &[
                 ("Let me explain the whole plan", 0.0, 0.5, Some("me")),
                 ("in detail because it's", 0.6, 1.1, Some("me")),
-                ("wait", 1.2, 1.7, Some("them")),
+                ("wait", 1.0, 1.7, Some("them")),
                 ("complicated.", 1.8, 2.3, Some("me")),
                 ("So let's start now", 3.0, 3.5, Some("me")),
             ],
@@ -1194,7 +1188,7 @@ mod tests {
             &[
                 ("First point.", 0.0, 0.5, Some("me")),
                 ("Second part continues", 0.6, 1.1, Some("me")),
-                ("quick question", 1.2, 1.7, Some("them")),
+                ("quick question", 1.0, 1.7, Some("them")),
                 ("and concludes.", 1.8, 2.3, Some("me")),
                 ("New topic starts", 3.0, 3.5, Some("me")),
             ],
@@ -1242,9 +1236,9 @@ mod tests {
         drop(conn);
 
         let db = McpDb::open(&path).unwrap();
-        let names = vec!["summary".to_string()];
+        let names = vec![MeetingSection::Summary];
         let detail = db
-            .get_meeting("m1", IncludeSet::from_names(Some(&names)))
+            .get_meeting("m1", IncludeSet::from_sections(Some(&names)))
             .unwrap();
         assert_eq!(detail.summary.as_deref(), Some("a summary"));
         assert!(detail.transcript.is_none());
