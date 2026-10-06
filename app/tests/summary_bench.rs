@@ -116,18 +116,21 @@ fn score(prose: &str, structured: &StructuredSummary, gold: &Gold, review: &Revi
         if let Some(owner) = &fact.owner {
             result.owners_total += 1;
             // An owner's name anywhere in the document is not an attribution.
-            result.owners_preserved += usize::from(structured.action_items.iter().any(|action| {
-                action
-                    .owner
-                    .as_ref()
-                    .is_some_and(|actual| fold(actual) == fold(owner))
-                    && !fact.keywords.is_empty()
-                    && fact.keywords.iter().all(|group| {
-                        group
-                            .iter()
-                            .any(|keyword| contains_phrase(&fold(&action.text), &fold(keyword)))
-                    })
-            }));
+            result.owners_preserved += usize::from(
+                matched
+                    && structured.action_items.iter().any(|action| {
+                        action
+                            .owner
+                            .as_ref()
+                            .is_some_and(|actual| fold(actual) == fold(owner))
+                            && !fact.keywords.is_empty()
+                            && fact.keywords.iter().all(|group| {
+                                group.iter().any(|keyword| {
+                                    contains_phrase(&fold(&action.text), &fold(keyword))
+                                })
+                            })
+                    }),
+            );
         }
     }
     for heading in ["summary", "topics"] {
@@ -156,26 +159,14 @@ fn outside_repo(path: &Path) -> PathBuf {
     assert!(path.is_absolute(), "benchmark directories must be absolute");
     std::fs::create_dir_all(path).expect("create benchmark directory");
     let path = path.canonicalize().unwrap();
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap()
-        .canonicalize()
-        .unwrap();
     // Resolve symlinks before checking: outputs and private corpus must never land in Git.
+    // A linked worktree has a .git FILE, an ordinary checkout a directory.
+    // Check every ancestor so this also rejects sibling/unrelated checkouts.
     assert!(
-        !path.starts_with(&root),
-        "private benchmark data must stay outside this checkout"
+        path.ancestors()
+            .all(|ancestor| !ancestor.join(".git").exists()),
+        "private benchmark data must stay outside every Git checkout"
     );
-    let common = command(
-        "git",
-        &["rev-parse", "--path-format=absolute", "--git-common-dir"],
-    );
-    if let Some(root) = Path::new(common.trim()).parent() {
-        assert!(
-            !path.starts_with(root),
-            "private benchmark data must stay outside the main repository"
-        );
-    }
     path
 }
 fn command(program: &str, args: &[&str]) -> String {
@@ -216,6 +207,29 @@ struct Run {
     diagnostics: serde_json::Value,
     elapsed_ms: u128,
     error: Option<String>,
+}
+
+/// Rescoring is offline: the saved artifacts, not today's device, choose
+/// providers. Return per-meeting sets so partially measured corpora are honest.
+fn saved_models(output_dir: &Path, meeting_id: &str) -> Vec<String> {
+    let mut models = std::collections::BTreeSet::new();
+    for entry in std::fs::read_dir(output_dir).unwrap() {
+        let entry = entry.unwrap();
+        if entry.file_name().to_string_lossy().ends_with(".run.json") {
+            let run: Run = read_json(&entry.path());
+            if run.meeting_id == meeting_id {
+                models.insert(run.model);
+            }
+        }
+    }
+    assert!(!models.is_empty(), "no saved runs for meeting {meeting_id}");
+    models.into_iter().collect()
+}
+
+struct AggregateSample {
+    recall: f64,
+    elapsed_ms: u128,
+    calls: usize,
 }
 
 #[tokio::test]
@@ -378,32 +392,42 @@ async fn summary_bench() {
         Some(r) => r.json::<serde_json::Value>().await.ok(),
         None => None,
     };
-    let mut models = vec!["qwen2.5:7b".to_string(), "qwen3:4b".to_string()];
-    if summary::apple_intelligence_available() {
-        models.push(summary::APPLE_INTELLIGENCE_MODEL_ID.to_string());
+    let mut run_models = vec!["qwen2.5:7b".to_string(), "qwen3:4b".to_string()];
+    let availability_path = output_dir.join("provider-availability.json");
+    if mode == "run" {
+        let apple_available = summary::apple_intelligence_available();
+        if apple_available {
+            run_models.push(summary::APPLE_INTELLIGENCE_MODEL_ID.to_string());
+        }
+        assert!(
+            !availability_path.exists(),
+            "choose a new output directory for each measurement campaign"
+        );
+        write_json(
+            &availability_path,
+            &serde_json::json!({
+                "apple_available": apple_available,
+                "apple_unavailable_reason": if apple_available { None } else { Some(format!("{:?}", souffle_lib::apple_intelligence::unavailable_reason())) },
+                "apple_stub": souffle_lib::apple_intelligence::is_stub_linked(),
+            }),
+        );
+    }
+    if availability_path.exists() {
+        let provenance: serde_json::Value = read_json(&availability_path);
+        if provenance["apple_available"] == false {
+            table.push_str(&format!("\nApple not measured at run time: {}; stub={}. No Apple merge baseline is claimed.\n\n", provenance["apple_unavailable_reason"], provenance["apple_stub"]));
+        }
     } else {
-        table.push_str(&format!(
-            "\nApple not measured: {:?}; stub={}. No Apple merge baseline is claimed.\n\n",
-            souffle_lib::apple_intelligence::unavailable_reason(),
-            souffle_lib::apple_intelligence::is_stub_linked()
-        ));
+        table.push_str("\nProvider availability was not recorded in these saved artifacts. Only saved models are rescored.\n\n");
     }
-    if mode == "score"
-        && std::fs::read_dir(&output_dir).unwrap().any(|e| {
-            e.unwrap()
-                .file_name()
-                .to_string_lossy()
-                .ends_with("-apple-intelligence-1.run.json")
-        })
-        && !models
-            .iter()
-            .any(|model| model == summary::APPLE_INTELLIGENCE_MODEL_ID)
-    {
-        models.push(summary::APPLE_INTELLIGENCE_MODEL_ID.to_string());
-    }
-    let mut aggregates: BTreeMap<(String, String), Vec<(f64, u128, usize)>> = BTreeMap::new();
+    let mut aggregates: BTreeMap<(String, String), Vec<AggregateSample>> = BTreeMap::new();
     // Runs/configurations are sequential; map concurrency stays in production.
     for (input, gold, gold_hash, corpus_hash) in corpus {
+        let models = if mode == "score" {
+            saved_models(&output_dir, &input.id)
+        } else {
+            run_models.clone()
+        };
         for model in &models {
             for repetition in 1..=3 {
                 let stem = format!("{}-{}-{repetition}", input.id, model.replace(':', "-"));
@@ -512,7 +536,7 @@ async fn summary_bench() {
                         write_json(&output_dir.join(format!("{stem}.score.json")), &result);
                         let thirds = [Third::Beginning,Third::Middle,Third::End].map(|t| { let (m,n)=result.by_third.get(&t).copied().unwrap_or_default(); format!("{m}/{n}") }).join(" / ");
                         table.push_str(&format!("| {} | {} | {} | {}/{} | {} | {}/{} | {} | {} | {:?}/{:?} | {} | {} | {} |\n", input.id,model,repetition,result.matched,result.total,thirds,result.owners_preserved,result.owners_total,result.duplicated_headings,calls.len(),tokens("prompt_tokens"),tokens("output_tokens"),run.elapsed_ms,run.diagnostics["merge_rounds"],result.invented_facts.map(|n| n.to_string()).unwrap_or_else(|| "NOT REVIEWED".into())));
-                        aggregates.entry((input.id.clone(),model.to_string())).or_default().push((result.matched as f64/result.total as f64,run.elapsed_ms,calls.len()));
+                        aggregates.entry((input.id.clone(),model.to_string())).or_default().push(AggregateSample { recall: result.matched as f64/result.total as f64, elapsed_ms: run.elapsed_ms, calls: calls.len() });
                     }
                     _ => table.push_str(&format!("| {} | {} | {} | INVALID | — | — | — | {} | {:?}/{:?} | {} | {} | NOT REVIEWED |\n",input.id,model,repetition,calls.len(),tokens("prompt_tokens"),tokens("output_tokens"),run.elapsed_ms,run.diagnostics["merge_rounds"])),
                 }
@@ -525,9 +549,9 @@ async fn summary_bench() {
         table.push_str(&format!(
             "| {meeting} | {model} | {} / 3 | {:.3} | {:.0} | {:.2} |\n",
             values.len(),
-            values.iter().map(|v| v.0).sum::<f64>() / n,
-            values.iter().map(|v| v.1 as f64).sum::<f64>() / n,
-            values.iter().map(|v| v.2 as f64).sum::<f64>() / n
+            values.iter().map(|v| v.recall).sum::<f64>() / n,
+            values.iter().map(|v| v.elapsed_ms as f64).sum::<f64>() / n,
+            values.iter().map(|v| v.calls as f64).sum::<f64>() / n
         ));
     }
     let date = chrono::Local::now().format("%Y-%m-%d");
@@ -588,6 +612,96 @@ fn keyword_scoring_folds_accents_matches_words_and_keeps_owner_attribution() {
         score("échéance été", &structured, &gold, &review).matched,
         0
     );
+    let attributed = StructuredSummary {
+        action_items: vec![souffle_lib::transcript::StructuredActionItem {
+            text: "échéance été".into(),
+            owner: Some("Alice".into()),
+        }],
+        ..structured
+    };
+    assert_eq!(
+        score("échéance été", &attributed, &gold, &Review::default()).owners_preserved,
+        1
+    );
+    let corrected = score("échéance été", &attributed, &gold, &review);
+    assert_eq!((corrected.matched, corrected.owners_preserved), (0, 0));
+}
+
+#[test]
+fn rescore_uses_only_saved_models_for_each_meeting() {
+    let output = tempfile::tempdir().unwrap();
+    let mut run = Run {
+        meeting_id: "ollama-only".into(),
+        model: "qwen2.5:7b".into(),
+        repetition: 1,
+        metadata: serde_json::json!({}),
+        prose: None,
+        structured: None,
+        diagnostics: serde_json::json!({}),
+        elapsed_ms: 0,
+        error: Some("synthetic invalid run".into()),
+    };
+    write_json(&output.path().join("one.run.json"), &run);
+    assert_eq!(
+        saved_models(output.path(), "ollama-only"),
+        vec!["qwen2.5:7b"]
+    );
+    run.meeting_id = "apple-measured".into();
+    run.model = summary::APPLE_INTELLIGENCE_MODEL_ID.into();
+    write_json(&output.path().join("two.run.json"), &run);
+    assert_eq!(
+        saved_models(output.path(), "apple-measured"),
+        vec![summary::APPLE_INTELLIGENCE_MODEL_ID]
+    );
+    assert_eq!(
+        saved_models(output.path(), "ollama-only"),
+        vec!["qwen2.5:7b"]
+    );
+}
+
+#[test]
+fn private_output_rejects_sibling_worktrees_and_symlinks() {
+    let directory = tempfile::tempdir().unwrap();
+    let repository = directory.path().join("unrelated");
+    std::fs::create_dir(&repository).unwrap();
+    let git = |args: &[&str]| {
+        assert!(
+            std::process::Command::new("git")
+                .current_dir(&repository)
+                .args(args)
+                .output()
+                .unwrap()
+                .status
+                .success()
+        );
+    };
+    git(&["init", "-q"]);
+    git(&[
+        "-c",
+        "user.name=Fixture",
+        "-c",
+        "user.email=fixture@example.invalid",
+        "-c",
+        "commit.gpgsign=false",
+        "commit",
+        "--allow-empty",
+        "-m",
+        "Fixture",
+    ]);
+    let sibling = directory.path().join("sibling");
+    git(&["worktree", "add", "--detach", sibling.to_str().unwrap()]);
+    assert!(std::panic::catch_unwind(|| outside_repo(&sibling)).is_err());
+    assert!(std::panic::catch_unwind(|| outside_repo(&repository)).is_err());
+    #[cfg(unix)]
+    {
+        let linked = directory.path().join("linked");
+        std::os::unix::fs::symlink(&sibling, &linked).unwrap();
+        assert!(std::panic::catch_unwind(|| outside_repo(&linked)).is_err());
+    }
+    assert_eq!(
+        outside_repo(directory.path()),
+        directory.path().canonicalize().unwrap()
+    );
 }
 
 #[test]
@@ -608,7 +722,7 @@ fn prepare_reads_selected_meeting_without_migrations_or_database_writes() {
 }
 
 #[test]
-#[should_panic(expected = "outside this checkout")]
+#[should_panic(expected = "outside every Git checkout")]
 fn private_output_rejects_repository_directory() {
     outside_repo(Path::new(env!("CARGO_MANIFEST_DIR")));
 }

@@ -405,21 +405,15 @@ pub(crate) async fn generate_with_provider(
                     || {
                         let system = system.clone();
                         let prompt = prompt.clone();
-                        let measurement = measurement_context.as_ref().map(|context| {
-                            context.start("apple_intelligence", temperature, None, None)
-                        });
                         move || {
-                            let result = apple_intelligence::process_text_with_system_prompt(
-                                &system, &prompt, 0,
-                            );
-                            if let Some(measurement) = measurement {
-                                measurement.finish(&result);
-                            }
-                            result
+                            apple_intelligence::process_text_with_system_prompt(&system, &prompt, 0)
                         }
                     },
                     apple::REQUEST_TIMEOUT,
                     apple::RETRY_BACKOFF,
+                    measurement_context
+                        .as_ref()
+                        .map(|context| (context, temperature)),
                 )
             })
             .await

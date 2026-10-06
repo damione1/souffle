@@ -66,12 +66,20 @@ are counted individually, including retries. Tokens not exposed by a provider ar
 `null`, never zero. Failed/incomplete calls have an error; provider/extraction
 errors make the run invalid rather than assigning zero recall.
 
+`provider-availability.json` freezes the measured machine's Apple availability and
+reason. Offline `score` derives each meeting's model set from its saved run files,
+so moving artifacts to a machine with different Apple support never creates or
+removes measured runs. Older artifacts without availability provenance are labelled
+accordingly. Apple hard timeouts are finalized by the waiting thread before a retry;
+a late abandoned response cannot turn the timed-out attempt into a success.
+
 `*.review.json` binds to a run hash. Set `matches` fact-id overrides to correct
 keyword false positives/negatives, and `reviewed_by` before saving manual decisions.
 Set `invented_facts` only after reading the output against the transcript. An
 unreviewed output is marked **NOT REVIEWED**, never zero hallucinations. Owners
 are counted on matching structured action items, not merely a name appearing
 elsewhere in the prose. Inspect semantic attribution and keyword errors manually.
+Rejecting a fact through `matches` also rejects its owner attribution.
 
 The command writes per-run scores and `bench-resumes-<date>.md`, including recall
 by third, owners, duplicated Summary/Topics headings, calls, available tokens,
@@ -87,3 +95,7 @@ three quality runs or measured Apple merge rounds. On 2026-09-30 the stable DB
 contained a single 9-second test meeting; Nightly's longest meeting was 256 seconds.
 The former representative corpus must be located/supplied before gold preparation
 and baseline measurements. SOU-103/104/105 remain gated on those missing proofs.
+
+On 2026-10-05 the user confirmed that corpus was on another machine and requested
+skipping this empirical blocker. No corpus was fabricated, no gold approval was
+assumed, and no private quality run was performed during PR maintenance.
