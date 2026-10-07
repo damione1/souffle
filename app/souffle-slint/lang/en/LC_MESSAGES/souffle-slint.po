@@ -2959,9 +2959,6 @@ msgctxt "ThemedComboBox"
 msgid "Apple Speech — assets système"
 msgstr "Apple Speech — system assets"
 
-msgctxt "ModelDeleteSection"
-msgid "Les assets Apple Speech sont gérés par macOS. Soufflé ne les supprime pas."
-msgstr "Apple Speech assets are managed by macOS. Soufflé does not delete them."
 #: app/souffle-slint/ui/components/settings/interface_section.slint:14
 msgctxt "ShortcutNoticeText"
 msgid "Le raccourci doit inclure une touche de modification (Cmd, Ctrl, Maj, Alt) ou être une touche de fonction."
