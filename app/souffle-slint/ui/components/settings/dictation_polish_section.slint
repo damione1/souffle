@@ -1,3 +1,4 @@
+import { AppText, AppTextInput, Typography, TypographyStyle } from "@typography";
 import { SettingsField } from "settings_field.slint";
 import { SettingsFieldVertical } from "settings_field_vertical.slint";
 import { SettingsGroup } from "settings_group.slint";
@@ -53,10 +54,10 @@ export component DictationPolishSection inherits VerticalLayout {
             spacing: 10px;
             alignment: space-between;
 
-            Text {
+            AppText {
                 text: @tr("Aucun fournisseur IA disponible pour la retouche.");
                 color: Theme.warning;
-                font-size: 11.5px;
+                typography: Typography.small;
                 wrap: word-wrap;
                 horizontal-stretch: 1;
             }

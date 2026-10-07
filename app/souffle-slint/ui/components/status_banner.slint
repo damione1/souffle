@@ -1,3 +1,4 @@
+import { AppText, AppTextInput, Typography, TypographyStyle } from "@typography";
 import { Theme } from "../theme.slint";
 import { ThemedButton, ThemedButtonKind } from "themed_button.slint";
 import { LucideIcon, IconSet } from "lucide_icon.slint";
@@ -30,10 +31,10 @@ export component StatusBanner inherits Rectangle {
         padding-bottom: 10px;
         spacing: 12px;
 
-        Text {
+        AppText {
             text: root.message;
             color: Theme.text-primary;
-            font-size: 13px;
+            typography: Typography.content;
             vertical-alignment: center;
             wrap: word-wrap;
             horizontal-stretch: 1;

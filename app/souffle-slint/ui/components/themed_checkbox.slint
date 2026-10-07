@@ -1,3 +1,4 @@
+import { AppText, AppTextInput, Typography, TypographyStyle } from "@typography";
 import { Theme } from "../theme.slint";
 
 // Compact square used by the calendar picker. Stock CheckBox is Fluent-blue.
@@ -23,10 +24,10 @@ export component ThemedCheckbox inherits Rectangle {
     accessible-enabled: root.enabled;
     accessible-action-default => { root.toggled(!root.checked); }
 
-    if root.checked: Text {
+    if root.checked: AppText {
         text: @tr("✓");
-        font-size: 11px;
-        font-weight: 700;
+        typography: Typography.caption-strong;
+
         color: Theme.canvas;
         horizontal-alignment: center;
         vertical-alignment: center;

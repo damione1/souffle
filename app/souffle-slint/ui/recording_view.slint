@@ -1,3 +1,4 @@
+import { AppText, AppTextInput, AppNumericText, Typography, TypographyStyle } from "@typography";
 import { ScrollView } from "std-widgets.slint";
 import { RecordingMode, SpeakerRole, LiveSystemAudio, MicStall, MeetingIdleBanner, WakeResumeNotice } from "types.slint";
 import { Theme } from "theme.slint";
@@ -134,13 +135,13 @@ export component RecordingView inherits Rectangle {
                         border-radius: 4px;
                         background: Theme.on-danger;
                     }
-                    status-label := Text {
+                    status-label := AppText {
                         x: 27px;
                         width: self.preferred-width;
                         height: parent.height;
                         text: root.mode == RecordingMode.meeting ? @tr("Réunion en direct") : @tr("Dictée");
-                        font-family: "Archivo SemiBold";
-                        font-size: 12.5px;
+                        typography: Typography.hint-emphasis;
+
                         color: Theme.on-danger;
                         vertical-alignment: center;
                     }
@@ -196,13 +197,13 @@ export component RecordingView inherits Rectangle {
                 }
             }
 
-            Text {
+            elapsed-counter := AppNumericText {
                 width: 46px;
                 horizontal-stretch: 0;
                 text: root.elapsed-label;
-                font-family: "JetBrains Mono";
-                font-size: 14px;
-                color: Theme.text-tertiary;
+                typography: Typography.body;
+
+                text-color: Theme.text-tertiary;
                 horizontal-alignment: right;
                 vertical-alignment: center;
             }
@@ -258,10 +259,10 @@ export component RecordingView inherits Rectangle {
                                 filled: true;
                             }
                         }
-                        Text {
+                        AppText {
                             text: @tr("Arrêter");
-                            font-family: "Archivo SemiBold";
-                            font-size: 13.5px;
+                            typography: Typography.field-heading;
+
                             color: Theme.on-danger;
                             vertical-alignment: center;
                         }
@@ -318,10 +319,10 @@ export component RecordingView inherits Rectangle {
                     }
                 }
 
-                Text {
+                AppText {
                     text: @tr("Seul votre microphone est enregistré. L’audio des autres participants est indisponible.");
-                    font-size: 12.5px;
-                    font-family: "Archivo SemiBold";
+                    typography: Typography.hint-emphasis;
+
                     color: Theme.text-secondary;
                     wrap: word-wrap;
                     vertical-alignment: center;
@@ -363,11 +364,11 @@ export component RecordingView inherits Rectangle {
                     }
                 }
 
-                idle-message := Text {
+                idle-message := AppText {
                     text: root.meeting-idle-banner == MeetingIdleBanner.max-duration
                         ? @tr("Durée maximale de la réunion atteinte. Arrêt de l'enregistrement.")
                         : @tr("Aucune parole détectée depuis {} min. L'enregistrement va bientôt s'arrêter.", root.meeting-idle-minutes);
-                    font-size: 13px;
+                    typography: Typography.content;
                     color: Theme.warning;
                     wrap: word-wrap;
                     vertical-alignment: center;
@@ -425,15 +426,15 @@ export component RecordingView inherits Rectangle {
                         // Gutter for the overlay scrollbar, so it never
                         // sits on the last characters of a line.
                         padding-right: 12px;
-                        if root.starting || root.combined-text == "": Text {
+                        if root.starting || root.combined-text == "": AppText {
                             text: root.starting ? @tr("Démarrage…") : @tr("À l'écoute…");
-                            font-size: 14px;
+                            typography: Typography.body;
                             color: Theme.text-muted;
                             wrap: word-wrap;
                         }
                         if !root.starting && root.combined-text != "": TranscriptWordFlow {
                             words: root.live-dictation-words;
-                            font-size: 19px;
+                            typography: Typography.preview;
                             color: Theme.text-secondary;
                         }
                     }
@@ -450,9 +451,9 @@ export component RecordingView inherits Rectangle {
                         icon-color: Theme.accent;
                         size: 15px;
                     }
-                    Text {
+                    AppText {
                         text: @tr("Collé automatiquement dans votre dernière app à l’arrêt");
-                        font-size: 12.5px;
+                        typography: Typography.hint;
                         color: Theme.text-muted;
                         vertical-alignment: center;
                     }
@@ -499,10 +500,10 @@ export component RecordingView inherits Rectangle {
                     vertical-stretch: 0;
                     alignment: space-between;
 
-                    Text {
+                    AppText {
                         text: @tr("TRANSCRIPTION EN DIRECT");
-                        font-family: "Archivo SemiBold";
-                        font-size: 11px;
+                        typography: Typography.caption-emphasis;
+
                         color: Theme.text-muted;
                         vertical-alignment: center;
                     }
@@ -530,11 +531,11 @@ export component RecordingView inherits Rectangle {
                                     : Theme.surface-4;
                             }
                         }
-                        audio-label := Text {
+                        audio-label := AppText {
                             text: root.system-audio == LiveSystemAudio.active ? @tr("Audio système actif")
                                 : root.system-audio == LiveSystemAudio.pending ? @tr("Vérification de l’audio système")
                                 : @tr("Micro seul");
-                            font-size: 11.5px;
+                            typography: Typography.small;
                             color: Theme.text-muted;
                             vertical-alignment: center;
                         }
@@ -581,9 +582,9 @@ export component RecordingView inherits Rectangle {
                         // sits on the last characters of a line.
                         padding-right: 12px;
 
-                        if root.live-transcript-empty: Text {
+                        if root.live-transcript-empty: AppText {
                             text: root.starting ? @tr("Démarrage…") : @tr("À l'écoute…");
-                            font-size: 14px;
+                            typography: Typography.body;
                             color: Theme.text-muted;
                         }
 
@@ -595,17 +596,17 @@ export component RecordingView inherits Rectangle {
                                 alignment: start;
                                 spacing: 8px;
 
-                                Text {
+                                AppText {
                                     text: block.has-speaker ? SpeakerLabels.of(block.speaker) : "";
-                                    font-family: "Archivo SemiBold";
-                                    font-size: 11.5px;
+                                    typography: Typography.small-emphasis;
+
                                     color: Theme.accent;
                                 }
-                                Text {
+                                AppNumericText {
                                     text: block.timestamp;
-                                    font-family: "JetBrains Mono";
-                                    font-size: 10.5px;
-                                    color: Theme.text-faint;
+                                    typography: Typography.micro-detail;
+
+                                    text-color: Theme.text-faint;
                                 }
                                 if block.can-edit: ThemedButton {
                                     text: @tr("Corriger");
@@ -620,7 +621,7 @@ export component RecordingView inherits Rectangle {
                             TranscriptWordFlow {
                                 width: parent.width;
                                 words: block.words;
-                                font-size: 15px;
+                                typography: Typography.action-body;
                                 color: Theme.text-secondary;
                                 word-clicked(word, at-x, at-y) => { live-alias.open(word, at-x, at-y); }
                             }
@@ -664,10 +665,10 @@ export component RecordingView inherits Rectangle {
                         icon-color: Theme.accent;
                         size: 14px;
                     }
-                    Text {
+                    AppText {
                         text: @tr("NOTES");
-                        font-family: "Archivo SemiBold";
-                        font-size: 11px;
+                        typography: Typography.caption-emphasis;
+
                         color: Theme.text-muted;
                         vertical-alignment: center;
                     }

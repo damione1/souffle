@@ -1,0 +1,4 @@
+AXRole=AXApplication | AXTitle=Soufflé Typography QA
+ AXRole=AXWindow | AXDescription=Meeting
+  AXRole=AXGroup | AXDescription=Meeting
+   AXRole=AXButton | AXDescription=Stop recording

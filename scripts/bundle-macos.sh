@@ -144,6 +144,9 @@ cp app/resources/sounds/dictation_stop.wav "$contents/Resources/resources/sounds
 cp app/resources/libonnxruntime.dylib "$contents/Frameworks/libonnxruntime.dylib"
 
 cp app/icons/icon.icns "$contents/Resources/icon.icns"
+mkdir -p "$contents/Resources/licenses/Inter"
+cp app/souffle-typography/assets/LICENSE.txt app/souffle-typography/assets/README.md \
+  "$contents/Resources/licenses/Inter/"
 
 # Info.plist: base bundle keys, plus every usage-description key from
 # app/Info.plist (the file `tauri_build::build()` used to merge in

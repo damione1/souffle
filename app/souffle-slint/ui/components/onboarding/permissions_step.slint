@@ -1,3 +1,4 @@
+import { AppText, AppTextInput, Typography, TypographyStyle } from "@typography";
 import { Theme } from "../../theme.slint";
 import { ThemedButton } from "../themed_button.slint";
 import { AccessState, PermissionKind } from "../../types.slint";
@@ -72,15 +73,15 @@ export component PermissionsStep inherits VerticalLayout {
             VerticalLayout {
                 spacing: 1px;
                 horizontal-stretch: 1;
-                Text {
+                AppText {
                     text: row-label(row.kind);
-                    font-size: 12.5px;
-                    font-weight: 600;
+                    typography: Typography.hint-emphasis;
+
                     color: Theme.text-primary;
                 }
-                Text {
+                AppText {
                     text: row-description(row.kind);
-                    font-size: 11px;
+                    typography: Typography.caption;
                     color: Theme.text-muted;
                     wrap: word-wrap;
                 }
@@ -104,20 +105,20 @@ export component PermissionsStep inherits VerticalLayout {
                     border-radius: 4px;
                     background: Theme.success;
                 }
-                granted-label := Text {
+                granted-label := AppText {
                     x: 22px;
                     height: parent.height;
                     text: @tr("Accordé");
                     color: Theme.text-secondary;
-                    font-family: "Archivo Medium";
-                    font-size: 11px;
+                    typography: Typography.caption-label;
+
                     vertical-alignment: center;
                 }
             }
-            if row.state == AccessState.unsupported: Text {
+            if row.state == AccessState.unsupported: AppText {
                 text: @tr("Non pris en charge");
                 color: Theme.text-faint;
-                font-size: 11px;
+                typography: Typography.caption;
                 vertical-alignment: center;
             }
             if row.state != AccessState.granted && row.state != AccessState.unsupported: ThemedButton {
@@ -131,9 +132,9 @@ export component PermissionsStep inherits VerticalLayout {
             spacing: 8px;
             alignment: space-between;
 
-            Text {
+            AppText {
                 text: row-hint(row.kind, row.state);
-                font-size: 10.5px;
+                typography: Typography.micro-detail;
                 color: Theme.text-muted;
                 wrap: word-wrap;
                 horizontal-stretch: 1;
@@ -155,11 +156,11 @@ export component PermissionsStep inherits VerticalLayout {
         spacing: 10px;
         alignment: space-between;
 
-        Text {
+        AppText {
             text: root.repair-success
                 ? @tr("Réparation effectuée, en attente de confirmation macOS.")
                 : @tr("Un problème persiste ? Réparez l'entrée Accessibilité.");
-            font-size: 10.5px;
+            typography: Typography.micro-detail;
             color: Theme.text-muted;
             wrap: word-wrap;
             horizontal-stretch: 1;
@@ -171,9 +172,9 @@ export component PermissionsStep inherits VerticalLayout {
         }
     }
 
-    if root.error-message != "": Text {
+    if root.error-message != "": AppText {
         text: root.error-message;
         color: Theme.danger;
-        font-size: 11px;
+        typography: Typography.caption;
     }
 }

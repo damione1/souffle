@@ -1,3 +1,4 @@
+import { AppText, AppTextInput, Typography, TypographyStyle } from "@typography";
 import { Theme } from "../theme.slint";
 import { RecordingMode, TranscriptionPhase } from "../types.slint";
 import { LucideIcon, IconSet } from "lucide_icon.slint";
@@ -85,11 +86,11 @@ export component AppHeader inherits Rectangle {
             }
         }
 
-        Text {
+        AppText {
             text: @tr("Soufflé");
             height: 100%;
-            font-family: "Archivo SemiBold";
-            font-size: 14.5px;
+            typography: Typography.brand;
+
             color: Theme.text-primary;
             vertical-alignment: center;
         }
@@ -126,22 +127,22 @@ export component AppHeader inherits Rectangle {
                     border-radius: 3.5px;
                     background: root.status-color;
                 }
-                status-text := Text {
+                status-text := AppText {
                     x: dot.x + dot.width + 5px;
                     y: 0;
                     height: parent.height;
                     text: root.status-label;
-                    font-size: 11px;
+                    typography: Typography.caption;
                     color: Theme.text-muted;
                     vertical-alignment: center;
                 }
-                model-label-text := Text {
+                model-label-text := AppText {
                     x: status-text.x + status-text.width + 5px;
                     y: 0;
                     height: parent.height;
                     text: root.show-model-label ? root.model-label : "";
-                    font-family: "JetBrains Mono";
-                    font-size: 11px;
+                    typography: Typography.caption;
+
                     color: Theme.text-muted;
                     vertical-alignment: center;
                 }

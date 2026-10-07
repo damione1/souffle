@@ -1,3 +1,4 @@
+import { AppText, AppTextInput, AppNumericText, Typography, TypographyStyle } from "@typography";
 import { Theme } from "../theme.slint";
 import { LucideIcon, IconSet } from "lucide_icon.slint";
 // Native audio player for MeetingDetail (SOU-187 milestone 7, AC14/AC16).
@@ -25,10 +26,10 @@ export component AudioPlayerSection inherits VerticalLayout {
 
     spacing: 8px;
 
-    if !root.has-audio: Text {
+    if !root.has-audio: AppText {
         text: @tr("Aucun enregistrement audio pour cette r\u{e9}union.");
         color: Theme.text-muted;
-        font-size: 12px;
+        typography: Typography.secondary;
     }
 
     if root.has-audio: HorizontalLayout {
@@ -81,11 +82,11 @@ export component AudioPlayerSection inherits VerticalLayout {
             }
         }
 
-        Text {
+        AppNumericText {
             text: root.duration-label == "" ? @tr("Chargement de l'audio…") : root.position-label + @tr(" / {}", root.duration-label);
-            color: Theme.text-muted;
-            font-size: 11px;
-            font-family: "monospace";
+            text-color: Theme.text-muted;
+            typography: Typography.caption;
+
             vertical-alignment: center;
         }
     }

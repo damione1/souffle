@@ -19,6 +19,8 @@ mod timeline;
 #[allow(dead_code)]
 #[path = "../src/transcript.rs"]
 mod transcript;
+#[path = "../src/typography.rs"]
+mod typography;
 
 use slint::Model;
 use souffle_lib::audio::{AudioChunk, AudioMessage, Resampler};
@@ -44,6 +46,7 @@ fn main() {
         .select()
         .unwrap();
     let window = MainWindow::new().unwrap();
+    typography::initialize(&window).expect("Inter renderer font resolution failed");
     window
         .window()
         .set_size(slint::LogicalSize::new(1040.0, 820.0));

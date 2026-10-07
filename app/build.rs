@@ -177,9 +177,23 @@ fn build_pill_panel_bridge() {
     println!("cargo:rerun-if-changed={SWIFT_FILE}");
     println!("cargo:rerun-if-changed={BRIDGE_HEADER}");
 
+    souffle_typography::validate_swift(std::path::Path::new(SWIFT_FILE))
+        .expect("HUD Typography contract failed");
+
     let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR not set"));
     let object_path = out_dir.join("pill_panel.o");
     let static_lib_path = out_dir.join("libpill_panel.a");
+    let assets = souffle_typography::asset_dir();
+    souffle_typography::validate_assets(&assets).expect("Inter font validation failed");
+    println!("cargo:rerun-if-changed={}", assets.display());
+    // Compile the generated projection and the panel in the same module.
+    let merged = out_dir.join("pill_panel.swift");
+    let source = format!(
+        "{}\n{}",
+        souffle_typography::swift_projection(),
+        std::fs::read_to_string(SWIFT_FILE).expect("pill panel source")
+    );
+    std::fs::write(&merged, source).expect("merged pill panel source");
 
     let sdk_path = env::var("SDKROOT").unwrap_or_else(|_| {
         String::from_utf8(
@@ -225,7 +239,7 @@ fn build_pill_panel_bridge() {
             "-import-objc-header",
             BRIDGE_HEADER,
             "-c",
-            SWIFT_FILE,
+            merged.to_str().expect("merged panel path"),
             "-o",
             object_path.to_str().expect("object path"),
         ])
