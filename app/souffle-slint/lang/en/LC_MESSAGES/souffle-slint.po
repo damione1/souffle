@@ -3002,3 +3002,63 @@ msgstr "Restarting…"
 msgctxt "AboutSection"
 msgid "Réessayer"
 msgstr "Try again"
+
+msgctxt "ModelDeleteSection"
+msgid "Les assets Apple Speech sont gérés par macOS. Soufflé ne les supprime pas."
+msgstr "Apple Speech assets are managed by macOS. Soufflé does not delete them."
+
+msgctxt "TranscriptionLabels"
+msgid "Apple Speech — {} [{}]"
+msgstr "Apple Speech — {} [{}]"
+
+msgctxt "TranscriptionLabels"
+msgid "Apple Speech"
+msgstr "Apple Speech"
+
+msgctxt "TranscriptionLabels"
+msgid "Apple Speech ({})"
+msgstr "Apple Speech ({})"
+
+msgctxt "ModelSection"
+msgid "La langue affichée est celle prise en charge par Apple Speech pour la langue et la région de ce Mac. Pour la modifier, ouvrez Réglages Système > Général > Langue et région, puis relancez Soufflé."
+msgstr "The language shown is the one Apple Speech supports for this Mac’s language and region. To change it, open System Settings > General > Language & Region, then reopen Soufflé."
+
+msgctxt "ModelSection"
+msgid "La transcription fonctionne sans activer Siri ou Apple Intelligence. macOS gère le modèle ; Soufflé libère les sessions inactives."
+msgstr "Transcription works without enabling Siri or Apple Intelligence. macOS manages the model; Soufflé releases idle sessions."
+
+msgctxt "ModelSection"
+msgid "Ouvrir Langue et région"
+msgstr "Open Language & Region"
+
+msgctxt "ModelSection"
+msgid "Apple Speech indisponible"
+msgstr "Apple Speech unavailable"
+
+msgctxt "ModelSection"
+msgid "Apple Speech nécessite macOS 26 ou une version ultérieure. Vérifiez les mises à jour de macOS ou choisissez un autre modèle."
+msgstr "Apple Speech requires macOS 26 or later. Check for macOS updates or choose another model."
+
+msgctxt "ModelSection"
+msgid "Apple Speech n'est pas pris en charge sur ce Mac. Choisissez un autre modèle de transcription."
+msgstr "Apple Speech is not supported on this Mac. Choose another transcription model."
+
+msgctxt "ModelSection"
+msgid "Cette version de Soufflé n'inclut pas Apple Speech. Installez une version compatible ou choisissez un autre modèle."
+msgstr "This version of Soufflé does not include Apple Speech. Install a compatible version or choose another model."
+
+msgctxt "ModelSection"
+msgid "La langue et la région actuelles de ce Mac ne sont pas prises en charge par Apple Speech. Modifiez-les dans Réglages Système > Général > Langue et région, puis relancez Soufflé, ou choisissez un autre modèle."
+msgstr "Apple Speech does not support this Mac’s current language and region. Change them in System Settings > General > Language & Region, then reopen Soufflé, or choose another model."
+
+msgctxt "ModelSection"
+msgid "Les ressources Apple Speech ne sont pas disponibles pour la langue de ce Mac. Choisissez une autre langue dans Langue et région, puis relancez Soufflé, ou utilisez un autre modèle."
+msgstr "Apple Speech resources are not available for this Mac’s language. Choose another language in Language & Region, then reopen Soufflé, or use another model."
+
+msgctxt "ModelSection"
+msgid "Impossible de vérifier la disponibilité d'Apple Speech. Relancez Soufflé pour réessayer ou choisissez un autre modèle."
+msgstr "Apple Speech availability could not be checked. Reopen Soufflé to try again or choose another model."
+
+msgctxt "ModelSection"
+msgid "Ouvrir Mise à jour de logiciels"
+msgstr "Open Software Update"

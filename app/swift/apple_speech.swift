@@ -35,6 +35,50 @@ private struct SpeechFailure: Error, CustomStringConvertible {
     init(_ description: String) { self.description = description }
 }
 
+// Rust supplies mono float32 PCM at the analyzer's negotiated rate. Speech
+// assets may require another PCM representation (e.g. interleaved Int16).
+// Convert representation here, without resampling or changing frame times.
+private final class SpeechPCMInput {
+    let format: AVAudioFormat
+    private let sourceFormat: AVAudioFormat
+    private let converter: AVAudioConverter?
+
+    init(format: AVAudioFormat) throws {
+        guard format.channelCount == 1,
+              format.sampleRate.isFinite, format.sampleRate > 0,
+              format.sampleRate <= Double(Int32.max),
+              format.sampleRate.rounded() == format.sampleRate,
+              let source = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: format.sampleRate, channels: 1, interleaved: false) else {
+            throw SpeechFailure("Apple Speech audio format cannot accept mono float32 PCM: \(format)")
+        }
+        let needsConversion = !format.isEqual(source)
+        let converter = needsConversion ? AVAudioConverter(from: source, to: format) : nil
+        guard !needsConversion || converter != nil else {
+            throw SpeechFailure("Apple Speech PCM converter unavailable")
+        }
+        self.format = format
+        self.sourceFormat = source
+        self.converter = converter
+    }
+
+    func buffer(samples: [Float]) throws -> AVAudioPCMBuffer {
+        guard let count = AVAudioFrameCount(exactly: samples.count),
+              let source = AVAudioPCMBuffer(pcmFormat: sourceFormat, frameCapacity: count),
+              let channel = source.floatChannelData?[0] else {
+            throw SpeechFailure("Speech buffer allocation failed")
+        }
+        source.frameLength = count
+        samples.withUnsafeBufferPointer { channel.update(from: $0.baseAddress!, count: $0.count) }
+        guard let converter else { return source }
+        guard let output = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: count) else {
+            throw SpeechFailure("Speech conversion buffer allocation failed")
+        }
+        try converter.convert(to: output, from: source)
+        guard output.frameLength == count else { throw SpeechFailure("Speech PCM conversion changed frame count") }
+        return output
+    }
+}
+
 @available(macOS 26, *)
 private actor SpeechSessions {
     static let shared = SpeechSessions()
@@ -42,9 +86,7 @@ private actor SpeechSessions {
         let analyzer: SpeechAnalyzer
         let input: AsyncStream<AnalyzerInput>.Continuation
         let task: Task<Void, Never>
-        let format: AVAudioFormat
-        let inputFormat: AVAudioFormat
-        let converter: AVAudioConverter?
+        let pcm: SpeechPCMInput
         var samples: Int64 = 0
         var results: [[String: Any]] = []
         var error: String?
@@ -55,16 +97,12 @@ private actor SpeechSessions {
     func start(localeID: String) async throws -> [String: Any] {
         let locale = Locale(identifier: localeID)
         guard let supported = await SpeechTranscriber.supportedLocale(equivalentTo: locale) else { throw SpeechFailure("unsupported locale") }
-        let transcriber = SpeechTranscriber(locale: supported, transcriptionOptions: [], reportingOptions: [], attributeOptions: [.audioTimeRange])
+        // Apple's live preset combines volatile revisions with a shorter
+        // context window; volatileResults alone can still wait several seconds.
+        let transcriber = SpeechTranscriber(locale: supported, preset: .timeIndexedProgressiveTranscription)
         guard await AssetInventory.status(forModules: [transcriber]) == .installed else { throw SpeechFailure("Apple Speech system assets are not installed") }
-        guard let format = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [transcriber]), format.channelCount == 1, format.sampleRate > 0,
-              let inputFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: format.sampleRate, channels: 1, interleaved: false) else { throw SpeechFailure("Apple Speech has no compatible mono audio format") }
-        // Speech may negotiate int16 PCM. Rust supplies float32 at the
-        // negotiated rate; convert representation without resampling or
-        // changing the number of samples in the session clock.
-        let needsConversion = !format.isEqual(inputFormat)
-        let converter = needsConversion ? AVAudioConverter(from: inputFormat, to: format) : nil
-        guard !needsConversion || converter != nil else { throw SpeechFailure("Apple Speech PCM converter unavailable") }
+        guard let format = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [transcriber]) else { throw SpeechFailure("Apple Speech has no installed compatible audio format") }
+        let pcm = try SpeechPCMInput(format: format)
         let analyzer = SpeechAnalyzer(modules: [transcriber])
         let (sequence, continuation) = AsyncStream<AnalyzerInput>.makeStream(bufferingPolicy: .bufferingOldest(64))
         let id = next; next += 1
@@ -74,11 +112,11 @@ private actor SpeechSessions {
                     let start = result.range.start.seconds
                     let end = CMTimeRangeGetEnd(result.range).seconds
                     guard start.isFinite, end.isFinite, end >= start else { throw SpeechFailure("invalid Speech timestamps") }
-                    self.record(id, result: ["text": String(result.text.characters), "start_time": start, "end_time": end])
+                    self.record(id, result: ["text": String(result.text.characters), "start_time": start, "end_time": end, "is_final": result.isFinal])
                 }
             } catch { self.fail(id, error: String(describing: error)) }
         }
-        sessions[id] = Session(analyzer: analyzer, input: continuation, task: task, format: format, inputFormat: inputFormat, converter: converter)
+        sessions[id] = Session(analyzer: analyzer, input: continuation, task: task, pcm: pcm)
         do {
             try await analyzer.prepareToAnalyze(in: format)
             try await analyzer.start(inputSequence: sequence)
@@ -95,17 +133,8 @@ private actor SpeechSessions {
         guard var session = sessions[id] else { throw SpeechFailure("unknown Speech session") }
         if let error = session.error { throw SpeechFailure(error) }
         if !samples.isEmpty {
-            guard let inputBuffer = AVAudioPCMBuffer(pcmFormat: session.inputFormat, frameCapacity: AVAudioFrameCount(samples.count)), let channel = inputBuffer.floatChannelData?[0] else { throw SpeechFailure("Speech buffer allocation failed") }
-            inputBuffer.frameLength = AVAudioFrameCount(samples.count)
-            samples.withUnsafeBufferPointer { channel.update(from: $0.baseAddress!, count: $0.count) }
-            let buffer: AVAudioPCMBuffer
-            if let converter = session.converter {
-                guard let converted = AVAudioPCMBuffer(pcmFormat: session.format, frameCapacity: inputBuffer.frameLength) else { throw SpeechFailure("Speech conversion buffer allocation failed") }
-                try converter.convert(to: converted, from: inputBuffer)
-                guard converted.frameLength == inputBuffer.frameLength else { throw SpeechFailure("Speech PCM conversion changed the sample clock") }
-                buffer = converted
-            } else { buffer = inputBuffer }
-            let at = CMTime(value: session.samples, timescale: CMTimeScale(session.format.sampleRate))
+            let buffer = try session.pcm.buffer(samples: samples)
+            let at = CMTime(value: session.samples, timescale: CMTimeScale(session.pcm.format.sampleRate))
             switch session.input.yield(AnalyzerInput(buffer: buffer, bufferStartTime: at)) {
             case .enqueued: break
             case .dropped: throw SpeechFailure("Apple Speech input queue overflow; audio was not accepted")
@@ -144,20 +173,27 @@ private actor SpeechSessions {
 
 @_cdecl("souffle_speech_status")
 public func speechStatus() -> UnsafeMutablePointer<CChar>? {
-    guard #available(macOS 26, *) else { return response(["available": false, "reason": "macOS 26 is required"]) }
+    guard #available(macOS 26, *) else { return response(["available": false, "reason": "os_unsupported"]) }
     return blocking(10) {
-        guard SpeechTranscriber.isAvailable else { return ["available": false, "reason": "SpeechTranscriber is unavailable on this device"] }
-        guard let locale = await SpeechTranscriber.supportedLocale(equivalentTo: Locale.current) else { return ["available": false, "reason": "System locale is not supported by Apple Speech"] }
+        guard SpeechTranscriber.isAvailable else { return ["available": false, "reason": "device_unsupported"] }
+        guard let locale = await SpeechTranscriber.supportedLocale(equivalentTo: Locale.current) else { return ["available": false, "reason": "locale_unsupported"] }
         let module = SpeechTranscriber(locale: locale, preset: .transcription)
         let status = await AssetInventory.status(forModules: [module])
         let installed: Bool
         switch status {
         case .installed: installed = true
         case .supported, .downloading: installed = false
-        case .unsupported: return ["available": false, "reason": "Apple Speech assets are unsupported for this locale"]
-        @unknown default: return ["available": false, "reason": "Unknown system Speech asset status"]
+        case .unsupported: return ["available": false, "reason": "assets_unsupported"]
+        @unknown default: return ["available": false, "reason": "check_failed"]
         }
-        return ["available": true, "locale": locale.identifier, "installed": installed]
+        // Display names follow Soufflé's UI language; neither changes the
+        // negotiated recognition locale above. Foundation owns this open set.
+        let names = Dictionary(uniqueKeysWithValues: ["en", "fr"].map { language in
+            (language, Locale(identifier: language).localizedString(forIdentifier: locale.identifier) ?? locale.identifier)
+        })
+        return ["available": true, "locale": locale.identifier,
+                "locale_names": names,
+                "installed": installed]
     }
 }
 @_cdecl("souffle_speech_install")

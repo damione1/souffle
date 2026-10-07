@@ -16,6 +16,7 @@ import { ModelDeleteSection } from "components/settings/model_delete_section.sli
 import { DictionarySection, DictionaryRow } from "components/settings/dictionary_section.slint";
 import { SnippetsSection, SnippetRow } from "components/settings/snippets_section.slint";
 import { Theme } from "theme.slint";
+import { TranscriptionUnavailableReason, SystemSettingsPane } from "types.slint";
 import { LucideIcon, IconSet } from "components/lucide_icon.slint";
 import { SettingsTabBar, SettingsTabPage } from "components/settings/settings_tabs.slint";
 import { TranscriptionPhase, AppTheme, AppLocale, PasteMethod, MeetingLanguage, LogLevel, AudioRetention, AccessState, ShortcutField, ShortcutNotice, SummaryProvider, AppleIntelligenceUnavailableReason, SettingsTab, InstallBlockReason, UpdateRowStatus } from "types.slint";
@@ -158,6 +159,10 @@ export component SettingsView inherits Rectangle {
     in property <bool> model-ready;
     in property <[string]> model-labels;
     in property <string> selected-model-label;
+    in property <bool> apple-speech-selected;
+    in property <bool> apple-speech-unavailable;
+    in property <TranscriptionUnavailableReason> apple-speech-unavailable-reason;
+    callback open-system-settings-requested(SystemSettingsPane);
     in property <bool> model-busy;
     in property <TranscriptionPhase> model-phase;
     in property <bool> model-downloading;
@@ -389,6 +394,10 @@ export component SettingsView inherits Rectangle {
                             ready: root.model-ready;
                             model-labels: root.model-labels;
                             selected-model-label: root.selected-model-label;
+                            apple-speech-selected: root.apple-speech-selected;
+                            apple-speech-unavailable: root.apple-speech-unavailable;
+                            apple-speech-unavailable-reason: root.apple-speech-unavailable-reason;
+                            open-system-settings-requested(pane) => { root.open-system-settings-requested(pane); }
                             busy: root.model-busy;
                             downloading: root.model-downloading;
                             download-progress-label: root.model-download-progress-label;

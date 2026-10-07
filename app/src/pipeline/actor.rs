@@ -3688,6 +3688,53 @@ mod tests {
     }
 
     #[test]
+    fn continuous_dual_engine_keeps_delayed_finals_on_both_source_clocks() {
+        let mut mode = DiarizedMode::new();
+        let mut engine = MockEngine::new().with_silence_handling(SilenceHandling::Continuous);
+        let fed = engine.fed_dual_handle();
+        let chunk_size = MIMI_FRAME_SIZE;
+        let finals: Vec<_> = [Speaker::Me, Speaker::Them]
+            .into_iter()
+            .map(|speaker| TranscriptionSegment {
+                text: format!("{speaker:?} before the pause"),
+                start_time: 0.01,
+                end_time: 0.05,
+                is_final: true,
+                speaker: Some(speaker),
+                language: None,
+                confidence: None,
+            })
+            .collect();
+        for frame in 0..100 {
+            if frame == 99 {
+                engine
+                    .dual_transcribe_responses
+                    .push_back(Ok(finals.clone()));
+            }
+            mode.ingest_pair(vec![0.0; chunk_size], vec![0.0; chunk_size]);
+            let result = mode.step(&mut engine, chunk_size).unwrap().unwrap();
+            if frame == 99 {
+                assert_eq!(result.len(), 2);
+                for (segment, speaker) in result.iter().zip([Speaker::Me, Speaker::Them]) {
+                    assert_eq!(segment.speaker, Some(speaker));
+                    assert_eq!((segment.start_time, segment.end_time), (0.01, 0.05));
+                }
+            }
+        }
+        let fed = fed.lock().unwrap();
+        assert_eq!(fed.len(), 100);
+        assert!(
+            fed.iter()
+                .all(|(me, them)| me.len() == chunk_size && them.len() == chunk_size)
+        );
+        assert!(mode.finish_tail(&mut engine).unwrap().is_empty());
+        engine.flush_responses.push_back(Ok(finals));
+        for segment in engine.flush().unwrap() {
+            assert_eq!((segment.start_time, segment.end_time), (0.01, 0.05));
+        }
+    }
+
+    #[test]
     fn single_mode_tail_drained_signal_ends_window_early() {
         use std::sync::atomic::AtomicBool;
 

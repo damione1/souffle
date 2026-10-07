@@ -6137,6 +6137,9 @@ fn wire_callbacks(
     window.on_settings_open_apple_intelligence_settings_requested(move || {
         souffle_lib::commands::open_apple_intelligence_settings();
     });
+    window.on_settings_open_system_settings_requested(move |pane| {
+        souffle_lib::commands::open_system_settings(pane.into());
+    });
 
     let settings_io_for_polish_enabled = settings_io.clone();
     let weak = window.as_weak();

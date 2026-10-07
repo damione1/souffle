@@ -1,4 +1,5 @@
 import { Theme } from "../theme.slint";
+import { TranscriptionLabels } from "transcription_labels.slint";
 import { RecordingMode, TranscriptionPhase } from "../types.slint";
 import { LucideIcon, IconSet } from "lucide_icon.slint";
 
@@ -139,7 +140,9 @@ export component AppHeader inherits Rectangle {
                     x: status-text.x + status-text.width + 5px;
                     y: 0;
                     height: parent.height;
-                    text: root.show-model-label ? root.model-label : "";
+                    text: !root.show-model-label ? ""
+                        : root.model-label == "__APPLE_SPEECH_SYSTEM__" ? TranscriptionLabels.speech-short-label()
+                        : root.model-label;
                     font-family: "JetBrains Mono";
                     font-size: 11px;
                     color: Theme.text-muted;

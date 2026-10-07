@@ -18,81 +18,159 @@ or `models/apple-speech` directory is involved. Failed/timed-out installation
 reports an error rather than leaving Downloading. Progress is indeterminate
 because the current FFI reports start/completion, not Apple Progress byte counts.
 
-Loading creates a SpeechAnalyzer session on the engine actor and uses its actual
-mono sample rate. Rust supplies float32 PCM; an AVAudioConverter converts its
-representation to the negotiated system format (including int16), without
-resampling and with an exact frame-count check. Rust copies PCM at the FFI call boundary; async
+Loading creates a SpeechAnalyzer session on the engine actor and negotiates its
+actual audio format/sample rate. Rust supplies mono float32 at that rate; Swift
+converts the PCM representation to the exact analyzer format (including Int16),
+without resampling or changing frame counts. Rust copies PCM at the FFI call boundary; async
 Swift tasks never borrow Rust buffers. A bounded input queue reports overflow as
-an error. Final-only results use Speech result ranges, and stop finishes the input
+an error. Apple's `timeIndexedProgressiveTranscription` preset emits volatile
+revisions with audio ranges, followed by immutable finals. Its `fastResults`
+option uses a shorter context window, trading some recognition accuracy for
+responsiveness. Rust maps each revision to the shared lane preview contract;
+empty previews retract, finals replace the preview, and only finals persist.
+Ranges are bounded by consumed PCM, never callback time. Stop finishes the input
 and finalizes through its end before draining. Session resets cancel the old
-analyzer. A timeline-preserving reset carries the consumed-audio offset. Apple
-Speech does not support Me/Them: system-audio meetings use the existing mixed path.
+analyzers. A timeline-preserving reset carries the consumed-audio offset.
 
-### Architecture decision requiring maintainer confirmation
+Apple uses the typed `SilenceHandling::Continuous` policy retained from the
+published review branch. VAD still observes speech, but mono input feeds every
+sample, including long pauses: a delayed Speech result keeps its original source
+range rather than receiving a gap offset computed at delivery. Independent
+meeting lanes also feed their complete aligned PCM, including silence padding.
+Other engines retain `Gate` and bounded lookback. Continuous input continues
+Speech processing during silence; no CPU or power saving is claimed.
 
-Apple uses the typed `SilenceHandling::Continuous` engine policy. The pipeline
-still observes VAD, but feeds every frame, including long pauses. A Speech result
-can arrive asynchronously after its utterance: removing silence and applying the
-current gap offset when that result arrives would move old words into the future.
-Continuous input preserves the source clock through delayed delivery and final
-flush. Existing engines retain `Gate` and its bounded lookback behavior.
+Recovery commits each lane's accepted interval before fallible cancellation or
+restart. Both new lanes resume at the latest accepted capture time, including
+when only one previous push succeeded. A failure starting either source, or a
+negotiated-rate mismatch, cancels the partial replacement and leaves that offset
+available for retry without counting the old samples twice. A new recording
+explicitly resets the offset to zero.
 
-The tradeoff is continued Speech processing during silence; no CPU/power saving
-is claimed for paused speech. A more complex source-time gap map is deferred.
-Timeline-preserving recovery consumes the previous sample interval before the
-fallible restart, so a failed begin followed by retry never counts it twice.
-PR #364 remains draft for Damien's review of this architecture choice.
+On 2026-10-04, the user expanded the original SOU-121 scope to include the
+progressive stream and Me/Them behavior added for Whisper/Parakeet. Meetings now
+use independent analyzers for microphone (Me) and system audio (Them), through
+the shared `supports_diarization` / `transcribe_dual` interface. These labels
+identify capture sources, not inferred human speakers. Asymmetric frames receive
+silence padding to maintain a common capture clock; one lane's final never clears
+the other's preview. The existing shared live/history paragraph policy is used
+without Apple-specific grouping or UI branches. Dictation remains a single lane
+without speaker labels. If one analyzer fails while draining, the other lane's
+completed finals remain available to the actor's existing salvage hook.
 
-System assets are shared by macOS. The UI names them explicitly and offers no
-app-file deletion control; the backend also refuses deletion. No system assets
-are removed by unload or session cancellation.
+System assets are shared by macOS. The UI shows the equivalent supported locale
+(localized language/region name plus stable code) and offers no app-file deletion
+control; the backend also refuses deletion. No system assets are removed by
+unload or session cancellation. Settings hides the file-model unload timer for
+Apple Speech without overwriting its persisted value. The existing idle timeout
+still cancels analyzers and drops the engine; macOS owns the model assets and
+their memory lifecycle. Apple Speech is not permanently loaded by Soufflé.
+
+Language is selected from `Locale.current`, then negotiated through
+`SpeechTranscriber.supportedLocale(equivalentTo:)`. It is independent of Siri's
+language and Apple Intelligence. Change it in **System Settings > General >
+Language & Region**, then reopen Soufflé: the support catalogue intentionally
+keeps its startup snapshot throughout a process, including active recordings.
+The UI language changes only the display names, supplied by Foundation for FR/EN.
+
+Unsupported Apple Speech remains discoverable below the model selector, with a
+typed translated reason. Language/resource failures link to Language & Region;
+an old OS links to Software Update. Unsupported hardware/builds and failed
+checks explain the relevant alternative without suggesting a Siri toggle. The
+Settings destinations use the installed macOS extension identifiers and an
+exhaustive Rust/Slint enum.
+
+Apple references: [SpeechAnalyzer WWDC25](https://developer.apple.com/videos/play/wwdc2025/277/)
+explains explicit transcriber locales, system-owned assets, and the independence
+from Siri/dictation toggles; [Language & Region settings](https://support.apple.com/guide/mac-help/change-language-region-settings-on-mac-intl163/mac)
+describes the macOS language/region controls.
 
 ## Observed evidence and pending QA
+
+The observations below belong to the original advanced local history, not a
+fresh test of the reconciled build. On 2026-10-07 the user requested combining
+advanced local commit `53018512de00cd324421859290e63b51417e8016` with published
+review head `25a3085b83bfc4bd9da730b75785b0d02e033ac5`. The original ticket's
+mixed-only/no-Me-Them limitation is superseded by the explicitly expanded user
+scope above. New build and human acceptance results must be recorded separately
+after validation; CodeQL is explicitly delegated to the user.
 
 2026-09-30, Mac16,7 / Apple M4 Pro / 48 GiB / macOS 27.0 (26A428), CLT Swift 6.3.3:
 real Speech SDK probe returned hardware available, current locale
 `en_US@rg=cazzzz`, equivalent supported locale `en_US`, asset status `supported`
 (not installed). The real Swift bridge compiled against the installed SDK.
 
-2026-10-05 review: the Rust test binary reports `en_US` installed. The actual SDK
-negotiated mono 16000 Hz Int16 interleaved (`commonFormat=3`), so rejecting any
-format other than float32 previously prevented load on this machine. No installation
-or removal was performed. The synthetic phrase “The quick brown fox jumps over
-the lazy dog.” decoded exactly on three runs at 16000 Hz. Initial final range:
-0–2.76 s; after preserving reset: 3.67075–6.43075 s; after new-session reset:
-0–2.76 s. All segments were final with no speaker identity. Unload rejected
-further transcription. The forced stub engine suite passed 119 tests (8 ignored).
-The later isolated native Slint binary instead reported `en_US` supported but
-not installed; the cause of this process/time-dependent difference remains
-unverified, with no installation/removal requested between probes. Its real
-catalogue/FR/EN rendering and this limit are recorded in
-[`docs/qa/sou-121`](../qa/sou-121/README.md). Do not infer shipped-app Ready from
-the test-binary success.
-The deterministic actor regression also verifies delayed pre-pause results after
-a pause longer than drain plus lookback, every sample fed, and unchanged stop
-timestamps. A failed-then-successful restart regression covers clock accounting.
+At that initial September check, no asset installation, live microphone
+transcription, PTT/toggle+polish or mixed meeting was exercised. Those were pending
+human acceptance checks. A status probe proves API reachability, not ASR output.
+The PR was kept draft for review of the observation and stub/runtime lifecycle
+paths. Use an isolated profile, explicitly select Apple Speech to install,
+transcribe a known phrase, stop/restart, and reselect Kyutai. Never purge shared
+Speech assets as part of a test.
 
-Reproduce the opt-in real probe without microphone/profile access (assets must
-already be installed; the test never installs them):
+2026-10-04: live loading exposed an invalid float32-only format assumption. The
+installed en_US assets require interleaved mono Int16 at 16 kHz. The bridge now
+converts Rust float32 PCM to that negotiated format. The opt-in integration test
+`real_bridge_transcribes_pcm_and_restarts` transcribed the synthesized phrase
+"Today we are testing speech recognition on this computer." exactly, checked
+final timestamps/no speaker labels, then exercised flush, restart and unload.
+This proves the real PCM bridge, not microphone/PTT/toggle/meeting UI acceptance.
+
+2026-10-04, progressive/source parity: the real integration test also receives
+nonempty previews **before Stop** in mono and both source lanes. It recognizes the
+same phrase exactly in each lane, preserves timestamps across asymmetric input,
+drains twice safely, and checks timeline-preserving recovery followed by a new
+session reset. `volatileResults` alone did not emit a preview before the short
+fixture ended; the official progressive preset passed this check. Deterministic
+tests cover revised previews, empty withdrawals, independent lanes, bounded
+timestamps, asymmetric PCM, preview suppression during catch-up and final salvage.
+
+To repeat (explicitly reserves/installs system assets for the supported locale):
 
 ```sh
-say -v Samantha -o /tmp/sou121-phrase.wav --file-format=WAVE --data-format=LEI16@16000 \
-  'The quick brown fox jumps over the lazy dog.'
-SOUFFLE_SPEECH_TEST_WAV=/tmp/sou121-phrase.wav cargo test --manifest-path app/Cargo.toml \
-  -p souffle --lib real_bridge_known_phrase_and_session_resets -- --ignored --nocapture
-SOUFFLE_FORCE_SPEECH_STUB=1 cargo test --manifest-path app/Cargo.toml -p souffle --lib engine::
+say -v Samantha -o /private/tmp/sou-121-known-phrase.aiff 'Today we are testing speech recognition on this computer.'
+afconvert -f WAVE -d LEF32@16000 -c 1 /private/tmp/sou-121-known-phrase.aiff /private/tmp/sou-121-known-phrase.wav
+SOUFFLE_SPEECH_TEST_WAV=/private/tmp/sou-121-known-phrase.wav \
+SOUFFLE_SPEECH_TEST_TEXT='Today we are testing speech recognition' \
+cargo test --manifest-path app/Cargo.toml -p souffle --lib \
+  engine::apple_speech::tests::real_bridge_transcribes_pcm_and_restarts -- --ignored --nocapture
 ```
 
-Live microphone PTT/toggle+polish, system-mix recording and missing-asset
-installation/cancellation remain pending end-to-end acceptance. The real probe
-proves ASR/flush/reset but does not stand in for those UI/capture paths. Existing
-user Nightly, settings, recordings and shared assets were preserved. Never purge
-shared Speech assets to manufacture a missing-assets test.
+The fixture must use mono float32 at the negotiated sample rate, and its phrase
+must match the system Speech locale; this example is for en_US at 16 kHz.
+
+2026-10-05, Settings follow-up: the user confirmed the preceding transcription
+build worked and accepted the rebuilt Settings screen. The local build completed
+with `make nightly`, reopened the Nightly bundle, and was signed with Developer ID
+Application / team `X6H966RSDB` (bundle `com.souffle.desktop.nightly`). A subsequent
+`codesign --verify --deep --strict` passed. The app was left running for testing;
+no system assets, app data or TCC permissions were purged.
+
+Validation for this Settings change:
+
+- Workspace tests: 1,464 passed, 19 ignored (including opt-in native ASR tests).
+- Workspace Clippy, all targets, with warnings denied: passed.
+- Rust formatting, diff whitespace and the centralized FR/EN translation gate:
+  passed.
+- Deterministic tests cover effective-locale/name preservation, all six typed
+  unavailable reasons, exclusion of unavailable models from selection, reactive
+  FR/EN display-name switching, and preservation of the stored unload timeout.
+- The `apple_speech_settings` Rust example provides an isolated native rendering
+  harness for unavailable cases without changing macOS language, Siri, the real
+  model selection or user data. It was checked by Clippy; a separate capture
+  campaign for these synthetic cases was not run for this follow-up.
+
+Local validation logs: `/tmp/souffle-pr364-settings-tests.log`,
+`/tmp/souffle-pr364-settings-clippy.log` and
+`/tmp/souffle-pr364-settings-nightly.log`. The signed debug build reports a linker
+compact-unwind size warning; the build and signature verification succeed.
 
 ## Primary references
 
 - [Apple SpeechAnalyzer](https://developer.apple.com/documentation/speech/speechanalyzer)
 - [Apple AssetInventory](https://developer.apple.com/documentation/speech/assetinventory)
+- [Apple progressive transcription preset](https://developer.apple.com/documentation/speech/speechtranscriber/preset/timeindexedprogressivetranscription)
+- [Apple fast-results latency/accuracy tradeoff](https://developer.apple.com/documentation/speech/speechtranscriber/reportingoption/fastresults)
 - [WWDC25 session 277](https://developer.apple.com/videos/play/wwdc2025/277/)
 
 The installed SDK interface was also checked for locale equivalence, actual asset

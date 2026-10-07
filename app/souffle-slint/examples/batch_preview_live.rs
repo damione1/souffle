@@ -4,6 +4,8 @@
 //! SOU275_PCM_RATE overrides the input fixture rate; the engine contract
 //! determines resampling, delivery hop and pacing. SOU275_HOLD_SECONDS keeps
 //! the finished fixture transcript visible for native screenshot inspection.
+//! SOUFFLE_REPLAY_INSTALL_ASSETS=1 explicitly installs/reserves the chosen
+//! profile's assets (needed for system Speech in this separate test process).
 //! Run from app/ so the bundled VAD/ORT resources resolve.
 
 slint::include_modules!();
@@ -70,29 +72,14 @@ fn main() {
     let engine = std::env::var("SOU273_ENGINE").expect("set SOU273_ENGINE");
     let profile =
         souffle_lib::engine::resolve_transcription_profile(Some(&engine), None, None).unwrap();
-    let audio_input = souffle_lib::engine::create_engine(&profile)
-        .unwrap()
-        .audio_requirements();
     let source_rate: u32 = std::env::var("SOU275_PCM_RATE")
         .unwrap_or_else(|_| "16000".into())
         .parse()
         .unwrap();
-    assert!(source_rate > 0 && audio_input.sample_rate_hz > 0);
-    let hop = audio_input.chunk_size_samples as usize;
-    assert!(hop > 0);
-    let pcm = resample_fixture(pcm, source_rate, audio_input.sample_rate_hz);
-    let system_pcm =
-        system_pcm.map(|system| resample_fixture(system, source_rate, audio_input.sample_rate_hz));
     let hold_seconds: u64 = std::env::var("SOU275_HOLD_SECONDS")
         .unwrap_or_else(|_| "2".into())
         .parse()
         .unwrap();
-    eprintln!(
-        "Fixture audio source_hz={source_rate} engine_hz={} hop={hop} samples={} duration={:.3}s dual={dual}",
-        audio_input.sample_rate_hz,
-        pcm.len(),
-        pcm.len() as f64 / f64::from(audio_input.sample_rate_hz)
-    );
     let (tx, rx) = crossbeam_channel::bounded(200);
     let actor = EngineActorHandle::spawn(
         rx,
@@ -102,9 +89,30 @@ fn main() {
     )
     .unwrap();
     let worker = std::thread::spawn(move || {
-        actor
-            .load_model(profile.clone(), souffle_lib::models::model_dir(&profile))
+        if std::env::var("SOUFFLE_REPLAY_INSTALL_ASSETS").as_deref() == Ok("1") {
+            souffle_lib::models::download_model(&profile, |_| {}).unwrap();
+        }
+        let info = actor
+            .load_model(
+                profile.clone(),
+                souffle_lib::models::model_location(&profile).unwrap(),
+            )
             .unwrap();
+        // System-managed analyzers negotiate their PCM format at load time.
+        // The loaded contract drives replay for every engine.
+        let audio_input = info.audio;
+        assert!(source_rate > 0 && audio_input.sample_rate_hz > 0);
+        let hop = audio_input.chunk_size_samples as usize;
+        assert!(hop > 0);
+        let pcm = resample_fixture(pcm, source_rate, audio_input.sample_rate_hz);
+        let system_pcm = system_pcm
+            .map(|system| resample_fixture(system, source_rate, audio_input.sample_rate_hz));
+        eprintln!(
+            "Fixture audio source_hz={source_rate} engine_hz={} hop={hop} samples={} duration={:.3}s dual={dual}",
+            audio_input.sample_rate_hz,
+            pcm.len(),
+            pcm.len() as f64 / f64::from(audio_input.sample_rate_hz)
+        );
         let started = Arc::new(Mutex::new(Instant::now()));
         let callback_started = started.clone();
         let callback_live = live.clone();

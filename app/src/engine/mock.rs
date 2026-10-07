@@ -168,6 +168,7 @@ pub struct MockEngine {
     diarize: bool,
     loaded: bool,
     pub transcribe_responses: VecDeque<Result<Vec<TranscriptionSegment>, EngineError>>,
+    pub dual_transcribe_responses: VecDeque<Result<Vec<TranscriptionSegment>, EngineError>>,
     pub flush_responses: VecDeque<Result<Vec<TranscriptionSegment>, EngineError>>,
     pub salvage_segments: Vec<TranscriptionSegment>,
     /// Shared with tests via `unload_count_handle()` (clone it before handing
@@ -222,6 +223,7 @@ impl MockEngine {
             silence_handling: SilenceHandling::Gate,
             loaded: false,
             transcribe_responses: VecDeque::new(),
+            dual_transcribe_responses: VecDeque::new(),
             flush_responses: VecDeque::new(),
             salvage_segments: Vec::new(),
             unload_count: Arc::new(AtomicUsize::new(0)),
@@ -429,6 +431,9 @@ impl TranscriptionEngine for MockEngine {
         self.dual_calls.push((me.to_vec(), them.to_vec()));
         if let Ok(mut fed) = self.fed_dual.lock() {
             fed.push((me.to_vec(), them.to_vec()));
+        }
+        if let Some(response) = self.dual_transcribe_responses.pop_front() {
+            return response;
         }
 
         let tagged = |speaker: Speaker, text: &str| TranscriptionSegment {

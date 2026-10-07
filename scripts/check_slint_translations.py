@@ -20,6 +20,8 @@ UNCHANGED_ENGLISH = {
     # prose - the same words in both languages.
     "Markdown (.md)", "JSON (.json)", "Audio (.ogg)",
     " {}", " / {}", "• {}", "→ {}", "Version {}",
+    # Brand plus Foundation-localized open-set locale data.
+    "Apple Speech", "Apple Speech ({})", "Apple Speech — {} [{}]",
 }
 
 

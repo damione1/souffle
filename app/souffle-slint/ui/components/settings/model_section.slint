@@ -1,7 +1,8 @@
 import { SettingsField } from "settings_field.slint";
 import { SettingsGroup } from "settings_group.slint";
 import { Theme } from "../../theme.slint";
-import { TranscriptionPhase } from "../../types.slint";
+import { TranscriptionPhase, TranscriptionUnavailableReason, SystemSettingsPane } from "../../types.slint";
+import { ThemedButton } from "../themed_button.slint";
 import { ThemedComboBox } from "../themed_combo.slint";
 import { StatusIndicator } from "status_indicator.slint";
 
@@ -15,6 +16,10 @@ export component ModelSection inherits VerticalLayout {
     in property <bool> ready;
     in property <[string]> model-labels;
     in property <string> selected-model-label;
+    in property <bool> apple-speech-selected;
+    in property <bool> apple-speech-unavailable;
+    in property <TranscriptionUnavailableReason> apple-speech-unavailable-reason;
+    callback open-system-settings-requested(SystemSettingsPane);
     in property <bool> busy;
     in property <bool> downloading;
     in property <string> download-progress-label;
@@ -70,6 +75,77 @@ export component ModelSection inherits VerticalLayout {
         }
     }
 
+    if root.apple-speech-selected && !root.apple-speech-unavailable: VerticalLayout {
+        padding-left: Theme.settings-inset;
+        padding-right: Theme.settings-inset;
+        padding-bottom: 15px;
+        spacing: 10px;
+        Text {
+            text: @tr("La langue affichée est celle prise en charge par Apple Speech pour la langue et la région de ce Mac. Pour la modifier, ouvrez Réglages Système > Général > Langue et région, puis relancez Soufflé.");
+            font-size: 12px;
+            color: Theme.text-secondary;
+            wrap: word-wrap;
+        }
+        Text {
+            text: @tr("La transcription fonctionne sans activer Siri ou Apple Intelligence. macOS gère le modèle ; Soufflé libère les sessions inactives.");
+            font-size: 12px;
+            color: Theme.text-muted;
+            wrap: word-wrap;
+        }
+        HorizontalLayout {
+            alignment: start;
+            ThemedButton {
+                text: @tr("Ouvrir Langue et région");
+                clicked => { root.open-system-settings-requested(SystemSettingsPane.language-and-region); }
+            }
+        }
+    }
+
+    if root.apple-speech-unavailable: VerticalLayout {
+        padding-left: Theme.settings-inset;
+        padding-right: Theme.settings-inset;
+        padding-bottom: 15px;
+        spacing: 10px;
+        Text {
+            text: @tr("Apple Speech indisponible");
+            font-size: 13px;
+            color: Theme.text-secondary;
+        }
+        Text {
+            text: root.apple-speech-unavailable-reason == TranscriptionUnavailableReason.os-unsupported
+                ? @tr("Apple Speech nécessite macOS 26 ou une version ultérieure. Vérifiez les mises à jour de macOS ou choisissez un autre modèle.")
+                : root.apple-speech-unavailable-reason == TranscriptionUnavailableReason.device-unsupported
+                ? @tr("Apple Speech n'est pas pris en charge sur ce Mac. Choisissez un autre modèle de transcription.")
+                : root.apple-speech-unavailable-reason == TranscriptionUnavailableReason.build-unsupported
+                ? @tr("Cette version de Soufflé n'inclut pas Apple Speech. Installez une version compatible ou choisissez un autre modèle.")
+                : root.apple-speech-unavailable-reason == TranscriptionUnavailableReason.locale-unsupported
+                ? @tr("La langue et la région actuelles de ce Mac ne sont pas prises en charge par Apple Speech. Modifiez-les dans Réglages Système > Général > Langue et région, puis relancez Soufflé, ou choisissez un autre modèle.")
+                : root.apple-speech-unavailable-reason == TranscriptionUnavailableReason.assets-unsupported
+                ? @tr("Les ressources Apple Speech ne sont pas disponibles pour la langue de ce Mac. Choisissez une autre langue dans Langue et région, puis relancez Soufflé, ou utilisez un autre modèle.")
+                : root.apple-speech-unavailable-reason == TranscriptionUnavailableReason.check-failed
+                ? @tr("Impossible de vérifier la disponibilité d'Apple Speech. Relancez Soufflé pour réessayer ou choisissez un autre modèle.")
+                : "";
+            font-size: 12px;
+            color: Theme.text-muted;
+            wrap: word-wrap;
+        }
+        if root.apple-speech-unavailable-reason == TranscriptionUnavailableReason.locale-unsupported
+            || root.apple-speech-unavailable-reason == TranscriptionUnavailableReason.assets-unsupported: HorizontalLayout {
+            alignment: start;
+            ThemedButton {
+                text: @tr("Ouvrir Langue et région");
+                clicked => { root.open-system-settings-requested(SystemSettingsPane.language-and-region); }
+            }
+        }
+        if root.apple-speech-unavailable-reason == TranscriptionUnavailableReason.os-unsupported: HorizontalLayout {
+            alignment: start;
+            ThemedButton {
+                text: @tr("Ouvrir Mise à jour de logiciels");
+                clicked => { root.open-system-settings-requested(SystemSettingsPane.software-update); }
+            }
+        }
+    }
+
     if root.downloading: VerticalLayout {
         spacing: 4px;
         Text {
@@ -97,7 +173,7 @@ export component ModelSection inherits VerticalLayout {
         wrap: word-wrap;
     }
 
-    SettingsField {
+    if !root.apple-speech-selected: SettingsField {
         label: @tr("Délai avant déchargement");
         description: @tr("Décharger le modèle de la mémoire après une période d'inactivité.");
 

@@ -1,4 +1,5 @@
 import { Theme } from "../theme.slint";
+import { TranscriptionLabels } from "transcription_labels.slint";
 import { LucideIcon, IconSet } from "lucide_icon.slint";
 
 // Port of app.css `.field-select`. `std-widgets` ComboBox uses the Fluent
@@ -37,7 +38,7 @@ export component ThemedComboBox inherits Rectangle {
 
     accessible-role: combobox;
     accessible-label: root.control-label;
-    accessible-value: root.current-value;
+    accessible-value: label.text;
     accessible-enabled: root.enabled;
     accessible-expandable: true;
     accessible-expanded: popup.is-open;
@@ -74,7 +75,7 @@ export component ThemedComboBox inherits Rectangle {
         width: parent.width - 36px;
         height: parent.height;
         text: root.current-value == "__AUTOMATIC__" ? @tr("Automatique")
-            : root.current-value == "__APPLE_SPEECH_SYSTEM__" ? @tr("Apple Speech — assets système")
+            : root.current-value == "__APPLE_SPEECH_SYSTEM__" ? TranscriptionLabels.speech-label()
             : root.current-value == "__FOLLOW_DEFAULT__" ? @tr("Suivre l'appareil par défaut")
             : root.current-value == "__CLAMSHELL_DEVICE_UNAVAILABLE__" ? @tr("Appareil personnalisé (indisponible)")
             : root.current-value == "__NEVER__" ? @tr("Jamais")
@@ -233,7 +234,7 @@ export component ThemedComboBox inherits Rectangle {
                             width: parent.width - 20px;
                             height: parent.height;
                             text: item == "__AUTOMATIC__" ? @tr("Automatique")
-                                : item == "__APPLE_SPEECH_SYSTEM__" ? @tr("Apple Speech — assets système")
+                                : item == "__APPLE_SPEECH_SYSTEM__" ? TranscriptionLabels.speech-label()
                                 : item == "__FOLLOW_DEFAULT__" ? @tr("Suivre l'appareil par défaut")
                                 : item == "__NEVER__" ? @tr("Jamais")
                                 : item == "__DEFAULT__" ? @tr("Par défaut")

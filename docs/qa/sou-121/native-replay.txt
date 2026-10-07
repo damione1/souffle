@@ -1,0 +1,246 @@
+Fixture audio source_hz=16000 engine_hz=16000 hop=1600 samples=560000 duration=35.000s dual=true
+UI segment speaker=Some(Me) final=false start=0.000s end=1.100s actor_at=1.213s slint_queue=0.002s text="I"
+UI blocks=1 timeline=["Me@0:00"]
+UI segment speaker=Some(Me) final=false start=0.000s end=1.100s actor_at=1.213s slint_queue=0.002s text="I am"
+UI blocks=1 timeline=["Me@0:00"]
+UI segment speaker=Some(Me) final=false start=0.000s end=2.000s actor_at=2.104s slint_queue=0.000s text="I am speaking"
+UI blocks=1 timeline=["Me@0:00"]
+UI segment speaker=Some(Me) final=false start=0.000s end=2.000s actor_at=2.104s slint_queue=0.001s text="I am speaking through"
+UI blocks=1 timeline=["Me@0:00"]
+UI segment speaker=Some(Me) final=false start=0.000s end=2.000s actor_at=2.104s slint_queue=0.001s text="I am speaking through the"
+UI blocks=1 timeline=["Me@0:00"]
+UI segment speaker=Some(Me) final=false start=0.000s end=2.000s actor_at=2.104s slint_queue=0.001s text="I am speaking through the mic"
+UI blocks=1 timeline=["Me@0:00"]
+UI segment speaker=Some(Me) final=false start=0.000s end=3.000s actor_at=3.102s slint_queue=0.000s text="I am speaking through the microp"
+UI blocks=1 timeline=["Me@0:00"]
+UI segment speaker=Some(Me) final=false start=0.000s end=3.000s actor_at=3.102s slint_queue=0.000s text="I am speaking through the microphone"
+UI blocks=1 timeline=["Me@0:00"]
+UI segment speaker=Some(Me) final=false start=0.000s end=3.000s actor_at=3.102s slint_queue=0.000s text="I am speaking through the microphone."
+UI blocks=1 timeline=["Me@0:00"]
+UI segment speaker=Some(Me) final=true start=0.120s end=2.340s actor_at=3.102s slint_queue=0.001s text="I am speaking through the microphone."
+UI blocks=1 timeline=["Me@0:00"]
+UI segment speaker=Some(Me) final=false start=2.340s end=3.000s actor_at=3.102s slint_queue=0.001s text="We"
+UI blocks=1 timeline=["Me@0:00"]
+UI segment speaker=Some(Me) final=false start=2.340s end=4.000s actor_at=4.101s slint_queue=0.000s text="We need"
+UI blocks=1 timeline=["Me@0:00"]
+UI segment speaker=Some(Me) final=false start=2.340s end=4.000s actor_at=4.101s slint_queue=0.000s text="We need pro"
+UI blocks=1 timeline=["Me@0:00"]
+UI segment speaker=Some(Me) final=false start=2.340s end=4.000s actor_at=4.101s slint_queue=0.000s text="We need prog"
+UI blocks=1 timeline=["Me@0:00"]
+UI segment speaker=Some(Me) final=false start=2.340s end=4.000s actor_at=4.101s slint_queue=0.001s text="We need progress"
+UI blocks=1 timeline=["Me@0:00"]
+UI segment speaker=Some(Me) final=false start=2.340s end=4.000s actor_at=4.101s slint_queue=0.001s text="We need progressive speech"
+UI blocks=1 timeline=["Me@0:00"]
+UI segment speaker=Some(Me) final=false start=2.340s end=4.900s actor_at=5.004s slint_queue=0.000s text="We need progressive speech recogn"
+UI blocks=1 timeline=["Me@0:00"]
+UI segment speaker=Some(Me) final=false start=2.340s end=4.900s actor_at=5.004s slint_queue=0.001s text="We need progressive speech recognition"
+UI blocks=1 timeline=["Me@0:00"]
+UI segment speaker=Some(Them) final=false start=0.000s end=4.900s actor_at=5.004s slint_queue=0.001s text="This"
+UI blocks=2 timeline=["Them@0:00", "Me@0:00"]
+UI segment speaker=Some(Them) final=false start=0.000s end=4.900s actor_at=5.004s slint_queue=0.002s text="This is"
+UI blocks=2 timeline=["Them@0:00", "Me@0:00"]
+UI segment speaker=Some(Them) final=false start=0.000s end=4.900s actor_at=5.004s slint_queue=0.002s text="This is the"
+UI blocks=2 timeline=["Them@0:00", "Me@0:00"]
+UI segment speaker=Some(Me) final=false start=2.340s end=5.900s actor_at=6.004s slint_queue=0.000s text="We need progressive speech recognition so"
+UI blocks=2 timeline=["Them@0:00", "Me@0:00"]
+UI segment speaker=Some(Me) final=false start=2.340s end=5.900s actor_at=6.004s slint_queue=0.001s text="We need progressive speech recognition so each"
+UI blocks=2 timeline=["Them@0:00", "Me@0:00"]
+UI segment speaker=Some(Me) final=false start=2.340s end=5.900s actor_at=6.004s slint_queue=0.001s text="We need progressive speech recognition so each new"
+UI blocks=2 timeline=["Them@0:00", "Me@0:00"]
+UI segment speaker=Some(Me) final=false start=2.340s end=5.900s actor_at=6.004s slint_queue=0.001s text="We need progressive speech recognition so each new sent"
+UI blocks=2 timeline=["Them@0:00", "Me@0:00"]
+UI segment speaker=Some(Them) final=false start=0.000s end=5.900s actor_at=6.004s slint_queue=0.001s text="This is the system"
+UI blocks=2 timeline=["Them@0:00", "Me@0:00"]
+UI segment speaker=Some(Them) final=false start=0.000s end=5.900s actor_at=6.004s slint_queue=0.002s text="This is the systemstem"
+UI blocks=2 timeline=["Them@0:00", "Me@0:00"]
+UI segment speaker=Some(Them) final=false start=0.000s end=5.900s actor_at=6.004s slint_queue=0.002s text="This is the systemstem audio"
+UI blocks=2 timeline=["Them@0:00", "Me@0:00"]
+UI segment speaker=Some(Them) final=false start=0.000s end=5.900s actor_at=6.004s slint_queue=0.002s text="This is the systemstem audio speaking"
+UI blocks=2 timeline=["Them@0:00", "Me@0:00"]
+UI segment speaker=Some(Me) final=false start=2.340s end=6.800s actor_at=6.903s slint_queue=0.000s text="We need progressive speech recognition so each new sentence"
+UI blocks=2 timeline=["Them@0:00", "Me@0:00"]
+UI segment speaker=Some(Me) final=false start=2.340s end=6.800s actor_at=6.903s slint_queue=0.000s text="We need progressive speech recognition so each new sentence app"
+UI blocks=2 timeline=["Them@0:00", "Me@0:00"]
+UI segment speaker=Some(Me) final=false start=2.340s end=6.800s actor_at=6.903s slint_queue=0.000s text="We need progressive speech recognition so each new sentence appears"
+UI blocks=2 timeline=["Them@0:00", "Me@0:00"]
+UI segment speaker=Some(Me) final=false start=2.340s end=6.800s actor_at=6.903s slint_queue=0.001s text="We need progressive speech recognition so each new sentence appears while"
+UI blocks=2 timeline=["Them@0:00", "Me@0:00"]
+UI segment speaker=Some(Me) final=false start=2.340s end=6.800s actor_at=6.903s slint_queue=0.001s text="We need progressive speech recognition so each new sentence appears while the"
+UI blocks=2 timeline=["Them@0:00", "Me@0:00"]
+UI segment speaker=Some(Me) final=false start=2.340s end=6.800s actor_at=6.903s slint_queue=0.001s text="We need progressive speech recognition so each new sentence appears while the meeting"
+UI blocks=2 timeline=["Them@0:00", "Me@0:00"]
+UI segment speaker=Some(Them) final=false start=0.000s end=6.800s actor_at=6.903s slint_queue=0.001s text="This is the systemstem audio speaking."
+UI blocks=2 timeline=["Them@0:00", "Me@0:00"]
+UI segment speaker=Some(Them) final=true start=3.960s end=6.000s actor_at=6.903s slint_queue=0.001s text="This is the system audio speaking."
+UI blocks=2 timeline=["Me@0:00", "Them@0:04"]
+UI segment speaker=Some(Them) final=false start=6.000s end=6.800s actor_at=6.903s slint_queue=0.001s text="Keep"
+UI blocks=2 timeline=["Me@0:00", "Them@0:04"]
+UI segment speaker=Some(Them) final=false start=6.000s end=6.800s actor_at=6.903s slint_queue=0.002s text="Keep the"
+UI blocks=2 timeline=["Me@0:00", "Them@0:04"]
+UI segment speaker=Some(Me) final=false start=2.340s end=7.800s actor_at=7.901s slint_queue=0.000s text="We need progressive speech recognition so each new sentence appears while the meeting is"
+UI blocks=2 timeline=["Me@0:00", "Them@0:04"]
+UI segment speaker=Some(Me) final=false start=2.340s end=7.800s actor_at=7.901s slint_queue=0.000s text="We need progressive speech recognition so each new sentence appears while the meeting is still"
+UI blocks=2 timeline=["Me@0:00", "Them@0:04"]
+UI segment speaker=Some(Me) final=false start=2.340s end=7.800s actor_at=7.901s slint_queue=0.001s text="We need progressive speech recognition so each new sentence appears while the meeting is still running"
+UI blocks=2 timeline=["Me@0:00", "Them@0:04"]
+UI segment speaker=Some(Them) final=false start=6.000s end=7.800s actor_at=7.901s slint_queue=0.001s text="Keep the 2"
+UI blocks=2 timeline=["Me@0:00", "Them@0:04"]
+UI segment speaker=Some(Them) final=false start=6.000s end=7.800s actor_at=7.901s slint_queue=0.001s text="Keep the 2 sour"
+UI blocks=2 timeline=["Me@0:00", "Them@0:04"]
+UI segment speaker=Some(Them) final=false start=6.000s end=7.800s actor_at=7.901s slint_queue=0.001s text="Keep the 2 sources"
+UI blocks=2 timeline=["Me@0:00", "Them@0:04"]
+UI segment speaker=Some(Them) final=false start=6.000s end=7.800s actor_at=7.901s slint_queue=0.001s text="Keep the 2 sources separ"
+UI blocks=2 timeline=["Me@0:00", "Them@0:04"]
+UI segment speaker=Some(Them) final=false start=6.000s end=7.800s actor_at=7.901s slint_queue=0.002s text="Keep the 2 sources separate"
+UI blocks=2 timeline=["Me@0:00", "Them@0:04"]
+UI segment speaker=Some(Me) final=false start=2.340s end=8.800s actor_at=8.903s slint_queue=0.000s text="We need progressive speech recognition so each new sentence appears while the meeting is still running."
+UI blocks=2 timeline=["Me@0:00", "Them@0:04"]
+UI segment speaker=Some(Me) final=true start=2.340s end=7.800s actor_at=8.903s slint_queue=0.000s text="We need progressive speech recognition, so each new sentence appears while the meeting is still running."
+UI blocks=2 timeline=["Me@0:00", "Them@0:04"]
+UI segment speaker=Some(Them) final=false start=6.000s end=8.800s actor_at=8.903s slint_queue=0.000s text="Keep the 2 sources separate and"
+UI blocks=2 timeline=["Me@0:00", "Them@0:04"]
+UI segment speaker=Some(Them) final=false start=6.000s end=8.800s actor_at=8.903s slint_queue=0.001s text="Keep the 2 sources separate and show"
+UI blocks=2 timeline=["Me@0:00", "Them@0:04"]
+UI segment speaker=Some(Them) final=false start=6.000s end=8.800s actor_at=8.903s slint_queue=0.001s text="Keep the 2 sources separate and show my"
+UI blocks=2 timeline=["Me@0:00", "Them@0:04"]
+UI segment speaker=Some(Them) final=false start=6.000s end=8.800s actor_at=8.903s slint_queue=0.001s text="Keep the 2 sources separate and show my words"
+UI blocks=2 timeline=["Me@0:00", "Them@0:04"]
+UI segment speaker=Some(Them) final=false start=6.000s end=9.700s actor_at=9.805s slint_queue=0.000s text="Keep the 2 sources separate and show my words in"
+UI blocks=2 timeline=["Me@0:00", "Them@0:04"]
+UI segment speaker=Some(Them) final=false start=6.000s end=9.700s actor_at=9.805s slint_queue=0.001s text="Keep the 2 sources separate and show my words in the"
+UI blocks=2 timeline=["Me@0:00", "Them@0:04"]
+UI segment speaker=Some(Them) final=false start=6.000s end=9.700s actor_at=9.806s slint_queue=0.001s text="Keep the 2 sources separate and show my words in the other"
+UI blocks=2 timeline=["Me@0:00", "Them@0:04"]
+UI segment speaker=Some(Them) final=false start=6.000s end=9.700s actor_at=9.806s slint_queue=0.001s text="Keep the 2 sources separate and show my words in the other speaker"
+UI blocks=2 timeline=["Me@0:00", "Them@0:04"]
+UI segment speaker=Some(Them) final=false start=6.000s end=10.700s actor_at=10.803s slint_queue=0.000s text="Keep the 2 sources separate and show my words in the other speaker col"
+UI blocks=2 timeline=["Me@0:00", "Them@0:04"]
+UI segment speaker=Some(Them) final=false start=6.000s end=10.700s actor_at=10.803s slint_queue=0.000s text="Keep the 2 sources separate and show my words in the other speaker colum"
+UI blocks=2 timeline=["Me@0:00", "Them@0:04"]
+UI segment speaker=Some(Them) final=false start=6.000s end=10.700s actor_at=10.803s slint_queue=0.000s text="Keep the 2 sources separate and show my words in the other speaker column"
+UI blocks=2 timeline=["Me@0:00", "Them@0:04"]
+UI segment speaker=Some(Them) final=false start=6.000s end=10.700s actor_at=10.803s slint_queue=0.001s text="Keep the 2 sources separate and show my words in the other speaker column."
+UI blocks=2 timeline=["Me@0:00", "Them@0:04"]
+UI segment speaker=Some(Them) final=true start=6.000s end=10.140s actor_at=10.803s slint_queue=0.001s text="Keep the 2 sources separate and show my words in the other speaker column."
+UI blocks=2 timeline=["Me@0:00", "Them@0:04"]
+UI segment speaker=Some(Me) final=false start=7.800s end=21.200s actor_at=21.304s slint_queue=0.003s text="I"
+UI blocks=3 timeline=["Me@0:00", "Them@0:04", "Me@0:08"]
+UI segment speaker=Some(Me) final=false start=7.800s end=21.200s actor_at=21.304s slint_queue=0.004s text="I am"
+UI blocks=3 timeline=["Me@0:00", "Them@0:04", "Me@0:08"]
+UI segment speaker=Some(Me) final=false start=7.800s end=21.200s actor_at=21.304s slint_queue=0.004s text="I am speaking"
+UI blocks=3 timeline=["Me@0:00", "Them@0:04", "Me@0:08"]
+UI segment speaker=Some(Me) final=false start=7.800s end=21.200s actor_at=21.304s slint_queue=0.004s text="I am speaking through"
+UI blocks=3 timeline=["Me@0:00", "Them@0:04", "Me@0:08"]
+UI segment speaker=Some(Me) final=false start=7.800s end=21.200s actor_at=21.304s slint_queue=0.004s text="I am speaking through the"
+UI blocks=3 timeline=["Me@0:00", "Them@0:04", "Me@0:08"]
+UI segment speaker=Some(Me) final=false start=7.800s end=22.200s actor_at=22.304s slint_queue=0.006s text="I am speaking through the mic"
+UI blocks=3 timeline=["Me@0:00", "Them@0:04", "Me@0:08"]
+UI segment speaker=Some(Me) final=false start=7.800s end=22.200s actor_at=22.304s slint_queue=0.007s text="I am speaking through the microp"
+UI blocks=3 timeline=["Me@0:00", "Them@0:04", "Me@0:08"]
+UI segment speaker=Some(Me) final=false start=7.800s end=22.200s actor_at=22.304s slint_queue=0.007s text="I am speaking through the microphone"
+UI blocks=3 timeline=["Me@0:00", "Them@0:04", "Me@0:08"]
+UI segment speaker=Some(Me) final=false start=7.800s end=23.200s actor_at=23.304s slint_queue=0.004s text="I am speaking through the microphone."
+UI blocks=3 timeline=["Me@0:00", "Them@0:04", "Me@0:08"]
+UI segment speaker=Some(Me) final=true start=20.040s end=22.200s actor_at=23.304s slint_queue=0.004s text="I am speaking through the microphone."
+UI blocks=3 timeline=["Me@0:00", "Them@0:04", "Me@0:20"]
+UI segment speaker=Some(Me) final=false start=22.200s end=23.200s actor_at=23.304s slint_queue=0.004s text="We"
+UI blocks=3 timeline=["Me@0:00", "Them@0:04", "Me@0:20"]
+UI segment speaker=Some(Me) final=false start=22.200s end=23.200s actor_at=23.304s slint_queue=0.005s text="We need"
+UI blocks=3 timeline=["Me@0:00", "Them@0:04", "Me@0:20"]
+UI segment speaker=Some(Me) final=false start=22.200s end=23.200s actor_at=23.304s slint_queue=0.005s text="We need pro"
+UI blocks=3 timeline=["Me@0:00", "Them@0:04", "Me@0:20"]
+UI segment speaker=Some(Me) final=false start=22.200s end=23.200s actor_at=23.304s slint_queue=0.005s text="We need prog"
+UI blocks=3 timeline=["Me@0:00", "Them@0:04", "Me@0:20"]
+UI segment speaker=Some(Me) final=false start=22.200s end=23.200s actor_at=23.304s slint_queue=0.005s text="We need progress"
+UI blocks=3 timeline=["Me@0:00", "Them@0:04", "Me@0:20"]
+UI segment speaker=Some(Me) final=false start=22.200s end=24.100s actor_at=24.201s slint_queue=0.000s text="We need progressive speech"
+UI blocks=3 timeline=["Me@0:00", "Them@0:04", "Me@0:20"]
+UI segment speaker=Some(Me) final=false start=22.200s end=24.100s actor_at=24.201s slint_queue=0.001s text="We need progressive speech recogn"
+UI blocks=3 timeline=["Me@0:00", "Them@0:04", "Me@0:20"]
+UI segment speaker=Some(Me) final=false start=22.200s end=25.100s actor_at=25.206s slint_queue=0.005s text="We need progressive speech recognition"
+UI blocks=3 timeline=["Me@0:00", "Them@0:04", "Me@0:20"]
+UI segment speaker=Some(Me) final=false start=22.200s end=25.100s actor_at=25.206s slint_queue=0.005s text="We need progressive speech recognition so"
+UI blocks=3 timeline=["Me@0:00", "Them@0:04", "Me@0:20"]
+UI segment speaker=Some(Me) final=false start=22.200s end=25.100s actor_at=25.206s slint_queue=0.006s text="We need progressive speech recognition so each"
+UI blocks=3 timeline=["Me@0:00", "Them@0:04", "Me@0:20"]
+UI segment speaker=Some(Them) final=false start=10.140s end=25.100s actor_at=25.206s slint_queue=0.006s text="This"
+UI blocks=3 timeline=["Me@0:00", "Them@0:04", "Me@0:20"]
+UI segment speaker=Some(Them) final=false start=10.140s end=25.100s actor_at=25.206s slint_queue=0.006s text="This is"
+UI blocks=3 timeline=["Me@0:00", "Them@0:04", "Me@0:20"]
+UI segment speaker=Some(Them) final=false start=10.140s end=25.100s actor_at=25.206s slint_queue=0.007s text="This is the"
+UI blocks=3 timeline=["Me@0:00", "Them@0:04", "Me@0:20"]
+UI segment speaker=Some(Them) final=false start=10.140s end=25.100s actor_at=25.206s slint_queue=0.007s text="This is the system"
+UI blocks=3 timeline=["Me@0:00", "Them@0:04", "Me@0:20"]
+UI segment speaker=Some(Me) final=false start=22.200s end=26.000s actor_at=26.106s slint_queue=0.000s text="We need progressive speech recognition so each new"
+UI blocks=3 timeline=["Me@0:00", "Them@0:04", "Me@0:20"]
+UI segment speaker=Some(Me) final=false start=22.200s end=26.000s actor_at=26.106s slint_queue=0.001s text="We need progressive speech recognition so each new sent"
+UI blocks=3 timeline=["Me@0:00", "Them@0:04", "Me@0:20"]
+UI segment speaker=Some(Me) final=false start=22.200s end=26.000s actor_at=26.106s slint_queue=0.001s text="We need progressive speech recognition so each new sentence"
+UI blocks=3 timeline=["Me@0:00", "Them@0:04", "Me@0:20"]
+UI segment speaker=Some(Me) final=false start=22.200s end=26.000s actor_at=26.106s slint_queue=0.002s text="We need progressive speech recognition so each new sentence app"
+UI blocks=3 timeline=["Me@0:00", "Them@0:04", "Me@0:20"]
+UI segment speaker=Some(Me) final=false start=22.200s end=26.000s actor_at=26.106s slint_queue=0.002s text="We need progressive speech recognition so each new sentence appears"
+UI blocks=3 timeline=["Me@0:00", "Them@0:04", "Me@0:20"]
+UI segment speaker=Some(Them) final=false start=10.140s end=26.000s actor_at=26.106s slint_queue=0.003s text="This is the system audio"
+UI blocks=3 timeline=["Me@0:00", "Them@0:04", "Me@0:20"]
+UI segment speaker=Some(Them) final=false start=10.140s end=26.000s actor_at=26.106s slint_queue=0.003s text="This is the system audio speaking"
+UI blocks=3 timeline=["Me@0:00", "Them@0:04", "Me@0:20"]
+UI segment speaker=Some(Me) final=false start=22.200s end=27.000s actor_at=27.105s slint_queue=0.000s text="We need progressive speech recognition so each new sentence appears while"
+UI blocks=3 timeline=["Me@0:00", "Them@0:04", "Me@0:20"]
+UI segment speaker=Some(Me) final=false start=22.200s end=27.000s actor_at=27.105s slint_queue=0.000s text="We need progressive speech recognition so each new sentence appears while the"
+UI blocks=3 timeline=["Me@0:00", "Them@0:04", "Me@0:20"]
+UI segment speaker=Some(Me) final=false start=22.200s end=27.000s actor_at=27.106s slint_queue=0.001s text="We need progressive speech recognition so each new sentence appears while the meeting"
+UI blocks=3 timeline=["Me@0:00", "Them@0:04", "Me@0:20"]
+UI segment speaker=Some(Me) final=false start=22.200s end=27.000s actor_at=27.106s slint_queue=0.001s text="We need progressive speech recognition so each new sentence appears while the meeting is"
+UI blocks=3 timeline=["Me@0:00", "Them@0:04", "Me@0:20"]
+UI segment speaker=Some(Me) final=false start=22.200s end=27.000s actor_at=27.106s slint_queue=0.001s text="We need progressive speech recognition so each new sentence appears while the meeting is still"
+UI blocks=3 timeline=["Me@0:00", "Them@0:04", "Me@0:20"]
+UI segment speaker=Some(Them) final=false start=10.140s end=27.000s actor_at=27.106s slint_queue=0.002s text="This is the system audio speaking."
+UI blocks=3 timeline=["Me@0:00", "Them@0:04", "Me@0:20"]
+UI segment speaker=Some(Them) final=true start=23.940s end=26.040s actor_at=27.106s slint_queue=0.002s text="This is the system audio speaking."
+UI blocks=4 timeline=["Me@0:00", "Them@0:04", "Me@0:20", "Them@0:24"]
+UI segment speaker=Some(Them) final=false start=26.040s end=27.000s actor_at=27.106s slint_queue=0.002s text="Keep"
+UI blocks=4 timeline=["Me@0:00", "Them@0:04", "Me@0:20", "Them@0:24"]
+UI segment speaker=Some(Them) final=false start=26.040s end=27.000s actor_at=27.106s slint_queue=0.002s text="Keep the"
+UI blocks=4 timeline=["Me@0:00", "Them@0:04", "Me@0:20", "Them@0:24"]
+UI segment speaker=Some(Them) final=false start=26.040s end=27.000s actor_at=27.106s slint_queue=0.003s text="Keep the two"
+UI blocks=4 timeline=["Me@0:00", "Them@0:04", "Me@0:20", "Them@0:24"]
+UI segment speaker=Some(Me) final=false start=22.200s end=28.000s actor_at=28.103s slint_queue=0.000s text="We need progressive speech recognition so each new sentence appears while the meeting is still running"
+UI blocks=4 timeline=["Me@0:00", "Them@0:04", "Me@0:20", "Them@0:24"]
+UI segment speaker=Some(Me) final=false start=22.200s end=28.000s actor_at=28.103s slint_queue=0.000s text="We need progressive speech recognition so each new sentence appears while the meeting is still running."
+UI blocks=4 timeline=["Me@0:00", "Them@0:04", "Me@0:20", "Them@0:24"]
+UI segment speaker=Some(Me) final=true start=22.200s end=27.060s actor_at=28.103s slint_queue=0.001s text="We need progressive speech recognition, so each new sentence appears while the meeting is still running."
+UI blocks=4 timeline=["Me@0:00", "Them@0:04", "Me@0:20", "Them@0:24"]
+UI segment speaker=Some(Them) final=false start=26.040s end=28.000s actor_at=28.103s slint_queue=0.001s text="Keep the two sour"
+UI blocks=4 timeline=["Me@0:00", "Them@0:04", "Me@0:20", "Them@0:24"]
+UI segment speaker=Some(Them) final=false start=26.040s end=28.000s actor_at=28.103s slint_queue=0.001s text="Keep the two sources"
+UI blocks=4 timeline=["Me@0:00", "Them@0:04", "Me@0:20", "Them@0:24"]
+UI segment speaker=Some(Them) final=false start=26.040s end=28.000s actor_at=28.103s slint_queue=0.001s text="Keep the two sources separ"
+UI blocks=4 timeline=["Me@0:00", "Them@0:04", "Me@0:20", "Them@0:24"]
+UI segment speaker=Some(Them) final=false start=26.040s end=28.000s actor_at=28.103s slint_queue=0.002s text="Keep the two sources separate"
+UI blocks=4 timeline=["Me@0:00", "Them@0:04", "Me@0:20", "Them@0:24"]
+UI segment speaker=Some(Them) final=false start=26.040s end=28.000s actor_at=28.103s slint_queue=0.002s text="Keep the two sources separate and"
+UI blocks=4 timeline=["Me@0:00", "Them@0:04", "Me@0:20", "Them@0:24"]
+UI segment speaker=Some(Them) final=false start=26.040s end=28.900s actor_at=29.005s slint_queue=0.000s text="Keep the two sources separate and show"
+UI blocks=4 timeline=["Me@0:00", "Them@0:04", "Me@0:20", "Them@0:24"]
+UI segment speaker=Some(Them) final=false start=26.040s end=28.900s actor_at=29.005s slint_queue=0.001s text="Keep the two sources separate and show my"
+UI blocks=4 timeline=["Me@0:00", "Them@0:04", "Me@0:20", "Them@0:24"]
+UI segment speaker=Some(Them) final=false start=26.040s end=28.900s actor_at=29.005s slint_queue=0.001s text="Keep the two sources separate and show my words"
+UI blocks=4 timeline=["Me@0:00", "Them@0:04", "Me@0:20", "Them@0:24"]
+UI segment speaker=Some(Them) final=false start=26.040s end=28.900s actor_at=29.006s slint_queue=0.001s text="Keep the two sources separate and show my words in"
+UI blocks=4 timeline=["Me@0:00", "Them@0:04", "Me@0:20", "Them@0:24"]
+UI segment speaker=Some(Them) final=false start=26.040s end=28.900s actor_at=29.006s slint_queue=0.002s text="Keep the two sources separate and show my words in the"
+UI blocks=4 timeline=["Me@0:00", "Them@0:04", "Me@0:20", "Them@0:24"]
+UI segment speaker=Some(Them) final=false start=26.040s end=29.900s actor_at=30.005s slint_queue=0.000s text="Keep the two sources separate and show my words in the other"
+UI blocks=4 timeline=["Me@0:00", "Them@0:04", "Me@0:20", "Them@0:24"]
+UI segment speaker=Some(Them) final=false start=26.040s end=29.900s actor_at=30.005s slint_queue=0.001s text="Keep the two sources separate and show my words in the other speaker"
+UI blocks=4 timeline=["Me@0:00", "Them@0:04", "Me@0:20", "Them@0:24"]
+UI segment speaker=Some(Them) final=false start=26.040s end=29.900s actor_at=30.006s slint_queue=0.001s text="Keep the two sources separate and show my words in the other speaker col"
+UI blocks=4 timeline=["Me@0:00", "Them@0:04", "Me@0:20", "Them@0:24"]
+UI segment speaker=Some(Them) final=false start=26.040s end=29.900s actor_at=30.006s slint_queue=0.001s text="Keep the two sources separate and show my words in the other speaker colum"
+UI blocks=4 timeline=["Me@0:00", "Them@0:04", "Me@0:20", "Them@0:24"]
+UI segment speaker=Some(Them) final=false start=26.040s end=30.800s actor_at=30.905s slint_queue=0.000s text="Keep the two sources separate and show my words in the other speaker columns."
+UI blocks=4 timeline=["Me@0:00", "Them@0:04", "Me@0:20", "Them@0:24"]
+UI segment speaker=Some(Them) final=true start=26.040s end=29.940s actor_at=30.905s slint_queue=0.000s text="Keep the two sources separate and show my words in the other speaker column."
+UI blocks=4 timeline=["Me@0:00", "Them@0:04", "Me@0:20", "Them@0:24"]
+Stopped: SessionSummary { frames_processed: 350, skipped_chunks: 0, dropped_chunks: 0 }
