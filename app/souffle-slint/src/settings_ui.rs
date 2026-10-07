@@ -14,8 +14,8 @@ use souffle_lib::calendar::CalendarInfo;
 use souffle_lib::logging::LogLevel;
 use souffle_lib::permissions::{PermState, PermissionKind};
 use souffle_lib::settings::{
-    AppSettings, MeetingAudioRetention, MeetingTranscriptionLanguage, PasteMethod, SettingsOptions,
-    ShortcutSettings, Theme,
+    AppSettings, DictionaryLearningMode, MeetingAudioRetention, MeetingTranscriptionLanguage,
+    PasteMethod, SettingsOptions, ShortcutSettings, Theme,
 };
 
 impl From<crate::SystemSettingsPane> for souffle_lib::commands::SystemSettingsPane {
@@ -51,7 +51,18 @@ pub fn populate(window: &MainWindow, settings: &AppSettings) {
     window.set_settings_locale(locale_to_slint(&settings.locale));
     window.set_settings_auto_paste(settings.auto_paste);
     window.set_settings_paste_method(paste_method_to_slint(settings.paste_method));
-    window.set_settings_dictation_learn_from_edit(settings.dictation_learn_from_edit);
+    window.set_settings_dictionary_learning_mode(dictionary_learning_to_slint(
+        settings.dictionary_learning_mode,
+    ));
+    let options = DictionaryLearningMode::ALL
+        .into_iter()
+        .map(|mode| crate::DictionaryLearningOption {
+            mode: dictionary_learning_to_slint(mode),
+        })
+        .collect::<Vec<_>>();
+    window.set_settings_dictionary_learning_options(
+        std::rc::Rc::new(slint::VecModel::from(options)).into(),
+    );
     window.set_settings_paste_delay_ms(settings.paste_delay_ms as i32);
     window.set_settings_pill_hidden(settings.pill_hidden);
     window.set_settings_pill_hidden_in_captures(settings.pill_hidden_in_captures);
@@ -106,6 +117,26 @@ pub fn populate_platform_capabilities(
 fn shared_string_model(values: &[String]) -> slint::ModelRc<slint::SharedString> {
     let values: Vec<slint::SharedString> = values.iter().map(|v| v.as_str().into()).collect();
     std::rc::Rc::new(slint::VecModel::from(values)).into()
+}
+
+pub fn dictionary_learning_to_slint(
+    value: DictionaryLearningMode,
+) -> crate::DictionaryLearningMode {
+    match value {
+        DictionaryLearningMode::Disabled => crate::DictionaryLearningMode::Disabled,
+        DictionaryLearningMode::Suggestions => crate::DictionaryLearningMode::Suggestions,
+        DictionaryLearningMode::Automatic => crate::DictionaryLearningMode::Automatic,
+    }
+}
+
+pub fn dictionary_learning_from_slint(
+    value: crate::DictionaryLearningMode,
+) -> DictionaryLearningMode {
+    match value {
+        crate::DictionaryLearningMode::Disabled => DictionaryLearningMode::Disabled,
+        crate::DictionaryLearningMode::Suggestions => DictionaryLearningMode::Suggestions,
+        crate::DictionaryLearningMode::Automatic => DictionaryLearningMode::Automatic,
+    }
 }
 
 pub fn meeting_language_to_slint(value: MeetingTranscriptionLanguage) -> MeetingLanguage {
@@ -325,6 +356,16 @@ pub fn audio_retention_from_slint(value: SlintAudioRetention) -> MeetingAudioRet
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dictionary_learning_mode_conversions_cover_the_backend_catalogue() {
+        for mode in DictionaryLearningMode::ALL {
+            assert_eq!(
+                dictionary_learning_from_slint(dictionary_learning_to_slint(mode)),
+                mode
+            );
+        }
+    }
     use slint::platform::{Platform, WindowAdapter, software_renderer::MinimalSoftwareWindow};
     use std::rc::Rc;
 

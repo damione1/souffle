@@ -13,13 +13,13 @@ import { DictationPolishSection } from "components/settings/dictation_polish_sec
 import { SummaryTemplatesSection } from "components/settings/summary_templates_section.slint";
 import { ModelSection } from "components/settings/model_section.slint";
 import { ModelDeleteSection } from "components/settings/model_delete_section.slint";
-import { DictionarySection, DictionaryRow } from "components/settings/dictionary_section.slint";
+import { DictionarySection, DictionaryRow, DictionarySuggestionRow, DictionaryLearningOption } from "components/settings/dictionary_section.slint";
 import { SnippetsSection, SnippetRow } from "components/settings/snippets_section.slint";
 import { Theme } from "theme.slint";
 import { TranscriptionUnavailableReason, SystemSettingsPane } from "types.slint";
 import { LucideIcon, IconSet } from "components/lucide_icon.slint";
 import { SettingsTabBar, SettingsTabPage } from "components/settings/settings_tabs.slint";
-import { TranscriptionPhase, AppTheme, AppLocale, PasteMethod, MeetingLanguage, LogLevel, AudioRetention, AccessState, ShortcutField, ShortcutNotice, SummaryProvider, AppleIntelligenceUnavailableReason, SettingsTab, InstallBlockReason, UpdateRowStatus } from "types.slint";
+import { TranscriptionPhase, AppTheme, AppLocale, PasteMethod, MeetingLanguage, LogLevel, AudioRetention, AccessState, ShortcutField, ShortcutNotice, SummaryProvider, AppleIntelligenceUnavailableReason, SettingsTab, InstallBlockReason, UpdateRowStatus, DictionaryLearningMode } from "types.slint";
 
 // Port of components/SettingsView.svelte's tab shell (SOU-188). Svelte
 // groups its 17 sections into 6 tabs (Transcription / IA / Audio / Interface
@@ -173,7 +173,17 @@ export component SettingsView inherits Rectangle {
     in property <string> model-error-message;
     in property <string> model-delete-error;
     in property <bool> model-files-deletable;
-    in property <bool> dictation-learn-from-edit;
+
+    in property <DictionaryLearningMode> dictionary-learning-mode;
+    in property <[DictionaryLearningOption]> dictionary-learning-options;
+    in property <[DictionarySuggestionRow]> dictionary-suggestions;
+    in property <int> dictionary-suggestion-count;
+    in property <float> dictionary-suggestion-content-height;
+    in property <float> dictionary-suggestion-spacer-before;
+    in property <float> dictionary-suggestion-spacer-after;
+    in-out property <length> dictionary-suggestion-scroll-top;
+    in property <string> dictionary-suggestion-error;
+    in property <bool> dictionary-suggestion-busy;
     // `dictionary-entries` / `snippets` are windowed slices, not the full
     // lists - see the SOU-229 comment in `dictionary_section.slint`.
     in property <[DictionaryRow]> dictionary-entries;
@@ -273,7 +283,9 @@ export component SettingsView inherits Rectangle {
     callback model-changed(string);
     callback unload-timeout-changed(string);
     callback delete-model-requested();
-    callback dictation-learn-from-edit-changed(bool);
+    callback dictionary-learning-mode-changed(DictionaryLearningMode);
+    callback dictionary-suggestion-accept-requested(int);
+    callback dictionary-suggestion-dismiss-requested(int);
     callback dictionary-add-requested(string, string, string);
     callback dictionary-delete-requested(int);
     callback snippet-add-requested(string, string);
@@ -410,7 +422,16 @@ export component SettingsView inherits Rectangle {
                         }
 
                         DictionarySection {
-                            learn-from-edit: root.dictation-learn-from-edit;
+                            learning-mode: root.dictionary-learning-mode;
+                            learning-options: root.dictionary-learning-options;
+                            suggestions: root.dictionary-suggestions;
+                            suggestion-count: root.dictionary-suggestion-count;
+                            suggestion-content-height: root.dictionary-suggestion-content-height;
+                            suggestion-spacer-before: root.dictionary-suggestion-spacer-before;
+                            suggestion-spacer-after: root.dictionary-suggestion-spacer-after;
+                            suggestion-scroll-top <=> root.dictionary-suggestion-scroll-top;
+                            suggestion-error: root.dictionary-suggestion-error;
+                            suggestion-busy: root.dictionary-suggestion-busy;
                             entries: root.dictionary-entries;
                             entry-count: root.dictionary-entry-count;
                             list-content-height: root.dictionary-list-content-height;
@@ -423,7 +444,9 @@ export component SettingsView inherits Rectangle {
                             add-error: root.dictionary-add-error;
                             delete-error-id: root.dictionary-delete-error-id;
                             delete-error: root.dictionary-delete-error;
-                            learn-from-edit-changed(value) => { root.dictation-learn-from-edit-changed(value); }
+                            learning-mode-changed(value) => { root.dictionary-learning-mode-changed(value); }
+                            suggestion-accept-requested(id) => { root.dictionary-suggestion-accept-requested(id); }
+                            suggestion-dismiss-requested(id) => { root.dictionary-suggestion-dismiss-requested(id); }
                             add-requested(term, pronunciation, category) => { root.dictionary-add-requested(term, pronunciation, category); }
                             delete-requested(id) => { root.dictionary-delete-requested(id); }
                         }

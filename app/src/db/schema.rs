@@ -121,6 +121,20 @@ pub const CREATE_DICTIONARY: &str = "
     );
 ";
 
+/// Only word pairs and their origin; never the AX field or meeting transcript.
+pub const CREATE_DICTIONARY_SUGGESTIONS: &str = "
+    CREATE TABLE IF NOT EXISTS dictionary_suggestions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        misspelling TEXT NOT NULL,
+        term TEXT NOT NULL,
+        misspelling_key TEXT NOT NULL,
+        term_key TEXT NOT NULL,
+        source INTEGER NOT NULL CHECK(source IN (0, 1)),
+        state INTEGER NOT NULL DEFAULT 0 CHECK(state IN (0, 1)),
+        UNIQUE(misspelling_key, term_key)
+    );
+";
+
 /// Voice snippets (SOU-035). `trigger_key` is the case- and accent-folded
 /// form of `trigger` (see `db::snippets::fold_trigger`); uniqueness lives on
 /// it so two triggers the matcher cannot tell apart never coexist.

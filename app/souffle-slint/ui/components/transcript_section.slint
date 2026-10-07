@@ -21,6 +21,7 @@ export global SpeakerLabels {
 }
 
 export struct TranscriptBlock {
+    can-edit: bool,
     is-session-break: bool,
     // Diarized lane of the paragraph. `has-speaker` false means an
     // undiarized (mono) paragraph: no label at all, `speaker` is then

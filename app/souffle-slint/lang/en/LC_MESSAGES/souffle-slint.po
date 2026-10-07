@@ -1,4 +1,53 @@
 #
+
+msgctxt "DictionarySection"
+msgid "Apprentissage depuis les corrections"
+msgstr "Learn from corrections"
+
+msgctxt "DictionarySection"
+msgid "Suggestions propose les corrections après collage et en réunion. Automatique apprend après collage. Les corrections de session restent immédiates."
+msgstr "Suggestions collects corrections after pasting and during meetings. Automatic learns after pasting. Session corrections apply immediately."
+
+msgctxt "DictionarySection"
+msgid "Désactivé"
+msgstr "Disabled"
+
+msgctxt "DictionarySection"
+msgid "Suggestions"
+msgstr "Suggestions"
+
+msgctxt "DictionarySection"
+msgid "Automatique"
+msgstr "Automatic"
+
+msgctxt "DictionarySection"
+msgid "CORRECTIONS À VALIDER"
+msgstr "CORRECTIONS TO REVIEW"
+
+msgctxt "DictionarySection"
+msgid "Aucune suggestion en attente."
+msgstr "No pending suggestions."
+
+msgctxt "DictionarySection"
+msgid "Correction : {} → {}"
+msgstr "Correction: {} → {}"
+
+msgctxt "DictionarySection"
+msgid "Accepter"
+msgstr "Accept"
+
+msgctxt "DictionarySection"
+msgid "Ignorer"
+msgstr "Dismiss"
+
+msgctxt "DictionarySection"
+msgid "Accepter {} → {}"
+msgstr "Accept {} → {}"
+
+msgctxt "DictionarySection"
+msgid "Ignorer {} → {}"
+msgstr "Dismiss {} → {}"
+
 msgid ""
 msgstr ""
 "Project-Id-Version: \n"
@@ -3062,3 +3111,31 @@ msgstr "Apple Speech availability could not be checked. Reopen Soufflé to try a
 msgctxt "ModelSection"
 msgid "Ouvrir Mise à jour de logiciels"
 msgstr "Open Software Update"
+
+msgctxt "RecordingView"
+msgid "Corriger"
+msgstr "Correct"
+
+msgctxt "LiveParagraphEditor"
+msgid "Corriger le paragraphe"
+msgstr "Correct paragraph"
+
+msgctxt "LiveParagraphEditor"
+msgid "Seul le texte confirmé est modifié. L’enregistrement continue."
+msgstr "Only confirmed text is edited. Recording continues."
+
+msgctxt "LiveParagraphEditor"
+msgid "Texte du paragraphe"
+msgstr "Paragraph text"
+
+msgctxt "LiveParagraphEditor"
+msgid "Correction impossible. Fermez puis rouvrez le paragraphe pour réessayer."
+msgstr "Could not save the correction. Close and reopen the paragraph to try again."
+
+msgctxt "LiveParagraphEditor"
+msgid "Annuler"
+msgstr "Cancel"
+
+msgctxt "LiveParagraphEditor"
+msgid "Enregistrer"
+msgstr "Save"

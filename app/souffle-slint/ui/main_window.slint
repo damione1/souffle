@@ -10,13 +10,13 @@ import { UpdateAvailableDialog } from "components/onboarding/update_available_di
 import { MarkdownBlock } from "components/onboarding/markdown_block.slint";
 import { CalendarRow } from "components/settings/calendar_section.slint";
 import { MicrophoneRow } from "components/settings/microphone_section.slint";
-import { DictionaryRow } from "components/settings/dictionary_section.slint";
+import { DictionaryRow, DictionarySuggestionRow, DictionaryLearningOption } from "components/settings/dictionary_section.slint";
 import { SnippetRow } from "components/settings/snippets_section.slint";
 import { TimelineDayGroup, UpcomingEvent } from "components/timeline_section.slint";
 import { TranscriptBlock } from "components/transcript_section.slint";
 import { TranscriptWord } from "components/transcript_words.slint";
 import { StructuredActionItem } from "components/summary_section.slint";
-import { RecordingMode, LiveSystemAudio, MicStall, MeetingIdleBanner, WakeResumeNotice,SpeakerRole, TimelineFilter, TimelineKind, NotesSaveState, ModelPhase, TranscriptionPhase, UpcomingPhase, SettingsTab, SettingsInteraction, AppTheme, AppLocale, PasteMethod, MeetingLanguage, LogLevel, AudioRetention, AccessState, PermissionKind, ShortcutField, ShortcutNotice, SummaryProvider, AppleIntelligenceUnavailableReason, OnboardingStep, UpdatePhase, InstallBlockReason, UpdateRowStatus, MeetingExportFormat } from "types.slint";
+import { RecordingMode, LiveSystemAudio, MicStall, MeetingIdleBanner, WakeResumeNotice,SpeakerRole, TimelineFilter, TimelineKind, NotesSaveState, ModelPhase, TranscriptionPhase, UpcomingPhase, SettingsTab, SettingsInteraction, AppTheme, AppLocale, PasteMethod, MeetingLanguage, LogLevel, AudioRetention, AccessState, PermissionKind, ShortcutField, ShortcutNotice, SummaryProvider, AppleIntelligenceUnavailableReason, OnboardingStep, UpdatePhase, InstallBlockReason, UpdateRowStatus, MeetingExportFormat, DictionaryLearningMode } from "types.slint";
 export { SettingsTab, SettingsInteraction, AppTheme, AppLocale, PasteMethod, MeetingLanguage, LogLevel, AudioRetention, AccessState, PermissionKind, ShortcutField, SummaryProvider, AppleIntelligenceUnavailableReason, SpeakerRole }
 import { Theme } from "theme.slint";
 import { TranscriptionLabels } from "components/transcription_labels.slint";
@@ -30,6 +30,7 @@ export { TranscriptionUnavailableReason, SystemSettingsPane }
 // to reach the global at all.
 export { Theme }
 import { AppHeader } from "components/app_header.slint";
+import { LiveParagraphEditor } from "components/live_paragraph_editor.slint";
 
 // Self-hosted variable fonts from src/app.css, instantiated to static
 // per-weight TTFs (scripts/... none checked in - see the ticket notes: Slint
@@ -95,6 +96,10 @@ export component MainWindow inherits Window {
     in-out property <string> dictation-recovery-text;
     in property <[TranscriptBlock]> live-transcript-blocks;
     in property <bool> live-transcript-empty: true;
+    in property <bool> live-edit-open;
+    in property <bool> live-edit-busy;
+    in property <bool> live-edit-failed;
+    in-out property <string> live-edit-text;
     in property <int> live-elapsed-offset-seconds: 0;
     in property <float> audio-level: 0.0;
     // SOU-282: false while the window is closed or fully covered (winit
@@ -349,7 +354,22 @@ export component MainWindow inherits Window {
     in property <string> settings-model-error-message;
     in property <string> settings-model-delete-error;
     in property <bool> settings-model-files-deletable;
-    in property <bool> settings-dictation-learn-from-edit;
+
+    in property <DictionaryLearningMode> settings-dictionary-learning-mode;
+    in property <[DictionaryLearningOption]> settings-dictionary-learning-options;
+    in property <[DictionarySuggestionRow]> settings-dictionary-suggestions;
+    in property <int> settings-dictionary-suggestion-count;
+    in property <float> settings-dictionary-suggestion-content-height;
+    in property <float> settings-dictionary-suggestion-spacer-before;
+    in property <float> settings-dictionary-suggestion-spacer-after;
+    in-out property <length> settings-dictionary-suggestion-scroll-top;
+    out property <float> settings-dictionary-suggestion-scroll-top-px: root.settings-dictionary-suggestion-scroll-top / 1px;
+    in property <string> settings-dictionary-suggestion-error;
+    in property <bool> settings-dictionary-suggestion-busy;
+    callback settings-dictionary-suggestion-scroll-changed(float);
+    changed settings-dictionary-suggestion-scroll-top => {
+        root.settings-dictionary-suggestion-scroll-changed(self.settings-dictionary-suggestion-scroll-top / 1px);
+    }
     // Windowed slice of the dictionary, not the full list (SOU-229) - same
     // spacer/scroll-mirror plumbing as `meeting-detail-transcript-*` above:
     // `lists_ui.rs` reads the `-px` mirror on `settings-dictionary-scroll-changed`
@@ -466,7 +486,9 @@ export component MainWindow inherits Window {
     callback settings-model-changed(string);
     callback settings-unload-timeout-changed(string);
     callback settings-delete-model-requested();
-    callback settings-dictation-learn-from-edit-changed(bool);
+    callback settings-dictionary-learning-mode-changed(DictionaryLearningMode);
+    callback settings-dictionary-suggestion-accept-requested(int);
+    callback settings-dictionary-suggestion-dismiss-requested(int);
     callback settings-dictionary-add-requested(string, string, string);
     callback settings-dictionary-delete-requested(int);
     callback settings-snippet-add-requested(string, string);
@@ -502,6 +524,9 @@ export component MainWindow inherits Window {
     callback meeting-detail-transcript-alias-save-requested(string, string);
     // Same save as above, from a word clicked in the live meeting view.
     callback live-transcript-alias-save-requested(string, string);
+    callback live-paragraph-edit-requested(int);
+    callback live-paragraph-edit-saved(string);
+    callback live-paragraph-edit-cancelled();
     callback meeting-detail-export-requested(MeetingExportFormat);
     callback meeting-detail-export-audio-requested();
     callback meeting-detail-copy-transcript-requested();
@@ -748,6 +773,7 @@ export component MainWindow inherits Window {
         wake-resume-notice-dismissed => { root.wake-resume-notice-dismissed(); }
         stop-requested => { root.stop-requested(); }
         alias-save-requested(term, pronunciation) => { root.live-transcript-alias-save-requested(term, pronunciation); }
+        paragraph-edit-requested(row) => { root.live-paragraph-edit-requested(row); }
         
         
     }
@@ -900,7 +926,17 @@ export component MainWindow inherits Window {
         model-error-message: root.settings-model-error-message;
         model-delete-error: root.settings-model-delete-error;
         model-files-deletable: root.settings-model-files-deletable;
-        dictation-learn-from-edit: root.settings-dictation-learn-from-edit;
+
+        dictionary-learning-mode: root.settings-dictionary-learning-mode;
+        dictionary-learning-options: root.settings-dictionary-learning-options;
+        dictionary-suggestions: root.settings-dictionary-suggestions;
+        dictionary-suggestion-count: root.settings-dictionary-suggestion-count;
+        dictionary-suggestion-content-height: root.settings-dictionary-suggestion-content-height;
+        dictionary-suggestion-spacer-before: root.settings-dictionary-suggestion-spacer-before;
+        dictionary-suggestion-spacer-after: root.settings-dictionary-suggestion-spacer-after;
+        dictionary-suggestion-scroll-top <=> root.settings-dictionary-suggestion-scroll-top;
+        dictionary-suggestion-error: root.settings-dictionary-suggestion-error;
+        dictionary-suggestion-busy: root.settings-dictionary-suggestion-busy;
         dictionary-entries: root.settings-dictionary-entries;
         dictionary-entry-count: root.settings-dictionary-count;
         dictionary-list-content-height: root.settings-dictionary-content-height;
@@ -1003,7 +1039,9 @@ export component MainWindow inherits Window {
         model-changed(value) => { root.settings-model-changed(value); }
         unload-timeout-changed(value) => { root.settings-unload-timeout-changed(value); }
         delete-model-requested => { root.settings-delete-model-requested(); }
-        dictation-learn-from-edit-changed(value) => { root.settings-dictation-learn-from-edit-changed(value); }
+        dictionary-learning-mode-changed(value) => { root.settings-dictionary-learning-mode-changed(value); }
+        dictionary-suggestion-accept-requested(id) => { root.settings-dictionary-suggestion-accept-requested(id); }
+        dictionary-suggestion-dismiss-requested(id) => { root.settings-dictionary-suggestion-dismiss-requested(id); }
         dictionary-add-requested(term, pronunciation, category) => { root.settings-dictionary-add-requested(term, pronunciation, category); }
         dictionary-delete-requested(id) => { root.settings-dictionary-delete-requested(id); }
         snippet-add-requested(trigger, expansion) => { root.settings-snippet-add-requested(trigger, expansion); }
@@ -1061,6 +1099,16 @@ export component MainWindow inherits Window {
         review-accessibility-requested => { root.onboarding-review-accessibility-requested(); }
         back-requested => { root.onboarding-back-requested(); }
         continue-requested => { root.onboarding-continue-requested(); }
+    }
+
+    if root.live-edit-open && root.recording-mode == RecordingMode.meeting && !root.recording-stop-pending: LiveParagraphEditor {
+        width: 100%;
+        height: 100%;
+        text <=> root.live-edit-text;
+        busy: root.live-edit-busy;
+        failed: root.live-edit-failed;
+        close-requested => { root.live-paragraph-edit-cancelled(); }
+        save-requested(text) => { root.live-paragraph-edit-saved(text); }
     }
 
     if root.settings-permissions-dialog-open: SettingsPermissionsDialog {
