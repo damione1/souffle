@@ -883,22 +883,20 @@ mod contract_tests {
             ..Default::default()
         }
     }
+    fn lane_with_capture(timeline_offset: f64, consumed_samples: u64) -> AppleSpeechLane {
+        let mut value = lane();
+        value.timeline_offset = timeline_offset;
+        value.consumed_samples = consumed_samples;
+        value
+    }
     #[test]
     fn failed_first_or_second_source_restart_preserves_the_capture_interval_once() {
         for failed_begin in [1, 2] {
             let mut engine = AppleSpeechEngine {
                 dual: true,
                 lanes: SpeechLanes::Dual {
-                    me: AppleSpeechLane {
-                        timeline_offset: 7.0,
-                        consumed_samples: 48000,
-                        ..lane()
-                    },
-                    them: AppleSpeechLane {
-                        timeline_offset: 7.0,
-                        consumed_samples: 64000,
-                        ..lane()
-                    },
+                    me: lane_with_capture(7.0, 48000),
+                    them: lane_with_capture(7.0, 64000),
                 },
                 ..Default::default()
             };
@@ -965,11 +963,7 @@ mod contract_tests {
     #[test]
     fn failed_mono_engine_restart_and_retry_do_not_advance_the_clock_twice() {
         let mut engine = AppleSpeechEngine {
-            lanes: SpeechLanes::Mono(AppleSpeechLane {
-                timeline_offset: 7.0,
-                consumed_samples: 48000,
-                ..lane()
-            }),
+            lanes: SpeechLanes::Mono(lane_with_capture(7.0, 48000)),
             ..Default::default()
         };
         assert!(

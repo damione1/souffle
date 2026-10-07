@@ -3689,6 +3689,7 @@ mod tests {
 
     #[test]
     fn continuous_dual_engine_keeps_delayed_finals_on_both_source_clocks() {
+        use crate::engine::{SilenceHandling, TranscriptionEngine};
         let mut mode = DiarizedMode::new();
         let mut engine = MockEngine::new().with_silence_handling(SilenceHandling::Continuous);
         let fed = engine.fed_dual_handle();

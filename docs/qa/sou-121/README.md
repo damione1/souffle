@@ -104,3 +104,59 @@ and launched `com.souffle.desktop.nightly`. The actual window showed
 [Ready Apple Speech](nightly-ready.png). The full window was captured and
 inspected locally; this committed header capture records readiness without
 including the existing transcription history. Nightly was left running.
+
+## Historical published review head 25a3085b — 2026-10-05
+
+The older [French](catalog-fr.png) and [English](catalog-en.png) catalogue
+screenshots belong to the published review branch, before the advanced Settings
+display-name/guidance changes. Its isolated native catalogue harness logged
+`en_US` supported but not installed, `DownloadRequired`, and file deletion
+disabled. Model action callbacks were not wired; these screenshots never proved
+installation or Ready in the actual product. The removed `apple_speech_catalog`
+example was the harness at the time; use the current `apple_speech_settings`
+example for a fresh locale/reason rendering check.
+
+The review branch's separate real Rust ASR probe recognized “The quick brown fox
+jumps over the lazy dog.” on three runs, with final ranges 0–2.76 seconds,
+3.67075–6.43075 after preserving reset, and 0–2.76 after a new-session reset.
+The system negotiated mono 16000 Hz interleaved Int16. That test binary observed
+installed assets while the later native catalogue probe did not; no installation
+or removal occurred between those observations, and the discrepancy remains
+unexplained. This history does not establish the reconciled build's asset state.
+
+The 25a3085b records preserved the user Nightly and shared assets. Its architecture
+review still requested confirmation of Continuous input and mixed-meeting
+acceptance. Those statements describe that older snapshot: the current requested
+reconciliation retains Continuous and includes independent capture-source lanes.
+Physical microphone/PTT/toggle plus polish and actual system-audio acceptance
+still require human validation of the new build before ticket closure.
+
+## Reconciliation source and validation plan — 2026-10-07
+
+Local reconciliation commit `92bd2a1b` combines the two feature histories. It was
+then merged with the newest locally accessible develop `0004eced` in
+`d30612fe`, retaining SOU-166's paragraph editor, dictionary learning enum,
+suggestion state/callbacks and translations. No network fetch or change to the
+main repository, external worktrees or vault was involved. SOU-276 typography is
+outside this reconciliation and was not integrated speculatively.
+
+Formatting and conflict/whitespace checks passed before handing the merged
+source to the build owner. New deterministic regressions cover Continuous in
+mono/dual, delayed finals after long silence through Stop, retry of a failed
+mono begin or either dual begin, partial-lane acceptance offsets, negotiated
+source-rate mismatch and independent preview/final state. They do not invoke
+system assets or live capture. Both historical opt-in native tests are retained;
+the older installed-assets-only probe filters finals now that progressive
+revisions also arrive.
+
+Planned validation, with results to be recorded separately after execution:
+
+```sh
+cargo test --manifest-path app/Cargo.toml -p souffle --lib engine::apple_speech::
+cargo test --manifest-path app/Cargo.toml -p souffle --lib pipeline::actor::tests::continuous_
+cargo test --manifest-path app/Cargo.toml -p souffle-slint model_ui
+```
+
+The build owner runs the complete local Contracts gate and packages an isolated
+Nightly for the user. Neither these plans nor the historical screenshots count
+as a new test pass. CodeQL is explicitly waived here and delegated to the user.

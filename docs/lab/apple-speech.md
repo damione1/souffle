@@ -139,6 +139,25 @@ cargo test --manifest-path app/Cargo.toml -p souffle --lib \
 The fixture must use mono float32 at the negotiated sample rate, and its phrase
 must match the system Speech locale; this example is for en_US at 16 kHz.
 
+Published review head `25a3085b`, 2026-10-05, separately negotiated mono 16000 Hz
+interleaved Int16 and recognized “The quick brown fox jumps over the lazy dog.”
+on three runs: 0–2.76 seconds initially, 3.67075–6.43075 after a preserving reset,
+and 0–2.76 after a new session. The Rust test observed installed en_US assets;
+its subsequent native catalogue example reported supported but not installed.
+No installation/removal occurred between those probes and the discrepancy
+remains unexplained. The old forced-stub suite passed 119 tests with 8 ignored.
+These are review-branch observations, not new evidence for the reconciliation.
+Its installed-assets-only `real_bridge_known_phrase_and_session_resets` test is
+retained alongside the advanced progressive/source probe; it now selects finals
+for phrase assertions instead of mistaking volatile revisions for persisted text.
+
+The combined source is local commit `92bd2a1b`, followed by merge `d30612fe` with
+the newest accessible develop `0004eced`. SOU-166's dictionary/paragraph-editor
+contract and behavior remain; the old edit-learning bool is replaced by its
+typed learning-mode state. New Nightly and human acceptance results will be
+recorded separately in [the QA dossier](../qa/sou-121/README.md). No historical
+image, native result or test count is relabeled as fresh reconciliation proof.
+
 2026-10-05, Settings follow-up: the user confirmed the preceding transcription
 build worked and accepted the rebuilt Settings screen. The local build completed
 with `make nightly`, reopened the Nightly bundle, and was signed with Developer ID
