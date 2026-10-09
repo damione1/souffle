@@ -15,6 +15,8 @@ mod microphone_list;
 #[allow(dead_code)]
 #[path = "../src/model_ui.rs"]
 mod model_ui;
+#[path = "../src/typography.rs"]
+mod typography;
 
 use slint::ComponentHandle;
 use souffle_lib::engine::{APPLE_SPEECH_ENGINE_ID, TranscriptionUnavailableReason as DomainReason};
@@ -27,6 +29,7 @@ fn main() {
     let locale = std::env::var("SPEECH_SETTINGS_LOCALE").unwrap_or_else(|_| "fr".into());
     slint::select_bundled_translation(&locale).unwrap();
     let window = MainWindow::new().unwrap();
+    typography::initialize(&window).expect("Inter renderer font resolution failed");
     window
         .window()
         .set_size(slint::LogicalSize::new(860., 780.));
