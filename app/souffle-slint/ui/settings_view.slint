@@ -1,3 +1,4 @@
+import { AppText, AppTextInput, Typography, TypographyStyle } from "@typography";
 import { AutostartSection } from "components/settings/autostart_section.slint";
 import { PermissionsSection } from "components/settings/permissions_section.slint";
 import { DiagnosticsSection } from "components/settings/diagnostics_section.slint";
@@ -343,11 +344,11 @@ export component SettingsView inherits Rectangle {
                 x: 10px;
                 y: (parent.height - self.height) / 2;
             }
-            done-label := Text {
+            done-label := AppText {
                 x: 32px;
                 y: (parent.height - self.height) / 2;
                 text: @tr("Terminé");
-                font-size: 13px;
+                typography: Typography.content;
                 color: done-area.has-hover ? Theme.text-primary : Theme.text-muted;
             }
             done-area := TouchArea {
@@ -358,15 +359,15 @@ export component SettingsView inherits Rectangle {
             }
         }
 
-        Text {
+        AppText {
             text: @tr("Paramètres");
-            font-size: 20px;
-            font-weight: 700;
+            typography: Typography.settings-title;
+
             color: Theme.text-primary;
             vertical-stretch: 0;
         }
 
-        if root.save-error != "" && root.draft-save-error == "": Text {
+        if root.save-error != "" && root.draft-save-error == "": AppText {
             text: root.save-error-unavailable
                 ? @tr("État des réglages enregistrés inconnu : {}", root.save-error)
                 : @tr("Enregistrement des réglages : {}", root.save-error);
@@ -375,7 +376,7 @@ export component SettingsView inherits Rectangle {
             vertical-stretch: 0;
         }
 
-        if root.draft-save-error != "": Text {
+        if root.draft-save-error != "": AppText {
             text: root.draft-save-error-unavailable
                 ? @tr("Brouillon conservé, état des réglages inconnu : {}", root.draft-save-error)
                 : @tr("Brouillon conservé : {}", root.draft-save-error);

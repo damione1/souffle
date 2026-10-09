@@ -1,3 +1,4 @@
+import { AppText, Typography } from "@typography";
 import { ModalDialog } from "modal_dialog.slint";
 import { ThemedTextArea } from "themed_text_area.slint";
 import { ThemedButton, ThemedButtonKind } from "themed_button.slint";
@@ -19,8 +20,9 @@ export component LiveParagraphEditor inherits ModalDialog {
         enabled: !root.busy;
         area-height: 150px;
     }
-    if root.failed: Text {
+    if root.failed: AppText {
         text: @tr("Correction impossible. Fermez puis rouvrez le paragraphe pour réessayer.");
+        typography: Typography.body;
         color: Theme.danger;
         wrap: word-wrap;
     }

@@ -1,3 +1,4 @@
+import { AppText, AppTextInput, Typography, TypographyStyle } from "@typography";
 import { Theme } from "../theme.slint";
 import { LucideIcon, IconSet } from "lucide_icon.slint";
 
@@ -26,13 +27,13 @@ export component SearchField inherits Rectangle {
         y: (parent.height - self.height) / 2;
     }
 
-    input := TextInput {
+    input := AppTextInput {
         x: 42px;
         width: parent.width - 42px - 15px;
         height: parent.height;
         text <=> root.text;
-        font-size: 13.5px;
-        font-family: "Archivo";
+        typography: Typography.field-label;
+
         color: Theme.text-secondary;
         vertical-alignment: center;
         single-line: true;
@@ -40,12 +41,12 @@ export component SearchField inherits Rectangle {
         edited => { root.edited(self.text); }
     }
 
-    if root.text == "" && !input.has-focus: Text {
+    if root.text == "" && !input.has-focus: AppText {
         x: 42px;
         width: input.width;
         height: parent.height;
         text: root.placeholder;
-        font-size: 13.5px;
+        typography: Typography.field-label;
         color: Theme.text-muted;
         vertical-alignment: center;
     }

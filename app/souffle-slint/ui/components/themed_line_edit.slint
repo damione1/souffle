@@ -1,3 +1,4 @@
+import { AppText, AppTextInput, Typography, TypographyStyle } from "@typography";
 import { Theme } from "../theme.slint";
 
 // Port of app.css `.field-input`. Stock LineEdit is taller and Fluent-gray.
@@ -7,14 +8,14 @@ export component ThemedLineEdit inherits Rectangle {
     in property <bool> enabled: true;
     in property <string> control-label: root.placeholder;
     // 14px everywhere in Settings; the meeting title edits at its own size.
-    in property <length> text-size: 14px;
+    in property <TypographyStyle> typography: Typography.body;
 
     callback edited(string);
     callback accepted(string);
     // The input just lost keyboard focus (an HTML `blur`), with its text.
     callback focus-lost(string);
 
-    height: max(Theme.settings-control-height, root.text-size * 1.7);
+    height: max(Theme.settings-control-height, root.typography.size * 1.7);
     vertical-stretch: 0;
     min-width: 80px;
     border-radius: 4px;
@@ -27,13 +28,13 @@ export component ThemedLineEdit inherits Rectangle {
     // on a conditionally-created field) and land in the actual input.
     forward-focus: input;
 
-    input := TextInput {
+    input := AppTextInput {
         x: 12px;
         width: parent.width - 24px;
         height: parent.height;
         text <=> root.text;
-        font-size: root.text-size;
-        font-family: "Archivo";
+        typography: root.typography;
+
         color: Theme.text-secondary;
         vertical-alignment: center;
         single-line: true;
@@ -46,12 +47,12 @@ export component ThemedLineEdit inherits Rectangle {
         }
     }
 
-    if root.text == "" && !input.has-focus: Text {
+    if root.text == "" && !input.has-focus: AppText {
         x: 12px;
         width: input.width;
         height: parent.height;
         text: root.placeholder;
-        font-size: root.text-size;
+        typography: root.typography;
         color: Theme.text-muted;
         vertical-alignment: center;
     }

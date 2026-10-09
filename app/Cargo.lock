@@ -7184,6 +7184,7 @@ dependencies = [
  "souffle",
  "souffle-mcp",
  "souffle-schema",
+ "souffle-typography",
  "strsim",
  "tempfile",
  "thiserror 2.0.18",
@@ -7244,6 +7245,7 @@ dependencies = [
  "slint-build",
  "souffle",
  "souffle-schema",
+ "souffle-typography",
  "tempfile",
  "tokio",
  "uuid",
@@ -7256,6 +7258,15 @@ dependencies = [
  "hound",
  "serde",
  "toml 0.8.2",
+]
+
+[[package]]
+name = "souffle-typography"
+version = "0.0.0"
+dependencies = [
+ "sha2",
+ "tempfile",
+ "ttf-parser",
 ]
 
 [[package]]

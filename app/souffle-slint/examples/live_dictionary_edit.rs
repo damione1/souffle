@@ -24,6 +24,8 @@ mod timeline;
 #[allow(dead_code)]
 #[path = "../src/transcript.rs"]
 mod transcript;
+#[path = "../src/typography.rs"]
+mod typography;
 
 use slint::ComponentHandle;
 use souffle_lib::{
@@ -68,6 +70,7 @@ fn main() {
         Arc::new(AtomicU32::new(0)),
     ));
     let window = MainWindow::new().unwrap();
+    typography::initialize(&window).expect("required Inter fonts must resolve before the window");
     slint::select_bundled_translation(&locale).unwrap();
     window
         .window()

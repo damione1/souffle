@@ -1,3 +1,4 @@
+import { AppText, AppNumericText, Typography } from "@typography";
 import { Theme } from "../theme.slint";
 import { TranscriptBlock, SpeakerLabels } from "transcript_section.slint";
 import { TranscriptWordFlow } from "transcript_words.slint";
@@ -27,17 +28,15 @@ export component LiveTranscriptParagraph inherits VerticalLayout {
         alignment: start;
         spacing: 8px;
 
-        Text {
+        AppText {
             text: root.block.has-speaker ? SpeakerLabels.of(root.block.speaker) : "";
-            font-family: "Archivo SemiBold";
-            font-size: 11.5px;
+            typography: Typography.small-emphasis;
             color: Theme.accent;
         }
-        Text {
+        AppNumericText {
             text: root.block.timestamp;
-            font-family: "JetBrains Mono";
-            font-size: 10.5px;
-            color: Theme.text-faint;
+            typography: Typography.micro-detail;
+            text-color: Theme.text-faint;
         }
         if root.block.can-edit: ThemedButton {
             // Keep the existing catalogue context when extracting this row.
@@ -53,7 +52,7 @@ export component LiveTranscriptParagraph inherits VerticalLayout {
     TranscriptWordFlow {
         width: parent.width;
         words: root.block.words;
-        font-size: 15px;
+        typography: Typography.action-body;
         color: Theme.text-secondary;
         word-clicked(word, at-x, at-y) => { root.word-clicked(word, at-x, at-y); }
     }

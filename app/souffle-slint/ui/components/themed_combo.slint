@@ -1,3 +1,4 @@
+import { AppText, AppTextInput, Typography, TypographyStyle } from "@typography";
 import { Theme } from "../theme.slint";
 import { TranscriptionLabels } from "transcription_labels.slint";
 import { LucideIcon, IconSet } from "lucide_icon.slint";
@@ -70,7 +71,7 @@ export component ThemedComboBox inherits Rectangle {
         }
     }
 
-    label := Text {
+    label := AppText {
         x: 12px;
         width: parent.width - 36px;
         height: parent.height;
@@ -93,7 +94,7 @@ export component ThemedComboBox inherits Rectangle {
             : root.current-value == "__BULLETS__" ? @tr("Puces")
             : root.current-value == "__NO_FILLERS__" ? @tr("Sans fillers")
             : root.current-value;
-        font-size: 14px;
+        typography: Typography.body;
         color: Theme.text-secondary;
         vertical-alignment: center;
         overflow: elide;
@@ -229,7 +230,7 @@ export component ThemedComboBox inherits Rectangle {
                             root.restore-focus();
                         }
 
-                        Text {
+                        AppText {
                             x: 10px;
                             width: parent.width - 20px;
                             height: parent.height;
@@ -251,7 +252,7 @@ export component ThemedComboBox inherits Rectangle {
                                 : item == "__BULLETS__" ? @tr("Puces")
                                 : item == "__NO_FILLERS__" ? @tr("Sans fillers")
                                 : item;
-                            font-size: 13px;
+                            typography: Typography.content;
                             color: item == root.current-value ? Theme.text-primary : Theme.text-secondary;
                             vertical-alignment: center;
                             overflow: elide;

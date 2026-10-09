@@ -1,3 +1,8 @@
+import { AppText, AppTextInput, Typography, TypographyStyle } from "@typography";
+import { TypographySpecimen } from "@typography";
+export { TypographySpecimen }
+import { TypefaceWeight } from "types.slint";
+export { TypefaceWeight }
 import { IdleView } from "idle_view.slint";
 import { RecordingView } from "recording_view.slint";
 import { MeetingDetail, MeetingParticipantChip, MeetingMeta } from "meeting_detail.slint";
@@ -29,20 +34,9 @@ export { TranscriptionUnavailableReason, SystemSettingsPane }
 // every other `.slint` file to read `Theme.canvas` etc., but not for Rust
 // to reach the global at all.
 export { Theme }
+export { Typography }
 import { AppHeader } from "components/app_header.slint";
 import { LiveParagraphEditor } from "components/live_paragraph_editor.slint";
-
-// Self-hosted variable fonts from src/app.css, instantiated to static
-// per-weight TTFs (scripts/... none checked in - see the ticket notes: Slint
-// 1.17's renderer wants static instances, not a single variable font) so
-// `font-family: "Archivo SemiBold"` etc. resolve to the right weight instead
-// of the variable font's own default instance (600, SemiBold - which is
-// what every unweighted Text would render as if only one file were embedded).
-import "assets/fonts/archivo-regular.ttf";
-import "assets/fonts/archivo-medium.ttf";
-import "assets/fonts/archivo-semibold.ttf";
-import "assets/fonts/archivo-bold.ttf";
-import "assets/fonts/jetbrains-mono.ttf";
 
 export component MainWindow inherits Window {
     title: @tr("Soufflé");
@@ -62,8 +56,9 @@ export component MainWindow inherits Window {
     preferred-height: 1280px;
     min-width: 680px;
     min-height: 560px;
-    default-font-family: "Archivo";
-    default-font-size: 14px;
+    default-font-family: Typography.body.family;
+    default-font-size: Typography.body.size;
+    default-font-weight: Typography.body.weight;
     background: Theme.canvas;
 
     in property <string> dictation-shortcut;
@@ -621,7 +616,7 @@ export component MainWindow inherits Window {
         AppHeader {
             settings-open: root.settings-open;
             model-phase: root.model-runtime-phase;
-            
+
             recording-mode: root.recording-mode;
             model-label: root.header-model-label;
             settings-toggled => {
@@ -774,8 +769,6 @@ export component MainWindow inherits Window {
         stop-requested => { root.stop-requested(); }
         alias-save-requested(term, pronunciation) => { root.live-transcript-alias-save-requested(term, pronunciation); }
         paragraph-edit-requested(row) => { root.live-paragraph-edit-requested(row); }
-        
-        
     }
 
     // Drawn last so it overlays whatever is behind it, mirroring App.svelte

@@ -1,3 +1,4 @@
+import { AppText, AppTextInput, Typography, TypographyStyle } from "@typography";
 import { SettingsField } from "settings_field.slint";
 import { SettingsGroup } from "settings_group.slint";
 import { Theme } from "../../theme.slint";
@@ -48,10 +49,10 @@ export component FeedbackSoundsSection inherits VerticalLayout {
                     changed(value) => { root.volume-changed(value); }
                 }
 
-                Text {
+                AppText {
                     text: @tr("{}%", root.volume);
                     color: Theme.text-muted;
-                    font-size: 12px;
+                    typography: Typography.secondary;
                     vertical-alignment: center;
                     width: 34px;
                 }

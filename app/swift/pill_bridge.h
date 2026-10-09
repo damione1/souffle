@@ -1,5 +1,7 @@
 #ifndef pill_bridge_h
 #define pill_bridge_h
+#include <stdint.h>
+#include <stddef.h>
 
 // C-compatible declarations for the native HUD pill panel (SOU-051).
 // The NSPanel and all AppKit content live entirely in Swift; Rust calls
@@ -12,6 +14,11 @@ extern "C" {
 // ---------------------------------------------------------------------------
 // Lifecycle
 // ---------------------------------------------------------------------------
+
+/// Register exact embedded faces in this process, before constructing labels.
+int32_t pill_typography_register(const uint8_t *bytes, size_t count, int32_t index);
+/// Private native QA boundary: inspect actual CoreText glyph-run selection.
+int32_t pill_typography_verify(void);
 
 /// Create the NSPanel. Safe to call from any thread; hops to the main
 /// thread internally. No-op if already created.

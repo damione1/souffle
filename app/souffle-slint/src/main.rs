@@ -32,6 +32,7 @@ mod shortcut_label;
 mod summary;
 mod timeline;
 mod transcript;
+mod typography;
 mod update_ui;
 mod wake_resume_ui;
 
@@ -7269,6 +7270,7 @@ fn main() {
     }
 
     let window = MainWindow::new().expect("failed to create Slint window");
+    typography::initialize(&window).expect("Inter renderer font resolution failed");
     settings_instrumentation::install(&window);
 
     // Close hides; it must not destroy. The pill + tray keep the process

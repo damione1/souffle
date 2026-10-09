@@ -1,3 +1,4 @@
+import { AppText, AppTextInput, Typography, TypographyStyle } from "@typography";
 import { Theme } from "../theme.slint";
 
 // Port of components/ui/EmptyState.svelte (icon slot dropped: no icon set
@@ -11,13 +12,13 @@ export component EmptyState inherits VerticalLayout {
     spacing: 6px;
     padding: 32px;
 
-    if root.title != "": Text {
+    if root.title != "": AppText {
         text: root.title;
-        font-weight: 600;
+        typography: Typography.body-emphasis;
         color: Theme.text-primary;
         horizontal-alignment: center;
     }
-    Text {
+    AppText {
         text: root.message;
         horizontal-alignment: center;
         color: Theme.text-muted;
