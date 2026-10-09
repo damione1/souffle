@@ -81,15 +81,15 @@ export component ModelSection inherits VerticalLayout {
         padding-right: Theme.settings-inset;
         padding-bottom: 15px;
         spacing: 10px;
-        Text {
+        AppText {
             text: @tr("La langue affichée est celle prise en charge par Apple Speech pour la langue et la région de ce Mac. Pour la modifier, ouvrez Réglages Système > Général > Langue et région, puis relancez Soufflé.");
-            font-size: 12px;
+            typography: Typography.secondary;
             color: Theme.text-secondary;
             wrap: word-wrap;
         }
-        Text {
+        AppText {
             text: @tr("La transcription fonctionne sans activer Siri ou Apple Intelligence. macOS gère le modèle ; Soufflé libère les sessions inactives.");
-            font-size: 12px;
+            typography: Typography.secondary;
             color: Theme.text-muted;
             wrap: word-wrap;
         }
@@ -107,12 +107,12 @@ export component ModelSection inherits VerticalLayout {
         padding-right: Theme.settings-inset;
         padding-bottom: 15px;
         spacing: 10px;
-        Text {
+        AppText {
             text: @tr("Apple Speech indisponible");
-            font-size: 13px;
+            typography: Typography.content;
             color: Theme.text-secondary;
         }
-        Text {
+        AppText {
             text: root.apple-speech-unavailable-reason == TranscriptionUnavailableReason.os-unsupported
                 ? @tr("Apple Speech nécessite macOS 26 ou une version ultérieure. Vérifiez les mises à jour de macOS ou choisissez un autre modèle.")
                 : root.apple-speech-unavailable-reason == TranscriptionUnavailableReason.device-unsupported
@@ -126,7 +126,7 @@ export component ModelSection inherits VerticalLayout {
                 : root.apple-speech-unavailable-reason == TranscriptionUnavailableReason.check-failed
                 ? @tr("Impossible de vérifier la disponibilité d'Apple Speech. Relancez Soufflé pour réessayer ou choisissez un autre modèle.")
                 : "";
-            font-size: 12px;
+            typography: Typography.secondary;
             color: Theme.text-muted;
             wrap: word-wrap;
         }
