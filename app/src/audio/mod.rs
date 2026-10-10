@@ -1,7 +1,9 @@
 pub mod aec;
+pub mod aec_replay;
 pub mod capture;
 pub mod device;
 pub mod device_watch;
+pub(crate) mod diagnostic;
 pub mod feedback;
 pub mod mic_capture_probe;
 pub mod mixer;

@@ -28,6 +28,8 @@ pub enum AudioCommand {
         /// setting is not off. `None` for dictation and for meetings
         /// recorded with retention off.
         record_path: Option<std::path::PathBuf>,
+        /// Capture a separate raw mic/tap artifact, only with `record_path`.
+        meeting_audio_diagnostic: bool,
         /// The pre-spawned system audio tap, if any (macOS only).
         #[cfg(target_os = "macos")]
         tap: Option<crate::audio::system_tap::TapHandle>,
@@ -35,10 +37,16 @@ pub enum AudioCommand {
         #[cfg(target_os = "macos")]
         tap_cons: Option<ringbuf::HeapCons<f32>>,
     },
+    /// Engine readiness succeeded for this capture's session. A raw
+    /// diagnostic cannot be published until this acknowledgement and Stop.
+    ConfirmStart {
+        session_id: u64,
+    },
     Stop,
     /// Stop a session whose start failed after its capture began (SOU-260),
     /// delete the audio file it started, then answer on `done`.
     Discard {
+        session_id: u64,
         done: crossbeam_channel::Sender<()>,
     },
     SelectDevice(String),

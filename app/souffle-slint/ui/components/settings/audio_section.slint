@@ -3,7 +3,7 @@ import { SettingsGroup } from "settings_group.slint";
 import { Theme } from "../../theme.slint";
 import { ThemedSwitch } from "../themed_switch.slint";
 import { ThemedComboBox } from "../themed_combo.slint";
-import { MeetingLanguage } from "../../types.slint";
+import { MeetingLanguage, AudioRetention } from "../../types.slint";
 
 // Port of AudioSettingsSection.svelte. Autostop/max-duration minute lists
 // and clamshell device names are precomputed to `[string]` labels by Rust
@@ -15,6 +15,10 @@ export component AudioSection inherits VerticalLayout {
     in property <string> clamshell-device-label;
     in property <bool> system-audio-supported;
     in property <bool> capture-system-audio;
+    in property <bool> meeting-audio-diagnostic;
+    in property <AudioRetention> meeting-audio-retention;
+    in property <int> diagnostic-max-minutes;
+    in property <int> diagnostic-megabytes-per-hour;
     in property <MeetingLanguage> meeting-transcription-language;
     in property <bool> meeting-autostop-enabled;
     in property <[string]> meeting-autostop-labels;
@@ -28,6 +32,7 @@ export component AudioSection inherits VerticalLayout {
 
     callback clamshell-device-changed(string);
     callback capture-system-audio-changed(bool);
+    callback meeting-audio-diagnostic-changed(bool);
     callback meeting-transcription-language-changed(MeetingLanguage);
     callback meeting-autostop-enabled-changed(bool);
     callback meeting-autostop-changed(string);
@@ -176,6 +181,23 @@ export component AudioSection inherits VerticalLayout {
                 control-label: @tr("Correction par dictionnaire");
                 checked: root.dictionary-correction;
                 toggled(new) => { root.dictionary-correction-changed(new); }
+            }
+        }
+    }
+
+    SettingsGroup {
+        title: @tr("AUDIO AVANCÉ");
+        SettingsField {
+            show-divider: false;
+            label: @tr("Capture diagnostique avant AEC");
+            description: root.meeting-audio-retention == AudioRetention.off
+                ? @tr("Activez d'abord la conservation de l'audio dans Données. Aucun diagnostic n'est enregistré sans elle.")
+                : @tr("À partir de la prochaine réunion, conserve les voies brutes séparées : micro à gauche, audio système à droite. WAV sans perte : environ {} Mo/heure, {} minutes maximum. Même conservation que l'audio de réunion.", root.diagnostic-megabytes-per-hour, root.diagnostic-max-minutes);
+            ThemedSwitch {
+                control-label: @tr("Capture diagnostique avant AEC");
+                checked: root.meeting-audio-diagnostic;
+                enabled: root.meeting-audio-retention != AudioRetention.off;
+                toggled(new) => { root.meeting-audio-diagnostic-changed(new); }
             }
         }
     }

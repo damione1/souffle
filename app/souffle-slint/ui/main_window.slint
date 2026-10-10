@@ -260,6 +260,9 @@ export component MainWindow inherits Window {
     in property <string> settings-clamshell-device-label;
     in property <bool> settings-system-audio-supported;
     in property <bool> settings-capture-system-audio;
+    in property <bool> settings-meeting-audio-diagnostic;
+    in property <int> settings-diagnostic-max-minutes;
+    in property <int> settings-diagnostic-megabytes-per-hour;
     in property <MeetingLanguage> settings-meeting-transcription-language;
     in property <bool> settings-meeting-autostop-enabled;
     in property <[string]> settings-meeting-autostop-labels;
@@ -460,6 +463,7 @@ export component MainWindow inherits Window {
     callback settings-remove-device-requested(string);
     callback settings-clamshell-device-changed(string);
     callback settings-capture-system-audio-changed(bool);
+    callback settings-meeting-audio-diagnostic-changed(bool);
     callback settings-meeting-transcription-language-changed(MeetingLanguage);
     callback settings-meeting-autostop-enabled-changed(bool);
     callback settings-meeting-autostop-changed(string);
@@ -857,6 +861,9 @@ export component MainWindow inherits Window {
         clamshell-device-label: root.settings-clamshell-device-label;
         system-audio-supported: root.settings-system-audio-supported;
         capture-system-audio: root.settings-capture-system-audio;
+        meeting-audio-diagnostic: root.settings-meeting-audio-diagnostic;
+        diagnostic-max-minutes: root.settings-diagnostic-max-minutes;
+        diagnostic-megabytes-per-hour: root.settings-diagnostic-megabytes-per-hour;
         meeting-transcription-language: root.settings-meeting-transcription-language;
         meeting-autostop-enabled: root.settings-meeting-autostop-enabled;
         meeting-autostop-labels: root.settings-meeting-autostop-labels;
@@ -1027,6 +1034,7 @@ export component MainWindow inherits Window {
         remove-device-requested(uid) => { root.settings-remove-device-requested(uid); }
         clamshell-device-changed(value) => { root.settings-clamshell-device-changed(value); }
         capture-system-audio-changed(value) => { root.settings-capture-system-audio-changed(value); }
+        meeting-audio-diagnostic-changed(value) => { root.settings-meeting-audio-diagnostic-changed(value); }
         meeting-transcription-language-changed(value) => { root.settings-meeting-transcription-language-changed(value); }
         meeting-autostop-enabled-changed(value) => { root.settings-meeting-autostop-enabled-changed(value); }
         meeting-autostop-changed(value) => { root.settings-meeting-autostop-changed(value); }

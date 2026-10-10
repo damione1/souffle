@@ -30,6 +30,10 @@ struct CliArgs {
     #[arg(long, value_name = "WAV")]
     transcribe_file: Option<PathBuf>,
 
+    /// Replay a lossless pre-AEC stereo diagnostic WAV (left mic, right tap).
+    #[arg(long, value_name = "WAV", conflicts_with_all = ["transcribe_file", "list_models", "list_engines"])]
+    aec_replay: Option<PathBuf>,
+
     /// Override the selected transcription engine id.
     #[arg(long)]
     engine: Option<String>,
@@ -62,7 +66,10 @@ struct CliArgs {
 
 impl CliArgs {
     fn is_headless(&self) -> bool {
-        self.transcribe_file.is_some() || self.list_models || self.list_engines
+        self.transcribe_file.is_some()
+            || self.aec_replay.is_some()
+            || self.list_models
+            || self.list_engines
     }
 }
 
@@ -109,6 +116,8 @@ fn has_headless_flag(args: &[String]) -> bool {
             || a.starts_with("--transcribe-file=")
             || a == "--list-models"
             || a == "--list-engines"
+            || a == "--aec-replay"
+            || a.starts_with("--aec-replay=")
     })
 }
 
@@ -133,6 +142,21 @@ impl ProfileSource {
 
 fn run(cli: CliArgs) -> i32 {
     init_cli_logging(cli.json);
+    if let Some(path) = &cli.aec_replay {
+        return match crate::audio::aec_replay::replay_file(path) {
+            Ok(metrics) => {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&metrics).expect("finite replay metrics")
+                );
+                0
+            }
+            Err(e) => {
+                eprintln!("AEC replay: {e}");
+                1
+            }
+        };
+    }
 
     if cli.list_engines {
         return list_engines(cli.json);
@@ -623,6 +647,23 @@ mod tests {
     }
 
     // ── has_headless_flag / dispatch ────────────────────────────────
+
+    #[test]
+    fn aec_replay_flag_dispatches_without_loading_models_or_settings() {
+        let args = vec!["souffle".into(), "--aec-replay=/missing/pre-aec.wav".into()];
+        assert!(has_headless_flag(&args));
+        assert_eq!(dispatch(args), Some(1));
+        assert!(
+            CliArgs::try_parse_from([
+                "souffle",
+                "--aec-replay",
+                "x.wav",
+                "--transcribe-file",
+                "y.wav"
+            ])
+            .is_err()
+        );
+    }
 
     #[test]
     fn has_headless_flag_detects_transcribe_file() {
