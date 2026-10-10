@@ -1,3 +1,13 @@
+use souffle_schema::sql::{
+    column::{
+        CONFIDENCE, CONTENT, DURATION_SECONDS, EDITED_TRANSCRIPT, END_TIME, ENDED_AT, ID, IS_FINAL,
+        LANGUAGE, MEETING_ID, RECORDING_SESSIONS, SORT_ORDER, SOURCE_ID, SOURCE_TYPE, START_TIME,
+        STARTED_AT, SUMMARY, SUMMARY_GENERATED_AT, SUMMARY_IS_STALE, SUMMARY_MODEL, TEXT,
+        TIMESTAMP, TITLE, TRANSCRIPTION_PROFILE, VERSION,
+    },
+    table::{DICTATION_ENTRIES, MEETINGS, SCHEMA_VERSION as VERSION_TABLE, SEGMENTS, TEXT_SEARCH},
+};
+
 use chrono::{DateTime, Utc};
 use rusqlite::{Connection, params};
 
@@ -8,12 +18,17 @@ use crate::transcript::{legacy_recording_session, resolve_legacy_transcription_p
 /// the same number and can refuse a database that has moved past it.
 pub use souffle_schema::SCHEMA_VERSION;
 
-pub const CREATE_SCHEMA_VERSION: &str = "
-    CREATE TABLE IF NOT EXISTS schema_version (
-        version INTEGER NOT NULL
+pub fn create_schema_version() -> String {
+    format!(
+        "
+    CREATE TABLE IF NOT EXISTS {VERSION_TABLE} (
+        {VERSION} INTEGER NOT NULL
     );
-";
+"
+    )
+}
 
+// Historical V1 snapshot: identifiers below must keep their original spelling.
 pub const CREATE_MEETINGS_V1: &str = "
     CREATE TABLE IF NOT EXISTS meetings (
         id TEXT PRIMARY KEY,
@@ -29,48 +44,64 @@ pub const CREATE_MEETINGS_V1: &str = "
     );
 ";
 
-pub const CREATE_MEETINGS_V3: &str = "
-    CREATE TABLE IF NOT EXISTS meetings (
-        id TEXT PRIMARY KEY,
-        title TEXT NOT NULL,
-        started_at TEXT NOT NULL,
-        ended_at TEXT,
-        duration_seconds REAL NOT NULL,
-        transcription_profile TEXT NOT NULL,
-        recording_sessions TEXT NOT NULL,
-        summary TEXT,
-        summary_is_stale INTEGER NOT NULL DEFAULT 0,
-        summary_model TEXT,
-        summary_generated_at TEXT,
-        edited_transcript TEXT
+pub fn create_meetings_v3() -> String {
+    format!(
+        "
+    CREATE TABLE IF NOT EXISTS {MEETINGS} (
+        {ID} TEXT PRIMARY KEY,
+        {TITLE} TEXT NOT NULL,
+        {STARTED_AT} TEXT NOT NULL,
+        {ENDED_AT} TEXT,
+        {DURATION_SECONDS} REAL NOT NULL,
+        {TRANSCRIPTION_PROFILE} TEXT NOT NULL,
+        {RECORDING_SESSIONS} TEXT NOT NULL,
+        {SUMMARY} TEXT,
+        {SUMMARY_IS_STALE} INTEGER NOT NULL DEFAULT 0,
+        {SUMMARY_MODEL} TEXT,
+        {SUMMARY_GENERATED_AT} TEXT,
+        {EDITED_TRANSCRIPT} TEXT
     );
-";
+"
+    )
+}
 
-pub const CREATE_SEGMENTS: &str = "
-    CREATE TABLE IF NOT EXISTS segments (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        meeting_id TEXT NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
-        text TEXT NOT NULL,
-        start_time REAL NOT NULL,
-        end_time REAL NOT NULL,
-        is_final INTEGER NOT NULL DEFAULT 1,
-        language TEXT,
-        confidence REAL,
-        sort_order INTEGER NOT NULL
+pub fn create_segments() -> String {
+    format!(
+        "
+    CREATE TABLE IF NOT EXISTS {SEGMENTS} (
+        {ID} INTEGER PRIMARY KEY AUTOINCREMENT,
+        {MEETING_ID} TEXT NOT NULL REFERENCES {MEETINGS}({ID}) ON DELETE CASCADE,
+        {TEXT} TEXT NOT NULL,
+        {START_TIME} REAL NOT NULL,
+        {END_TIME} REAL NOT NULL,
+        {IS_FINAL} INTEGER NOT NULL DEFAULT 1,
+        {LANGUAGE} TEXT,
+        {CONFIDENCE} REAL,
+        {SORT_ORDER} INTEGER NOT NULL
     );
-";
+"
+    )
+}
 
-pub const CREATE_SEGMENTS_INDEX: &str = "
-    CREATE INDEX IF NOT EXISTS idx_segments_meeting ON segments(meeting_id);
-";
+pub fn create_segments_index() -> String {
+    format!(
+        "
+    CREATE INDEX IF NOT EXISTS idx_segments_meeting ON {SEGMENTS}({MEETING_ID});
+"
+    )
+}
 
-pub const CREATE_DICTATION_ENTRIES: &str = "
-    CREATE TABLE IF NOT EXISTS dictation_entries (
-        id TEXT PRIMARY KEY,
-        text TEXT NOT NULL,
-        timestamp TEXT NOT NULL
+pub fn create_dictation_entries() -> String {
+    format!(
+        "
+    CREATE TABLE IF NOT EXISTS {DICTATION_ENTRIES} (
+        {ID} TEXT PRIMARY KEY,
+        {TEXT} TEXT NOT NULL,
+        {TIMESTAMP} TEXT NOT NULL
     );
-";
+"
+    )
+}
 
 pub const CREATE_SETTINGS: &str = "
     CREATE TABLE IF NOT EXISTS settings (
@@ -80,11 +111,15 @@ pub const CREATE_SETTINGS: &str = "
 ";
 
 /// FTS5 table — content-storing (v4+). Enables snippet()/highlight().
-pub const CREATE_TEXT_SEARCH: &str = "
-    CREATE VIRTUAL TABLE IF NOT EXISTS text_search USING fts5(
-        content, source_type, source_id
+pub fn create_text_search() -> String {
+    format!(
+        "
+    CREATE VIRTUAL TABLE IF NOT EXISTS {TEXT_SEARCH} USING fts5(
+        {CONTENT}, {SOURCE_TYPE}, {SOURCE_ID}
     );
-";
+"
+    )
+}
 
 /// Legacy contentless FTS5 table (v1-v3). Kept for v1 schema creation path
 /// so that fresh databases go straight to v4 migration which recreates it.
@@ -188,18 +223,22 @@ pub const CREATE_SPEAKERS_IS_ME_INDEX: &str = "
 ";
 
 /// All schema creation statements in order
-pub const SCHEMA_V1: &[&str] = &[
-    CREATE_SCHEMA_VERSION,
-    CREATE_MEETINGS_V1,
-    CREATE_SEGMENTS,
-    CREATE_SEGMENTS_INDEX,
-    CREATE_DICTATION_ENTRIES,
-    CREATE_SETTINGS,
-    CREATE_TEXT_SEARCH_V1,
-    CREATE_EMBEDDINGS,
-    CREATE_EMBEDDINGS_INDEX,
-];
+pub fn schema_v1() -> [String; 9] {
+    [
+        create_schema_version(),
+        CREATE_MEETINGS_V1.to_owned(),
+        create_segments(),
+        create_segments_index(),
+        create_dictation_entries(),
+        CREATE_SETTINGS.to_owned(),
+        CREATE_TEXT_SEARCH_V1.to_owned(),
+        CREATE_EMBEDDINGS.to_owned(),
+        CREATE_EMBEDDINGS_INDEX.to_owned(),
+    ]
+}
 
+// Historical migrations (V2–V16) keep literal identifiers and encodings. They
+// describe old disk layouts, so changing a live contract must not rewrite them.
 pub const SCHEMA_V2: &[&str] = &["ALTER TABLE meetings ADD COLUMN transcription_profile TEXT;"];
 
 struct LegacyMeetingRow {
@@ -239,11 +278,11 @@ pub fn migrate_meetings_to_v3(conn: &mut Connection) -> Result<(), String> {
         )
         .map_err(|e| format!("Rename meetings table for v3 migration: {e}"))?;
 
-        tx.execute_batch(CREATE_MEETINGS_V3)
+        tx.execute_batch(&create_meetings_v3())
             .map_err(|e| format!("Create v3 meetings table: {e}"))?;
-        tx.execute_batch(CREATE_SEGMENTS)
+        tx.execute_batch(&create_segments())
             .map_err(|e| format!("Create v3 segments table: {e}"))?;
-        tx.execute_batch(CREATE_SEGMENTS_INDEX)
+        tx.execute_batch(&create_segments_index())
             .map_err(|e| format!("Create v3 segments index: {e}"))?;
         tx.execute_batch(CREATE_EMBEDDINGS)
             .map_err(|e| format!("Create v3 embeddings table: {e}"))?;
@@ -385,7 +424,7 @@ pub fn migrate_text_search_to_v4(conn: &mut Connection) -> Result<(), String> {
     tx.execute_batch("DROP TABLE IF EXISTS text_search;")
         .map_err(|e| format!("Drop contentless text_search: {e}"))?;
 
-    tx.execute_batch(CREATE_TEXT_SEARCH)
+    tx.execute_batch(&create_text_search())
         .map_err(|e| format!("Create content-storing text_search: {e}"))?;
 
     // The two source_type literals below stay literals on purpose: a past
@@ -587,9 +626,9 @@ mod tests {
     use rusqlite::{Connection, params};
 
     use super::{
-        CREATE_DICTATION_ENTRIES, CREATE_EMBEDDINGS, CREATE_EMBEDDINGS_INDEX, CREATE_MEETINGS_V1,
-        CREATE_SCHEMA_VERSION, CREATE_SEGMENTS, CREATE_SEGMENTS_INDEX, CREATE_SETTINGS,
-        CREATE_TEXT_SEARCH_V1, SCHEMA_V2,
+        CREATE_EMBEDDINGS, CREATE_EMBEDDINGS_INDEX, CREATE_MEETINGS_V1, CREATE_SETTINGS,
+        CREATE_TEXT_SEARCH_V1, SCHEMA_V2, create_dictation_entries, create_schema_version,
+        create_segments, create_segments_index,
     };
     use crate::db::Database;
     use tempfile::TempDir;
@@ -655,16 +694,16 @@ mod tests {
         // Minimal v9-era fixture: only the tables the v10 step touches, plus a
         // v3-shaped meetings table to mirror a real v9 database.
         let conn = Connection::open(&db_path).unwrap();
-        conn.execute_batch(CREATE_SCHEMA_VERSION).unwrap();
-        conn.execute_batch(super::CREATE_MEETINGS_V3).unwrap();
-        conn.execute_batch(CREATE_SEGMENTS).unwrap();
-        conn.execute_batch(CREATE_SEGMENTS_INDEX).unwrap();
+        conn.execute_batch(&create_schema_version()).unwrap();
+        conn.execute_batch(&super::create_meetings_v3()).unwrap();
+        conn.execute_batch(&create_segments()).unwrap();
+        conn.execute_batch(&create_segments_index()).unwrap();
         // A real v9 database has already been through the v7 migration.
         conn.execute("ALTER TABLE segments ADD COLUMN speaker TEXT", [])
             .unwrap();
-        conn.execute_batch(CREATE_DICTATION_ENTRIES).unwrap();
+        conn.execute_batch(&create_dictation_entries()).unwrap();
         conn.execute_batch(CREATE_SETTINGS).unwrap();
-        conn.execute_batch(super::CREATE_TEXT_SEARCH).unwrap();
+        conn.execute_batch(&super::create_text_search()).unwrap();
         conn.execute_batch(CREATE_EMBEDDINGS).unwrap();
         conn.execute_batch(CREATE_EMBEDDINGS_INDEX).unwrap();
         conn.execute("INSERT INTO schema_version (version) VALUES (9)", [])
@@ -749,16 +788,16 @@ mod tests {
         let db_path = dir.path().join("test.db");
 
         let conn = Connection::open(&db_path).unwrap();
-        conn.execute_batch(CREATE_SCHEMA_VERSION).unwrap();
-        conn.execute_batch(super::CREATE_MEETINGS_V3).unwrap();
-        conn.execute_batch(CREATE_SEGMENTS).unwrap();
-        conn.execute_batch(CREATE_SEGMENTS_INDEX).unwrap();
+        conn.execute_batch(&create_schema_version()).unwrap();
+        conn.execute_batch(&super::create_meetings_v3()).unwrap();
+        conn.execute_batch(&create_segments()).unwrap();
+        conn.execute_batch(&create_segments_index()).unwrap();
         // A real v10 database has already been through the v7 migration.
         conn.execute("ALTER TABLE segments ADD COLUMN speaker TEXT", [])
             .unwrap();
-        conn.execute_batch(CREATE_DICTATION_ENTRIES).unwrap();
+        conn.execute_batch(&create_dictation_entries()).unwrap();
         conn.execute_batch(CREATE_SETTINGS).unwrap();
-        conn.execute_batch(super::CREATE_TEXT_SEARCH).unwrap();
+        conn.execute_batch(&super::create_text_search()).unwrap();
         conn.execute("INSERT INTO schema_version (version) VALUES (10)", [])
             .unwrap();
         drop(conn);
@@ -784,10 +823,10 @@ mod tests {
         let db_path = dir.path().join("test.db");
 
         let conn = Connection::open(&db_path).unwrap();
-        conn.execute_batch(CREATE_SCHEMA_VERSION).unwrap();
+        conn.execute_batch(&create_schema_version()).unwrap();
         // Every real v14 database has a meetings table, and later migrations
         // alter it.
-        conn.execute_batch(super::CREATE_MEETINGS_V3).unwrap();
+        conn.execute_batch(&super::create_meetings_v3()).unwrap();
         conn.execute("INSERT INTO schema_version (version) VALUES (14)", [])
             .unwrap();
         drop(conn);
@@ -825,8 +864,8 @@ mod tests {
         let db_path = dir.path().join("test.db");
 
         let conn = Connection::open(&db_path).unwrap();
-        conn.execute_batch(CREATE_SCHEMA_VERSION).unwrap();
-        conn.execute_batch(super::CREATE_MEETINGS_V3).unwrap();
+        conn.execute_batch(&create_schema_version()).unwrap();
+        conn.execute_batch(&super::create_meetings_v3()).unwrap();
         conn.execute(
             "INSERT INTO meetings (
                 id, title, started_at, ended_at, duration_seconds,
@@ -871,21 +910,21 @@ mod tests {
         // Minimal v11-era fixture: meetings v3 shape plus the structured_summary
         // column v11 added, no speakers table yet.
         let conn = Connection::open(&db_path).unwrap();
-        conn.execute_batch(CREATE_SCHEMA_VERSION).unwrap();
-        conn.execute_batch(super::CREATE_MEETINGS_V3).unwrap();
+        conn.execute_batch(&create_schema_version()).unwrap();
+        conn.execute_batch(&super::create_meetings_v3()).unwrap();
         conn.execute(
             "ALTER TABLE meetings ADD COLUMN structured_summary TEXT",
             [],
         )
         .unwrap();
-        conn.execute_batch(CREATE_SEGMENTS).unwrap();
-        conn.execute_batch(CREATE_SEGMENTS_INDEX).unwrap();
+        conn.execute_batch(&create_segments()).unwrap();
+        conn.execute_batch(&create_segments_index()).unwrap();
         // A real v11 database has already been through the v7 migration.
         conn.execute("ALTER TABLE segments ADD COLUMN speaker TEXT", [])
             .unwrap();
-        conn.execute_batch(CREATE_DICTATION_ENTRIES).unwrap();
+        conn.execute_batch(&create_dictation_entries()).unwrap();
         conn.execute_batch(CREATE_SETTINGS).unwrap();
-        conn.execute_batch(super::CREATE_TEXT_SEARCH).unwrap();
+        conn.execute_batch(&super::create_text_search()).unwrap();
         conn.execute("INSERT INTO schema_version (version) VALUES (11)", [])
             .unwrap();
         drop(conn);
@@ -998,21 +1037,21 @@ mod tests {
         // segments referencing one of two speakers, and the v12 speakers
         // table (with a centroid) but no speaker_embeddings table yet.
         let conn = Connection::open(&db_path).unwrap();
-        conn.execute_batch(CREATE_SCHEMA_VERSION).unwrap();
-        conn.execute_batch(super::CREATE_MEETINGS_V3).unwrap();
+        conn.execute_batch(&create_schema_version()).unwrap();
+        conn.execute_batch(&super::create_meetings_v3()).unwrap();
         conn.execute(
             "ALTER TABLE meetings ADD COLUMN structured_summary TEXT",
             [],
         )
         .unwrap();
-        conn.execute_batch(CREATE_SEGMENTS).unwrap();
-        conn.execute_batch(CREATE_SEGMENTS_INDEX).unwrap();
+        conn.execute_batch(&create_segments()).unwrap();
+        conn.execute_batch(&create_segments_index()).unwrap();
         // A real v12 database has already been through the v7 migration.
         conn.execute("ALTER TABLE segments ADD COLUMN speaker TEXT", [])
             .unwrap();
-        conn.execute_batch(CREATE_DICTATION_ENTRIES).unwrap();
+        conn.execute_batch(&create_dictation_entries()).unwrap();
         conn.execute_batch(CREATE_SETTINGS).unwrap();
-        conn.execute_batch(super::CREATE_TEXT_SEARCH).unwrap();
+        conn.execute_batch(&super::create_text_search()).unwrap();
         conn.execute_batch(super::CREATE_SPEAKERS).unwrap();
         conn.execute("INSERT INTO schema_version (version) VALUES (12)", [])
             .unwrap();
@@ -1116,20 +1155,20 @@ mod tests {
         // the pre-v13 shape (no is_me), unlike super::CREATE_SPEAKERS which
         // already includes it.
         let conn = Connection::open(&db_path).unwrap();
-        conn.execute_batch(CREATE_SCHEMA_VERSION).unwrap();
-        conn.execute_batch(super::CREATE_MEETINGS_V3).unwrap();
+        conn.execute_batch(&create_schema_version()).unwrap();
+        conn.execute_batch(&super::create_meetings_v3()).unwrap();
         conn.execute(
             "ALTER TABLE meetings ADD COLUMN structured_summary TEXT",
             [],
         )
         .unwrap();
-        conn.execute_batch(CREATE_SEGMENTS).unwrap();
-        conn.execute_batch(CREATE_SEGMENTS_INDEX).unwrap();
+        conn.execute_batch(&create_segments()).unwrap();
+        conn.execute_batch(&create_segments_index()).unwrap();
         conn.execute("ALTER TABLE segments ADD COLUMN speaker TEXT", [])
             .unwrap();
-        conn.execute_batch(CREATE_DICTATION_ENTRIES).unwrap();
+        conn.execute_batch(&create_dictation_entries()).unwrap();
         conn.execute_batch(CREATE_SETTINGS).unwrap();
-        conn.execute_batch(super::CREATE_TEXT_SEARCH).unwrap();
+        conn.execute_batch(&super::create_text_search()).unwrap();
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS speakers (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1206,11 +1245,11 @@ mod tests {
         let db_path = dir.path().join("test.db");
 
         let conn = Connection::open(&db_path).unwrap();
-        conn.execute_batch(CREATE_SCHEMA_VERSION).unwrap();
+        conn.execute_batch(&create_schema_version()).unwrap();
         conn.execute_batch(CREATE_MEETINGS_V1).unwrap();
-        conn.execute_batch(CREATE_SEGMENTS).unwrap();
-        conn.execute_batch(CREATE_SEGMENTS_INDEX).unwrap();
-        conn.execute_batch(CREATE_DICTATION_ENTRIES).unwrap();
+        conn.execute_batch(&create_segments()).unwrap();
+        conn.execute_batch(&create_segments_index()).unwrap();
+        conn.execute_batch(&create_dictation_entries()).unwrap();
         conn.execute_batch(CREATE_SETTINGS).unwrap();
         conn.execute_batch(CREATE_TEXT_SEARCH_V1).unwrap();
         conn.execute_batch(CREATE_EMBEDDINGS).unwrap();

@@ -89,7 +89,7 @@ pub fn bootstrap() -> Arc<AppState> {
         }
     };
 
-    let db_path = constants::app_data_dir().join("souffle.db");
+    let db_path = constants::app_data_dir().join(crate::constants::DB_FILENAME);
     let database = match db::Database::open(&db_path) {
         Ok(db) => Arc::new(db),
         Err(e) => {

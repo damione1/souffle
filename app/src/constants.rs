@@ -19,12 +19,7 @@ pub const MIMI_FRAME_SIZE: usize = 1920;
 /// Mimi codec frame rate (24000 / 1920)
 pub const MIMI_FRAMES_PER_SECOND: f64 = 12.5;
 
-/// Application bundle identifier of the shipped app.
-pub const APP_IDENTIFIER: &str = "com.souffle.desktop";
-
-/// Debug / `tauri dev` builds (`tauri.nightly.conf.json`). Separate TCC
-/// identity so a local build can sit next to the installed app.
-pub const NIGHTLY_APP_IDENTIFIER: &str = "com.souffle.desktop.nightly";
+pub use souffle_schema::{APP_IDENTIFIER, DB_FILENAME, NIGHTLY_APP_IDENTIFIER};
 
 /// Former bundle identifier; the data directory is renamed from this to
 /// [`APP_IDENTIFIER`] at startup so existing meetings/settings/models survive

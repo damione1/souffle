@@ -246,7 +246,7 @@ fn resolve_cli_profile(cli: &CliArgs) -> Result<(TranscriptionProfile, ProfileSo
 }
 
 fn load_persisted_profile() -> Result<TranscriptionProfile, String> {
-    let db_path = crate::constants::app_data_dir().join("souffle.db");
+    let db_path = crate::constants::app_data_dir().join(crate::constants::DB_FILENAME);
     let db = crate::db::Database::open(&db_path)?;
     let settings = crate::settings::AppSettings::load(&db)?;
     resolve_transcription_profile(

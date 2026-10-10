@@ -1,3 +1,14 @@
+use souffle_schema::sql::{
+    column::{
+        CALENDAR_EVENT_ID, CONFIDENCE, CONTENT, DURATION_SECONDS, EDITED_TRANSCRIPT, END_TIME,
+        ENDED_AT, ID, IS_FINAL, LANGUAGE, MEETING_ID, NOTES, PARTICIPANTS, RECORDING_SESSIONS,
+        SORT_ORDER, SOURCE_ID, SOURCE_TYPE, SPEAKER, START_TIME, STARTED_AT, STRUCTURED_SUMMARY,
+        SUMMARY, SUMMARY_GENERATED_AT, SUMMARY_IS_STALE, SUMMARY_MODEL, SYSTEM_AUDIO, TEXT, TITLE,
+        TRANSCRIPTION_PROFILE,
+    },
+    table::{MEETINGS, SEGMENTS, TEXT_SEARCH},
+};
+
 use chrono::{DateTime, Utc};
 use rusqlite::params;
 
@@ -22,13 +33,13 @@ fn meeting_fts_text(edited_transcript: Option<&str>, segment_text: String) -> St
 
 fn reindex_meeting_fts(tx: &rusqlite::Transaction<'_>, id: &str, text: &str) -> Result<(), String> {
     tx.execute(
-        "DELETE FROM text_search WHERE source_type = ?1 AND source_id = ?2",
+        &format!("DELETE FROM {TEXT_SEARCH} WHERE {SOURCE_TYPE} = ?1 AND {SOURCE_ID} = ?2"),
         params![SearchSource::Meeting, id],
     )
     .map_err(|e| format!("Delete FTS: {e}"))?;
     if !text.is_empty() {
         tx.execute(
-            "INSERT INTO text_search (content, source_type, source_id) VALUES (?1, ?2, ?3)",
+            &format!("INSERT INTO {TEXT_SEARCH} ({CONTENT}, {SOURCE_TYPE}, {SOURCE_ID}) VALUES (?1, ?2, ?3)"),
             params![text, SearchSource::Meeting, id],
         )
         .map_err(|e| format!("Insert FTS: {e}"))?;
@@ -38,7 +49,9 @@ fn reindex_meeting_fts(tx: &rusqlite::Transaction<'_>, id: &str, text: &str) -> 
 
 fn joined_segment_text(tx: &rusqlite::Transaction<'_>, meeting_id: &str) -> Result<String, String> {
     let mut stmt = tx
-        .prepare("SELECT text FROM segments WHERE meeting_id = ?1 ORDER BY sort_order")
+        .prepare(&format!(
+            "SELECT {TEXT} FROM {SEGMENTS} WHERE {MEETING_ID} = ?1 ORDER BY {SORT_ORDER}"
+        ))
         .map_err(|e| format!("Prepare segments: {e}"))?;
     stmt.query_map(params![meeting_id], |row| row.get::<_, String>(0))
         .map_err(|e| format!("Query segments: {e}"))?
@@ -57,25 +70,27 @@ impl Database {
             .map_err(|e| format!("Transaction: {e}"))?;
 
         tx.execute(
-            "INSERT OR REPLACE INTO meetings (
-                id,
-                title,
-                started_at,
-                ended_at,
-                duration_seconds,
-                transcription_profile,
-                recording_sessions,
-                summary,
-                summary_is_stale,
-                summary_model,
-                summary_generated_at,
-                edited_transcript,
-                notes,
-                calendar_event_id,
-                participants,
-                structured_summary,
-                system_audio
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
+            &format!(
+                "INSERT OR REPLACE INTO {MEETINGS} (
+                {ID},
+                {TITLE},
+                {STARTED_AT},
+                {ENDED_AT},
+                {DURATION_SECONDS},
+                {TRANSCRIPTION_PROFILE},
+                {RECORDING_SESSIONS},
+                {SUMMARY},
+                {SUMMARY_IS_STALE},
+                {SUMMARY_MODEL},
+                {SUMMARY_GENERATED_AT},
+                {EDITED_TRANSCRIPT},
+                {NOTES},
+                {CALENDAR_EVENT_ID},
+                {PARTICIPANTS},
+                {STRUCTURED_SUMMARY},
+                {SYSTEM_AUDIO}
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)"
+            ),
             params![
                 meeting.id,
                 meeting.title,
@@ -101,15 +116,18 @@ impl Database {
         .map_err(|e| format!("Insert meeting: {e}"))?;
 
         tx.execute(
-            "DELETE FROM segments WHERE meeting_id = ?1",
+            &format!("DELETE FROM {SEGMENTS} WHERE {MEETING_ID} = ?1"),
             params![meeting.id],
         )
         .map_err(|e| format!("Delete segments: {e}"))?;
 
+        let insert_segment_sql = format!(
+            "INSERT INTO {SEGMENTS} ({MEETING_ID}, {TEXT}, {START_TIME}, {END_TIME}, {IS_FINAL}, {LANGUAGE}, {CONFIDENCE}, {SORT_ORDER}, {SPEAKER})
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)"
+        );
         for (i, seg) in meeting.segments.iter().enumerate() {
             tx.execute(
-                "INSERT INTO segments (meeting_id, text, start_time, end_time, is_final, language, confidence, sort_order, speaker)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                &insert_segment_sql,
                 params![
                     meeting.id,
                     seg.text,
@@ -150,27 +168,29 @@ impl Database {
     pub fn upsert_meeting_header(&self, meeting: &MeetingTranscript) -> Result<(), String> {
         let conn = self.conn.acquire()?;
         conn.execute(
-            "INSERT INTO meetings (
-                id, title, started_at, ended_at, duration_seconds,
-                transcription_profile, recording_sessions, summary,
-                summary_is_stale, summary_model, summary_generated_at,
-                edited_transcript, notes, calendar_event_id, participants,
-                structured_summary
+            &format!(
+                "INSERT INTO {MEETINGS} (
+                {ID}, {TITLE}, {STARTED_AT}, {ENDED_AT}, {DURATION_SECONDS},
+                {TRANSCRIPTION_PROFILE}, {RECORDING_SESSIONS}, {SUMMARY},
+                {SUMMARY_IS_STALE}, {SUMMARY_MODEL}, {SUMMARY_GENERATED_AT},
+                {EDITED_TRANSCRIPT}, {NOTES}, {CALENDAR_EVENT_ID}, {PARTICIPANTS},
+                {STRUCTURED_SUMMARY}
              ) VALUES (?1, ?2, ?3, NULL, 0, ?4, ?5, ?6, ?7, ?8, ?9, NULL, ?10, ?11, ?12, ?13)
-             ON CONFLICT(id) DO UPDATE SET
-                title = excluded.title,
-                started_at = excluded.started_at,
-                ended_at = NULL,
-                transcription_profile = excluded.transcription_profile,
-                recording_sessions = excluded.recording_sessions,
-                summary = excluded.summary,
-                summary_is_stale = excluded.summary_is_stale,
-                summary_model = excluded.summary_model,
-                summary_generated_at = excluded.summary_generated_at,
-                notes = excluded.notes,
-                calendar_event_id = excluded.calendar_event_id,
-                participants = excluded.participants,
-                structured_summary = excluded.structured_summary",
+             ON CONFLICT({ID}) DO UPDATE SET
+                {TITLE} = excluded.{TITLE},
+                {STARTED_AT} = excluded.{STARTED_AT},
+                {ENDED_AT} = NULL,
+                {TRANSCRIPTION_PROFILE} = excluded.{TRANSCRIPTION_PROFILE},
+                {RECORDING_SESSIONS} = excluded.{RECORDING_SESSIONS},
+                {SUMMARY} = excluded.{SUMMARY},
+                {SUMMARY_IS_STALE} = excluded.{SUMMARY_IS_STALE},
+                {SUMMARY_MODEL} = excluded.{SUMMARY_MODEL},
+                {SUMMARY_GENERATED_AT} = excluded.{SUMMARY_GENERATED_AT},
+                {NOTES} = excluded.{NOTES},
+                {CALENDAR_EVENT_ID} = excluded.{CALENDAR_EVENT_ID},
+                {PARTICIPANTS} = excluded.{PARTICIPANTS},
+                {STRUCTURED_SUMMARY} = excluded.{STRUCTURED_SUMMARY}"
+            ),
             params![
                 meeting.id,
                 meeting.title,
@@ -209,10 +229,13 @@ impl Database {
         let tx = conn
             .transaction()
             .map_err(|e| format!("Transaction: {e}"))?;
+        let insert_segment_sql = format!(
+            "INSERT INTO {SEGMENTS} ({MEETING_ID}, {TEXT}, {START_TIME}, {END_TIME}, {IS_FINAL}, {LANGUAGE}, {CONFIDENCE}, {SORT_ORDER}, {SPEAKER})
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)"
+        );
         for (i, seg) in segments.iter().enumerate() {
             tx.execute(
-                "INSERT INTO segments (meeting_id, text, start_time, end_time, is_final, language, confidence, sort_order, speaker)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                &insert_segment_sql,
                 params![
                     meeting_id,
                     seg.text,
@@ -245,18 +268,18 @@ impl Database {
         let tx = conn
             .transaction()
             .map_err(|e| format!("Transaction: {e}"))?;
+        let update_segment_sql = format!(
+            "UPDATE {SEGMENTS} SET {TEXT} = ?3 WHERE {MEETING_ID} = ?1 AND {SORT_ORDER} = ?2"
+        );
         for (sort_order, text) in updates {
-            tx.execute(
-                "UPDATE segments SET text = ?3 WHERE meeting_id = ?1 AND sort_order = ?2",
-                params![meeting_id, sort_order, text],
-            )
-            .map_err(|e| format!("Update segment text: {e}"))?;
+            tx.execute(&update_segment_sql, params![meeting_id, sort_order, text])
+                .map_err(|e| format!("Update segment text: {e}"))?;
         }
 
         // Rebuild FTS only if there is no edited_transcript
         let edited_transcript: Option<String> = tx
             .query_row(
-                "SELECT edited_transcript FROM meetings WHERE id = ?1",
+                &format!("SELECT {EDITED_TRANSCRIPT} FROM {MEETINGS} WHERE {ID} = ?1"),
                 params![meeting_id],
                 |row| row.get(0),
             )
@@ -309,7 +332,9 @@ impl Database {
         let ids: Vec<String> = {
             let conn = self.conn.acquire()?;
             let mut stmt = conn
-                .prepare("SELECT id FROM meetings WHERE ended_at IS NULL")
+                .prepare(&format!(
+                    "SELECT {ID} FROM {MEETINGS} WHERE {ENDED_AT} IS NULL"
+                ))
                 .map_err(|e| format!("Prepare unfinished: {e}"))?;
             stmt.query_map([], |row| row.get::<_, String>(0))
                 .map_err(|e| format!("Query unfinished: {e}"))?
@@ -386,26 +411,28 @@ impl Database {
         #[allow(clippy::wildcard_enum_match_arm)]
         let meeting = conn
             .query_row(
-                "SELECT
-                    id,
-                    title,
-                    started_at,
-                    ended_at,
-                    duration_seconds,
-                    transcription_profile,
-                    recording_sessions,
-                    summary,
-                    summary_is_stale,
-                    summary_model,
-                    summary_generated_at,
-                    edited_transcript,
-                    notes,
-                    calendar_event_id,
-                    participants,
-                    structured_summary,
-                    system_audio
-                 FROM meetings
-                 WHERE id = ?1",
+                &format!(
+                    "SELECT
+                    {ID},
+                    {TITLE},
+                    {STARTED_AT},
+                    {ENDED_AT},
+                    {DURATION_SECONDS},
+                    {TRANSCRIPTION_PROFILE},
+                    {RECORDING_SESSIONS},
+                    {SUMMARY},
+                    {SUMMARY_IS_STALE},
+                    {SUMMARY_MODEL},
+                    {SUMMARY_GENERATED_AT},
+                    {EDITED_TRANSCRIPT},
+                    {NOTES},
+                    {CALENDAR_EVENT_ID},
+                    {PARTICIPANTS},
+                    {STRUCTURED_SUMMARY},
+                    {SYSTEM_AUDIO}
+                 FROM {MEETINGS}
+                 WHERE {ID} = ?1"
+                ),
                 params![id],
                 |row| {
                     Ok(MeetingRow {
@@ -436,8 +463,8 @@ impl Database {
 
         let mut stmt = conn
             .prepare(
-                "SELECT text, start_time, end_time, is_final, language, confidence, speaker
-                 FROM segments WHERE meeting_id = ?1 ORDER BY sort_order",
+                &format!("SELECT {TEXT}, {START_TIME}, {END_TIME}, {IS_FINAL}, {LANGUAGE}, {CONFIDENCE}, {SPEAKER}
+                 FROM {SEGMENTS} WHERE {MEETING_ID} = ?1 ORDER BY {SORT_ORDER}"),
             )
             .map_err(|e| format!("Prepare: {e}"))?;
 
@@ -511,7 +538,7 @@ impl Database {
         #[allow(clippy::wildcard_enum_match_arm)]
         let raw: Option<String> = conn
             .query_row(
-                "SELECT system_audio FROM meetings WHERE id = ?1",
+                &format!("SELECT {SYSTEM_AUDIO} FROM {MEETINGS} WHERE {ID} = ?1"),
                 params![id],
                 |row| row.get(0),
             )
@@ -525,13 +552,15 @@ impl Database {
     pub fn save_meeting_notes(&self, id: &str, notes: Option<&str>) -> Result<(), String> {
         let conn = self.conn.acquire()?;
         conn.execute(
-            "UPDATE meetings
-             SET notes = ?1,
-                 summary_is_stale = CASE
-                   WHEN summary IS NOT NULL AND notes IS DISTINCT FROM ?1 THEN 1
-                   ELSE summary_is_stale
+            &format!(
+                "UPDATE {MEETINGS}
+             SET {NOTES} = ?1,
+                 {SUMMARY_IS_STALE} = CASE
+                   WHEN {SUMMARY} IS NOT NULL AND {NOTES} IS DISTINCT FROM ?1 THEN 1
+                   ELSE {SUMMARY_IS_STALE}
                  END
-             WHERE id = ?2",
+             WHERE {ID} = ?2"
+            ),
             params![notes, id],
         )
         .map_err(|e| format!("Update meeting notes: {e}"))?;
@@ -544,8 +573,8 @@ impl Database {
 
         let mut stmt = conn
             .prepare(
-                "SELECT id, title, started_at, duration_seconds, summary IS NOT NULL, summary_is_stale
-                 FROM meetings ORDER BY started_at DESC",
+                &format!("SELECT {ID}, {TITLE}, {STARTED_AT}, {DURATION_SECONDS}, {SUMMARY} IS NOT NULL, {SUMMARY_IS_STALE}
+                 FROM {MEETINGS} ORDER BY {STARTED_AT} DESC"),
             )
             .map_err(|e| format!("Prepare: {e}"))?;
 
@@ -582,13 +611,16 @@ impl Database {
         let conn = self.conn.acquire()?;
 
         conn.execute(
-            "DELETE FROM text_search WHERE source_type = ?1 AND source_id = ?2",
+            &format!("DELETE FROM {TEXT_SEARCH} WHERE {SOURCE_TYPE} = ?1 AND {SOURCE_ID} = ?2"),
             params![SearchSource::Meeting, id],
         )
         .map_err(|e| format!("Delete FTS: {e}"))?;
 
-        conn.execute("DELETE FROM meetings WHERE id = ?1", params![id])
-            .map_err(|e| format!("Delete meeting: {e}"))?;
+        conn.execute(
+            &format!("DELETE FROM {MEETINGS} WHERE {ID} = ?1"),
+            params![id],
+        )
+        .map_err(|e| format!("Delete meeting: {e}"))?;
 
         Ok(())
     }
@@ -612,15 +644,17 @@ impl Database {
         let now = Utc::now().to_rfc3339();
 
         conn.execute(
-            "UPDATE meetings
-             SET summary = ?1, summary_model = ?2, summary_generated_at = ?3,
-                 structured_summary = ?4,
-                 summary_is_stale = CASE
-                   WHEN edited_transcript IS NOT DISTINCT FROM ?5
-                    AND notes IS NOT DISTINCT FROM ?6 THEN 0
+            &format!(
+                "UPDATE {MEETINGS}
+             SET {SUMMARY} = ?1, {SUMMARY_MODEL} = ?2, {SUMMARY_GENERATED_AT} = ?3,
+                 {STRUCTURED_SUMMARY} = ?4,
+                 {SUMMARY_IS_STALE} = CASE
+                   WHEN {EDITED_TRANSCRIPT} IS NOT DISTINCT FROM ?5
+                    AND {NOTES} IS NOT DISTINCT FROM ?6 THEN 0
                    ELSE 1
                  END
-             WHERE id = ?7",
+             WHERE {ID} = ?7"
+            ),
             params![
                 summary,
                 model,
@@ -640,7 +674,7 @@ impl Database {
     pub fn update_meeting_title(&self, id: &str, title: &str) -> Result<(), String> {
         let conn = self.conn.acquire()?;
         conn.execute(
-            "UPDATE meetings SET title = ?1 WHERE id = ?2",
+            &format!("UPDATE {MEETINGS} SET {TITLE} = ?1 WHERE {ID} = ?2"),
             params![title, id],
         )
         .map_err(|e| format!("Update meeting title: {e}"))?;
@@ -658,13 +692,15 @@ impl Database {
             .map_err(|e| format!("Transaction: {e}"))?;
 
         tx.execute(
-            "UPDATE meetings
-             SET edited_transcript = ?1,
-                 summary_is_stale = CASE
-                   WHEN summary IS NOT NULL AND edited_transcript IS DISTINCT FROM ?1 THEN 1
-                   ELSE summary_is_stale
+            &format!(
+                "UPDATE {MEETINGS}
+             SET {EDITED_TRANSCRIPT} = ?1,
+                 {SUMMARY_IS_STALE} = CASE
+                   WHEN {SUMMARY} IS NOT NULL AND {EDITED_TRANSCRIPT} IS DISTINCT FROM ?1 THEN 1
+                   ELSE {SUMMARY_IS_STALE}
                  END
-             WHERE id = ?2",
+             WHERE {ID} = ?2"
+            ),
             params![edited_transcript, id],
         )
         .map_err(|e| format!("Update edited transcript: {e}"))?;
@@ -681,7 +717,7 @@ impl Database {
     pub fn load_edited_transcript(&self, id: &str) -> Result<Option<String>, String> {
         let conn = self.conn.acquire()?;
         conn.query_row(
-            "SELECT edited_transcript FROM meetings WHERE id = ?1",
+            &format!("SELECT {EDITED_TRANSCRIPT} FROM {MEETINGS} WHERE {ID} = ?1"),
             params![id],
             |row| row.get(0),
         )
@@ -693,7 +729,7 @@ impl Database {
         let conn = self.conn.acquire()?;
         let count: i64 = conn
             .query_row(
-                "SELECT COUNT(*) FROM meetings WHERE id = ?1",
+                &format!("SELECT COUNT(*) FROM {MEETINGS} WHERE {ID} = ?1"),
                 params![id],
                 |row| row.get(0),
             )
@@ -705,7 +741,9 @@ impl Database {
     pub fn count_meetings(&self) -> Result<u32, String> {
         let conn = self.conn.acquire()?;
         let count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM meetings", [], |row| row.get(0))
+            .query_row(&format!("SELECT COUNT(*) FROM {MEETINGS}"), [], |row| {
+                row.get(0)
+            })
             .map_err(|e| format!("Count meetings: {e}"))?;
         Ok(count.max(0) as u32)
     }
