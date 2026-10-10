@@ -154,8 +154,8 @@ for phrase assertions instead of mistaking volatile revisions for persisted text
 The combined source is local commit `92bd2a1b`, followed by merge `d30612fe` with
 the newest accessible develop `0004eced`. SOU-166's dictionary/paragraph-editor
 contract and behavior remain; the old edit-learning bool is replaced by its
-typed learning-mode state. New Nightly and human acceptance results will be
-recorded separately in [the QA dossier](../qa/sou-121/README.md). No historical
+typed learning-mode state. The subsequent 2026-10-09 Nightly acceptance and exact
+revision-specific gate results are recorded in [the QA dossier](../qa/sou-121/README.md#verification--2026-10-09). No historical
 image, native result or test count is relabeled as fresh reconciliation proof.
 
 2026-10-05, Settings follow-up: the user confirmed the preceding transcription

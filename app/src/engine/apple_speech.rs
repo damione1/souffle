@@ -275,6 +275,20 @@ impl AppleSpeechLane {
             s
         })
     }
+    fn transcribe_with(
+        &mut self,
+        audio: &[f32],
+        push: impl FnOnce(u32) -> Result<serde_json::Value, EngineError>,
+    ) -> Result<Vec<TranscriptionSegment>, EngineError> {
+        let count =
+            u32::try_from(audio.len()).map_err(|e| EngineError::InferenceError(e.to_string()))?;
+        // The actor has already removed this capture interval from its buffer.
+        // Account for it even if delivery fails; recovery replaces the old
+        // analyzer before another frame can use its shorter accepted clock.
+        self.consumed_samples += u64::from(count);
+        let value = push(count)?;
+        self.segments(value)
+    }
 }
 impl TranscriptionEngine for AppleSpeechLane {
     fn silence_handling(&self) -> super::SilenceHandling {
@@ -300,21 +314,20 @@ impl TranscriptionEngine for AppleSpeechLane {
         audio: &[f32],
         _language: Option<&str>,
     ) -> Result<Vec<TranscriptionSegment>, EngineError> {
-        let session = self.session.ok_or(EngineError::NotInitialized)?;
-        let count =
-            u32::try_from(audio.len()).map_err(|e| EngineError::InferenceError(e.to_string()))?;
-        #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-        {
-            let value = decode(unsafe { souffle_speech_push(session, audio.as_ptr(), count) })
-                .map_err(EngineError::InferenceError)?;
-            self.consumed_samples += u64::from(count);
-            self.segments(value)
-        }
-        #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
-        {
-            let _ = (session, count);
-            Err(EngineError::NotInitialized)
-        }
+        let session = self.session;
+        self.transcribe_with(audio, |count| {
+            let session = session.ok_or(EngineError::NotInitialized)?;
+            #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+            {
+                decode(unsafe { souffle_speech_push(session, audio.as_ptr(), count) })
+                    .map_err(EngineError::InferenceError)
+            }
+            #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+            {
+                let _ = (session, count);
+                Err(EngineError::NotInitialized)
+            }
+        })
     }
     fn flush(&mut self) -> Result<Vec<TranscriptionSegment>, EngineError> {
         let Some(session) = self.session else {
@@ -427,6 +440,7 @@ impl AppleSpeechEngine {
             .locale
             .clone()
             .ok_or(EngineError::NotInitialized)?;
+        let sample_rate = self.lanes.primary().sample_rate;
         let carry = |lane: &mut AppleSpeechLane| {
             lane.preserve_timeline();
             if !preserve {
@@ -441,9 +455,12 @@ impl AppleSpeechEngine {
             SpeechLanes::Dual { me, them } => carry(me).max(carry(them)),
         };
         self.lanes.cancel()?;
-        self.pending_finals.clear();
+        if !preserve {
+            self.pending_finals.clear();
+        }
         let me = AppleSpeechLane {
             locale: Some(locale.clone()),
+            sample_rate,
             timeline_offset: offset,
             preview: None,
             ..Default::default()
@@ -451,6 +468,7 @@ impl AppleSpeechEngine {
         self.lanes = if self.dual {
             let them = AppleSpeechLane {
                 locale: Some(locale),
+                sample_rate,
                 timeline_offset: offset,
                 preview: None,
                 ..Default::default()
@@ -472,12 +490,72 @@ impl AppleSpeechEngine {
                 }
             }),
         };
+        let result = result.and_then(|()| {
+            if preserve && sample_rate != 0 && self.lanes.primary().sample_rate != sample_rate {
+                Err(EngineError::InferenceError(
+                    "Apple Speech rate changed during capture recovery".into(),
+                ))
+            } else {
+                Ok(())
+            }
+        });
         if result.is_err() {
             // A failed second begin must not leave its successful peer alive.
             // The replacement lanes already retain the committed offset.
             let _ = self.lanes.cancel();
+            if preserve {
+                // Capture/resampling continues at the last agreed rate even
+                // when one begin negotiated a new format before its peer failed.
+                match &mut self.lanes {
+                    SpeechLanes::Mono(lane) => lane.sample_rate = sample_rate,
+                    SpeechLanes::Dual { me, them } => {
+                        me.sample_rate = sample_rate;
+                        them.sample_rate = sample_rate;
+                    }
+                }
+            }
         }
         result
+    }
+    fn finish_push(
+        &mut self,
+        result: Result<Vec<TranscriptionSegment>, EngineError>,
+        begin: impl FnMut(&mut AppleSpeechLane) -> Result<(), EngineError>,
+    ) -> Result<Vec<TranscriptionSegment>, EngineError> {
+        if result.is_err()
+            && let Err(error) = self.restart_with(true, begin)
+        {
+            tracing::warn!(%error, "Apple Speech capture recovery failed; clock retained for retry");
+        }
+        result.map(|mut segments| {
+            visible_results(&mut segments, self.preview_enabled);
+            segments
+        })
+    }
+    fn transcribe_dual_with(
+        &mut self,
+        mic: &[f32],
+        system: &[f32],
+        mut push: impl FnMut(
+            &mut AppleSpeechLane,
+            &[f32],
+        ) -> Result<Vec<TranscriptionSegment>, EngineError>,
+        begin: impl FnMut(&mut AppleSpeechLane) -> Result<(), EngineError>,
+    ) -> Result<Vec<TranscriptionSegment>, EngineError> {
+        let result = match &mut self.lanes {
+            SpeechLanes::Mono(_) => {
+                return Err(EngineError::InferenceError(
+                    "Dual audio supplied to mono Apple Speech session".into(),
+                ));
+            }
+            SpeechLanes::Dual { me, them } => {
+                let len = mic.len().max(system.len());
+                let first = push(me, &aligned_audio(mic, len));
+                let second = push(them, &aligned_audio(system, len));
+                combine_lanes(first, second, &mut self.pending_finals)
+            }
+        };
+        self.finish_push(result, begin)
     }
 }
 fn label(mut segments: Vec<TranscriptionSegment>, speaker: Speaker) -> Vec<TranscriptionSegment> {
@@ -558,33 +636,27 @@ impl TranscriptionEngine for AppleSpeechEngine {
         audio: &[f32],
         language: Option<&str>,
     ) -> Result<Vec<TranscriptionSegment>, EngineError> {
-        let mut segments = match &mut self.lanes {
+        let result = match &mut self.lanes {
             SpeechLanes::Mono(lane) => lane.transcribe(audio, language),
-            SpeechLanes::Dual { .. } => Err(EngineError::InferenceError(
-                "Mono audio supplied to dual Apple Speech session".into(),
-            )),
-        }?;
-        visible_results(&mut segments, self.preview_enabled);
-        Ok(segments)
+            SpeechLanes::Dual { .. } => {
+                return Err(EngineError::InferenceError(
+                    "Mono audio supplied to dual Apple Speech session".into(),
+                ));
+            }
+        };
+        self.finish_push(result, AppleSpeechLane::begin)
     }
     fn transcribe_dual(
         &mut self,
         mic: &[f32],
         system: &[f32],
     ) -> Result<Vec<TranscriptionSegment>, EngineError> {
-        match &mut self.lanes {
-            SpeechLanes::Mono(_) => Err(EngineError::InferenceError(
-                "Dual audio supplied to mono Apple Speech session".into(),
-            )),
-            SpeechLanes::Dual { me, them } => {
-                let len = mic.len().max(system.len());
-                let first = me.transcribe(&aligned_audio(mic, len), None);
-                let second = them.transcribe(&aligned_audio(system, len), None);
-                let mut out = combine_lanes(first, second, &mut self.pending_finals)?;
-                visible_results(&mut out, self.preview_enabled);
-                Ok(out)
-            }
-        }
+        self.transcribe_dual_with(
+            mic,
+            system,
+            |lane, audio| lane.transcribe(audio, None),
+            AppleSpeechLane::begin,
+        )
     }
     fn flush(&mut self) -> Result<Vec<TranscriptionSegment>, EngineError> {
         let mut out = match &mut self.lanes {
@@ -888,6 +960,282 @@ mod contract_tests {
         value.timeline_offset = timeline_offset;
         value.consumed_samples = consumed_samples;
         value
+    }
+    #[test]
+    fn partial_delivery_recovers_both_clocks_and_retains_finals_until_next_success() {
+        for failed_push in [1, 2] {
+            let mut engine = AppleSpeechEngine {
+                dual: true,
+                lanes: SpeechLanes::Dual {
+                    me: lane_with_capture(7.0, 48000),
+                    them: lane_with_capture(7.0, 48000),
+                },
+                ..Default::default()
+            };
+            let mut pushes = 0;
+            let mut starts = 0;
+            assert!(
+                engine
+                    .transcribe_dual_with(
+                        &vec![0.1; 4000],
+                        &vec![0.2; 2000],
+                        |lane, audio| {
+                            pushes += 1;
+                            lane.transcribe_with(audio, |count| {
+                                assert_eq!(count, 4000);
+                                if pushes == failed_push {
+                                    Err(EngineError::InferenceError("delivery failed".into()))
+                                } else {
+                                    Ok(result("Already finalized.", true, 2.0, 2.25))
+                                }
+                            })
+                        },
+                        |lane| {
+                            starts += 1;
+                            assert_eq!(lane.timeline_offset, 10.25);
+                            lane.sample_rate = 16000;
+                            Ok(())
+                        },
+                    )
+                    .is_err()
+            );
+            assert_eq!((pushes, starts), (2, 2));
+            match &engine.lanes {
+                SpeechLanes::Dual { me, them } => {
+                    for lane in [me, them] {
+                        assert_eq!(lane.timeline_offset, 10.25);
+                        assert_eq!(lane.consumed_samples, 0);
+                        assert!(lane.preview.is_none());
+                    }
+                }
+                SpeechLanes::Mono(_) => panic!("recovery lost a source"),
+            }
+            let out = engine
+                .transcribe_dual_with(
+                    &vec![0.0; 4000],
+                    &vec![0.0; 4000],
+                    |lane, audio| {
+                        lane.transcribe_with(audio, |_| Ok(result("Recovered.", true, 0.0, 0.25)))
+                    },
+                    |_| panic!("successful delivery must not restart"),
+                )
+                .unwrap();
+            assert_eq!(out.len(), 3);
+            assert_eq!(out[0].text, "Already finalized.");
+            assert_eq!((out[0].start_time, out[0].end_time), (9.0, 9.25));
+            assert_eq!(
+                out[0].speaker,
+                Some(if failed_push == 1 {
+                    Speaker::Them
+                } else {
+                    Speaker::Me
+                })
+            );
+            for (segment, speaker) in out[1..].iter().zip([Speaker::Me, Speaker::Them]) {
+                assert_eq!(segment.speaker, Some(speaker));
+                assert_eq!((segment.start_time, segment.end_time), (10.25, 10.5));
+            }
+            assert!(engine.salvage_pending_after_flush_error().is_empty());
+            engine.restart_with(true, |_| Ok(())).unwrap();
+            assert_eq!(engine.lanes.primary().timeline_offset, 10.5);
+        }
+    }
+    #[test]
+    fn repeated_delivery_and_restart_failures_count_each_frame_once_at_negotiated_rate() {
+        let make_lane = || {
+            let mut lane = lane_with_capture(5.0, 48000);
+            lane.sample_rate = 48000;
+            lane
+        };
+        let mut engine = AppleSpeechEngine {
+            dual: true,
+            lanes: SpeechLanes::Dual {
+                me: make_lane(),
+                them: make_lane(),
+            },
+            ..Default::default()
+        };
+        for expected in [6.1, 6.2] {
+            assert!(
+                engine
+                    .transcribe_dual_with(
+                        &vec![0.0; 4800],
+                        &[],
+                        |lane, audio| lane
+                            .transcribe_with(audio, |_| Err(EngineError::NotInitialized)),
+                        |_| Err(EngineError::InferenceError("restart failed".into())),
+                    )
+                    .is_err()
+            );
+            match &engine.lanes {
+                SpeechLanes::Dual { me, them } => {
+                    for lane in [me, them] {
+                        assert!((lane.timeline_offset - expected).abs() < 1e-10);
+                        assert_eq!(lane.sample_rate, 48000);
+                        assert_eq!(lane.consumed_samples, 0);
+                        assert!(lane.session.is_none());
+                    }
+                }
+                SpeechLanes::Mono(_) => panic!("recovery lost a source"),
+            }
+        }
+        engine.restart_with(true, |_| Ok(())).unwrap();
+        assert!((engine.lanes.primary().timeline_offset - 6.2).abs() < 1e-10);
+        let out = engine
+            .transcribe_dual_with(
+                &vec![0.0; 4800],
+                &[],
+                |lane, audio| {
+                    lane.transcribe_with(audio, |_| Ok(result("After retry.", true, 0.0, 0.1)))
+                },
+                |_| panic!("successful delivery must not restart"),
+            )
+            .unwrap();
+        for segment in out {
+            assert!((segment.start_time - 6.2).abs() < 1e-10);
+            assert!((segment.end_time - 6.3).abs() < 1e-10);
+        }
+    }
+    #[test]
+    fn recovery_rejects_changed_rates_and_restores_both_lanes_after_partial_begin() {
+        for (dual, fail_second) in [(false, false), (true, false), (true, true)] {
+            let mut captured = lane_with_capture(5.0, 48000);
+            captured.sample_rate = 48000;
+            let mut engine = AppleSpeechEngine {
+                dual,
+                lanes: SpeechLanes::Mono(captured),
+                ..Default::default()
+            };
+            let mut starts = 0;
+            assert!(
+                engine
+                    .restart_with(true, |lane| {
+                        starts += 1;
+                        lane.sample_rate = 16000;
+                        if fail_second && starts == 2 {
+                            Err(EngineError::NotInitialized)
+                        } else {
+                            Ok(())
+                        }
+                    })
+                    .is_err()
+            );
+            let check = |lane: &AppleSpeechLane| {
+                assert_eq!(lane.sample_rate, 48000);
+                assert_eq!(lane.timeline_offset, 6.0);
+                assert_eq!(lane.consumed_samples, 0);
+                assert!(lane.session.is_none());
+            };
+            match &engine.lanes {
+                SpeechLanes::Mono(lane) => check(lane),
+                SpeechLanes::Dual { me, them } => {
+                    check(me);
+                    check(them);
+                }
+            }
+            let reject_frame = |lane: &mut AppleSpeechLane, audio: &[f32]| {
+                lane.transcribe_with(audio, |_| Err(EngineError::NotInitialized))
+            };
+            if dual {
+                assert!(
+                    engine
+                        .transcribe_dual_with(&vec![0.0; 4800], &[], reject_frame, |_| Err(
+                            EngineError::NotInitialized
+                        ),)
+                        .is_err()
+                );
+            } else {
+                let rejected = match &mut engine.lanes {
+                    SpeechLanes::Mono(lane) => reject_frame(lane, &vec![0.0; 4800]),
+                    SpeechLanes::Dual { .. } => panic!("expected mono"),
+                };
+                assert!(
+                    engine
+                        .finish_push(rejected, |_| Err(EngineError::NotInitialized))
+                        .is_err()
+                );
+            }
+            assert!((engine.lanes.primary().timeline_offset - 6.1).abs() < 1e-10);
+            engine.restart_with(true, |_| Ok(())).unwrap();
+            assert!((engine.lanes.primary().timeline_offset - 6.1).abs() < 1e-10);
+            // A new recording may negotiate a different format normally.
+            engine
+                .restart_with(false, |lane| {
+                    lane.sample_rate = 16000;
+                    Ok(())
+                })
+                .unwrap();
+            assert_eq!(engine.lanes.primary().sample_rate, 16000);
+            assert_eq!(engine.lanes.primary().timeline_offset, 0.0);
+        }
+    }
+    #[test]
+    fn failed_delivery_recovery_keeps_peer_final_available_for_stop_salvage_once() {
+        let mut engine = AppleSpeechEngine {
+            dual: true,
+            lanes: SpeechLanes::Dual {
+                me: lane_with_capture(7.0, 48000),
+                them: lane_with_capture(7.0, 48000),
+            },
+            ..Default::default()
+        };
+        let mut pushes = 0;
+        assert!(
+            engine
+                .transcribe_dual_with(
+                    &vec![0.0; 4000],
+                    &[],
+                    |lane, audio| {
+                        pushes += 1;
+                        lane.transcribe_with(audio, |_| {
+                            if pushes == 1 {
+                                Ok(result("Saved peer final.", true, 2.0, 2.25))
+                            } else {
+                                Err(EngineError::NotInitialized)
+                            }
+                        })
+                    },
+                    |_| Err(EngineError::NotInitialized),
+                )
+                .is_err()
+        );
+        let final_segments = engine.salvage_pending_after_flush_error();
+        assert_eq!(final_segments.len(), 1);
+        assert_eq!(final_segments[0].text, "Saved peer final.");
+        assert_eq!(final_segments[0].speaker, Some(Speaker::Me));
+        assert_eq!(
+            (final_segments[0].start_time, final_segments[0].end_time),
+            (9.0, 9.25)
+        );
+        assert!(engine.salvage_pending_after_flush_error().is_empty());
+    }
+    #[test]
+    fn mono_rejected_frame_is_carried_once_before_delivery_can_resume() {
+        let mut engine = AppleSpeechEngine {
+            lanes: SpeechLanes::Mono(lane_with_capture(7.0, 48000)),
+            ..Default::default()
+        };
+        let failed = match &mut engine.lanes {
+            SpeechLanes::Mono(lane) => lane.transcribe_with(&vec![0.0; 4000], |_| {
+                Err(EngineError::InferenceError("delivery failed".into()))
+            }),
+            SpeechLanes::Dual { .. } => panic!("expected mono"),
+        };
+        assert!(engine.finish_push(failed, |_| Ok(())).is_err());
+        assert_eq!(engine.lanes.primary().timeline_offset, 10.25);
+        engine.restart_with(true, |_| Ok(())).unwrap();
+        assert_eq!(engine.lanes.primary().timeline_offset, 10.25);
+        match &mut engine.lanes {
+            SpeechLanes::Mono(lane) => {
+                let out = lane
+                    .transcribe_with(&vec![0.0; 4000], |_| {
+                        Ok(result("After retry.", true, 0.0, 0.25))
+                    })
+                    .unwrap();
+                assert_eq!((out[0].start_time, out[0].end_time), (10.25, 10.5));
+            }
+            SpeechLanes::Dual { .. } => panic!("recovery changed mode"),
+        }
     }
     #[test]
     fn failed_first_or_second_source_restart_preserves_the_capture_interval_once() {

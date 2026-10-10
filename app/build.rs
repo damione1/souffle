@@ -61,6 +61,9 @@ fn build_apple_speech_bridge() {
         "swift/apple_speech.swift"
     } else {
         println!("cargo:rustc-cfg=apple_speech_stub");
+        println!(
+            "cargo:warning=Building Apple Speech with stubs (SpeechTranscriber not found in SDK or SOUFFLE_FORCE_SPEECH_STUB=1)."
+        );
         "swift/apple_speech_stub.swift"
     };
     let out = PathBuf::from(env::var_os("OUT_DIR").expect("OUT_DIR"));

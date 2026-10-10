@@ -149,14 +149,36 @@ system assets or live capture. Both historical opt-in native tests are retained;
 the older installed-assets-only probe filters finals now that progressive
 revisions also arrive.
 
-Planned validation, with results to be recorded separately after execution:
+### Verification — 2026-10-09
+
+Damien accepted the reconciled Nightly built from
+`3e4caa1968794a6acfde797e29de3b0f0293f435` and authorized merging SOU-121.
+Its embedded source revision, Developer ID signature, DMG integrity and physical
+CoreAudio round-trip test passed. This is global user acceptance, not a newly
+measured installation/error/cancellation matrix.
+
+The final develop/Inter integration at
+`9400d0b30d25c2123dd63f5294b04d7bf520fc14` passed the following complete local
+gate and GitHub Contracts run
+[38005020765](https://github.com/damione1/souffle/actions/runs/38005020765):
 
 ```sh
-cargo test --manifest-path app/Cargo.toml -p souffle --lib engine::apple_speech::
-cargo test --manifest-path app/Cargo.toml -p souffle --lib pipeline::actor::tests::continuous_
-cargo test --manifest-path app/Cargo.toml -p souffle-slint model_ui
+./scripts/build-mcp-sidecar.test.sh
+./scripts/build-mcp-sidecar.sh --debug
+cargo fmt --manifest-path app/Cargo.toml --all -- --check
+cargo clippy --manifest-path app/Cargo.toml --workspace --all-targets -- -D warnings
+cargo test --manifest-path app/Cargo.toml --workspace --no-run
+./scripts/ci/cargo-test-watchdog.sh 300 <samples> -- --manifest-path app/Cargo.toml --workspace
+./scripts/check_slint_translations.sh
 ```
 
-The build owner runs the complete local Contracts gate and packages an isolated
-Nightly for the user. Neither these plans nor the historical screenshots count
-as a new test pass. CodeQL is explicitly waived here and delegated to the user.
+All steps passed; the workspace suite reported 1,499 passed, 0 failed,
+20 ignored and 0 filtered. The local gate disabled debug symbols and incremental
+compilation through external Cargo profile overrides to fit disk space;
+debug assertions remained enabled. Independent review approved that revision.
+No signed DMG of this typography integration is claimed. Subsequent review fixes
+require a new gate; these results remain attached to the named revision.
+
+The separate Copilot scan failed before analysis with HTTP 402 / monthly quota
+exceeded, producing no security findings. CodeQL is explicitly delegated to Damien.
+Historical screenshots and native probes above remain historical evidence.

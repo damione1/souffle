@@ -3070,8 +3070,8 @@ msgid "La langue affichée est celle prise en charge par Apple Speech pour la la
 msgstr "The language shown is the one Apple Speech supports for this Mac’s language and region. To change it, open System Settings > General > Language & Region, then reopen Soufflé."
 
 msgctxt "ModelSection"
-msgid "La transcription fonctionne sans activer Siri ou Apple Intelligence. macOS gère le modèle ; Soufflé libère les sessions inactives."
-msgstr "Transcription works without enabling Siri or Apple Intelligence. macOS manages the model; Soufflé releases idle sessions."
+msgid "La transcription fonctionne sans activer Siri ou Apple Intelligence. macOS gère le modèle."
+msgstr "Transcription works without enabling Siri or Apple Intelligence. macOS manages the model."
 
 msgctxt "ModelSection"
 msgid "Ouvrir Langue et région"

@@ -16,7 +16,7 @@ private func response(_ value: [String: Any]) -> UnsafeMutablePointer<CChar>? {
           let string = String(data: data, encoding: .utf8) else { return strdup("{\"error\":\"serialize Speech response\"}") }
     return strdup(string)
 }
-private func blocking(_ seconds: Double, _ operation: @escaping @Sendable () async throws -> [String: Any]) -> UnsafeMutablePointer<CChar>? {
+private func blocking(_ seconds: Double?, _ operation: @escaping @Sendable () async throws -> [String: Any]) -> UnsafeMutablePointer<CChar>? {
     let reply = Reply()
     let done = DispatchSemaphore(value: 0)
     let task = Task {
@@ -24,7 +24,8 @@ private func blocking(_ seconds: Double, _ operation: @escaping @Sendable () asy
         catch { reply.store(["error": String(describing: error)]) }
         done.signal()
     }
-    guard done.wait(timeout: .now() + seconds) == .success else {
+    let deadline = seconds.map { DispatchTime.now() + $0 } ?? .distantFuture
+    guard done.wait(timeout: deadline) == .success else {
         task.cancel()
         return response(["error": "Apple Speech operation timed out"])
     }
@@ -129,24 +130,37 @@ private actor SpeechSessions {
     }
     func record(_ id: UInt64, result: [String: Any]) { sessions[id]?.results.append(result) }
     func fail(_ id: UInt64, error: String) { sessions[id]?.error = error }
-    func push(_ id: UInt64, samples: [Float]) throws -> [String: Any] {
-        guard var session = sessions[id] else { throw SpeechFailure("unknown Speech session") }
-        if let error = session.error { throw SpeechFailure(error) }
-        if !samples.isEmpty {
-            let buffer = try session.pcm.buffer(samples: samples)
-            let at = CMTime(value: session.samples, timescale: CMTimeScale(session.pcm.format.sampleRate))
-            switch session.input.yield(AnalyzerInput(buffer: buffer, bufferStartTime: at)) {
-            case .enqueued: break
-            case .dropped: throw SpeechFailure("Apple Speech input queue overflow; audio was not accepted")
-            case .terminated: throw SpeechFailure("Apple Speech session terminated")
-            @unknown default: throw SpeechFailure("unknown Speech input queue result")
+    func push(_ id: UInt64, samples: [Float]) async throws -> [String: Any] {
+        guard let initial = sessions[id] else { throw SpeechFailure("unknown Speech session") }
+        let buffer = samples.isEmpty ? nil : try initial.pcm.buffer(samples: samples)
+        let deadline = ContinuousClock.now.advanced(by: .seconds(10))
+        while true {
+            try Task.checkCancellation()
+            // Retry owns the same PCM until accepted. Re-read after every
+            // suspension: result/error/cancel callbacks may have changed it.
+            guard var session = sessions[id] else { throw SpeechFailure("unknown Speech session") }
+            if let error = session.error { throw SpeechFailure(error) }
+            if let buffer {
+                guard ContinuousClock.now < deadline else {
+                    throw SpeechFailure("Apple Speech input stalled; audio was not accepted")
+                }
+                let at = CMTime(value: session.samples, timescale: CMTimeScale(session.pcm.format.sampleRate))
+                switch session.input.yield(AnalyzerInput(buffer: buffer, bufferStartTime: at)) {
+                case .enqueued: session.samples += Int64(samples.count)
+                case .dropped:
+                    // AsyncStream rejects this value without retaining it.
+                    // Backpressure the engine worker instead of losing PCM.
+                    try await Task.sleep(nanoseconds: 5_000_000)
+                    continue
+                case .terminated: throw SpeechFailure("Apple Speech session terminated")
+                @unknown default: throw SpeechFailure("unknown Speech input queue result")
+                }
             }
-            session.samples += Int64(samples.count)
+            let results = session.results
+            session.results = []
+            sessions[id] = session
+            return ["segments": results]
         }
-        let results = session.results
-        session.results = []
-        sessions[id] = session
-        return ["segments": results]
     }
     func finish(_ id: UInt64) async throws -> [String: Any] {
         guard let session = sessions[id] else { throw SpeechFailure("unknown Speech session") }
@@ -155,7 +169,7 @@ private actor SpeechSessions {
             try await session.analyzer.finalizeAndFinishThroughEndOfInput()
             await session.task.value
             try Task.checkCancellation()
-            let result = try push(id, samples: [])
+            let result = try await push(id, samples: [])
             sessions.removeValue(forKey: id)
             return result
         } catch {
@@ -224,7 +238,9 @@ public func speechPush(_ session: UInt64, _ pointer: UnsafePointer<Float>?, _ co
     // Copy before launching Task; Rust can release/reuse its buffer on return.
     let samples: [Float] = count == 0 ? [] : Array(UnsafeBufferPointer(start: pointer, count: Int(count)))
     guard #available(macOS 26, *) else { return response(["error": "macOS 26 is required"]) }
-    return blocking(10) { try await SpeechSessions.shared.push(session, samples: samples) }
+    // Push has its own bounded, monotonic backpressure deadline. Wait for the
+    // actual commit/error; an outer timeout could return before a late enqueue.
+    return blocking(nil) { try await SpeechSessions.shared.push(session, samples: samples) }
 }
 @_cdecl("souffle_speech_finish")
 public func speechFinish(_ session: UInt64) -> UnsafeMutablePointer<CChar>? {

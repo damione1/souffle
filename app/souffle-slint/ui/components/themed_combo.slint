@@ -205,7 +205,7 @@ export component ThemedComboBox inherits Rectangle {
                         border-width: index == root.highlighted-index ? 1px : 0px;
                         border-color: Theme.accent;
                         accessible-role: list-item;
-                        accessible-label: item;
+                        accessible-label: row-label.text;
                         accessible-enabled: root.enabled;
                         accessible-item-selectable: true;
                         accessible-item-selected: item == root.current-value;
@@ -230,7 +230,7 @@ export component ThemedComboBox inherits Rectangle {
                             root.restore-focus();
                         }
 
-                        AppText {
+                        row-label := AppText {
                             x: 10px;
                             width: parent.width - 20px;
                             height: parent.height;

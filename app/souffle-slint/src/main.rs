@@ -1271,6 +1271,7 @@ fn load_transcription_model_state(
     let Some(token) = settings_io.current_load_token() else {
         return;
     };
+    let model_revision = MODEL_SELECTION_REVISION.load(Ordering::Acquire);
     let unload_timeout_minutes = settings_state
         .borrow()
         .as_ref()
@@ -1295,7 +1296,9 @@ fn load_transcription_model_state(
             Ok(result) => result,
             Err(error) => Err(format!("Failed to join model state worker: {error}")),
         };
-        if !settings_io.accepts_load(token) {
+        if !settings_io.accepts_load(token)
+            || MODEL_SELECTION_REVISION.load(Ordering::Acquire) != model_revision
+        {
             return;
         }
         let Some(window) = weak.upgrade() else {
@@ -2246,6 +2249,88 @@ fn ollama_pull_channel(
     })
 }
 
+// Invalidate delayed native status reads as soon as the user picks a different
+// model, before its asynchronous Settings save has completed. Checking only
+// durable Settings would still accept the previous profile during that save.
+static MODEL_SELECTION_REVISION: AtomicU64 = AtomicU64::new(0);
+
+fn invalidate_model_selection() -> u64 {
+    begin_model_refresh();
+    MODEL_SELECTION_REVISION.fetch_add(1, Ordering::AcqRel) + 1
+}
+
+#[derive(Clone)]
+struct ModelTransition {
+    revision: u64,
+    selection: TranscriptionProfileSelection,
+}
+
+impl ModelTransition {
+    fn begin(selection: TranscriptionProfileSelection) -> Self {
+        Self {
+            revision: invalidate_model_selection(),
+            selection,
+        }
+    }
+
+    fn is_current(&self) -> bool {
+        MODEL_SELECTION_REVISION.load(Ordering::Acquire) == self.revision
+    }
+
+    // Worker-only: verify all three profile IDs against canonical Settings,
+    // including saves whose subsequent snapshot could not be read by the UI.
+    fn is_selected(&self, handle: &AppHandle) -> Result<bool, String> {
+        if !self.is_current() {
+            return Ok(false);
+        }
+        let settings = AppSettings::load(&handle.db)?;
+        Ok(self.is_current() && model_selection_matches_settings(&self.selection, &settings))
+    }
+}
+
+fn model_selection_matches_settings(
+    selection: &TranscriptionProfileSelection,
+    settings: &AppSettings,
+) -> bool {
+    selection.engine_id == settings.transcription_engine_id
+        && selection.model_id == settings.transcription_model_id
+        && selection.backend_id == settings.transcription_backend_id
+}
+
+/// A native status query may outlive a new model selection. Check both before
+/// starting its work and after it returns, including when the old work failed.
+fn run_current_model_task<T>(
+    is_current: impl Fn() -> Result<bool, String>,
+    task: impl FnOnce() -> Result<T, String>,
+) -> Result<Option<T>, String> {
+    if !is_current()? {
+        return Ok(None);
+    }
+    let result = task();
+    if !is_current()? {
+        return Ok(None);
+    }
+    result.map(Some)
+}
+
+fn read_model_transition_status(
+    handle: &AppHandle,
+    transition: &ModelTransition,
+) -> Result<Option<souffle_lib::engine::TranscriptionRuntimeStatus>, String> {
+    run_current_model_task(
+        || transition.is_selected(handle),
+        || {
+            // An explicit retry recovers the canonical machine, not a local busy flag.
+            if let Ok(souffle_lib::state_machine::AppStateMachine::Error { .. }) =
+                handle.current_machine_state()
+            {
+                souffle_lib::commands::recover_state(handle.clone())?;
+            }
+            souffle_lib::commands::get_model_status(handle.clone(), transition.selection.clone())
+        },
+    )
+}
+
 /// Drives one model transition (AC2): reads the real `get_model_status`,
 /// then either does nothing (Ready), loads in the background (LoadRequired),
 /// or starts a real tracked download that itself triggers the load once
@@ -2257,52 +2342,76 @@ fn start_model_transition(
     handle: AppHandle,
     selection: TranscriptionProfileSelection,
 ) {
-    // An explicit retry recovers the canonical machine, not a local busy flag.
-    if let Ok(souffle_lib::state_machine::AppStateMachine::Error { .. }) =
-        handle.current_machine_state()
-        && let Err(error) = souffle_lib::commands::recover_state(Arc::clone(&handle))
-    {
-        if let Some(window) = weak.upgrade() {
-            window.set_settings_model_error_message(error.into());
-        }
-        return;
-    }
-    let state = Arc::clone(&handle);
-    let status = match souffle_lib::commands::get_model_status(state, selection.clone()) {
-        Ok(status) => status,
-        Err(e) => {
-            if let Some(window) = weak.upgrade() {
-                window.set_settings_model_error_message(e.into());
-            }
+    let transition = ModelTransition::begin(selection);
+    let worker_handle = handle.clone();
+    let worker_transition = transition.clone();
+    let worker = souffle_lib::async_runtime::spawn_blocking(move || {
+        read_model_transition_status(&worker_handle, &worker_transition)
+    });
+    slint::spawn_local(async move {
+        let result = worker
+            .await
+            .map_err(|error| format!("Join model status task: {error}"))
+            .and_then(|result| result);
+        if !transition.is_current() {
             return;
         }
-    };
-    let Some(window) = weak.upgrade() else {
-        return;
-    };
-    window.set_settings_model_error_message("".into());
-    refresh_model_runtime(weak.clone(), handle.clone());
-    match status.phase {
-        TranscriptionRuntimePhase::Ready => {}
-        TranscriptionRuntimePhase::LoadRequired => {
-            load_model_in_background(weak, handle, selection);
-        }
-        TranscriptionRuntimePhase::DownloadRequired => {
-            window.set_settings_model_download_progress_label("".into());
-            window.set_settings_model_download_progress_fraction(0.0);
-            let state = Arc::clone(&handle);
-            let channel = model_download_channel(weak.clone(), handle.clone(), selection.clone());
-            if let Err(e) = souffle_lib::commands::download_model(state, selection, channel) {
-                window.set_settings_model_error_message(e.into());
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        let status = match result {
+            Ok(Some(status)) => status,
+            Ok(None) => return,
+            Err(error) => {
+                window.set_settings_model_error_message(error.into());
+                return;
             }
+        };
+        window.set_settings_model_error_message("".into());
+        refresh_model_runtime(weak.clone(), handle.clone());
+        match status.phase {
+            TranscriptionRuntimePhase::Ready => {}
+            TranscriptionRuntimePhase::LoadRequired => {
+                load_model_in_background(weak, handle, transition);
+            }
+            TranscriptionRuntimePhase::DownloadRequired => {
+                window.set_settings_model_download_progress_label("".into());
+                window.set_settings_model_download_progress_fraction(0.0);
+                let channel =
+                    model_download_channel(weak.clone(), handle.clone(), transition.clone());
+                drop(window);
+                let worker_transition = transition.clone();
+                let result = souffle_lib::async_runtime::spawn_blocking(move || {
+                    run_current_model_task(
+                        || worker_transition.is_selected(&handle),
+                        || {
+                            souffle_lib::commands::download_model(
+                                handle.clone(),
+                                worker_transition.selection.clone(),
+                                channel,
+                            )
+                        },
+                    )
+                })
+                .await
+                .map_err(|error| format!("Join model download task: {error}"))
+                .and_then(|result| result);
+                if transition.is_current()
+                    && let Err(error) = result
+                    && let Some(window) = weak.upgrade()
+                {
+                    window.set_settings_model_error_message(error.into());
+                }
+            }
+            // A startup load and a settings-open action can overlap. Observing an
+            // in-flight operation never starts a second one.
+            TranscriptionRuntimePhase::Downloading
+            | TranscriptionRuntimePhase::Loading
+            | TranscriptionRuntimePhase::Unloading
+            | TranscriptionRuntimePhase::Failed => {}
         }
-        // A startup load and a settings-open action can overlap. Observing an
-        // in-flight operation never starts a second one.
-        TranscriptionRuntimePhase::Downloading
-        | TranscriptionRuntimePhase::Loading
-        | TranscriptionRuntimePhase::Unloading
-        | TranscriptionRuntimePhase::Failed => {}
-    }
+    })
+    .expect("slint event loop not running");
 }
 
 /// Off the Slint event-loop thread (weights loading takes seconds) - same
@@ -2311,26 +2420,43 @@ fn start_model_transition(
 fn load_model_in_background(
     weak: slint::Weak<MainWindow>,
     handle: AppHandle,
-    selection: TranscriptionProfileSelection,
+    transition: ModelTransition,
 ) {
     slint::spawn_local(async move {
         let handle_for_load = handle.clone();
-        let selection_for_load = selection.clone();
+        let transition_for_load = transition.clone();
         let result = souffle_lib::async_runtime::spawn_blocking(move || {
-            let state = Arc::clone(&handle_for_load);
-            souffle_lib::commands::load_model(state, selection_for_load)
+            run_current_model_task(
+                || transition_for_load.is_selected(&handle_for_load),
+                || {
+                    let result = souffle_lib::commands::load_model(
+                        handle_for_load.clone(),
+                        transition_for_load.selection.clone(),
+                    );
+                    if let Err(error) = result {
+                        let phase = souffle_lib::commands::get_model_status(
+                            handle_for_load.clone(),
+                            transition_for_load.selection.clone(),
+                        )
+                        .map(|status| status.phase);
+                        if !phase.is_ok_and(model_ui::load_is_already_in_progress_or_ready) {
+                            return Err(error);
+                        }
+                    }
+                    Ok(())
+                },
+            )
         })
         .await
         .map_err(|e| format!("Join load_model task: {e}"))
         .and_then(|r| r);
+        if !transition.is_current() || matches!(result, Ok(None)) {
+            return;
+        }
         if let Some(window) = weak.upgrade() {
             refresh_model_runtime(weak.clone(), handle.clone());
             if let Err(e) = result {
-                let phase = souffle_lib::commands::get_model_status(handle.clone(), selection)
-                    .map(|status| status.phase);
-                if !phase.is_ok_and(model_ui::load_is_already_in_progress_or_ready) {
-                    window.set_settings_model_error_message(e.into());
-                }
+                window.set_settings_model_error_message(e.into());
             }
         }
     })
@@ -2344,15 +2470,18 @@ fn load_model_in_background(
 fn model_download_channel(
     weak: slint::Weak<MainWindow>,
     handle: AppHandle,
-    selection: TranscriptionProfileSelection,
+    transition: ModelTransition,
 ) -> ProgressChannel<souffle_lib::models::DownloadProgress> {
     let load_started = Arc::new(AtomicBool::new(false));
     ProgressChannel::new(move |progress: souffle_lib::models::DownloadProgress| {
         let weak = weak.clone();
         let handle = handle.clone();
-        let selection = selection.clone();
+        let transition = transition.clone();
         let load_started = Arc::clone(&load_started);
         let _ = slint::invoke_from_event_loop(move || {
+            if !transition.is_current() {
+                return;
+            }
             let Some(window) = weak.upgrade() else {
                 return;
             };
@@ -2371,7 +2500,7 @@ fn model_download_channel(
                 souffle_lib::models::DownloadStatus::Complete => {
                     let globally_complete = model_ui::download_is_globally_complete(&progress);
                     if globally_complete && !load_started.swap(true, Ordering::AcqRel) {
-                        load_model_in_background(weak.clone(), handle.clone(), selection.clone());
+                        load_model_in_background(weak.clone(), handle.clone(), transition.clone());
                     } else {
                         window.set_settings_model_download_progress_label(
                             format!(
@@ -2803,6 +2932,7 @@ fn show_onboarding_step(
         };
         (step, guard.step_index as i32, guard.steps.len() as i32)
     };
+    let model_revision = invalidate_model_selection();
     window.set_onboarding_step(step);
     window.set_onboarding_step_index(step_index);
     window.set_onboarding_step_count(step_count);
@@ -2853,23 +2983,47 @@ fn show_onboarding_step(
                 .get(selected_index)
                 .map(|o| o.selection());
             drop(guard);
-            let phase = selection.and_then(|selection| {
-                souffle_lib::commands::get_model_status(Arc::clone(handle), selection).ok()
-            });
-            // LoadRequired collapses to Pick here (not Loading): re-entering this
-            // step only shows a spinner once the user has actually clicked
-            // "Continuer" to kick off the load, matching prior behavior.
-            let model_phase = match phase.map(|s| s.phase) {
-                Some(TranscriptionRuntimePhase::Ready) => ModelPhase::Ready,
-                Some(TranscriptionRuntimePhase::Downloading) => ModelPhase::Downloading,
-                Some(TranscriptionRuntimePhase::Loading)
-                | Some(TranscriptionRuntimePhase::Unloading) => ModelPhase::Loading,
-                Some(TranscriptionRuntimePhase::DownloadRequired)
-                | Some(TranscriptionRuntimePhase::LoadRequired)
-                | Some(TranscriptionRuntimePhase::Failed)
-                | None => ModelPhase::Pick,
+            window.set_onboarding_model_phase(ModelPhase::Pick);
+            let Some(selection) = selection else {
+                return;
             };
-            window.set_onboarding_model_phase(model_phase);
+            let transition = ModelTransition {
+                revision: model_revision,
+                selection,
+            };
+            let worker_handle = handle.clone();
+            let worker_selection = transition.selection.clone();
+            let worker = souffle_lib::async_runtime::spawn_blocking(move || {
+                souffle_lib::commands::get_model_status(worker_handle, worker_selection)
+            });
+            let weak = window.as_weak();
+            slint::spawn_local(async move {
+                let result = worker.await;
+                if !transition.is_current() {
+                    return;
+                }
+                let Some(window) = weak.upgrade() else {
+                    return;
+                };
+                if !window.get_onboarding_open()
+                    || window.get_onboarding_step() != OnboardingStep::Model
+                {
+                    return;
+                }
+                // LoadRequired stays Pick until Continue starts the real load.
+                let model_phase = match result.ok().and_then(Result::ok).map(|s| s.phase) {
+                    Some(TranscriptionRuntimePhase::Ready) => ModelPhase::Ready,
+                    Some(TranscriptionRuntimePhase::Downloading) => ModelPhase::Downloading,
+                    Some(TranscriptionRuntimePhase::Loading)
+                    | Some(TranscriptionRuntimePhase::Unloading) => ModelPhase::Loading,
+                    Some(TranscriptionRuntimePhase::DownloadRequired)
+                    | Some(TranscriptionRuntimePhase::LoadRequired)
+                    | Some(TranscriptionRuntimePhase::Failed)
+                    | None => ModelPhase::Pick,
+                };
+                window.set_onboarding_model_phase(model_phase);
+            })
+            .expect("slint event loop not running");
         }
         OnboardingStep::Shortcut => {
             let guard = ob.borrow();
@@ -2964,12 +3118,24 @@ fn wire_onboarding_callbacks(
     });
 
     let ob_for_model_pick = ob.clone();
+    let weak = window.as_weak();
+    let handle = tauri_handle.clone();
+    let permissions_for_model_pick = permissions.clone();
     window.on_onboarding_model_picked(move |label| {
         let mut guard = ob_for_model_pick.borrow_mut();
         guard.selected_model_index = guard
             .model_options
             .iter()
             .position(|o| o.label == label.as_str());
+        drop(guard);
+        if let Some(window) = weak.upgrade() {
+            show_onboarding_step(
+                &window,
+                &handle,
+                &ob_for_model_pick,
+                &permissions_for_model_pick,
+            );
+        }
     });
 
     let weak = window.as_weak();
@@ -3183,6 +3349,7 @@ fn wire_onboarding_callbacks(
                 let Some((engine_id, model_id, backend_id, selection)) = selection else {
                     return;
                 };
+                let transition = ModelTransition::begin(selection);
                 window.set_onboarding_busy(true);
                 window.set_onboarding_continue_enabled(false);
                 let completion_weak = weak.clone();
@@ -3196,6 +3363,9 @@ fn wire_onboarding_callbacks(
                         settings.transcription_backend_id = backend_id;
                     },
                     move |_, outcome| {
+                        if !transition.is_current() {
+                            return;
+                        }
                         log_settings_save_outcome("onboarding model", outcome);
                         settle_onboarding_completion(
                             outcome,
@@ -3203,7 +3373,7 @@ fn wire_onboarding_callbacks(
                                 start_onboarding_model_transition(
                                     completion_weak,
                                     completion_handle,
-                                    selection,
+                                    transition,
                                 );
                             },
                             move |message| {
@@ -3323,106 +3493,143 @@ fn apply_onboarding_shortcut(
 fn start_onboarding_model_transition(
     weak: slint::Weak<MainWindow>,
     handle: AppHandle,
-    selection: TranscriptionProfileSelection,
+    transition: ModelTransition,
 ) {
-    if let Ok(souffle_lib::state_machine::AppStateMachine::Error { .. }) =
-        handle.current_machine_state()
-        && let Err(error) = souffle_lib::commands::recover_state(Arc::clone(&handle))
-    {
-        if let Some(window) = weak.upgrade() {
-            window.set_onboarding_busy(false);
-            window.set_onboarding_continue_enabled(true);
-            window.set_onboarding_status_message(error.into());
-        }
-        return;
-    }
-    let state = Arc::clone(&handle);
-    let status = match souffle_lib::commands::get_model_status(state, selection.clone()) {
-        Ok(status) => status,
-        Err(e) => {
-            if let Some(window) = weak.upgrade() {
-                window.set_onboarding_busy(false);
-                window.set_onboarding_continue_enabled(true);
-                window.set_onboarding_status_message(e.into());
-            }
+    let worker_handle = handle.clone();
+    let worker_transition = transition.clone();
+    let worker = souffle_lib::async_runtime::spawn_blocking(move || {
+        read_model_transition_status(&worker_handle, &worker_transition)
+    });
+    slint::spawn_local(async move {
+        let result = worker
+            .await
+            .map_err(|error| format!("Join onboarding model status task: {error}"))
+            .and_then(|result| result);
+        if !transition.is_current() {
             return;
         }
-    };
-    let Some(window) = weak.upgrade() else {
-        return;
-    };
-    // Clear any error left over from a previous attempt in this same step
-    // (e.g. a retried download) before reporting on the new one.
-    window.set_onboarding_status_message("".into());
-    match status.phase {
-        TranscriptionRuntimePhase::Ready => {
-            window.set_onboarding_model_phase(ModelPhase::Ready);
-            window.set_onboarding_busy(false);
-            window.set_onboarding_continue_enabled(true);
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        if !window.get_onboarding_open() || window.get_onboarding_step() != OnboardingStep::Model {
+            return;
         }
-        TranscriptionRuntimePhase::LoadRequired => {
-            window.set_onboarding_model_phase(ModelPhase::Loading);
-            let weak2 = weak.clone();
-            let handle2 = handle.clone();
-            let selection2 = selection.clone();
-            slint::spawn_local(async move {
-                let handle3 = handle2.clone();
+        let status = match result {
+            Ok(Some(status)) => status,
+            Ok(None) => return,
+            Err(error) => {
+                window.set_onboarding_busy(false);
+                window.set_onboarding_continue_enabled(true);
+                window.set_onboarding_status_message(error.into());
+                return;
+            }
+        };
+        // Clear any error left over from a previous attempt in this same step.
+        window.set_onboarding_status_message("".into());
+        match status.phase {
+            TranscriptionRuntimePhase::Ready => {
+                window.set_onboarding_model_phase(ModelPhase::Ready);
+                window.set_onboarding_busy(false);
+                window.set_onboarding_continue_enabled(true);
+            }
+            TranscriptionRuntimePhase::LoadRequired => {
+                window.set_onboarding_model_phase(ModelPhase::Loading);
+                drop(window);
+                let worker_handle = handle.clone();
+                let worker_transition = transition.clone();
                 let result = souffle_lib::async_runtime::spawn_blocking(move || {
-                    souffle_lib::commands::load_model(handle3, selection2)
+                    run_current_model_task(
+                        || worker_transition.is_selected(&worker_handle),
+                        || {
+                            souffle_lib::commands::load_model(
+                                worker_handle.clone(),
+                                worker_transition.selection.clone(),
+                            )
+                        },
+                    )
                 })
                 .await
                 .map_err(|e| format!("Join load_model task: {e}"))
                 .and_then(|r| r);
-                if let Some(window) = weak2.upgrade() {
+                if !transition.is_current() || matches!(result, Ok(None)) {
+                    return;
+                }
+                if let Some(window) = weak.upgrade() {
                     window.set_onboarding_busy(false);
                     window.set_onboarding_continue_enabled(true);
                     match result {
-                        Ok(()) => window.set_onboarding_model_phase(ModelPhase::Ready),
+                        Ok(Some(())) => window.set_onboarding_model_phase(ModelPhase::Ready),
+                        Ok(None) => {}
                         Err(e) => window.set_onboarding_status_message(e.into()),
                     }
                 }
-            })
-            .expect("slint event loop not running");
-        }
-        TranscriptionRuntimePhase::DownloadRequired => {
-            window.set_onboarding_model_phase(ModelPhase::Downloading);
-            window.set_onboarding_download_progress_label("".into());
-            window.set_onboarding_download_progress_fraction(0.0);
-            let state = Arc::clone(&handle);
-            let channel =
-                onboarding_model_download_channel(weak.clone(), handle.clone(), selection.clone());
-            if let Err(e) = souffle_lib::commands::download_model(state, selection, channel) {
+            }
+            TranscriptionRuntimePhase::DownloadRequired => {
+                window.set_onboarding_model_phase(ModelPhase::Downloading);
+                window.set_onboarding_download_progress_label("".into());
+                window.set_onboarding_download_progress_fraction(0.0);
+                let channel = onboarding_model_download_channel(
+                    weak.clone(),
+                    handle.clone(),
+                    transition.clone(),
+                );
+                drop(window);
+                let worker_transition = transition.clone();
+                let result = souffle_lib::async_runtime::spawn_blocking(move || {
+                    run_current_model_task(
+                        || worker_transition.is_selected(&handle),
+                        || {
+                            souffle_lib::commands::download_model(
+                                handle.clone(),
+                                worker_transition.selection.clone(),
+                                channel,
+                            )
+                        },
+                    )
+                })
+                .await
+                .map_err(|error| format!("Join onboarding model download task: {error}"))
+                .and_then(|result| result);
+                if transition.is_current()
+                    && let Err(error) = result
+                    && let Some(window) = weak.upgrade()
+                {
+                    window.set_onboarding_busy(false);
+                    window.set_onboarding_continue_enabled(true);
+                    window.set_onboarding_status_message(error.into());
+                }
+            }
+            TranscriptionRuntimePhase::Downloading => {
+                window.set_onboarding_model_phase(ModelPhase::Downloading);
+            }
+            TranscriptionRuntimePhase::Loading | TranscriptionRuntimePhase::Unloading => {
+                window.set_onboarding_model_phase(ModelPhase::Loading);
+            }
+            TranscriptionRuntimePhase::Failed => {
                 window.set_onboarding_busy(false);
                 window.set_onboarding_continue_enabled(true);
-                window.set_onboarding_status_message(e.into());
+                window.set_onboarding_status_message("Le modèle est en erreur.".into());
             }
         }
-        TranscriptionRuntimePhase::Downloading => {
-            window.set_onboarding_model_phase(ModelPhase::Downloading);
-        }
-        TranscriptionRuntimePhase::Loading | TranscriptionRuntimePhase::Unloading => {
-            window.set_onboarding_model_phase(ModelPhase::Loading);
-        }
-        TranscriptionRuntimePhase::Failed => {
-            window.set_onboarding_busy(false);
-            window.set_onboarding_continue_enabled(true);
-            window.set_onboarding_status_message("Le modèle est en erreur.".into());
-        }
-    }
+    })
+    .expect("slint event loop not running");
 }
 
 fn onboarding_model_download_channel(
     weak: slint::Weak<MainWindow>,
     handle: AppHandle,
-    selection: TranscriptionProfileSelection,
+    transition: ModelTransition,
 ) -> ProgressChannel<souffle_lib::models::DownloadProgress> {
     let load_started = Arc::new(AtomicBool::new(false));
     ProgressChannel::new(move |progress: souffle_lib::models::DownloadProgress| {
         let weak = weak.clone();
         let handle = handle.clone();
-        let selection = selection.clone();
+        let transition = transition.clone();
         let load_started = Arc::clone(&load_started);
         let _ = slint::invoke_from_event_loop(move || {
+            if !transition.is_current() {
+                return;
+            }
             let Some(window) = weak.upgrade() else {
                 return;
             };
@@ -3444,7 +3651,7 @@ fn onboarding_model_download_channel(
                         start_onboarding_model_transition(
                             weak.clone(),
                             handle.clone(),
-                            selection.clone(),
+                            transition.clone(),
                         );
                     } else if !globally_complete {
                         window.set_onboarding_download_progress_label(
@@ -6495,6 +6702,7 @@ fn wire_callbacks(
             return;
         };
         let (engine_id, model_id, backend_id, selection) = option;
+        invalidate_model_selection();
         let revision = revision_for_model.get().wrapping_add(1);
         revision_for_model.set(revision);
         let latest_revision = revision_for_model.clone();
@@ -7696,18 +7904,18 @@ mod tests {
         apply_audio_device_projection_settlement, audio_device_load_configuration,
         capture_and_submit_window_geometry, clear_committed_summary_add_draft,
         dictation_transcript_disposition, finish_startup_presentation, merge_recovery_text,
-        persist_shortcut_candidate, prime_summary_template_editor,
-        project_model_selection_snapshot, project_startup_settings, reset_live_buffers,
-        reset_stale_save_error, settle_audio_device_save, settle_model_selection_save,
-        settle_onboarding_completion, should_clear_committed_summary_add_draft,
-        wire_summary_template_edit_callbacks,
+        model_selection_matches_settings, persist_shortcut_candidate,
+        prime_summary_template_editor, project_model_selection_snapshot, project_startup_settings,
+        reset_live_buffers, reset_stale_save_error, run_current_model_task,
+        settle_audio_device_save, settle_model_selection_save, settle_onboarding_completion,
+        should_clear_committed_summary_add_draft, wire_summary_template_edit_callbacks,
     };
     use super::{
         DICTATIONS_FINALIZING, LiveNotesAutosave, LiveSystemAudio, LiveTranscript,
-        LiveTranscriptState, RecordingMode, ShortcutField, WindowActivity, begin_model_refresh,
-        is_latest_model_refresh, meeting_can_resume, recording_timers_armed, replay_pending_stop,
-        set_recording_idle, settle_recording_start, show_recording_starting,
-        sync_dictation_finalizing,
+        LiveTranscriptState, RecordingMode, ShortcutField, TranscriptionRuntimePhase,
+        WindowActivity, begin_model_refresh, is_latest_model_refresh, meeting_can_resume,
+        recording_timers_armed, replay_pending_stop, set_recording_idle, settle_recording_start,
+        show_recording_starting, sync_dictation_finalizing,
     };
     use crate::model_ui;
     use crate::settings_drafts::SettingsDraftController;
@@ -7828,6 +8036,78 @@ mod tests {
 
         assert!(!is_latest_model_refresh(first));
         assert!(is_latest_model_refresh(second));
+    }
+
+    #[test]
+    fn late_model_status_and_error_cannot_publish_after_a_new_pick() {
+        for response in [
+            Ok(TranscriptionRuntimePhase::LoadRequired),
+            Err("old error".into()),
+        ] {
+            let revision = Cell::new(1);
+            let result = run_current_model_task(
+                || Ok(revision.get() == 1),
+                || {
+                    // The native check completes after the UI has accepted a
+                    // new pick, even if its Settings save is still pending.
+                    revision.set(2);
+                    response
+                },
+            );
+            assert_eq!(result, Ok(None));
+        }
+
+        let started = Cell::new(false);
+        let result = run_current_model_task(
+            || Ok(false),
+            || {
+                started.set(true);
+                Ok(())
+            },
+        );
+        assert_eq!(result, Ok(None));
+        assert!(!started.get(), "an obsolete download/load must not start");
+
+        // A current failure still reaches the UI; the guard is not an error sink.
+        assert_eq!(
+            run_current_model_task(|| Ok(true), || Err::<(), _>("current error".into())),
+            Err("current error".into())
+        );
+    }
+
+    #[test]
+    fn model_transition_checks_all_profile_ids_and_late_canonical_changes() {
+        let settings = AppSettings::default();
+        let selection = souffle_lib::engine::TranscriptionProfileSelection {
+            engine_id: settings.transcription_engine_id.clone(),
+            model_id: settings.transcription_model_id.clone(),
+            backend_id: settings.transcription_backend_id.clone(),
+        };
+        assert!(model_selection_matches_settings(&selection, &settings));
+
+        let mut other_engine = settings.clone();
+        other_engine.transcription_engine_id.push_str("-other");
+        let mut other_model = settings.clone();
+        other_model.transcription_model_id.push_str("-other");
+        let mut other_backend = settings.clone();
+        other_backend.transcription_backend_id.push_str("-other");
+        for changed in [other_engine, other_model, other_backend] {
+            assert!(!model_selection_matches_settings(&selection, &changed));
+            let canonical = RefCell::new(settings.clone());
+            let result = run_current_model_task(
+                || {
+                    Ok(model_selection_matches_settings(
+                        &selection,
+                        &canonical.borrow(),
+                    ))
+                },
+                || {
+                    *canonical.borrow_mut() = changed;
+                    Ok(TranscriptionRuntimePhase::Ready)
+                },
+            );
+            assert_eq!(result, Ok(None));
+        }
     }
 
     // SOU-258 AC1/AC3: the recording view is up on the click, in its

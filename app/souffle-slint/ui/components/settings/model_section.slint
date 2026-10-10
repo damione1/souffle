@@ -88,7 +88,7 @@ export component ModelSection inherits VerticalLayout {
             wrap: word-wrap;
         }
         AppText {
-            text: @tr("La transcription fonctionne sans activer Siri ou Apple Intelligence. macOS gère le modèle ; Soufflé libère les sessions inactives.");
+            text: @tr("La transcription fonctionne sans activer Siri ou Apple Intelligence. macOS gère le modèle.");
             typography: Typography.secondary;
             color: Theme.text-muted;
             wrap: word-wrap;
@@ -102,7 +102,7 @@ export component ModelSection inherits VerticalLayout {
         }
     }
 
-    if root.apple-speech-unavailable: VerticalLayout {
+    if root.apple-speech-selected && root.apple-speech-unavailable: VerticalLayout {
         padding-left: Theme.settings-inset;
         padding-right: Theme.settings-inset;
         padding-bottom: 15px;
