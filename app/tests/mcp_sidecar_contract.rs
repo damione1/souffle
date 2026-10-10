@@ -16,6 +16,7 @@ use souffle_lib::transcript::{
     StructuredSummary,
 };
 use souffle_mcp::db::{IncludeSet, McpDb};
+use souffle_schema::sql::{column as col, table};
 use tempfile::TempDir;
 
 fn build_meeting(id: &str, title: &str, is_ongoing: bool) -> MeetingTranscript {
@@ -92,7 +93,7 @@ fn build_meeting(id: &str, title: &str, is_ongoing: bool) -> MeetingTranscript {
 #[test]
 fn sidecar_round_trips_data_written_by_the_real_app() {
     let dir = TempDir::new().unwrap();
-    let db_path = dir.path().join("souffle.db");
+    let db_path = dir.path().join(souffle_schema::DB_FILENAME);
 
     // Write through the real app database, using the real writers — this is
     // the source of truth for what the schema actually looks like.
@@ -185,12 +186,120 @@ fn sidecar_round_trips_data_written_by_the_real_app() {
     assert_eq!(dictations.len(), 1);
     assert_eq!(dictations[0].id, "dict-1");
     assert_eq!(dictations[0].text, "Buy milk on the way home");
+
+    // V17 adds only dictionary_suggestions, an app-only table. Removing it
+    // produces the actual V16 schema rather than merely changing its number.
+    let v17_outputs = all_tool_outputs(&sidecar);
+    assert_eq!(
+        sidecar.schema_version().unwrap(),
+        souffle_schema::SCHEMA_VERSION
+    );
+    drop(sidecar);
+    let conn = rusqlite::Connection::open(&db_path).unwrap();
+    conn.execute_batch("DROP TABLE dictionary_suggestions;")
+        .unwrap();
+    conn.execute(
+        &format!("UPDATE {} SET {} = ?1", table::SCHEMA_VERSION, col::VERSION),
+        [16],
+    )
+    .unwrap();
+    let has_v17_table: bool = conn
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='dictionary_suggestions')",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(!has_v17_table);
+    drop(conn);
+    let v16 = McpDb::open(&db_path).unwrap();
+    assert_eq!(v16.schema_version().unwrap(), 16);
+    assert_eq!(
+        all_tool_outputs(&v16),
+        v17_outputs,
+        "all five MCP tools preserve their V16 output"
+    );
+}
+
+fn all_tool_outputs(db: &McpDb) -> serde_json::Value {
+    serde_json::json!({
+        "list_meetings": db.list_meetings(None, None, None, 10).unwrap(),
+        "filtered_meetings": db.list_meetings(Some("drift"), Some("1900-01-01"), Some("2099-12-31"), 10).unwrap(),
+        "get_meeting": db.get_meeting("contract-1", IncludeSet::all()).unwrap(),
+        "latest_meeting": db.latest_meeting(IncludeSet::all()).unwrap(),
+        "search_meetings": db.search_meetings("schema drift", 10).unwrap(),
+        "list_dictations": db.list_dictations(10).unwrap(),
+    })
+}
+
+#[test]
+fn every_shared_identifier_resolves_against_the_real_app_schema() {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join(souffle_schema::DB_FILENAME);
+    drop(Database::open(&path).unwrap());
+    let conn = rusqlite::Connection::open(&path).unwrap();
+    for (table, columns) in [
+        (table::SCHEMA_VERSION, &[col::VERSION][..]),
+        (
+            table::MEETINGS,
+            &[
+                col::ID,
+                col::TITLE,
+                col::STARTED_AT,
+                col::ENDED_AT,
+                col::DURATION_SECONDS,
+                col::TRANSCRIPTION_PROFILE,
+                col::RECORDING_SESSIONS,
+                col::SUMMARY,
+                col::SUMMARY_IS_STALE,
+                col::SUMMARY_MODEL,
+                col::SUMMARY_GENERATED_AT,
+                col::EDITED_TRANSCRIPT,
+                col::NOTES,
+                col::CALENDAR_EVENT_ID,
+                col::PARTICIPANTS,
+                col::STRUCTURED_SUMMARY,
+                col::SYSTEM_AUDIO,
+            ][..],
+        ),
+        (
+            table::SEGMENTS,
+            &[
+                col::ID,
+                col::MEETING_ID,
+                col::TEXT,
+                col::START_TIME,
+                col::END_TIME,
+                col::IS_FINAL,
+                col::LANGUAGE,
+                col::CONFIDENCE,
+                col::SORT_ORDER,
+                col::SPEAKER,
+            ][..],
+        ),
+        (
+            table::DICTATION_ENTRIES,
+            &[col::ID, col::TEXT, col::TIMESTAMP][..],
+        ),
+        (
+            table::TEXT_SEARCH,
+            &[col::CONTENT, col::SOURCE_TYPE, col::SOURCE_ID, col::RANK][..],
+        ),
+    ] {
+        conn.prepare(&format!(
+            "SELECT {} FROM {table} LIMIT 0",
+            columns.join(", ")
+        ))
+        .unwrap_or_else(|error| {
+            panic!("shared identifiers drifted from app table {table}: {error}")
+        });
+    }
 }
 
 #[test]
 fn sidecar_get_meeting_include_filter_matches_across_the_boundary() {
     let dir = TempDir::new().unwrap();
-    let db_path = dir.path().join("souffle.db");
+    let db_path = dir.path().join(souffle_schema::DB_FILENAME);
 
     let app_db = Database::open(&db_path).unwrap();
     app_db

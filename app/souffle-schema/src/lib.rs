@@ -3,7 +3,8 @@
 //! The sidecar is a separate binary that opens the same SQLite file and
 //! depends on neither `souffle` nor `tauri`, so anything it shares with the
 //! app used to be restated on its side. This crate is the shared declaration:
-//! the schema version, the row shapes both processes read, the [`Speaker`]
+//! the on-disk identity, SQL identifiers, schema version, row shapes both
+//! processes read, the [`Speaker`]
 //! lane tag stored in the `segments` table, and the one piece of rendering
 //! logic both processes must agree on, the paragraph grouper in
 //! [`paragraphs`].
@@ -11,6 +12,12 @@
 use serde::{Deserialize, Serialize};
 
 pub mod paragraphs;
+pub mod sql;
+
+/// On-disk identities shared by the app and its independently bundled sidecar.
+pub const APP_IDENTIFIER: &str = "com.souffle.desktop";
+pub const NIGHTLY_APP_IDENTIFIER: &str = "com.souffle.desktop.nightly";
+pub const DB_FILENAME: &str = "souffle.db";
 
 /// Schema version 17 adds the local dictionary suggestion queue. Meeting
 /// and dictation columns consumed by the read-only sidecar stay compatible.

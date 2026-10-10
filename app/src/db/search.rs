@@ -1,3 +1,8 @@
+use souffle_schema::sql::{
+    column::{RANK, SOURCE_ID, SOURCE_TYPE},
+    table::TEXT_SEARCH,
+};
+
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
 
@@ -28,16 +33,16 @@ impl Database {
         let conn = self.conn.acquire()?;
 
         let mut stmt = conn
-            .prepare(
-                "SELECT snippet(text_search, 0, '<mark>', '</mark>', '...', 32),
-                        source_type,
-                        source_id,
-                        rank
-                 FROM text_search
-                 WHERE text_search MATCH ?1
-                 ORDER BY rank
-                 LIMIT ?2",
-            )
+            .prepare(&format!(
+                "SELECT snippet({TEXT_SEARCH}, 0, '<mark>', '</mark>', '...', 32),
+                        {SOURCE_TYPE},
+                        {SOURCE_ID},
+                        {RANK}
+                 FROM {TEXT_SEARCH}
+                 WHERE {TEXT_SEARCH} MATCH ?1
+                 ORDER BY {RANK}
+                 LIMIT ?2"
+            ))
             .map_err(|e| format!("Prepare search: {e}"))?;
 
         let results = stmt

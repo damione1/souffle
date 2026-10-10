@@ -5,10 +5,20 @@
 //! concurrently with the app under WAL) and re-implements just the read
 //! queries the MCP tools need. Keeping the two crates independent is the
 //! whole point of the sidecar (it must build and run without pulling in
-//! Tauri, candle, or ort), at the cost of the schema being duplicated on the
-//! read side. `souffle-mcp` schema drift against the writer is caught by the
+//! Tauri, candle, or ort). SQL identifiers come from `souffle-schema`.
+//! `souffle-mcp` schema drift against the writer is caught by the
 //! contract test in `app/tests/mcp_sidecar_contract.rs`, which writes
 //! through the real app `Database` and reads back through this module.
+
+use souffle_schema::sql::{
+    column::{
+        CALENDAR_EVENT_ID, DURATION_SECONDS, EDITED_TRANSCRIPT, END_TIME, ENDED_AT, ID, MEETING_ID,
+        NOTES, PARTICIPANTS, RANK, SORT_ORDER, SOURCE_ID, SOURCE_TYPE, SPEAKER, START_TIME,
+        STARTED_AT, STRUCTURED_SUMMARY, SUMMARY, SUMMARY_GENERATED_AT, SUMMARY_MODEL, TEXT,
+        TIMESTAMP, TITLE, VERSION,
+    },
+    table::{DICTATION_ENTRIES, MEETINGS, SCHEMA_VERSION as VERSION_TABLE, SEGMENTS, TEXT_SEARCH},
+};
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -18,11 +28,8 @@ use rusqlite::{Connection, OpenFlags, params};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use souffle_schema::paragraphs::{PAUSE_THRESHOLD_SECONDS, SegmentLike, group_into_paragraphs};
-use souffle_schema::{SearchSource, Speaker};
+use souffle_schema::{APP_IDENTIFIER, DB_FILENAME, SearchSource, Speaker};
 use thiserror::Error;
-
-/// Must match `constants::APP_IDENTIFIER` in the main crate.
-const APP_IDENTIFIER: &str = "com.souffle.desktop";
 
 #[derive(Debug, Error)]
 pub enum McpDbError {
@@ -83,9 +90,11 @@ impl SchemaVerdict {
 /// A missing or unreadable table is refused rather than assumed compatible.
 fn check_schema(conn: &Connection) -> Result<i64, SchemaVerdict> {
     let found: i64 = conn
-        .query_row("SELECT version FROM schema_version LIMIT 1", [], |row| {
-            row.get(0)
-        })
+        .query_row(
+            &format!("SELECT {VERSION} FROM {VERSION_TABLE} LIMIT 1"),
+            [],
+            |row| row.get(0),
+        )
         .map_err(|e| SchemaVerdict::Unreadable(e.to_string()))?;
 
     if found > souffle_schema::SCHEMA_VERSION {
@@ -98,23 +107,33 @@ fn check_schema(conn: &Connection) -> Result<i64, SchemaVerdict> {
 /// overrides everything (used by tests and manual debugging); otherwise this
 /// mirrors `constants::app_data_dir()` in the main crate.
 pub fn resolve_db_path() -> PathBuf {
-    if let Ok(path) = std::env::var("SOUFFLE_DB") {
-        return PathBuf::from(path);
-    }
-    dirs_next::data_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(running_app_identifier())
-        .join("souffle.db")
+    resolve_db_path_from(
+        std::env::var("SOUFFLE_DB").ok(),
+        dirs_next::data_dir(),
+        std::env::current_exe().ok().as_deref(),
+    )
 }
 
-fn running_app_identifier() -> String {
-    bundle_identifier_from_info_plist().unwrap_or_else(|| APP_IDENTIFIER.to_string())
+fn resolve_db_path_from(
+    override_path: Option<String>,
+    data_dir: Option<PathBuf>,
+    exe: Option<&Path>,
+) -> PathBuf {
+    if let Some(path) = override_path {
+        return PathBuf::from(path);
+    }
+    let identifier = exe
+        .and_then(bundle_identifier_from_info_plist)
+        .unwrap_or_else(|| APP_IDENTIFIER.to_string());
+    data_dir
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(identifier)
+        .join(DB_FILENAME)
 }
 
 /// Sidecar lives at `Foo.app/Contents/MacOS/souffle-mcp`. Nightly builds
 /// use `com.souffle.desktop.nightly`; fall back to the shipped id.
-fn bundle_identifier_from_info_plist() -> Option<String> {
-    let exe = std::env::current_exe().ok()?;
+fn bundle_identifier_from_info_plist(exe: &Path) -> Option<String> {
     let macos = exe.parent()?;
     if macos.file_name()?.to_str()? != "MacOS" {
         return None;
@@ -377,19 +396,19 @@ impl McpDb {
         let rows = if let Some(q) = query.filter(|q| !q.trim().is_empty()) {
             let mut stmt = conn
                 .prepare(
-                    "SELECT m.id, m.title, m.started_at, m.ended_at, m.duration_seconds,
-                            m.summary, m.summary_model, m.summary_generated_at,
-                            m.structured_summary,
-                            m.edited_transcript, m.notes, m.calendar_event_id, m.participants
-                     FROM meetings m
-                     WHERE m.id IN (
-                         SELECT source_id FROM text_search
-                         WHERE source_type = ?5 AND text_search MATCH ?1
+                    &format!("SELECT m.{ID}, m.{TITLE}, m.{STARTED_AT}, m.{ENDED_AT}, m.{DURATION_SECONDS},
+                            m.{SUMMARY}, m.{SUMMARY_MODEL}, m.{SUMMARY_GENERATED_AT},
+                            m.{STRUCTURED_SUMMARY},
+                            m.{EDITED_TRANSCRIPT}, m.{NOTES}, m.{CALENDAR_EVENT_ID}, m.{PARTICIPANTS}
+                     FROM {MEETINGS} m
+                     WHERE m.{ID} IN (
+                         SELECT {SOURCE_ID} FROM {TEXT_SEARCH}
+                         WHERE {SOURCE_TYPE} = ?5 AND {TEXT_SEARCH} MATCH ?1
                      )
-                     AND (?2 IS NULL OR julianday(m.started_at) >= julianday(?2))
-                     AND (?3 IS NULL OR julianday(m.started_at) <= julianday(?3))
-                     ORDER BY m.started_at DESC
-                     LIMIT ?4",
+                     AND (?2 IS NULL OR julianday(m.{STARTED_AT}) >= julianday(?2))
+                     AND (?3 IS NULL OR julianday(m.{STARTED_AT}) <= julianday(?3))
+                     ORDER BY m.{STARTED_AT} DESC
+                     LIMIT ?4"),
                 )
                 .map_err(McpDbError::Query)?;
             query_meeting_rows(
@@ -399,15 +418,15 @@ impl McpDb {
         } else {
             let mut stmt = conn
                 .prepare(
-                    "SELECT m.id, m.title, m.started_at, m.ended_at, m.duration_seconds,
-                            m.summary, m.summary_model, m.summary_generated_at,
-                            m.structured_summary,
-                            m.edited_transcript, m.notes, m.calendar_event_id, m.participants
-                     FROM meetings m
-                     WHERE (?1 IS NULL OR julianday(m.started_at) >= julianday(?1))
-                       AND (?2 IS NULL OR julianday(m.started_at) <= julianday(?2))
-                     ORDER BY m.started_at DESC
-                     LIMIT ?3",
+                    &format!("SELECT m.{ID}, m.{TITLE}, m.{STARTED_AT}, m.{ENDED_AT}, m.{DURATION_SECONDS},
+                            m.{SUMMARY}, m.{SUMMARY_MODEL}, m.{SUMMARY_GENERATED_AT},
+                            m.{STRUCTURED_SUMMARY},
+                            m.{EDITED_TRANSCRIPT}, m.{NOTES}, m.{CALENDAR_EVENT_ID}, m.{PARTICIPANTS}
+                     FROM {MEETINGS} m
+                     WHERE (?1 IS NULL OR julianday(m.{STARTED_AT}) >= julianday(?1))
+                       AND (?2 IS NULL OR julianday(m.{STARTED_AT}) <= julianday(?2))
+                     ORDER BY m.{STARTED_AT} DESC
+                     LIMIT ?3"),
                 )
                 .map_err(McpDbError::Query)?;
             query_meeting_rows(&mut stmt, params![from, to, limit])?
@@ -436,10 +455,12 @@ impl McpDb {
         let row = self
             .conn()?
             .query_row(
-                "SELECT id, title, started_at, ended_at, duration_seconds,
-                        summary, summary_model, summary_generated_at, structured_summary,
-                        edited_transcript, notes, calendar_event_id, participants
-                 FROM meetings WHERE id = ?1",
+                &format!(
+                    "SELECT {ID}, {TITLE}, {STARTED_AT}, {ENDED_AT}, {DURATION_SECONDS},
+                        {SUMMARY}, {SUMMARY_MODEL}, {SUMMARY_GENERATED_AT}, {STRUCTURED_SUMMARY},
+                        {EDITED_TRANSCRIPT}, {NOTES}, {CALENDAR_EVENT_ID}, {PARTICIPANTS}
+                 FROM {MEETINGS} WHERE {ID} = ?1"
+                ),
                 params![id],
                 map_meeting_row,
             )
@@ -458,7 +479,7 @@ impl McpDb {
         let id: Option<String> = self
             .conn()?
             .query_row(
-                "SELECT id FROM meetings ORDER BY started_at DESC LIMIT 1",
+                &format!("SELECT {ID} FROM {MEETINGS} ORDER BY {STARTED_AT} DESC LIMIT 1"),
                 [],
                 |row| row.get(0),
             )
@@ -536,10 +557,10 @@ impl McpDb {
     fn load_segments(&self, meeting_id: &str) -> Result<Vec<SegmentRow>, McpDbError> {
         let conn = self.conn()?;
         let mut stmt = conn
-            .prepare(
-                "SELECT text, start_time, end_time, speaker
-                 FROM segments WHERE meeting_id = ?1 ORDER BY sort_order",
-            )
+            .prepare(&format!(
+                "SELECT {TEXT}, {START_TIME}, {END_TIME}, {SPEAKER}
+                 FROM {SEGMENTS} WHERE {MEETING_ID} = ?1 ORDER BY {SORT_ORDER}"
+            ))
             .map_err(McpDbError::Query)?;
 
         let segments = stmt
@@ -569,15 +590,15 @@ impl McpDb {
 
         let conn = self.conn()?;
         let mut stmt = conn
-            .prepare(
-                "SELECT ts.source_id, m.title, m.started_at,
-                        snippet(text_search, 0, '**', '**', '...', 32)
-                 FROM text_search ts
-                 JOIN meetings m ON m.id = ts.source_id
-                 WHERE ts.source_type = ?3 AND text_search MATCH ?1
-                 ORDER BY rank
-                 LIMIT ?2",
-            )
+            .prepare(&format!(
+                "SELECT ts.{SOURCE_ID}, m.{TITLE}, m.{STARTED_AT},
+                        snippet({TEXT_SEARCH}, 0, '**', '**', '...', 32)
+                 FROM {TEXT_SEARCH} ts
+                 JOIN {MEETINGS} m ON m.{ID} = ts.{SOURCE_ID}
+                 WHERE ts.{SOURCE_TYPE} = ?3 AND {TEXT_SEARCH} MATCH ?1
+                 ORDER BY {RANK}
+                 LIMIT ?2"
+            ))
             .map_err(McpDbError::Query)?;
 
         stmt.query_map(params![query, limit, SearchSource::Meeting], |row| {
@@ -596,10 +617,10 @@ impl McpDb {
     pub fn list_dictations(&self, limit: i64) -> Result<Vec<DictationSummary>, McpDbError> {
         let conn = self.conn()?;
         let mut stmt = conn
-            .prepare(
-                "SELECT id, text, timestamp FROM dictation_entries
-                 ORDER BY timestamp DESC LIMIT ?1",
-            )
+            .prepare(&format!(
+                "SELECT {ID}, {TEXT}, {TIMESTAMP} FROM {DICTATION_ENTRIES}
+                 ORDER BY {TIMESTAMP} DESC LIMIT ?1"
+            ))
             .map_err(McpDbError::Query)?;
 
         stmt.query_map(params![limit], |row| {
@@ -661,19 +682,70 @@ fn render_transcript(segments: &[SegmentRow]) -> String {
 mod tests {
     use super::*;
     use rusqlite::Connection;
+    use souffle_schema::NIGHTLY_APP_IDENTIFIER;
+    use souffle_schema::sql::column::{
+        CONFIDENCE, CONTENT, IS_FINAL, LANGUAGE, RECORDING_SESSIONS, SUMMARY_IS_STALE,
+        SYSTEM_AUDIO, TRANSCRIPTION_PROFILE,
+    };
     use tempfile::TempDir;
 
     #[test]
+    fn resolves_the_database_inside_a_nightly_bundle() {
+        let dir = TempDir::new().unwrap();
+        let contents = dir.path().join("Soufflé Nightly.app/Contents");
+        let exe = contents.join("MacOS/souffle-mcp");
+        std::fs::create_dir_all(exe.parent().unwrap()).unwrap();
+        std::fs::write(
+            contents.join("Info.plist"),
+            format!("<key>CFBundleIdentifier</key><string>{NIGHTLY_APP_IDENTIFIER}</string>"),
+        )
+        .unwrap();
+        let data_dir = dir.path().join("Application Support");
+        assert_eq!(
+            resolve_db_path_from(None, Some(data_dir.clone()), Some(&exe)),
+            data_dir.join(NIGHTLY_APP_IDENTIFIER).join(DB_FILENAME),
+        );
+        let overridden = dir.path().join("explicit.db");
+        assert_eq!(
+            resolve_db_path_from(
+                Some(overridden.display().to_string()),
+                Some(data_dir),
+                Some(&exe)
+            ),
+            overridden,
+        );
+    }
+
+    #[test]
+    fn unbundled_sidecar_uses_the_shared_production_identity() {
+        let data_dir = PathBuf::from("Application Support");
+        assert_eq!(
+            resolve_db_path_from(
+                None,
+                Some(data_dir.clone()),
+                Some(Path::new("bin/souffle-mcp"))
+            ),
+            data_dir.join(APP_IDENTIFIER).join(DB_FILENAME),
+        );
+        assert_eq!(
+            resolve_db_path_from(None, None, None),
+            PathBuf::from(".").join(APP_IDENTIFIER).join(DB_FILENAME)
+        );
+    }
+
+    #[test]
     fn reads_nightly_bundle_id_from_info_plist() {
-        let xml = r#"
+        let xml = format!(
+            r#"
             <key>CFBundleName</key>
             <string>Soufflé Nightly</string>
             <key>CFBundleIdentifier</key>
-            <string>com.souffle.desktop.nightly</string>
-        "#;
+            <string>{NIGHTLY_APP_IDENTIFIER}</string>
+        "#
+        );
         assert_eq!(
-            bundle_id_from_info_plist_xml(xml).as_deref(),
-            Some("com.souffle.desktop.nightly")
+            bundle_id_from_info_plist_xml(&xml).as_deref(),
+            Some(NIGHTLY_APP_IDENTIFIER)
         );
     }
 
@@ -683,8 +755,7 @@ mod tests {
         assert_eq!(bundle_id_from_info_plist_xml(xml), None);
     }
 
-    /// Minimal fixture mirroring the app's current schema (meetings v10 +
-    /// segments + dictation_entries + text_search FTS5). Kept intentionally
+    /// Minimal fixture mirroring the current dual-reader columns. Kept intentionally
     /// small: the schema-drift contract test in
     /// `app/tests/mcp_sidecar_contract.rs` is what actually guards
     /// this against the real writer.
@@ -692,54 +763,55 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("fixture.db");
         let conn = Connection::open(&path).unwrap();
-        conn.execute_batch(
+        conn.execute_batch(&format!(
             "
-            CREATE TABLE meetings (
-                id TEXT PRIMARY KEY,
-                title TEXT NOT NULL,
-                started_at TEXT NOT NULL,
-                ended_at TEXT,
-                duration_seconds REAL NOT NULL,
-                transcription_profile TEXT NOT NULL,
-                recording_sessions TEXT NOT NULL,
-                summary TEXT,
-                summary_is_stale INTEGER NOT NULL DEFAULT 0,
-                summary_model TEXT,
-                summary_generated_at TEXT,
-                structured_summary TEXT,
-                edited_transcript TEXT,
-                notes TEXT,
-                calendar_event_id TEXT,
-                participants TEXT
+            CREATE TABLE {MEETINGS} (
+                {ID} TEXT PRIMARY KEY,
+                {TITLE} TEXT NOT NULL,
+                {STARTED_AT} TEXT NOT NULL,
+                {ENDED_AT} TEXT,
+                {DURATION_SECONDS} REAL NOT NULL,
+                {TRANSCRIPTION_PROFILE} TEXT NOT NULL,
+                {RECORDING_SESSIONS} TEXT NOT NULL,
+                {SUMMARY} TEXT,
+                {SUMMARY_IS_STALE} INTEGER NOT NULL DEFAULT 0,
+                {SUMMARY_MODEL} TEXT,
+                {SUMMARY_GENERATED_AT} TEXT,
+                {STRUCTURED_SUMMARY} TEXT,
+                {EDITED_TRANSCRIPT} TEXT,
+                {NOTES} TEXT,
+                {CALENDAR_EVENT_ID} TEXT,
+                {PARTICIPANTS} TEXT,
+                {SYSTEM_AUDIO} TEXT
             );
-            CREATE TABLE segments (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                meeting_id TEXT NOT NULL,
-                text TEXT NOT NULL,
-                start_time REAL NOT NULL,
-                end_time REAL NOT NULL,
-                is_final INTEGER NOT NULL DEFAULT 1,
-                language TEXT,
-                confidence REAL,
-                sort_order INTEGER NOT NULL,
-                speaker TEXT
+            CREATE TABLE {SEGMENTS} (
+                {ID} INTEGER PRIMARY KEY AUTOINCREMENT,
+                {MEETING_ID} TEXT NOT NULL,
+                {TEXT} TEXT NOT NULL,
+                {START_TIME} REAL NOT NULL,
+                {END_TIME} REAL NOT NULL,
+                {IS_FINAL} INTEGER NOT NULL DEFAULT 1,
+                {LANGUAGE} TEXT,
+                {CONFIDENCE} REAL,
+                {SORT_ORDER} INTEGER NOT NULL,
+                {SPEAKER} TEXT
             );
-            CREATE TABLE dictation_entries (
-                id TEXT PRIMARY KEY,
-                text TEXT NOT NULL,
-                timestamp TEXT NOT NULL
+            CREATE TABLE {DICTATION_ENTRIES} (
+                {ID} TEXT PRIMARY KEY,
+                {TEXT} TEXT NOT NULL,
+                {TIMESTAMP} TEXT NOT NULL
             );
-            CREATE VIRTUAL TABLE text_search USING fts5(
-                content, source_type, source_id
+            CREATE VIRTUAL TABLE {TEXT_SEARCH} USING fts5(
+                {CONTENT}, {SOURCE_TYPE}, {SOURCE_ID}
             );
-            CREATE TABLE schema_version (
-                version INTEGER NOT NULL
+            CREATE TABLE {VERSION_TABLE} (
+                {VERSION} INTEGER NOT NULL
             );
-            ",
-        )
+            "
+        ))
         .unwrap();
         conn.execute(
-            "INSERT INTO schema_version (version) VALUES (?1)",
+            &format!("INSERT INTO {VERSION_TABLE} ({VERSION}) VALUES (?1)"),
             params![souffle_schema::SCHEMA_VERSION],
         )
         .unwrap();
@@ -747,8 +819,11 @@ mod tests {
     }
 
     fn set_schema_version(conn: &Connection, version: i64) {
-        conn.execute("UPDATE schema_version SET version = ?1", params![version])
-            .unwrap();
+        conn.execute(
+            &format!("UPDATE {VERSION_TABLE} SET {VERSION} = ?1"),
+            params![version],
+        )
+        .unwrap();
     }
 
     /// AC1: a database written by a newer app is refused, and the message
@@ -778,7 +853,8 @@ mod tests {
     #[test]
     fn refuses_a_database_with_no_schema_version_table() {
         let (conn, _dir, path) = fixture_db();
-        conn.execute_batch("DROP TABLE schema_version;").unwrap();
+        conn.execute_batch(&format!("DROP TABLE {VERSION_TABLE};"))
+            .unwrap();
         drop(conn);
 
         let db = McpDb::open(&path).expect("opening must still succeed");
@@ -825,8 +901,8 @@ mod tests {
         participants: Option<&str>,
     ) {
         conn.execute(
-            "INSERT INTO meetings (id, title, started_at, ended_at, duration_seconds, transcription_profile, recording_sessions, participants)
-             VALUES (?1, ?2, ?3, ?3, 10.0, '{}', '[]', ?4)",
+            &format!("INSERT INTO {MEETINGS} ({ID}, {TITLE}, {STARTED_AT}, {ENDED_AT}, {DURATION_SECONDS}, {TRANSCRIPTION_PROFILE}, {RECORDING_SESSIONS}, {PARTICIPANTS})
+             VALUES (?1, ?2, ?3, ?3, 10.0, '{{}}', '[]', ?4)"),
             params![id, title, started_at, participants],
         )
         .unwrap();
@@ -834,8 +910,8 @@ mod tests {
         let mut full_text = Vec::new();
         for (i, (text, start, end, speaker)) in segments.iter().enumerate() {
             conn.execute(
-                "INSERT INTO segments (meeting_id, text, start_time, end_time, sort_order, speaker)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                &format!("INSERT INTO {SEGMENTS} ({MEETING_ID}, {TEXT}, {START_TIME}, {END_TIME}, {SORT_ORDER}, {SPEAKER})
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)"),
                 params![id, text, start, end, i as i64, speaker],
             )
             .unwrap();
@@ -843,7 +919,7 @@ mod tests {
         }
         if !full_text.is_empty() {
             conn.execute(
-                "INSERT INTO text_search (content, source_type, source_id) VALUES (?1, 'meeting', ?2)",
+                &format!("INSERT INTO {TEXT_SEARCH} ({CONTENT}, {SOURCE_TYPE}, {SOURCE_ID}) VALUES (?1, 'meeting', ?2)"),
                 params![full_text.join(" "), id],
             )
             .unwrap();
@@ -852,12 +928,14 @@ mod tests {
 
     fn insert_dictation(conn: &Connection, id: &str, text: &str, timestamp: &str) {
         conn.execute(
-            "INSERT INTO dictation_entries (id, text, timestamp) VALUES (?1, ?2, ?3)",
+            &format!(
+                "INSERT INTO {DICTATION_ENTRIES} ({ID}, {TEXT}, {TIMESTAMP}) VALUES (?1, ?2, ?3)"
+            ),
             params![id, text, timestamp],
         )
         .unwrap();
         conn.execute(
-            "INSERT INTO text_search (content, source_type, source_id) VALUES (?1, 'dictation', ?2)",
+            &format!("INSERT INTO {TEXT_SEARCH} ({CONTENT}, {SOURCE_TYPE}, {SOURCE_ID}) VALUES (?1, 'dictation', ?2)"),
             params![text, id],
         )
         .unwrap();
@@ -972,9 +1050,9 @@ mod tests {
     fn list_meetings_reports_participant_names_and_flags() {
         let (conn, _dir, path) = fixture_db();
         conn.execute(
-            "INSERT INTO meetings (id, title, started_at, duration_seconds, transcription_profile, recording_sessions, summary, notes, participants)
-             VALUES ('m1', 'Standup', '2026-01-01T10:00:00+00:00', 10.0, '{}', '[]', 'a summary', 'some notes',
-                     '[{\"name\":\"Alice\",\"email\":null,\"is_organizer\":true}]')",
+            &format!("INSERT INTO {MEETINGS} ({ID}, {TITLE}, {STARTED_AT}, {DURATION_SECONDS}, {TRANSCRIPTION_PROFILE}, {RECORDING_SESSIONS}, {SUMMARY}, {NOTES}, {PARTICIPANTS})
+             VALUES ('m1', 'Standup', '2026-01-01T10:00:00+00:00', 10.0, '{{}}', '[]', 'a summary', 'some notes',
+                     '[{{\"name\":\"Alice\",\"email\":null,\"is_organizer\":true}}]')"),
             [],
         )
         .unwrap();
@@ -1212,8 +1290,8 @@ mod tests {
     fn get_meeting_prefers_edited_transcript() {
         let (conn, _dir, path) = fixture_db();
         conn.execute(
-            "INSERT INTO meetings (id, title, started_at, duration_seconds, transcription_profile, recording_sessions, edited_transcript)
-             VALUES ('m1', 'Standup', '2026-01-01T10:00:00+00:00', 10.0, '{}', '[]', 'hand-edited text')",
+            &format!("INSERT INTO {MEETINGS} ({ID}, {TITLE}, {STARTED_AT}, {DURATION_SECONDS}, {TRANSCRIPTION_PROFILE}, {RECORDING_SESSIONS}, {EDITED_TRANSCRIPT})
+             VALUES ('m1', 'Standup', '2026-01-01T10:00:00+00:00', 10.0, '{{}}', '[]', 'hand-edited text')"),
             [],
         )
         .unwrap();
@@ -1228,8 +1306,8 @@ mod tests {
     fn get_meeting_respects_include_filter() {
         let (conn, _dir, path) = fixture_db();
         conn.execute(
-            "INSERT INTO meetings (id, title, started_at, duration_seconds, transcription_profile, recording_sessions, summary, notes)
-             VALUES ('m1', 'Standup', '2026-01-01T10:00:00+00:00', 10.0, '{}', '[]', 'a summary', 'some notes')",
+            &format!("INSERT INTO {MEETINGS} ({ID}, {TITLE}, {STARTED_AT}, {DURATION_SECONDS}, {TRANSCRIPTION_PROFILE}, {RECORDING_SESSIONS}, {SUMMARY}, {NOTES})
+             VALUES ('m1', 'Standup', '2026-01-01T10:00:00+00:00', 10.0, '{{}}', '[]', 'a summary', 'some notes')"),
             [],
         )
         .unwrap();

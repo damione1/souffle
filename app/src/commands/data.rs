@@ -90,7 +90,7 @@ pub fn export_archive(state: Arc<AppState>, dest_dir: String) -> Result<(), Stri
 /// Database size on disk plus meeting/dictation counts, for the Settings >
 /// Data stats line.
 pub fn get_data_stats(state: Arc<AppState>) -> Result<DataStats, String> {
-    let db_path = constants::app_data_dir().join("souffle.db");
+    let db_path = constants::app_data_dir().join(crate::constants::DB_FILENAME);
     let db_size_bytes = std::fs::metadata(&db_path).map(|m| m.len()).unwrap_or(0);
 
     Ok(DataStats {

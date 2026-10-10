@@ -11,6 +11,7 @@ use std::path::Path;
 use std::sync::Mutex;
 
 use rusqlite::Connection;
+use souffle_schema::sql::{column::VERSION, table::SCHEMA_VERSION as VERSION_TABLE};
 use tracing::info;
 
 use crate::lock_ext::MutexExt;
@@ -72,15 +73,15 @@ impl Database {
         // Check if schema_version table exists
         let has_version_table: bool = conn
             .query_row(
-                "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type='table' AND name='schema_version'",
-                [],
+                "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type='table' AND name=?1",
+                [VERSION_TABLE],
                 |row| row.get(0),
             )
             .map_err(|e| format!("Check schema_version: {e}"))?;
 
         let current_version = if has_version_table {
             conn.query_row(
-                "SELECT COALESCE(MAX(version), 0) FROM schema_version",
+                &format!("SELECT COALESCE(MAX({VERSION}), 0) FROM {VERSION_TABLE}"),
                 [],
                 |row| row.get::<_, i64>(0),
             )
@@ -90,6 +91,7 @@ impl Database {
         };
 
         if current_version < schema::SCHEMA_VERSION {
+            let update_version_sql = format!("UPDATE {VERSION_TABLE} SET {VERSION} = ?1");
             info!(
                 from = current_version,
                 to = schema::SCHEMA_VERSION,
@@ -97,15 +99,18 @@ impl Database {
             );
 
             if current_version < 1 {
-                for sql in schema::SCHEMA_V1 {
-                    conn.execute_batch(sql)
+                for sql in schema::schema_v1() {
+                    conn.execute_batch(&sql)
                         .map_err(|e| format!("Schema migration v1: {e}"))?;
                 }
 
-                conn.execute("DELETE FROM schema_version", [])
+                conn.execute(&format!("DELETE FROM {VERSION_TABLE}"), [])
                     .map_err(|e| format!("Reset schema version for v1: {e}"))?;
-                conn.execute("INSERT INTO schema_version (version) VALUES (1)", [])
-                    .map_err(|e| format!("Insert schema version v1: {e}"))?;
+                conn.execute(
+                    &format!("INSERT INTO {VERSION_TABLE} ({VERSION}) VALUES (1)"),
+                    [],
+                )
+                .map_err(|e| format!("Insert schema version v1: {e}"))?;
             }
 
             if current_version < 2 {
@@ -114,40 +119,42 @@ impl Database {
                         .map_err(|e| format!("Schema migration v2: {e}"))?;
                 }
 
-                conn.execute("UPDATE schema_version SET version = 2", [])
+                conn.execute(&update_version_sql, [2])
                     .map_err(|e| format!("Update schema version v2: {e}"))?;
             }
 
             if current_version < 3 {
                 schema::migrate_meetings_to_v3(&mut conn)?;
-                conn.execute("UPDATE schema_version SET version = 3", [])
+                conn.execute(&update_version_sql, [3])
                     .map_err(|e| format!("Update schema version v3: {e}"))?;
             }
 
             if current_version < 4 {
                 schema::migrate_text_search_to_v4(&mut conn)?;
-                conn.execute("UPDATE schema_version SET version = 4", [])
+                conn.execute(&update_version_sql, [4])
                     .map_err(|e| format!("Update schema version v4: {e}"))?;
             }
 
             if current_version < 5 {
                 conn.execute_batch(schema::CREATE_DICTIONARY)
                     .map_err(|e| format!("Schema migration v5 (dictionary): {e}"))?;
-                conn.execute("UPDATE schema_version SET version = 5", [])
+                conn.execute(&update_version_sql, [5])
                     .map_err(|e| format!("Update schema version v5: {e}"))?;
             }
 
+            // Historical ALTER statements below are frozen migration snapshots:
+            // they must keep the identifiers that shipped in those versions.
             if current_version < 6 {
                 conn.execute("ALTER TABLE meetings ADD COLUMN notes TEXT", [])
                     .map_err(|e| format!("Schema migration v6 (meeting notes): {e}"))?;
-                conn.execute("UPDATE schema_version SET version = 6", [])
+                conn.execute(&update_version_sql, [6])
                     .map_err(|e| format!("Update schema version v6: {e}"))?;
             }
 
             if current_version < 7 {
                 conn.execute("ALTER TABLE segments ADD COLUMN speaker TEXT", [])
                     .map_err(|e| format!("Schema migration v7 (segment speaker): {e}"))?;
-                conn.execute("UPDATE schema_version SET version = 7", [])
+                conn.execute(&update_version_sql, [7])
                     .map_err(|e| format!("Update schema version v7: {e}"))?;
             }
 
@@ -157,49 +164,49 @@ impl Database {
                 // JSON array of MeetingParticipant
                 conn.execute("ALTER TABLE meetings ADD COLUMN participants TEXT", [])
                     .map_err(|e| format!("Schema migration v8 (participants): {e}"))?;
-                conn.execute("UPDATE schema_version SET version = 8", [])
+                conn.execute(&update_version_sql, [8])
                     .map_err(|e| format!("Update schema version v8: {e}"))?;
             }
 
             if current_version < 9 {
                 schema::migrate_dictionary_phonetics_to_v9(&conn)?;
-                conn.execute("UPDATE schema_version SET version = 9", [])
+                conn.execute(&update_version_sql, [9])
                     .map_err(|e| format!("Update schema version v9: {e}"))?;
             }
 
             if current_version < 10 {
                 schema::migrate_drop_embeddings_to_v10(&conn)?;
-                conn.execute("UPDATE schema_version SET version = 10", [])
+                conn.execute(&update_version_sql, [10])
                     .map_err(|e| format!("Update schema version v10: {e}"))?;
             }
 
             if current_version < 11 {
                 schema::migrate_add_structured_summary_to_v11(&conn)?;
-                conn.execute("UPDATE schema_version SET version = 11", [])
+                conn.execute(&update_version_sql, [11])
                     .map_err(|e| format!("Update schema version v11: {e}"))?;
             }
 
             if current_version < 12 {
                 schema::migrate_add_speakers_to_v12(&conn)?;
-                conn.execute("UPDATE schema_version SET version = 12", [])
+                conn.execute(&update_version_sql, [12])
                     .map_err(|e| format!("Update schema version v12: {e}"))?;
             }
 
             if current_version < 13 {
                 schema::migrate_speaker_embeddings_to_v13(&conn)?;
-                conn.execute("UPDATE schema_version SET version = 13", [])
+                conn.execute(&update_version_sql, [13])
                     .map_err(|e| format!("Update schema version v13: {e}"))?;
             }
 
             if current_version < 14 {
                 schema::migrate_model_unload_default_to_v14(&conn)?;
-                conn.execute("UPDATE schema_version SET version = 14", [])
+                conn.execute(&update_version_sql, [14])
                     .map_err(|e| format!("Update schema version v14: {e}"))?;
             }
 
             if current_version < 15 {
                 schema::migrate_snippets_to_v15(&conn)?;
-                conn.execute("UPDATE schema_version SET version = 15", [])
+                conn.execute(&update_version_sql, [15])
                     .map_err(|e| format!("Update schema version v15: {e}"))?;
             }
 
@@ -208,7 +215,7 @@ impl Database {
                 // the leg was tracked, which reads as "unknown", not "fine".
                 conn.execute("ALTER TABLE meetings ADD COLUMN system_audio TEXT", [])
                     .map_err(|e| format!("Schema migration v16 (system audio): {e}"))?;
-                conn.execute("UPDATE schema_version SET version = 16", [])
+                conn.execute(&update_version_sql, [16])
                     .map_err(|e| format!("Update schema version v16: {e}"))?;
             }
 
@@ -218,7 +225,7 @@ impl Database {
                     .map_err(|e| format!("Begin v17 migration: {e}"))?;
                 tx.execute_batch(schema::CREATE_DICTIONARY_SUGGESTIONS)
                     .map_err(|e| format!("Schema migration v17 (dictionary suggestions): {e}"))?;
-                tx.execute("UPDATE schema_version SET version = 17", [])
+                tx.execute(&update_version_sql, [17])
                     .map_err(|e| format!("Update schema version v17: {e}"))?;
                 tx.commit()
                     .map_err(|e| format!("Commit v17 migration: {e}"))?;
