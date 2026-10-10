@@ -131,16 +131,19 @@ pub async fn extract_structured_summary(
     let system = super::with_language_instruction(system_base, output_language);
     let prompt = build_structured_extract_prompt(prose_summary, notes, participants);
     let no_op = |_: SummarizeProgress| {};
-    let raw = generate_with_provider(
-        provider,
-        model,
-        ollama_url,
-        &system,
-        prompt,
-        0.1,
-        super::ollama::REDUCE_BUDGET,
-        &no_op,
-        false,
+    let raw = super::metrics::phase(
+        super::metrics::Phase::Extract,
+        generate_with_provider(
+            provider,
+            model,
+            ollama_url,
+            &system,
+            prompt,
+            0.1,
+            super::ollama::REDUCE_BUDGET,
+            &no_op,
+            false,
+        ),
     )
     .await?;
     parse_structured_summary_response(&raw)

@@ -101,6 +101,7 @@ pub(crate) fn generate_guarded<C, F>(
     mut make_attempt: C,
     timeout: Duration,
     retry_backoff: Duration,
+    measurement: Option<(&super::metrics::Context, f32)>,
 ) -> Result<String, String>
 where
     C: FnMut() -> F,
@@ -108,7 +109,22 @@ where
 {
     let mut last_error = String::new();
     for attempt in 1..=MAX_ATTEMPTS {
-        match run_attempt(make_attempt(), timeout) {
+        // The waiter owns diagnostics, not the abandoned request thread. A
+        // timeout is finalized here and a late result cannot overwrite it.
+        let guard = measurement.map(|(context, temperature)| {
+            context.start("apple_intelligence", temperature, None, None)
+        });
+        let outcome = run_attempt(make_attempt(), timeout);
+        if let Some(guard) = guard {
+            match &outcome {
+                AttemptOutcome::Completed(result) => guard.finish(result),
+                AttemptOutcome::TimedOut => guard.finish(&Err::<(), _>(format!(
+                    "Apple Intelligence request timed out after {}s",
+                    timeout.as_secs_f64()
+                ))),
+            }
+        }
+        match outcome {
             AttemptOutcome::Completed(Ok(text)) => return Ok(text),
             AttemptOutcome::Completed(Err(error)) => {
                 if !is_retryable(&error) {
@@ -147,6 +163,39 @@ mod tests {
     const SHORT_TIMEOUT: Duration = Duration::from_millis(50);
     const NO_BACKOFF: Duration = Duration::ZERO;
 
+    #[tokio::test]
+    async fn diagnostics_finalize_timeout_before_successful_retry() {
+        let (result, metrics) = crate::summary::metrics::measure(async {
+            let context = crate::summary::metrics::context().unwrap();
+            let mut attempt = 0;
+            generate_guarded(
+                || {
+                    attempt += 1;
+                    let current = attempt;
+                    move || {
+                        if current == 1 {
+                            std::thread::sleep(Duration::from_millis(200));
+                        }
+                        Ok("summary".into())
+                    }
+                },
+                SHORT_TIMEOUT,
+                NO_BACKOFF,
+                Some((&context, 0.2)),
+            )
+        })
+        .await;
+        assert_eq!(result.as_deref(), Ok("summary"));
+        assert_eq!(metrics.calls.len(), 2);
+        let timeout = &metrics.calls[0];
+        assert!(timeout.completed);
+        assert!(timeout.error.as_ref().unwrap().contains("timed out"));
+        assert!(timeout.elapsed_ms >= SHORT_TIMEOUT.as_millis());
+        assert_eq!(timeout.prompt_tokens, None);
+        assert!(metrics.calls[1].completed);
+        assert!(metrics.calls[1].error.is_none());
+    }
+
     #[test]
     fn success_propagates_on_first_attempt() {
         let attempts = Arc::new(AtomicU32::new(0));
@@ -158,6 +207,7 @@ mod tests {
             },
             SHORT_TIMEOUT,
             NO_BACKOFF,
+            None,
         );
         assert_eq!(result.as_deref(), Ok("summary"));
         assert_eq!(attempts.load(Ordering::SeqCst), 1);
@@ -183,6 +233,7 @@ mod tests {
             },
             SHORT_TIMEOUT,
             NO_BACKOFF,
+            None,
         );
         assert_eq!(result.as_deref(), Ok("fresh result"));
         assert_eq!(attempts.load(Ordering::SeqCst), 2);
@@ -205,6 +256,7 @@ mod tests {
             },
             SHORT_TIMEOUT,
             NO_BACKOFF,
+            None,
         );
         let error = result.unwrap_err();
         assert!(error.contains("timed out"), "unexpected error: {error}");
@@ -223,6 +275,7 @@ mod tests {
             },
             SHORT_TIMEOUT,
             NO_BACKOFF,
+            None,
         );
         assert_eq!(result.unwrap_err(), "rate_limited: system is busy");
         assert_eq!(attempts.load(Ordering::SeqCst), 2);
@@ -245,6 +298,7 @@ mod tests {
                 },
                 SHORT_TIMEOUT,
                 NO_BACKOFF,
+                None,
             );
             assert_eq!(result.unwrap_err(), marker);
             assert_eq!(attempts.load(Ordering::SeqCst), 1, "marker: {marker}");

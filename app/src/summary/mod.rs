@@ -4,6 +4,7 @@ mod extract;
 mod formatters;
 mod language;
 mod map;
+pub mod metrics;
 mod ollama;
 mod polish;
 mod prompts;
@@ -394,6 +395,7 @@ pub(crate) async fn generate_with_provider(
         }
         SummaryProviderKind::AppleIntelligence => {
             let system = system.to_string();
+            let measurement_context = metrics::context();
             // Guarded call: dedicated thread per attempt, hard wall-clock
             // timeout, one retry (see apple::generate_guarded). Without it a
             // wedged FoundationModels request blocks this future forever and
@@ -409,6 +411,9 @@ pub(crate) async fn generate_with_provider(
                     },
                     apple::REQUEST_TIMEOUT,
                     apple::RETRY_BACKOFF,
+                    measurement_context
+                        .as_ref()
+                        .map(|context| (context, temperature)),
                 )
             })
             .await
@@ -522,30 +527,33 @@ pub async fn summarize_stream(
                 let model = model.to_string();
                 let map_system_prompt = map_system_prompt.clone();
                 async move {
-                    map::map_one_chunk(i + 1, n, &chunk, |user, temperature| {
-                        let client = client.clone();
-                        let ollama_url = ollama_url.clone();
-                        let model = model.clone();
-                        let map_system_prompt = map_system_prompt.clone();
-                        async move {
-                            ollama::generate_stream(
-                                &client,
-                                &ollama_url,
-                                &model,
-                                &map_system_prompt,
-                                user,
-                                ollama::MAP_BUDGET,
-                                temperature,
-                                &|_| {},
-                                false,
-                            )
-                            .await
-                            .map(|output| map::MapOutput {
-                                text: output.text,
-                                eval_count: output.eval_count,
-                            })
-                        }
-                    })
+                    metrics::phase(
+                        metrics::Phase::Map,
+                        map::map_one_chunk(i + 1, n, &chunk, |user, temperature| {
+                            let client = client.clone();
+                            let ollama_url = ollama_url.clone();
+                            let model = model.clone();
+                            let map_system_prompt = map_system_prompt.clone();
+                            async move {
+                                ollama::generate_stream(
+                                    &client,
+                                    &ollama_url,
+                                    &model,
+                                    &map_system_prompt,
+                                    user,
+                                    ollama::MAP_BUDGET,
+                                    temperature,
+                                    &|_| {},
+                                    false,
+                                )
+                                .await
+                                .map(|output| map::MapOutput {
+                                    text: output.text,
+                                    eval_count: output.eval_count,
+                                })
+                            }
+                        }),
+                    )
                     .await
                 }
             })
@@ -560,31 +568,36 @@ pub async fn summarize_stream(
                 Some(n as u32),
             ));
             let map_system_prompt = map_system_prompt.clone();
-            let part = map::map_one_chunk(i + 1, n, &chunk, |user, temperature| {
-                let map_system_prompt = map_system_prompt.clone();
-                async move {
-                    generate_with_provider(
-                        provider,
-                        model,
-                        ollama_url,
-                        &map_system_prompt,
-                        user,
-                        temperature,
-                        ollama::MAP_BUDGET,
-                        &no_op,
-                        false,
-                    )
-                    .await
-                    .map(|text| map::MapOutput {
-                        text,
-                        eval_count: None,
-                    })
-                }
-            })
+            let part = metrics::phase(
+                metrics::Phase::Map,
+                map::map_one_chunk(i + 1, n, &chunk, |user, temperature| {
+                    let map_system_prompt = map_system_prompt.clone();
+                    async move {
+                        generate_with_provider(
+                            provider,
+                            model,
+                            ollama_url,
+                            &map_system_prompt,
+                            user,
+                            temperature,
+                            ollama::MAP_BUDGET,
+                            &no_op,
+                            false,
+                        )
+                        .await
+                        .map(|text| map::MapOutput {
+                            text,
+                            eval_count: None,
+                        })
+                    }
+                }),
+            )
             .await?;
             part_summaries.push(part);
         }
     }
+
+    metrics::update(|metrics| metrics.maps = part_summaries.iter().cloned().enumerate().collect());
 
     let full = reduce_part_summaries(
         provider,
@@ -662,8 +675,11 @@ async fn reduce_part_summaries(
                 )
                 .await
             } else {
-                generate_with_provider(
-                    provider, model, ollama_url, system, prompt, 0.2, budget, &no_op, false,
+                metrics::phase(
+                    metrics::Phase::Merge,
+                    generate_with_provider(
+                        provider, model, ollama_url, system, prompt, 0.2, budget, &no_op, false,
+                    ),
                 )
                 .await
             }
@@ -744,6 +760,7 @@ where
         }
 
         let total_batches = batches.len() as u32;
+        metrics::update(|metrics| metrics.merge_rounds += 1);
         let mut next = Vec::with_capacity(batches.len());
         for (i, batch) in batches.into_iter().enumerate() {
             on_batch_start(i as u32 + 1, total_batches);
