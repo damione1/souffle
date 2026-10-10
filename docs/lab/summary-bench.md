@@ -5,6 +5,12 @@ extraction pipelines. It does not open the application `Database`, migrate SQLit
 change prompts, alter map concurrency or write user settings. Normal application
 runs do not collect benchmark diagnostics.
 
+The ignored test builds and launches the Rust `summary_bench` example. Its normal
+entry point dispatches the production Apple helper before starting the benchmark.
+This preserves process isolation: a libtest executable cannot handle the internal
+helper flag. The shared harness lives in `app/tests/support/summary_bench.rs`;
+the test wrapper also verifies the helper protocol without calling a provider.
+
 Use absolute directories **outside all repository checkouts**. Outputs contain
 private prose, participants, notes and map summaries. Do not commit them.
 
