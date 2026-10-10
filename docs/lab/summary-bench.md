@@ -29,7 +29,7 @@ SOUFFLE_BENCH_MODE=prepare cargo test --manifest-path app/Cargo.toml -p souffle 
 `prepare` uses `SQLITE_OPEN_READ_ONLY`, reads only explicitly selected meetings,
 and writes JSON corpus exports and empty gold drafts. Existing corpus/gold files
 are never overwritten. Alternatively supply exports using the `Input` shape in
-`app/tests/summary_bench.rs`: id, title, duration_seconds, segments,
+`app/tests/support/summary_bench.rs`: id, title, duration_seconds, segments,
 edited_transcript, notes, participants, language (`fr`), template (builtin id).
 
 Prepare 15–25 independent facts per meeting from transcript/notes **without reading
