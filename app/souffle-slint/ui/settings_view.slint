@@ -92,6 +92,9 @@ export component SettingsView inherits Rectangle {
     in property <string> clamshell-device-label;
     in property <bool> system-audio-supported;
     in property <bool> capture-system-audio;
+    in property <bool> meeting-audio-diagnostic;
+    in property <int> diagnostic-max-minutes;
+    in property <int> diagnostic-megabytes-per-hour;
     in property <MeetingLanguage> meeting-transcription-language;
     in property <bool> meeting-autostop-enabled;
     in property <[string]> meeting-autostop-labels;
@@ -250,6 +253,7 @@ export component SettingsView inherits Rectangle {
     callback remove-device-requested(string);
     callback clamshell-device-changed(string);
     callback capture-system-audio-changed(bool);
+    callback meeting-audio-diagnostic-changed(bool);
     callback meeting-transcription-language-changed(MeetingLanguage);
     callback meeting-autostop-enabled-changed(bool);
     callback meeting-autostop-changed(string);
@@ -569,6 +573,10 @@ export component SettingsView inherits Rectangle {
                             clamshell-device-label: root.clamshell-device-label;
                             system-audio-supported: root.system-audio-supported;
                             capture-system-audio: root.capture-system-audio;
+                            meeting-audio-diagnostic: root.meeting-audio-diagnostic;
+                            meeting-audio-retention: root.meeting-audio-retention;
+                            diagnostic-max-minutes: root.diagnostic-max-minutes;
+                            diagnostic-megabytes-per-hour: root.diagnostic-megabytes-per-hour;
                             meeting-transcription-language: root.meeting-transcription-language;
                             meeting-autostop-enabled: root.meeting-autostop-enabled;
                             meeting-autostop-labels: root.meeting-autostop-labels;
@@ -581,6 +589,7 @@ export component SettingsView inherits Rectangle {
                             dictionary-correction: root.dictionary-correction;
                             clamshell-device-changed(value) => { root.clamshell-device-changed(value); }
                             capture-system-audio-changed(value) => { root.capture-system-audio-changed(value); }
+                            meeting-audio-diagnostic-changed(value) => { root.meeting-audio-diagnostic-changed(value); }
                             meeting-transcription-language-changed(value) => { root.meeting-transcription-language-changed(value); }
                             meeting-autostop-enabled-changed(value) => { root.meeting-autostop-enabled-changed(value); }
                             meeting-autostop-changed(value) => { root.meeting-autostop-changed(value); }

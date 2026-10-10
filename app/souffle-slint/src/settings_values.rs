@@ -338,6 +338,7 @@ impl SettingsValueController {
         window.set_settings_meeting_audio_retention(settings_ui::audio_retention_to_slint(
             settings.meeting_audio_retention,
         ));
+        window.set_settings_meeting_audio_diagnostic(settings.meeting_audio_diagnostic);
         let summary = self.summary.borrow();
         let models = summary
             .as_ref()
@@ -453,6 +454,12 @@ pub(crate) fn wire(window: &MainWindow, controller: Rc<SettingsValueController>)
     window.on_settings_meeting_audio_retention_changed(move |value| {
         c.apply(SettingsSaveLane::General, move |s| {
             s.meeting_audio_retention = settings_ui::audio_retention_from_slint(value)
+        });
+    });
+    let c = controller.clone();
+    window.on_settings_meeting_audio_diagnostic_changed(move |enabled| {
+        c.apply(SettingsSaveLane::General, move |s| {
+            s.meeting_audio_diagnostic = enabled
         });
     });
     let c = controller.clone();
@@ -1220,6 +1227,34 @@ mod tests {
                 .get_settings_selected_summary_model_label()
                 .as_str(),
             "Model A"
+        );
+    }
+
+    #[test]
+    fn diagnostic_switch_projects_and_persists_without_changing_retention() {
+        let harness = DatabaseHarness::new(AppSettings::default());
+        assert!(!harness.window.get_settings_meeting_audio_diagnostic());
+        harness
+            .window
+            .invoke_settings_meeting_audio_diagnostic_changed(true);
+        assert!(harness.window.get_settings_meeting_audio_diagnostic());
+        harness.wait_for_saves(1);
+        let stored = AppSettings::load(&harness.db).unwrap();
+        assert!(stored.meeting_audio_diagnostic);
+        assert_eq!(
+            stored.meeting_audio_retention,
+            souffle_lib::settings::MeetingAudioRetention::Off
+        );
+        settings_ui::populate(&harness.window, &stored);
+        assert!(harness.window.get_settings_meeting_audio_diagnostic());
+        harness
+            .window
+            .invoke_settings_meeting_audio_diagnostic_changed(false);
+        harness.wait_for_saves(2);
+        assert!(
+            !AppSettings::load(&harness.db)
+                .unwrap()
+                .meeting_audio_diagnostic
         );
     }
 

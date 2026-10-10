@@ -23,11 +23,29 @@ pub fn is_expired(age: Duration, policy: MeetingAudioRetention) -> bool {
 }
 
 fn newest_mtime(dir: &Path) -> Option<SystemTime> {
-    std::fs::read_dir(dir)
-        .ok()?
-        .flatten()
+    let entries: Vec<_> = std::fs::read_dir(dir).ok()?.flatten().collect();
+    let primary = entries
+        .iter()
+        // A diagnostic may finish asynchronously after the primary. Its
+        // timestamp must never extend the existing primary retention age.
+        .filter(|entry| {
+            let path = entry.path();
+            path.extension().is_some_and(|extension| extension == "ogg")
+                && path
+                    .file_stem()
+                    .is_some_and(|stem| stem.to_string_lossy().parse::<u32>().is_ok())
+        })
         .filter_map(|entry| entry.metadata().ok()?.modified().ok())
-        .max()
+        .max();
+    // An orphan partial after a crash must not survive forever merely
+    // because its primary is missing. The fallback changes no live primary
+    // age and uses the same retention window for the remaining artifacts.
+    primary.or_else(|| {
+        entries
+            .iter()
+            .filter_map(|entry| entry.metadata().ok()?.modified().ok())
+            .max()
+    })
 }
 
 /// Delete every meeting recording directory directly under `root` whose
@@ -147,6 +165,35 @@ mod tests {
             recent_meeting.exists(),
             "recent meeting recording must survive"
         );
+    }
+
+    #[test]
+    fn diagnostic_mtime_never_prolongs_primary_retention() {
+        let root = tempfile::tempdir().unwrap();
+        let meeting = root.path().join("meeting");
+        std::fs::create_dir(&meeting).unwrap();
+        let now = SystemTime::now();
+        touch_with_age(&meeting.join("0.ogg"), DAY * 10, now);
+        touch_with_age(&meeting.join("0.pre-aec.wav"), Duration::ZERO, now);
+        touch_with_age(&meeting.join("0.pre-aec.wav.partial"), Duration::ZERO, now);
+        sweep_dir(root.path(), MeetingAudioRetention::Keep7d, now);
+        assert!(
+            !meeting.exists(),
+            "diagnostics must be deleted with expired primary audio"
+        );
+    }
+
+    #[test]
+    fn orphan_diagnostic_and_partial_follow_retention_window() {
+        let root = tempfile::tempdir().unwrap();
+        let now = SystemTime::now();
+        for name in ["0.pre-aec.wav", "0.pre-aec.wav.partial"] {
+            let meeting = root.path().join(name);
+            std::fs::create_dir(&meeting).unwrap();
+            touch_with_age(&meeting.join(name), DAY * 10, now);
+            sweep_dir(root.path(), MeetingAudioRetention::Keep7d, now);
+            assert!(!meeting.exists());
+        }
     }
 
     #[test]

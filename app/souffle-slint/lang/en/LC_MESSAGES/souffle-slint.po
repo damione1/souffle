@@ -3136,3 +3136,19 @@ msgstr "Cancel"
 msgctxt "LiveParagraphEditor"
 msgid "Enregistrer"
 msgstr "Save"
+
+msgctxt "AudioSection"
+msgid "AUDIO AVANCÉ"
+msgstr "ADVANCED AUDIO"
+
+msgctxt "AudioSection"
+msgid "Capture diagnostique avant AEC"
+msgstr "Pre-AEC diagnostic capture"
+
+msgctxt "AudioSection"
+msgid "Activez d'abord la conservation de l'audio dans Données. Aucun diagnostic n'est enregistré sans elle."
+msgstr "Enable audio retention in Data first. Diagnostics are never recorded without it."
+
+msgctxt "AudioSection"
+msgid "À partir de la prochaine réunion, conserve les voies brutes séparées : micro à gauche, audio système à droite. WAV sans perte : environ {} Mo/heure, {} minutes maximum. Même conservation que l'audio de réunion."
+msgstr "Starting with the next meeting, saves separate raw lanes: microphone on the left, system audio on the right. Lossless WAV: about {} MB/hour, up to {} minutes. Same retention as meeting audio."

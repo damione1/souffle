@@ -1959,6 +1959,7 @@ struct StartParams {
     /// not `off`. `None` for dictation sessions and for meetings recorded
     /// with retention off.
     record_path: Option<PathBuf>,
+    meeting_audio_diagnostic: bool,
 }
 
 /// Per-session state for meeting mode (mic + system audio).
@@ -2216,6 +2217,8 @@ pub struct AudioCapture {
     /// a mic rebuild mid-session must keep recording to the same file —
     /// only a genuinely new `session_id` (or no `record_path`) replaces it.
     recorder: Option<MeetingRecorder>,
+    diagnostic: super::diagnostic::DiagnosticSession,
+    diagnostic_mic_generation: u64,
     /// Parameters of the running session, kept for mid-session rebuilds.
     active_params: Option<StartParams>,
     /// Name of the input device the current stream was built on.
@@ -2326,6 +2329,8 @@ impl AudioCapture {
                     retired_tap_samples: 0,
                     retired_tap_signal: 0,
                     recorder: None,
+                    diagnostic: super::diagnostic::DiagnosticSession::default(),
+                    diagnostic_mic_generation: 0,
                     active_params: None,
                     mic_device_name: None,
                     mic_device_uid: None,
@@ -2405,6 +2410,7 @@ impl AudioCapture {
                             capture_system_audio,
                             diarize,
                             record_path,
+                            meeting_audio_diagnostic,
                             #[cfg(target_os = "macos")]
                             tap,
                             #[cfg(target_os = "macos")]
@@ -2417,6 +2423,7 @@ impl AudioCapture {
                                 capture_system_audio,
                                 diarize,
                                 record_path,
+                                meeting_audio_diagnostic,
                                 #[cfg(target_os = "macos")]
                                 tap,
                                 #[cfg(target_os = "macos")]
@@ -2440,8 +2447,11 @@ impl AudioCapture {
                         AudioCommand::Stop => {
                             capture.stop();
                         }
-                        AudioCommand::Discard { done } => {
-                            capture.discard();
+                        AudioCommand::ConfirmStart { session_id } => {
+                            capture.diagnostic.confirm_start(session_id);
+                        }
+                        AudioCommand::Discard { session_id, done } => {
+                            capture.discard(session_id);
                             let _ = done.send(());
                         }
                         AudioCommand::SelectDevice(uid) => {
@@ -2694,6 +2704,7 @@ impl AudioCapture {
         capture_system_audio: bool,
         diarize: bool,
         record_path: Option<PathBuf>,
+        meeting_audio_diagnostic: bool,
         #[cfg(target_os = "macos")] tap: Option<crate::audio::system_tap::TapHandle>,
         #[cfg(target_os = "macos")] tap_cons: Option<ringbuf::HeapCons<f32>>,
     ) -> Result<(), String> {
@@ -2750,6 +2761,8 @@ impl AudioCapture {
             target_sample_rate,
             diarize,
         );
+        self.diagnostic
+            .sync(session_id, record_path.as_deref(), meeting_audio_diagnostic);
 
         // Stored before any fallible step so a failed (re)build is retried
         // by the next mic health check instead of killing the session.
@@ -2760,6 +2773,7 @@ impl AudioCapture {
             capture_system_audio,
             diarize,
             record_path,
+            meeting_audio_diagnostic,
         });
         self.stream_failed
             .store(false, std::sync::atomic::Ordering::Relaxed);
@@ -2822,6 +2836,9 @@ impl AudioCapture {
         let sender = self.audio_sender.clone();
         let audio_budget = Arc::clone(&self.audio_budget);
         let recorder_feed = self.recorder.as_ref().and_then(|r| r.push_handle());
+        let diagnostic_feed = self.diagnostic.push_handle();
+        self.diagnostic_mic_generation = self.diagnostic_mic_generation.wrapping_add(1);
+        let diagnostic_generation = self.diagnostic_mic_generation;
         let active_session_id = Arc::clone(&self.active_session_id);
         let rms_ref = Arc::clone(&self.audio_rms);
         let dropped_counter = Arc::clone(&self.dropped_counter);
@@ -2857,6 +2874,15 @@ impl AudioCapture {
                         last_mic_callback_ms.store(unix_now_ms(), Ordering::Relaxed);
 
                         let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            if let Some(feed) = &diagnostic_feed {
+                                feed.push_microphone(
+                                    data,
+                                    channels,
+                                    sample_rate,
+                                    mic_gain,
+                                    diagnostic_generation,
+                                );
+                            }
                             let resampled = match resampler.lock() {
                                 Ok(mut r) => r.process(data),
                                 Err(_) => return,
@@ -2966,7 +2992,7 @@ impl AudioCapture {
         match record_path {
             Some(_) if same_session => {}
             Some(path) => {
-                self.finish_recording();
+                self.finish_primary_recording();
                 let channels = if diarize {
                     opus::Channels::Stereo
                 } else {
@@ -2978,7 +3004,7 @@ impl AudioCapture {
                     Err(e) => warn!("Failed to start meeting audio recorder: {e}"),
                 }
             }
-            None => self.finish_recording(),
+            None => self.finish_primary_recording(),
         }
     }
 
@@ -2986,6 +3012,11 @@ impl AudioCapture {
     /// chunks the realtime audio thread had to drop because the writer
     /// thread couldn't keep up.
     fn finish_recording(&mut self) {
+        self.diagnostic.finish();
+        self.finish_primary_recording();
+    }
+
+    fn finish_primary_recording(&mut self) {
         if let Some(recorder) = self.recorder.take() {
             let dropped = recorder.dropped_chunks();
             if dropped > 0 {
@@ -3199,6 +3230,7 @@ impl AudioCapture {
             tap_rate,
             target_sample_rate,
         );
+        mixer.set_diagnostic(self.diagnostic.push_handle());
 
         // Echo cancellation only matters when system audio can leak from
         // the speakers back into the mic, and only if we actually have the
@@ -3335,6 +3367,7 @@ impl AudioCapture {
             params.capture_system_audio,
             params.diarize,
             params.record_path.clone(),
+            params.meeting_audio_diagnostic,
             #[cfg(target_os = "macos")]
             None,
             #[cfg(target_os = "macos")]
@@ -4047,7 +4080,15 @@ impl AudioCapture {
     /// (SOU-260), and delete the audio file it began: nothing will ever
     /// point at it. The stop still sends its EndOfStream; the actor drops it
     /// as a stale marker.
-    fn discard(&mut self) {
+    fn discard(&mut self, session_id: u64) {
+        // The diagnostic owner survives Stop while engine start is pending.
+        // An old start reply cannot cancel or stop a newer capture.
+        self.diagnostic.discard(session_id);
+        if self.active_session_id.load(Ordering::Acquire) != session_id
+            && self.active_params.as_ref().map(|params| params.session_id) != Some(session_id)
+        {
+            return;
+        }
         let record_path = self
             .active_params
             .as_ref()

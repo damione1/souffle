@@ -75,6 +75,7 @@ pub fn populate(window: &MainWindow, settings: &AppSettings) {
 
     window.set_settings_allow_bluetooth_mic(settings.allow_bluetooth_mic);
     window.set_settings_capture_system_audio(settings.capture_system_audio);
+    window.set_settings_meeting_audio_diagnostic(settings.meeting_audio_diagnostic);
     window.set_settings_meeting_transcription_language(meeting_language_to_slint(
         settings.meeting_transcription_language,
     ));
@@ -91,6 +92,10 @@ pub fn populate(window: &MainWindow, settings: &AppSettings) {
     window.set_settings_dictionary_correction(settings.dictionary_correction);
 
     let bounds = SettingsOptions::current();
+    window.set_settings_diagnostic_max_minutes(bounds.meeting_diagnostic_max_minutes as i32);
+    window.set_settings_diagnostic_megabytes_per_hour(
+        bounds.meeting_diagnostic_megabytes_per_hour as i32,
+    );
     window.set_settings_paste_delay_min(bounds.paste_delay_ms_min as i32);
     window.set_settings_paste_delay_max(bounds.paste_delay_ms_max as i32);
     window.set_settings_feedback_sounds_volume_min(bounds.feedback_sounds_volume_min as i32);

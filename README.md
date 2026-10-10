@@ -170,6 +170,18 @@ make nightly
 
 `make nightly` builds and opens **Soufflé Nightly** (`com.souffle.desktop.nightly`), a debug build that sits next to the installed app with its own TCC rows; run it again after a code change. `make nightly-fresh` wipes Nightly's data and permissions first. `./scripts/bundle-macos.sh` builds a signed release bundle (see the script's header for `--dmg`, `--notarize` and the other flags).
 
+### Replaying meeting audio through AEC
+
+Settings > Audio > Advanced Audio offers **Pre-AEC diagnostic capture**, off by default. Enable meeting-audio retention in Data first; the diagnostic setting never enables recording by itself. Changes apply to the next session. Each recorded session gets a separate `<index>.pre-aec.wav` beside `<index>.ogg`: lossless float32 stereo at 48 kHz, left = microphone, right = system tap, sampled on the mixer's clock before echo cancellation and mixing. An unavailable source is silence. When system capture is disabled, the optional mic copy is resampled to the same clock independently, with a silent right lane. The principal recording keeps its existing mono or diarized stereo layout.
+
+This debug audio makes each participant's lane easy to isolate. It costs about **1.38 GB/hour**, or **806 MB for 35 minutes**. Capture stops after the first hour and keeps that aligned prefix; it does not stop the meeting. The writer checks free disk space before starting and every captured second, stopping diagnostics before using a 256 MiB reserve. Concurrent disk use by other processes can still exhaust the primary recording's space. The artifact follows meeting-audio retention without extending the primary recording's age. It is published only after audio capture ends and engine startup succeeds; stopping during startup keeps it private until that result arrives, and failed startup discards it. A failed or saturated diagnostic writer discards the diagnostic, while the meeting continues. Files ending in `.partial` are unfinished and cannot be replayed.
+
+```bash
+"/Applications/Soufflé.app/Contents/MacOS/souffle" --aec-replay /absolute/path/0.pre-aec.wav
+```
+
+Replay feeds the right lane as render, then the left lane as capture through the existing mixer/AEC, without loading a transcription model or reading settings. JSON reports the captured frame count, estimated **input-to-output pipeline delay** (16-sample resolution, up to 200 ms), raw ERLE and delay-compensated ERLE. In real meetings these ERLE fields are **mic/output energy attenuation proxies**, not isolated echo removal or near-end voice distortion: no separate voice ground truth exists. Compensation compares overlapping samples after aligning output to input. The bounded measurement window is the final quarter of the last eight seconds; silence gives zero dB and an unavailable delay estimate. Synthetic fixtures use the same evaluator with their known near-end voice subtracted from capture/output.
+
 ## License
 
 Copyright (c) 2026 Damien Goehrig.

@@ -449,6 +449,7 @@ fn start_pipeline_blocking(
     } else {
         None
     };
+    let diagnostic_start_confirmation = settings.meeting_audio_diagnostic && record_path.is_some();
 
     // SOU-260: hand the session to the actor, start capture, and only then
     // wait for the engine. The reset (seconds for a diarized Kyutai rebuild,
@@ -470,6 +471,7 @@ fn start_pipeline_blocking(
                     capture_system_audio: actual_capture_system_audio,
                     diarize,
                     record_path,
+                    meeting_audio_diagnostic: settings.meeting_audio_diagnostic,
                     // No pre-spawned tap: start_meeting opens the mic first,
                     // then the tap (see the disposable probe above).
                     #[cfg(target_os = "macos")]
@@ -487,11 +489,36 @@ fn start_pipeline_blocking(
     );
 
     let ready = started.and_then(|()| engine_actor_ready(pending, &info));
-    if let Err(error) = ready {
-        discard_capture(audio_cmd_sender);
-        return Err(error);
-    }
+    finish_capture_start(
+        ready,
+        audio_cmd_sender,
+        session_id,
+        diagnostic_start_confirmation,
+    )?;
     Ok(capture_started_at)
+}
+
+/// Capture may already have stopped while the engine was starting. Its raw
+/// diagnostic stays private until this keyed result reaches the audio owner.
+fn finish_capture_start(
+    ready: Result<(), String>,
+    audio_cmd_sender: &Sender<AudioCommand>,
+    session_id: u64,
+    diagnostic_start_confirmation: bool,
+) -> Result<(), String> {
+    let ready = ready.and_then(|()| {
+        if diagnostic_start_confirmation {
+            audio_cmd_sender
+                .send(AudioCommand::ConfirmStart { session_id })
+                .map_err(|e| format!("Audio start confirmation: {e}"))
+        } else {
+            Ok(())
+        }
+    });
+    if ready.is_err() {
+        discard_capture(audio_cmd_sender, session_id);
+    }
+    ready
 }
 
 /// Wait for the engine to be ready for the session capture already feeds.
@@ -514,10 +541,10 @@ fn engine_actor_ready(
 /// A start that failed after capture began: stop capture and delete the
 /// audio file it started, before the caller cleans up the meeting row
 /// (recovery keeps a meeting that has audio on disk).
-fn discard_capture(audio_cmd_sender: &Sender<AudioCommand>) {
+fn discard_capture(audio_cmd_sender: &Sender<AudioCommand>, session_id: u64) {
     let (done, done_rx) = crossbeam_channel::bounded(1);
     if audio_cmd_sender
-        .send(AudioCommand::Discard { done })
+        .send(AudioCommand::Discard { session_id, done })
         .is_err()
     {
         return;
@@ -1622,7 +1649,8 @@ mod tests {
     }
 
     /// SOU-260: capture is asked to start while the engine is still being
-    /// reset, not after, and the start returns once the engine is ready.
+    /// reset, not after. Stop can precede readiness; only an effectively
+    /// enabled diagnostic then receives the successful-start confirmation.
     #[test]
     fn capture_starts_before_the_engine_is_ready() {
         use crate::audio::start_gate::CaptureStartGate;
@@ -1633,64 +1661,130 @@ mod tests {
         let _guard = crate::audio::capture::status_test_support::LOCK
             .lock()
             .unwrap();
-        let (db, _dir) = test_db();
-        let (_audio_tx, audio_rx) = crossbeam_channel::unbounded();
-        let reset = Duration::from_millis(400);
-        let mock = Mutex::new(Some(MockEngine::new().with_reset_delay(reset)));
-        let actor = crate::pipeline::EngineActorHandle::spawn(
-            audio_rx,
-            Arc::new(std::sync::atomic::AtomicU64::new(0)),
-            Arc::new(Mutex::new(None)),
-            Box::new(move |_| {
-                mock.lock()
-                    .unwrap()
-                    .take()
-                    .map(|m| Box::new(m) as Box<dyn crate::engine::TranscriptionEngine>)
-                    .ok_or_else(|| "taken".to_string())
-            }),
-        )
-        .unwrap();
-        actor
-            .load_model(
-                default_transcription_profile(),
-                std::path::PathBuf::from("/tmp"),
+        for (mode, diagnostic) in [
+            (PipelineMode::Dictation, true),
+            (PipelineMode::Meeting, false),
+            (PipelineMode::Meeting, true),
+        ] {
+            let (db, _dir) = test_db();
+            crate::settings::AppSettings {
+                meeting_audio_diagnostic: diagnostic,
+                meeting_audio_retention: crate::settings::MeetingAudioRetention::Keep7d,
+                capture_system_audio: false,
+                ..Default::default()
+            }
+            .save(&db)
+            .unwrap();
+            let (recording_target, expect_confirmation) = match mode {
+                PipelineMode::Dictation => (None, false),
+                PipelineMode::Meeting => (
+                    Some(super::RecordingTarget {
+                        meeting_id: "start-confirmation-test".into(),
+                        session_index: 0,
+                    }),
+                    diagnostic,
+                ),
+            };
+            let (_audio_tx, audio_rx) = crossbeam_channel::unbounded();
+            let reset = Duration::from_millis(400);
+            let mock = Mutex::new(Some(MockEngine::new().with_reset_delay(reset)));
+            let actor = crate::pipeline::EngineActorHandle::spawn(
+                audio_rx,
+                Arc::new(std::sync::atomic::AtomicU64::new(0)),
+                Arc::new(Mutex::new(None)),
+                Box::new(move |_| {
+                    mock.lock()
+                        .unwrap()
+                        .take()
+                        .map(|m| Box::new(m) as Box<dyn crate::engine::TranscriptionEngine>)
+                        .ok_or_else(|| "taken".to_string())
+                }),
             )
             .unwrap();
-        // Make the dictation start pay a real reset.
-        actor.debug_transcribe(Vec::new()).unwrap();
-
-        let (cmd_tx, cmd_rx) = crossbeam_channel::unbounded::<AudioCommand>();
-        let gate = CaptureStartGate::new();
-        gate.begin(7);
-        let clicked = Instant::now();
-        let result = std::thread::scope(|scope| {
-            let start = scope.spawn(|| {
-                super::start_pipeline_blocking(
-                    &actor,
-                    &cmd_tx,
-                    &db,
-                    &gate,
-                    7,
-                    PipelineMode::Dictation,
-                    Vec::new(),
-                    None,
-                    Box::new(|_| {}),
+            actor
+                .load_model(
+                    default_transcription_profile(),
+                    std::path::PathBuf::from("/tmp"),
                 )
+                .unwrap();
+            // Make the next start pay a real reset.
+            actor.debug_transcribe(Vec::new()).unwrap();
+
+            let (cmd_tx, cmd_rx) = crossbeam_channel::unbounded::<AudioCommand>();
+            let gate = CaptureStartGate::new();
+            gate.begin(7);
+            let clicked = Instant::now();
+            let result = std::thread::scope(|scope| {
+                let start = scope.spawn(|| {
+                    super::start_pipeline_blocking(
+                        &actor,
+                        &cmd_tx,
+                        &db,
+                        &gate,
+                        7,
+                        mode,
+                        Vec::new(),
+                        recording_target,
+                        Box::new(|_| {}),
+                    )
+                });
+                let first = cmd_rx
+                    .recv_timeout(reset)
+                    .expect("capture is started before the engine reset ends");
+                let capture_after = clicked.elapsed();
+                assert!(matches!(first, AudioCommand::Start { session_id: 7, .. }));
+                assert!(
+                    capture_after < reset,
+                    "capture asked after {capture_after:?}, the reset takes {reset:?}"
+                );
+                assert!(!start.is_finished(), "the engine is still resetting");
+                assert!(gate.halt(|| {
+                    cmd_tx.send(AudioCommand::Stop).unwrap();
+                }));
+                assert!(matches!(cmd_rx.recv().unwrap(), AudioCommand::Stop));
+                assert!(cmd_rx.is_empty(), "no confirmation before engine readiness");
+                start.join().unwrap()
             });
-            let first = cmd_rx
-                .recv_timeout(reset)
-                .expect("capture is started before the engine reset ends");
-            let capture_after = clicked.elapsed();
-            assert!(matches!(first, AudioCommand::Start { session_id: 7, .. }));
-            assert!(
-                capture_after < reset,
-                "capture asked after {capture_after:?}, the reset takes {reset:?}"
-            );
-            assert!(!start.is_finished(), "the engine is still resetting");
-            start.join().unwrap()
+            assert!(result.is_ok(), "{result:?}");
+            if expect_confirmation {
+                assert!(matches!(
+                    cmd_rx.recv_timeout(Duration::from_secs(1)).unwrap(),
+                    AudioCommand::ConfirmStart { session_id: 7 }
+                ));
+            } else {
+                assert!(cmd_rx.is_empty(), "inactive diagnostic adds no command");
+            }
+            assert!(clicked.elapsed() >= reset);
+            let _ = actor.stop_session(Duration::from_secs(1));
+        }
+    }
+
+    #[test]
+    fn failed_engine_readiness_discards_by_session_without_confirmation() {
+        let (cmd_tx, cmd_rx) = crossbeam_channel::unbounded();
+        let result = std::thread::scope(|scope| {
+            let failed_start = scope.spawn(|| {
+                super::finish_capture_start(Err("engine start failed".into()), &cmd_tx, 7, true)
+            });
+            match cmd_rx
+                .recv_timeout(std::time::Duration::from_secs(1))
+                .unwrap()
+            {
+                crate::state::AudioCommand::Discard { session_id, done } => {
+                    assert_eq!(session_id, 7);
+                    done.send(()).unwrap();
+                }
+                crate::state::AudioCommand::Start { .. }
+                | crate::state::AudioCommand::ConfirmStart { .. }
+                | crate::state::AudioCommand::Stop
+                | crate::state::AudioCommand::SelectDevice(_)
+                | crate::state::AudioCommand::SetClamshellDevice(_)
+                | crate::state::AudioCommand::SetInputPolicy { .. }
+                | crate::state::AudioCommand::RefreshInputRoute => panic!("expected keyed discard"),
+            }
+            failed_start.join().unwrap()
         });
-        assert!(result.is_ok(), "{result:?}");
-        assert!(clicked.elapsed() >= reset);
-        let _ = actor.stop_session(Duration::from_secs(1));
+        assert_eq!(result, Err("engine start failed".into()));
+        assert!(cmd_rx.is_empty());
     }
 }
