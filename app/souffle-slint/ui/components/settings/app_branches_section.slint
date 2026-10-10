@@ -13,6 +13,7 @@ export struct AppBranchRow {
     app-pattern: string,
     enabled: bool,
     target-label: string,
+    pattern-rollback-revision: int,
 }
 
 export component AppBranchesSection inherits VerticalLayout {
@@ -76,6 +77,10 @@ export component AppBranchesSection inherits VerticalLayout {
             ListView {
                 height: min(root.rules.length * 116px, 348px);
                 for rule[index] in root.rules: Rectangle {
+                    private property <string> pattern-rule-id: rule.id;
+                    changed pattern-rule-id => { pattern-field.text = rule.app-pattern; }
+                    private property <int> pattern-rollback-revision: rule.pattern-rollback-revision;
+                    changed pattern-rollback-revision => { pattern-field.text = rule.app-pattern; }
                     height: 116px;
                     background: Theme.surface-2;
                     border-radius: 4px;
@@ -89,7 +94,7 @@ export component AppBranchesSection inherits VerticalLayout {
                                 checked: rule.enabled;
                                 toggled(value) => { root.rule-enabled(rule.id, value); }
                             }
-                            ThemedLineEdit {
+                            pattern-field := ThemedLineEdit {
                                 text: rule.app-pattern;
                                 control-label: @tr("Motif de la règle");
                                 horizontal-stretch: 1;

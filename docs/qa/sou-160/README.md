@@ -1,6 +1,7 @@
 # SOU-160 native Settings verification — 2026-10-10
 
-This verification follows the final displayed-template identity correction. Built the actual
+This verification covers the displayed-template identity correction and the
+follow-up restoration of rejected rule fields. Built the actual
 worktree binary with the shared Cargo cache and
 `./scripts/bundle-macos.sh --debug --nightly`; the local bundle passed Developer
 ID signature verification. Unique `SOUFFLE_APP_IDENTIFIER` profiles isolated
@@ -13,14 +14,28 @@ macOS Accessibility supplied the window bounds: `1200,63,1040,1280`.
 image was opened using the `souffle-ui-screenshot` workflow.
 
 The French/English switch instructions, French restart-to-Code result and
-English global fallback were recaptured and viewed on the final
-binary, including the displayed-template identity correction. Both profiles exited
+English global fallback were recaptured and viewed on commit `339f4784`,
+including the displayed-template identity correction. Both profiles exited
 with status 0 through the native Quit menu.
 The other five images below document the round-two binary, commit `5c30fd8a`;
-The later corrections change canonical projection and prompt identity without
-changing layout.
+The follow-up empty-field and edited-rule reorder captures below document the
+rejected-field and stable-identity corrections after all four new regressions.
+These corrections preserve the layout.
 
 Actual native interactions and durable results:
+
+The follow-up [rejected empty-field capture](fr-empty-pattern-restored.png)
+shows `Term` restored after clearing that field and clicking the second rule.
+The second field kept focus and SQLite retained both patterns. The new bundle
+passed Developer ID signature verification and exited normally through Quit.
+
+The [edited-rule reorder capture](fr-edited-rule-reordered.png) shows a physical
+`Term` → `Messages` edit accepted with Return, followed by clicking Descendre.
+The first field now displays the other rule's `Terminal` / Chat value, while
+the edited stable ID displays `Messages` / Code in the second row. Focusing
+then blurring the recycled first field did not change either SQLite pattern.
+The isolated profile was restored to its original `Term`, then `Terminal`
+order through ordinary edits/buttons before the native Quit menu exited 0.
 
 1. Pressed Tester with an ordinary mouse click while Soufflé was frontmost.
    The [French instruction](fr-switch-instruction.png) and
@@ -53,17 +68,26 @@ Actual native interactions and durable results:
    normally through the native Quit menu.
 
 The full local gate passed: sidecar resolution/build, workspace formatting,
-strict Clippy, test compilation, watchdog execution (1,545 passed, 20 explicit
+strict Clippy, test compilation, watchdog execution (1,552 passed, 20 explicit
 opt-in/manual ignores, zero failures), extractor installation and EN/FR
 translation checks. Two main-thread keyboard/paste harnesses also completed.
-The 27 editor tests include blocked-worker A → B → A, rejected-save retry,
+The 34 editor tests include blocked-worker A → B → A, rejected-save retry,
 mock-clock delayed capture, frozen capture, supersession, actual global/enable
 callback cancellation and close/reopen regressions. Four additional blocked-worker
 tests exercise global-template and enable changes followed by a rule save or
 Tester, complete canonical control projection, and shared prompt draft preservation
 with edits persisted to the displayed template. A further Intermediate-response
 regression advances the cache to Email while Cleanup remains displayed; the real
-prompt callback edits Cleanup alone, preserving Email's prompt. CodeQL was skipped by
+prompt callback edits Cleanup alone, preserving Email's prompt. Rendered-field
+regressions verify targeted empty/rejected rollback, pending-save settlement and
+preservation of another field's draft, focus, model identity and labels without
+echoed saves. The keyboard/blur regression emits real pointer/key events and
+does not invoke the Rust callback manually. Four further real-field regressions
+cover rollback after an Intermediate response followed by another rule's edit,
+recycled row identity after move/deletion, and rejected-save rollback with an
+unavailable re-read followed by a successful retry. Wrong-ID writes, sibling
+draft preservation, unknown-status reporting and session/revision supersession
+are asserted. All four were observed failing before the correction. CodeQL was skipped by
 explicit user instruction for this batch.
 
 Physical microphone dictation in chat/mail/code and a real focus change during

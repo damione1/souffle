@@ -125,6 +125,11 @@ pub(crate) fn populate(window: &MainWindow, settings: &AppSettings) {
         window.get_settings_app_branch_target_labels(),
         labels,
     ));
+    let rollback_revisions: HashMap<_, _> = window
+        .get_settings_app_branch_rules()
+        .iter()
+        .map(|row| (row.id.to_string(), row.pattern_rollback_revision))
+        .collect();
     let rows: Vec<_> = settings
         .dictation_app_branches
         .iter()
@@ -133,6 +138,10 @@ pub(crate) fn populate(window: &MainWindow, settings: &AppSettings) {
             app_pattern: rule.app_pattern.as_str().into(),
             enabled: rule.enabled,
             target_label: target_label(settings, &rule.target).into(),
+            pattern_rollback_revision: rollback_revisions
+                .get(&rule.id.0)
+                .copied()
+                .unwrap_or_default(),
         })
         .collect();
     window.set_settings_app_branch_rules(sync_model(window.get_settings_app_branch_rules(), rows));
@@ -141,6 +150,21 @@ pub(crate) fn populate(window: &MainWindow, settings: &AppSettings) {
     // hiding its result because unrelated provider metadata arrived later.
     if let Some(app) = tested_app {
         preview(window, settings, Some(&app));
+    }
+}
+
+fn restore_rendered_pattern(window: &MainWindow, id: &AppBranchId) {
+    let rows = window.get_settings_app_branch_rules();
+    for index in 0..rows.row_count() {
+        if let Some(mut row) = rows.row_data(index)
+            && row.id.as_str() == id.0
+        {
+            // A local edit replaces Slint's text binding. Reapplying equal
+            // model data cannot restore it; only this explicit row reset does.
+            row.pattern_rollback_revision = row.pattern_rollback_revision.wrapping_add(1);
+            rows.set_row_data(index, row);
+            break;
+        }
     }
 }
 
@@ -200,6 +224,7 @@ pub(crate) struct Editor {
     cache: SettingsCache,
     drafts: Rc<SettingsDraftController>,
     patterns: RefCell<HashMap<AppBranchId, PatternRequest>>,
+    pattern_rollbacks: RefCell<HashMap<AppBranchId, (SettingsLoadToken, u64)>>,
     test_generation: Cell<u64>,
     test_timer: RefCell<Option<slint::Timer>>,
     capture_app: CaptureApp,
@@ -212,16 +237,47 @@ impl Editor {
         let displayed_id = window.get_settings_active_dictation_polish_id();
         self.drafts
             .reapply_polish_prompt(window, displayed_id.as_str());
+        let rollbacks = std::mem::take(&mut *self.pattern_rollbacks.borrow_mut());
+        for (id, (token, revision)) in rollbacks {
+            // An observed request may already be pruned. A newer valid edit
+            // explicitly removes this ID's queued rollback before submission.
+            let still_requested = self
+                .patterns
+                .borrow()
+                .get(&id)
+                .is_none_or(|request| request.revision == revision);
+            if self.io.accepts_load(token) && still_requested {
+                restore_rendered_pattern(window, &id);
+            }
+        }
     }
 
     fn save(self: &Rc<Self>, mutation: impl FnOnce(&mut AppSettings) + Send + 'static) -> u64 {
+        self.save_then(mutation, |_, _, _| {})
+    }
+
+    fn save_then(
+        self: &Rc<Self>,
+        mutation: impl FnOnce(&mut AppSettings) + Send + 'static,
+        completion: impl FnOnce(&Editor, u64, &souffle_lib::commands::SettingsSaveOutcome) + 'static,
+    ) -> u64 {
         self.cancel_test();
         let token = self.io.current_load_token();
+        let callback_revision = Rc::new(Cell::new(0));
+        let submitted_revision = callback_revision.clone();
+        let weak = Rc::downgrade(self);
         let revision = self
             .io
             .submit(SettingsSaveLane::General, mutation, move |_, outcome| {
-                crate::log_settings_save_outcome("app branch", outcome)
+                crate::log_settings_save_outcome("app branch", outcome);
+                if let Some(editor) = weak.upgrade()
+                    && let Some(token) = token
+                    && editor.io.accepts_load(token)
+                {
+                    completion(&editor, submitted_revision.get(), outcome);
+                }
             });
+        callback_revision.set(revision);
         if let Some(token) = token {
             let weak = Rc::downgrade(self);
             self.io
@@ -234,6 +290,14 @@ impl Editor {
                 });
         }
         revision
+    }
+
+    fn queue_pattern_rollback(&self, id: AppBranchId, revision: u64) {
+        if let Some(token) = self.io.current_load_token() {
+            self.pattern_rollbacks
+                .borrow_mut()
+                .insert(id, (token, revision));
+        }
     }
 
     pub(crate) fn cancel_test(&self) {
@@ -391,6 +455,7 @@ fn register_with_capture(
         cache,
         drafts,
         patterns: RefCell::new(HashMap::new()),
+        pattern_rollbacks: RefCell::new(HashMap::new()),
         test_generation: Cell::new(0),
         test_timer: RefCell::new(None),
         capture_app,
@@ -433,28 +498,63 @@ fn register_with_capture(
         let pattern = pattern.trim().to_string();
         // Empty edits are rejected and the canonical row is restored.
         if pattern.is_empty() {
-            let settings = current.cache.known_snapshot();
-            if let Some(window) = current.window.upgrade()
-                && let Some(settings) = settings
-            {
-                populate(&window, &settings);
+            if let Some(window) = current.window.upgrade() {
+                restore_rendered_pattern(&window, &id);
+            }
+            if !current.io.snapshot_revision_is_current() {
+                let revision = current
+                    .patterns
+                    .borrow()
+                    .get(&id)
+                    .filter(|request| request.session == current.io.current_load_token())
+                    .map(|request| request.revision);
+                if let Some(revision) = revision {
+                    current.queue_pattern_rollback(id, revision);
+                }
             }
             return;
         }
         if current.pattern_is_current(&id, &pattern) {
             return;
         }
+        // A new valid edit supersedes this ID's queued rollback, even if an
+        // Intermediate response already pruned the preceding request.
+        current.pattern_rollbacks.borrow_mut().remove(&id);
         let worker_id = id.clone();
         let worker_pattern = pattern.clone();
-        let revision = current.save(move |settings| {
-            if let Some(rule) = settings
-                .dictation_app_branches
-                .iter_mut()
-                .find(|rule| rule.id == worker_id)
-            {
-                rule.app_pattern = worker_pattern;
-            }
-        });
+        let rollback_id = id.clone();
+        let revision = current.save_then(
+            move |settings| {
+                if let Some(rule) = settings
+                    .dictation_app_branches
+                    .iter_mut()
+                    .find(|rule| rule.id == worker_id)
+                {
+                    rule.app_pattern = worker_pattern;
+                }
+            },
+            move |editor, revision, outcome| {
+                use crate::settings_values::{SettingsCommitStatus, save_outcome_commit_status};
+                match save_outcome_commit_status(outcome) {
+                    SettingsCommitStatus::Committed => {}
+                    SettingsCommitStatus::NotCommitted => {
+                        let latest = editor
+                            .patterns
+                            .borrow()
+                            .get(&rollback_id)
+                            .is_some_and(|request| request.revision == revision);
+                        if latest {
+                            if let Some(window) = editor.window.upgrade() {
+                                // A failed re-read may never publish a terminal
+                                // snapshot. Restore the last rendered truth now.
+                                restore_rendered_pattern(&window, &rollback_id);
+                            }
+                            editor.queue_pattern_rollback(rollback_id, revision);
+                        }
+                    }
+                }
+            },
+        );
         current.patterns.borrow_mut().insert(
             id,
             PatternRequest {
@@ -502,6 +602,7 @@ mod tests {
     thread_local! {
         static CLOCK: Cell<Duration> = const { Cell::new(Duration::ZERO) };
         static EVENTS: (Sender<UiEvent>, Receiver<UiEvent>) = std::sync::mpsc::channel();
+        static SOFTWARE_WINDOW: RefCell<Option<Rc<MinimalSoftwareWindow>>> = const { RefCell::new(None) };
     }
 
     struct TestProxy(Sender<UiEvent>);
@@ -521,7 +622,9 @@ mod tests {
     }
     impl Platform for TestPlatform {
         fn create_window_adapter(&self) -> Result<Rc<dyn WindowAdapter>, slint::PlatformError> {
-            Ok(MinimalSoftwareWindow::new(Default::default()))
+            let window = MinimalSoftwareWindow::new(Default::default());
+            SOFTWARE_WINDOW.with(|slot| *slot.borrow_mut() = Some(window.clone()));
+            Ok(window)
         }
         fn new_event_loop_proxy(&self) -> Option<Box<dyn EventLoopProxy>> {
             // Unit fixtures run on independent libtest threads. Keep the
@@ -1803,6 +1906,465 @@ mod tests {
         assert_eq!(io.current_revision(), revision);
     }
 
+    fn pattern_inputs(window: &MainWindow) -> Vec<i_slint_backend_testing::ElementHandle> {
+        use i_slint_backend_testing::{AccessibleRole, ElementRoot};
+        window
+            .root_element()
+            .query_descendants()
+            .match_predicate(|element| {
+                element.accessible_role() == Some(AccessibleRole::TextInput)
+                    && element.accessible_label().is_some_and(|label| {
+                        label == "Rule pattern" || label == "Motif de la règle"
+                    })
+            })
+            .find_all()
+    }
+
+    fn render_rules(window: &MainWindow) {
+        crate::typography::initialize(window).unwrap();
+        window
+            .window()
+            .set_size(slint::PhysicalSize::new(1280, 1400));
+        let adapter = SOFTWARE_WINDOW.with(|slot| slot.borrow().clone()).unwrap();
+        let mut pixels =
+            vec![slint::platform::software_renderer::Rgb565Pixel::default(); 1280 * 1400];
+        for _ in 0..3 {
+            pump();
+            adapter.request_redraw();
+            adapter.draw_if_needed(|renderer| {
+                renderer.render(&mut pixels, 1280);
+            });
+        }
+    }
+
+    fn click_pattern_input(window: &MainWindow, input: &i_slint_backend_testing::ElementHandle) {
+        let position = slint::LogicalPosition::new(
+            input.absolute_position().x + input.size().width / 2.0,
+            input.absolute_position().y + input.size().height / 2.0,
+        );
+        let button = slint::platform::PointerEventButton::Left;
+        window
+            .window()
+            .dispatch_event(slint::platform::WindowEvent::PointerMoved { position });
+        window
+            .window()
+            .dispatch_event(slint::platform::WindowEvent::PointerPressed { position, button });
+        window
+            .window()
+            .dispatch_event(slint::platform::WindowEvent::PointerReleased { position, button });
+        pump();
+    }
+
+    fn pattern_key(window: &MainWindow, text: slint::SharedString) {
+        window
+            .window()
+            .dispatch_event(slint::platform::WindowEvent::KeyPressed { text: text.clone() });
+        window
+            .window()
+            .dispatch_event(slint::platform::WindowEvent::KeyReleased { text });
+        pump();
+    }
+
+    fn clear_pattern_input(window: &MainWindow) {
+        for _ in 0..12 {
+            pattern_key(window, slint::platform::Key::RightArrow.into());
+        }
+        for _ in 0..12 {
+            pattern_key(window, slint::platform::Key::Backspace.into());
+        }
+    }
+
+    #[test]
+    fn pending_pattern_rollback_survives_intermediate_observation_and_other_rule_edit() {
+        let test = BlockedEditor::new();
+        test.window.set_settings_open(true);
+        test.window.set_settings_tab(crate::SettingsTab::Ai);
+        render_rules(&test.window);
+        let inputs = pattern_inputs(&test.window);
+        assert!(inputs.len() >= 2);
+        let original = test
+            .window
+            .get_settings_app_branch_rules()
+            .row_data(0)
+            .unwrap();
+        click_pattern_input(&test.window, &inputs[0]);
+        clear_pattern_input(&test.window);
+        pattern_key(&test.window, "Messages".into());
+        pattern_key(&test.window, slint::platform::Key::Return.into());
+        let requested_revision = test.io.current_revision();
+        clear_pattern_input(&test.window);
+        click_pattern_input(&test.window, &inputs[1]);
+        assert_eq!(inputs[0].accessible_value().unwrap(), original.app_pattern);
+        test.release.send(()).unwrap();
+        wait_until(|| {
+            test.io.drain_one_for_test();
+            test.io.revision_is_observed(requested_revision)
+        });
+        assert!(!test.io.snapshot_revision_is_current());
+        assert_eq!(
+            test.editor
+                .cache
+                .known_snapshot()
+                .unwrap()
+                .dictation_app_branches[0]
+                .app_pattern,
+            "Messages"
+        );
+        assert_eq!(inputs[0].accessible_value().unwrap(), original.app_pattern);
+        clear_pattern_input(&test.window);
+        pattern_key(&test.window, "Updated Mail".into());
+        pattern_key(&test.window, slint::platform::Key::Return.into());
+        settle(&test.io, &test.window);
+        pump();
+        assert_eq!(inputs[0].accessible_value().unwrap(), "Messages");
+        assert_eq!(inputs[1].accessible_value().unwrap(), "Updated Mail");
+        let canonical = AppSettings::load(&test.db).unwrap();
+        assert_eq!(canonical.dictation_app_branches[0].app_pattern, "Messages");
+        assert_eq!(
+            canonical.dictation_app_branches[1].app_pattern,
+            "Updated Mail"
+        );
+    }
+
+    #[test]
+    fn moved_edited_pattern_field_tracks_rendered_rule_identity() {
+        let (window, io, db, _dir, _editor) = isolated_editor();
+        window.set_settings_open(true);
+        window.set_settings_tab(crate::SettingsTab::Ai);
+        render_rules(&window);
+        let inputs = pattern_inputs(&window);
+        assert!(inputs.len() >= 2);
+        let original = window.get_settings_app_branch_rules().row_data(0).unwrap();
+        let next = window.get_settings_app_branch_rules().row_data(1).unwrap();
+        click_pattern_input(&window, &inputs[0]);
+        clear_pattern_input(&window);
+        pattern_key(&window, "Messages".into());
+        pattern_key(&window, slint::platform::Key::Return.into());
+        settle(&io, &window);
+        pump();
+        if inputs.len() >= 3 {
+            inputs[2].set_accessible_value("Unmoved unsaved draft");
+        }
+        window.invoke_settings_app_branch_moved(original.id.clone(), 1);
+        settle(&io, &window);
+        render_rules(&window);
+        let moved_inputs = pattern_inputs(&window);
+        assert_eq!(
+            window
+                .get_settings_app_branch_rules()
+                .row_data(0)
+                .unwrap()
+                .id,
+            next.id
+        );
+        assert_eq!(
+            window
+                .get_settings_app_branch_rules()
+                .row_data(1)
+                .unwrap()
+                .id,
+            original.id
+        );
+        assert_eq!(
+            moved_inputs[0].accessible_value().unwrap(),
+            next.app_pattern
+        );
+        assert_eq!(moved_inputs[1].accessible_value().unwrap(), "Messages");
+        if inputs.len() >= 3 {
+            assert_eq!(
+                moved_inputs[2].accessible_value().unwrap(),
+                "Unmoved unsaved draft"
+            );
+        }
+        let revision = io.current_revision();
+        click_pattern_input(&window, &moved_inputs[1]);
+        pump();
+        assert_eq!(
+            io.current_revision(),
+            revision,
+            "blur must not save another rule's text"
+        );
+        let canonical = AppSettings::load(&db).unwrap();
+        assert_eq!(
+            canonical.dictation_app_branches[0].app_pattern,
+            next.app_pattern.as_str()
+        );
+        assert_eq!(canonical.dictation_app_branches[1].app_pattern, "Messages");
+    }
+
+    #[test]
+    fn deletion_after_pattern_edit_resets_recycled_field_without_wrong_id_write() {
+        let (window, io, db, _dir, _editor) = isolated_editor();
+        window.set_settings_open(true);
+        window.set_settings_tab(crate::SettingsTab::Ai);
+        render_rules(&window);
+        let inputs = pattern_inputs(&window);
+        assert!(inputs.len() >= 2);
+        let original = window.get_settings_app_branch_rules().row_data(0).unwrap();
+        let next = window.get_settings_app_branch_rules().row_data(1).unwrap();
+        click_pattern_input(&window, &inputs[0]);
+        clear_pattern_input(&window);
+        pattern_key(&window, "Messages".into());
+        pattern_key(&window, slint::platform::Key::Return.into());
+        settle(&io, &window);
+        window.invoke_settings_app_branch_deleted(original.id);
+        settle(&io, &window);
+        render_rules(&window);
+        let remaining_inputs = pattern_inputs(&window);
+        assert_eq!(
+            window
+                .get_settings_app_branch_rules()
+                .row_data(0)
+                .unwrap()
+                .id,
+            next.id
+        );
+        assert_eq!(
+            remaining_inputs[0].accessible_value().unwrap(),
+            next.app_pattern
+        );
+        let revision = io.current_revision();
+        click_pattern_input(&window, &remaining_inputs[1]);
+        assert_eq!(
+            io.current_revision(),
+            revision,
+            "recycled field blur must not corrupt its new ID"
+        );
+        let canonical = AppSettings::load(&db).unwrap();
+        assert_eq!(canonical.dictation_app_branches[0].id.0, next.id.as_str());
+        assert_eq!(
+            canonical.dictation_app_branches[0].app_pattern,
+            next.app_pattern.as_str()
+        );
+    }
+
+    #[test]
+    fn unavailable_rejected_pattern_restores_rendered_row_and_preserves_retry() {
+        use souffle_lib::commands::{SettingsSaveError, SettingsSaveOutcome};
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+        let dir = tempfile::tempdir().unwrap();
+        let db = Arc::new(souffle_lib::db::Database::open(&dir.path().join("rules.db")).unwrap());
+        let initial = AppSettings::default();
+        initial.save(&db).unwrap();
+        let window = test_window();
+        let cache = SettingsCache::with_observed(&window, initial.clone());
+        let read_failed = Arc::new(AtomicBool::new(false));
+        let reads = read_failed.clone();
+        let write_failure = read_failed.clone();
+        let writes = Arc::new(AtomicUsize::new(0));
+        let counted_writes = writes.clone();
+        let load = db.clone();
+        let effective = db.clone();
+        let save = db.clone();
+        let io = SettingsIoCoordinator::with_functions(
+            cache.clone(),
+            move || {
+                if reads.load(Ordering::SeqCst) {
+                    Err("injected unavailable barrier".into())
+                } else {
+                    AppSettings::load(&load)
+                }
+            },
+            move || AppSettings::load(&effective),
+            move |settings| {
+                if counted_writes.fetch_add(1, Ordering::SeqCst) == 0 {
+                    write_failure.store(true, Ordering::SeqCst);
+                    SettingsSaveOutcome::Unavailable {
+                        result: Err(SettingsSaveError::NotCommitted {
+                            message: "injected rejected pattern".into(),
+                        }),
+                        read_error: "injected unavailable snapshot".into(),
+                    }
+                } else {
+                    settings.save(&save).unwrap();
+                    SettingsSaveOutcome::Observed {
+                        settings: Box::new(AppSettings::load(&save).unwrap()),
+                        result: Ok(()),
+                    }
+                }
+            },
+            |_| panic!("unexpected autostart save"),
+        );
+        io.begin_open();
+        let _editor = register(
+            &window,
+            io.clone(),
+            cache.clone(),
+            SettingsDraftController::new(&window, io.clone()),
+        );
+        populate(&window, &initial);
+        window.set_settings_open(true);
+        window.set_settings_tab(crate::SettingsTab::Ai);
+        render_rules(&window);
+        let inputs = pattern_inputs(&window);
+        assert!(inputs.len() >= 2);
+        inputs[1].set_accessible_value("Another unsaved draft");
+        click_pattern_input(&window, &inputs[0]);
+        clear_pattern_input(&window);
+        pattern_key(&window, "Messages".into());
+        pattern_key(&window, slint::platform::Key::Return.into());
+        settle(&io, &window);
+        pump();
+        assert!(cache.known_snapshot().is_none());
+        assert!(window.get_settings_save_error_unavailable());
+        assert_eq!(
+            inputs[0].accessible_value().unwrap(),
+            initial.dictation_app_branches[0].app_pattern
+        );
+        assert_eq!(
+            inputs[1].accessible_value().unwrap(),
+            "Another unsaved draft"
+        );
+        assert_eq!(writes.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            AppSettings::load(&db).unwrap().dictation_app_branches[0].app_pattern,
+            initial.dictation_app_branches[0].app_pattern
+        );
+        read_failed.store(false, Ordering::SeqCst);
+        clear_pattern_input(&window);
+        pattern_key(&window, "Messages".into());
+        pattern_key(&window, slint::platform::Key::Return.into());
+        settle(&io, &window);
+        pump();
+        assert_eq!(inputs[0].accessible_value().unwrap(), "Messages");
+        assert_eq!(
+            inputs[1].accessible_value().unwrap(),
+            "Another unsaved draft"
+        );
+        assert_eq!(writes.load(Ordering::SeqCst), 2);
+        assert!(!window.get_settings_save_error_unavailable());
+        assert_eq!(
+            AppSettings::load(&db).unwrap().dictation_app_branches[0].app_pattern,
+            "Messages"
+        );
+    }
+
+    #[test]
+    fn empty_pattern_keyboard_blur_restores_canonical_field() {
+        let (window, io, db, _dir, _editor) = isolated_editor();
+        window.set_settings_open(true);
+        window.set_settings_tab(crate::SettingsTab::Ai);
+        render_rules(&window);
+        let inputs = pattern_inputs(&window);
+        assert!(inputs.len() >= 2);
+        let original = window.get_settings_app_branch_rules().row_data(0).unwrap();
+        let revision = io.current_revision();
+        click_pattern_input(&window, &inputs[0]);
+        for _ in 0..12 {
+            pattern_key(&window, slint::platform::Key::RightArrow.into());
+        }
+        for _ in 0..12 {
+            pattern_key(&window, slint::platform::Key::Backspace.into());
+        }
+        assert_eq!(inputs[0].accessible_value().unwrap(), "");
+        click_pattern_input(&window, &inputs[1]);
+        assert_eq!(inputs[0].accessible_value().unwrap(), original.app_pattern);
+        assert_eq!(io.current_revision(), revision);
+        assert_eq!(
+            AppSettings::load(&db).unwrap().dictation_app_branches[0].app_pattern,
+            original.app_pattern.as_str()
+        );
+    }
+
+    #[test]
+    fn empty_pattern_edit_restores_actual_field_without_touching_other_draft() {
+        let (window, io, db, _dir, _editor) = isolated_editor();
+        window.set_settings_open(true);
+        window.set_settings_tab(crate::SettingsTab::Ai);
+        render_rules(&window);
+        let inputs = pattern_inputs(&window);
+        assert!(inputs.len() >= 2, "the actual rule fields must be mounted");
+        let original = window.get_settings_app_branch_rules().row_data(0).unwrap();
+        let revision = io.current_revision();
+        let rules = window.get_settings_app_branch_rules();
+        let labels = window.get_settings_app_branch_target_labels();
+        inputs[1].set_accessible_value("Other uncommitted draft");
+        click_pattern_input(&window, &inputs[1]);
+        inputs[0].set_accessible_value("");
+        assert_eq!(inputs[0].accessible_value().unwrap(), "");
+        window.invoke_settings_app_branch_pattern_changed(original.id.clone(), "".into());
+        pump();
+        assert_eq!(inputs[0].accessible_value().unwrap(), original.app_pattern);
+        assert_eq!(
+            inputs[1].accessible_value().unwrap(),
+            "Other uncommitted draft"
+        );
+        assert_eq!(
+            io.current_revision(),
+            revision,
+            "rollback must not write settings"
+        );
+        assert_eq!(
+            AppSettings::load(&db).unwrap().dictation_app_branches[0].app_pattern,
+            original.app_pattern.as_str()
+        );
+        assert!(std::ptr::eq(
+            rules.as_any(),
+            window.get_settings_app_branch_rules().as_any()
+        ));
+        assert!(std::ptr::eq(
+            labels.as_any(),
+            window.get_settings_app_branch_target_labels().as_any()
+        ));
+        assert_eq!(rules.row_data(1).unwrap().pattern_rollback_revision, 0);
+        ia_ui::populate_dictation_polish(&window, &AppSettings::load(&db).unwrap(), true);
+        pump();
+        assert_eq!(
+            inputs[1].accessible_value().unwrap(),
+            "Other uncommitted draft"
+        );
+        window
+            .window()
+            .dispatch_event(slint::platform::WindowEvent::KeyPressed { text: "X".into() });
+        window
+            .window()
+            .dispatch_event(slint::platform::WindowEvent::KeyReleased { text: "X".into() });
+        assert!(
+            inputs[1].accessible_value().unwrap().contains('X'),
+            "the other field must retain keyboard focus"
+        );
+        window.invoke_settings_app_branch_pattern_changed(original.id, original.app_pattern);
+        assert_eq!(
+            io.current_revision(),
+            revision,
+            "canonical focus-lost echoes must not write"
+        );
+    }
+
+    #[test]
+    fn empty_pattern_during_pending_save_restores_rendered_then_terminal_truth() {
+        let test = BlockedEditor::new();
+        test.window.set_settings_open(true);
+        test.window.set_settings_tab(crate::SettingsTab::Ai);
+        render_rules(&test.window);
+        let inputs = pattern_inputs(&test.window);
+        assert!(inputs.len() >= 2);
+        let original = test
+            .window
+            .get_settings_app_branch_rules()
+            .row_data(0)
+            .unwrap();
+        inputs[1].set_accessible_value("Other pending draft");
+        inputs[0].set_accessible_value("Messages");
+        test.window
+            .invoke_settings_app_branch_pattern_changed(original.id.clone(), "Messages".into());
+        inputs[0].set_accessible_value("");
+        let revision = test.io.current_revision();
+        test.window
+            .invoke_settings_app_branch_pattern_changed(original.id, "".into());
+        pump();
+        assert_eq!(inputs[0].accessible_value().unwrap(), original.app_pattern);
+        assert_eq!(test.io.current_revision(), revision);
+        test.finish();
+        pump();
+        assert_eq!(inputs[0].accessible_value().unwrap(), "Messages");
+        assert_eq!(inputs[1].accessible_value().unwrap(), "Other pending draft");
+        assert_eq!(
+            AppSettings::load(&test.db).unwrap().dictation_app_branches[0].app_pattern,
+            "Messages"
+        );
+    }
+
     #[test]
     fn rejected_pattern_save_restores_canonical_value_and_allows_retry() {
         use souffle_lib::commands::{SettingsSaveError, SettingsSaveOutcome};
@@ -1845,9 +2407,22 @@ mod tests {
             SettingsDraftController::new(&window, io.clone()),
         );
         populate(&window, &initial);
+        window.set_settings_open(true);
+        window.set_settings_tab(crate::SettingsTab::Ai);
+        render_rules(&window);
+        let inputs = pattern_inputs(&window);
+        assert!(inputs.len() >= 2);
+        inputs[1].set_accessible_value("Another unsaved draft");
         let original = window.get_settings_app_branch_rules().row_data(0).unwrap();
+        inputs[0].set_accessible_value("Messages");
         window.invoke_settings_app_branch_pattern_changed(original.id.clone(), "Messages".into());
         settle(&io, &window);
+        pump();
+        assert_eq!(inputs[0].accessible_value().unwrap(), original.app_pattern);
+        assert_eq!(
+            inputs[1].accessible_value().unwrap(),
+            "Another unsaved draft"
+        );
         assert_eq!(
             window
                 .get_settings_app_branch_rules()
@@ -1862,8 +2437,15 @@ mod tests {
             original.app_pattern.clone(),
         );
         assert_eq!(io.current_revision(), revision);
+        inputs[0].set_accessible_value("Messages");
         window.invoke_settings_app_branch_pattern_changed(original.id, "Messages".into());
         settle(&io, &window);
+        pump();
+        assert_eq!(inputs[0].accessible_value().unwrap(), "Messages");
+        assert_eq!(
+            inputs[1].accessible_value().unwrap(),
+            "Another unsaved draft"
+        );
         assert_eq!(
             AppSettings::load(&db).unwrap().dictation_app_branches[0].app_pattern,
             "Messages"
