@@ -1160,7 +1160,7 @@ mod tests {
             &[
                 ("Let me explain the whole plan", 0.0, 0.5, Some("me")),
                 ("in detail because it's", 0.6, 1.1, Some("me")),
-                ("wait", 1.2, 1.7, Some("them")),
+                ("wait", 1.0, 1.7, Some("them")),
                 ("complicated.", 1.8, 2.3, Some("me")),
                 ("So let's start now", 3.0, 3.5, Some("me")),
             ],
@@ -1194,7 +1194,7 @@ mod tests {
             &[
                 ("First point.", 0.0, 0.5, Some("me")),
                 ("Second part continues", 0.6, 1.1, Some("me")),
-                ("quick question", 1.2, 1.7, Some("them")),
+                ("quick question", 1.0, 1.7, Some("them")),
                 ("and concludes.", 1.8, 2.3, Some("me")),
                 ("New topic starts", 3.0, 3.5, Some("me")),
             ],
