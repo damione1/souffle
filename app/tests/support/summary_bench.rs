@@ -209,6 +209,39 @@ struct Run {
     error: Option<String>,
 }
 
+/// Select one approved case so each retry campaign can start in a fresh
+/// process without changing the production bridge's failure protection.
+#[derive(Debug, Serialize)]
+struct BenchmarkCase {
+    meeting_id: String,
+    model: String,
+    repetition: usize,
+}
+
+impl BenchmarkCase {
+    fn parse(value: &str) -> Result<Self, &'static str> {
+        let fields: Vec<_> = value.split(',').collect();
+        if fields.len() != 3 || fields[0].is_empty() || fields[1].is_empty() {
+            return Err("SOUFFLE_BENCH_CASE requires meeting-id,model-id,repetition");
+        }
+        let repetition = fields[2]
+            .parse::<usize>()
+            .map_err(|_| "benchmark repetition must be 1, 2 or 3")?;
+        if !(1..=3).contains(&repetition) {
+            return Err("benchmark repetition must be 1, 2 or 3");
+        }
+        Ok(Self {
+            meeting_id: fields[0].into(),
+            model: fields[1].into(),
+            repetition,
+        })
+    }
+
+    fn includes(&self, meeting_id: &str, model: &str, repetition: usize) -> bool {
+        self.meeting_id == meeting_id && self.model == model && self.repetition == repetition
+    }
+}
+
 /// Rescoring is offline: the saved artifacts, not today's device, choose
 /// providers. Return per-meeting sets so partially measured corpora are honest.
 fn saved_models(output_dir: &Path, meeting_id: &str) -> Vec<String> {
@@ -352,6 +385,18 @@ pub(crate) async fn run_bench() {
             "corpus must include representative 30/45/75 minute meetings"
         );
     }
+    let selected_case = std::env::var_os("SOUFFLE_BENCH_CASE").map(|value| {
+        assert_eq!(mode, "run", "case selection is only supported in run mode");
+        let case = BenchmarkCase::parse(value.to_str().expect("UTF-8 benchmark case"))
+            .expect("valid benchmark case");
+        assert!(
+            corpus
+                .iter()
+                .any(|(input, _, _, _)| input.id == case.meeting_id),
+            "selected meeting must belong to the validated full corpus"
+        );
+        case
+    });
     let mut table = String::from(
         "# Summary benchmark\n\nKeyword recall is provisional until human correction; unreviewed inventions are unknown. Invalid runs have no quality score.\n\n| Meeting | Model | Run | Recall | Beginning / middle / end | Owners | Duplicate headings | Calls | Tokens in/out | ms | Merge rounds | Invented facts |\n|---|---|---|---|---|---|---|---|---|---|---|---|\n",
     );
@@ -399,6 +444,12 @@ pub(crate) async fn run_bench() {
         if apple_available {
             run_models.push(summary::APPLE_INTELLIGENCE_MODEL_ID.to_string());
         }
+        if let Some(case) = &selected_case {
+            assert!(
+                run_models.contains(&case.model),
+                "selected model must be available in the benchmark catalogue"
+            );
+        }
         assert!(
             !availability_path.exists(),
             "choose a new output directory for each measurement campaign"
@@ -423,6 +474,12 @@ pub(crate) async fn run_bench() {
     let mut aggregates: BTreeMap<(String, String), Vec<AggregateSample>> = BTreeMap::new();
     // Runs/configurations are sequential; map concurrency stays in production.
     for (input, gold, gold_hash, corpus_hash) in corpus {
+        if selected_case
+            .as_ref()
+            .is_some_and(|case| case.meeting_id != input.id)
+        {
+            continue;
+        }
         let models = if mode == "score" {
             saved_models(&output_dir, &input.id)
         } else {
@@ -433,6 +490,12 @@ pub(crate) async fn run_bench() {
         }
         for model in &models {
             for repetition in 1..=3 {
+                if selected_case
+                    .as_ref()
+                    .is_some_and(|case| !case.includes(&input.id, model, repetition))
+                {
+                    continue;
+                }
                 let stem = format!("{}-{}-{repetition}", input.id, model.replace(':', "-"));
                 let path = output_dir.join(format!("{stem}.run.json"));
                 if mode == "run" {
@@ -483,7 +546,7 @@ pub(crate) async fn run_bench() {
                             meeting_id: input.id.clone(),
                             model: model.to_string(),
                             repetition,
-                            metadata: serde_json::json!({"commit":commit,"machine":machine,"os":os,"corpus_sha256":corpus_hash,"gold_sha256":gold_hash,"gold_validated_by":gold.validated_by,"gold_validated_at":gold.validated_at,"template":input.template,"system_prompt":system,"language":input.language,"ollama_version":version,"ollama_models":tags,"ollama_url":url,"apple_stub":souffle_lib::apple_intelligence::is_stub_linked(),"parameters":"production: map=0.2/retry=0.7 merge=0.2 final=0.3 stuff=0.2 extract=0.1; Apple bridge defaults"}),
+                            metadata: serde_json::json!({"commit":commit,"machine":machine,"os":os,"corpus_sha256":corpus_hash,"gold_sha256":gold_hash,"gold_validated_by":gold.validated_by,"gold_validated_at":gold.validated_at,"template":input.template,"system_prompt":system,"language":input.language,"ollama_version":version,"ollama_models":tags,"ollama_url":url,"apple_stub":souffle_lib::apple_intelligence::is_stub_linked(),"parameters":"production: map=0.2/retry=0.7 merge=0.2 final=0.3 stuff=0.2 extract=0.1; Apple bridge defaults","selected_case":selected_case}),
                             prose,
                             structured,
                             error,

@@ -72,6 +72,15 @@ are counted individually, including retries. Tokens not exposed by a provider ar
 `null`, never zero. Failed/incomplete calls have an error; provider/extraction
 errors make the run invalid rather than assigning zero recall.
 
+For a targeted retry, set `SOUFFLE_BENCH_CASE='meeting-id,model-id,1'` in `run`
+mode and choose a fresh output directory. The full three-meeting corpus and its
+approved gold are still validated before selecting the one case. Only repetitions
+1–3 and an available benchmark model are accepted. Launch each selected case in
+a new process to isolate Apple bridge health after a previous timeout; this does
+not reset the bridge inside a production request or alter its 20-second helper
+deadline. Selection is recorded in run metadata. Rescore each private retry
+directory without the selector; missing cases remain explicitly missing.
+
 `provider-availability.json` freezes the measured machine's Apple availability and
 reason. Offline `score` derives each meeting's model set from its saved run files,
 so moving artifacts to a machine with different Apple support never creates or

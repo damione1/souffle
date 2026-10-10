@@ -16,6 +16,27 @@ fn benchmark_command() -> std::process::Command {
 }
 
 #[test]
+fn isolated_case_selects_one_run_and_rejects_malformed_repetitions() {
+    let case = BenchmarkCase::parse("synthetic,apple-intelligence,2").unwrap();
+    assert!(case.includes("synthetic", summary::APPLE_INTELLIGENCE_MODEL_ID, 2));
+    assert!(!case.includes("other", summary::APPLE_INTELLIGENCE_MODEL_ID, 2));
+    assert!(!case.includes("synthetic", "qwen2.5:7b", 2));
+    assert!(!case.includes("synthetic", summary::APPLE_INTELLIGENCE_MODEL_ID, 1));
+    for value in [
+        "",
+        "synthetic,apple-intelligence",
+        ",apple-intelligence,1",
+        "synthetic,,1",
+        "synthetic,apple-intelligence,0",
+        "synthetic,apple-intelligence,4",
+        "synthetic,apple-intelligence,no",
+        "synthetic,apple-intelligence,1,extra",
+    ] {
+        assert!(BenchmarkCase::parse(value).is_err(), "{value}");
+    }
+}
+
+#[test]
 #[ignore = "private corpus and validated gold required; calls production providers"]
 fn summary_bench() {
     // A libtest executable rejects the internal Apple helper argument.
