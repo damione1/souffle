@@ -292,9 +292,34 @@ pub fn get_modifier_tap_status() -> Option<crate::app_events::ModifierTapStatus>
 
 /// Open the macOS System Settings to the Apple Intelligence & Siri pane.
 pub fn open_apple_intelligence_settings() {
-    let _ = std::process::Command::new("open")
-        .arg("x-apple.systempreferences:com.apple.Siri-Settings.extension")
-        .spawn();
+    open_system_settings(SystemSettingsPane::AppleIntelligence);
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SystemSettingsPane {
+    AppleIntelligence,
+    LanguageAndRegion,
+    SoftwareUpdate,
+}
+
+impl SystemSettingsPane {
+    fn url(self) -> &'static str {
+        match self {
+            Self::AppleIntelligence => {
+                "x-apple.systempreferences:com.apple.Siri-Settings.extension"
+            }
+            Self::LanguageAndRegion => {
+                "x-apple.systempreferences:com.apple.Localization-Settings.extension"
+            }
+            Self::SoftwareUpdate => {
+                "x-apple.systempreferences:com.apple.Software-Update-Settings.extension"
+            }
+        }
+    }
+}
+
+pub fn open_system_settings(pane: SystemSettingsPane) {
+    let _ = std::process::Command::new("open").arg(pane.url()).spawn();
 }
 
 #[cfg(test)]

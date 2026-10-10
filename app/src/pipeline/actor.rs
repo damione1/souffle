@@ -21,7 +21,7 @@ use tracing::{debug, error, info, warn};
 use crate::app_events::MeetingIdleReason;
 use crate::audio::{AudioChunk, AudioMessage};
 use crate::engine::{
-    AudioInputRequirements, Speaker, TranscriptionEngine, TranscriptionProfile,
+    AudioInputRequirements, SilenceHandling, Speaker, TranscriptionEngine, TranscriptionProfile,
     TranscriptionSegment,
 };
 use crate::filter::{
@@ -86,7 +86,7 @@ pub enum EngineCommand {
     AttachApp(Arc<AppState>),
     LoadModel {
         profile: TranscriptionProfile,
-        model_dir: PathBuf,
+        model_dir: crate::engine::ModelLocation,
         reply: Sender<Result<EngineInfo, String>>,
     },
     UnloadModel {
@@ -269,12 +269,12 @@ impl EngineActorHandle {
     pub fn load_model(
         &self,
         profile: TranscriptionProfile,
-        model_dir: PathBuf,
+        model_dir: impl Into<crate::engine::ModelLocation>,
     ) -> Result<EngineInfo, String> {
         self.request(
             |reply| EngineCommand::LoadModel {
                 profile,
-                model_dir,
+                model_dir: model_dir.into(),
                 reply,
             },
             Some(Duration::from_secs(300)), // 5 minute timeout for model loading
@@ -732,14 +732,20 @@ impl EngineActor {
     fn handle_load(
         &mut self,
         profile: &TranscriptionProfile,
-        model_dir: &std::path::Path,
+        model_dir: &crate::engine::ModelLocation,
     ) -> Result<EngineInfo, String> {
         // Swap = unload + drop old, then create + load new — all sequential,
         // all on this thread.
         self.drop_engine();
 
         let mut engine = (self.factory)(profile)?;
-        engine.load_model(model_dir).map_err(|e| e.to_string())?;
+        match model_dir {
+            crate::engine::ModelLocation::Files(path) => engine.load_model(path),
+            crate::engine::ModelLocation::SystemSpeech { locale } => {
+                engine.load_system_assets(locale)
+            }
+        }
+        .map_err(|e| e.to_string())?;
         let info = EngineInfo {
             audio: engine.audio_requirements(),
             mic_gain: engine.mic_gain(),
@@ -1401,6 +1407,10 @@ impl SessionMode for SingleMode {
             engine.set_preview_enabled(false);
         }
         let speech = self.audio_filters.process(&frame);
+        let may_gate = match engine.silence_handling() {
+            SilenceHandling::Gate => true,
+            SilenceHandling::Continuous => false,
+        };
         let mut segments = Vec::new();
         if speech {
             self.frames_since_speech = 0;
@@ -1410,7 +1420,9 @@ impl SessionMode for SingleMode {
             }
         } else {
             self.frames_since_speech += 1;
-            if self.tail_drained || self.frames_since_speech > self.drain_window_frames {
+            if may_gate
+                && (self.tail_drained || self.frames_since_speech > self.drain_window_frames)
+            {
                 self.vad_skipped += 1;
                 self.push_lookback(frame);
                 return Ok(None); // Gated: buffered in the lookback ring instead of dropped.
@@ -3620,6 +3632,107 @@ mod tests {
         speech.store(true, Ordering::SeqCst);
         mode.ingest(make_frame());
         assert!(matches!(mode.step(&mut engine, chunk_size), Ok(Some(_))));
+    }
+
+    #[test]
+    fn continuous_engine_keeps_delayed_results_on_source_time_through_pause_and_stop() {
+        use crate::engine::{SilenceHandling, TranscriptionEngine};
+        use crate::filter::AudioFilterChain;
+        use std::sync::atomic::AtomicBool;
+        let speech = Arc::new(AtomicBool::new(true));
+        let chain = AudioFilterChain::new(vec![Box::new(ToggleVad(Arc::clone(&speech)))]);
+        let mut mode = SingleMode::new(chain, 3, 5, 16000);
+        let mut engine = MockEngine::new().with_silence_handling(SilenceHandling::Continuous);
+        let fed = engine.fed_audio_handle();
+        let chunk_size = MIMI_FRAME_SIZE;
+        let old_result = TranscriptionSegment {
+            text: "before the pause".into(),
+            start_time: 0.01,
+            end_time: 0.05,
+            is_final: true,
+            speaker: None,
+            language: None,
+            confidence: None,
+        };
+        // Far beyond both the drain window and lookback: a final for the
+        // initial utterance arrives only after a long pause.
+        for frame in 0..100 {
+            if frame == 1 {
+                speech.store(false, Ordering::SeqCst);
+            }
+            if frame == 99 {
+                engine
+                    .transcribe_responses
+                    .push_back(Ok(vec![old_result.clone()]));
+            }
+            mode.ingest(AudioChunk {
+                queue_permit: None,
+                session_id: 1,
+                samples: vec![0.0; chunk_size],
+                captured_at: Instant::now(),
+                speaker: None,
+            });
+            let result = mode.step(&mut engine, chunk_size).unwrap().unwrap();
+            if frame == 99 {
+                assert_eq!((result[0].start_time, result[0].end_time), (0.01, 0.05));
+            }
+        }
+        assert_eq!(fed.lock().unwrap().len(), 100 * chunk_size);
+        assert_eq!(mode.vad_skipped, 0);
+        assert_eq!(mode.eviction_offset_seconds, 0.0);
+        assert!(mode.drain_withheld(&mut engine).unwrap().is_empty());
+        assert!(mode.finish_tail(&mut engine).unwrap().is_empty());
+        engine.flush_responses.push_back(Ok(vec![old_result]));
+        let at_stop = engine.flush().unwrap();
+        assert_eq!((at_stop[0].start_time, at_stop[0].end_time), (0.01, 0.05));
+    }
+
+    #[test]
+    fn continuous_dual_engine_keeps_delayed_finals_on_both_source_clocks() {
+        use crate::engine::{SilenceHandling, TranscriptionEngine};
+        let mut mode = DiarizedMode::new();
+        let mut engine = MockEngine::new().with_silence_handling(SilenceHandling::Continuous);
+        let fed = engine.fed_dual_handle();
+        let chunk_size = MIMI_FRAME_SIZE;
+        let finals: Vec<_> = [Speaker::Me, Speaker::Them]
+            .into_iter()
+            .map(|speaker| TranscriptionSegment {
+                text: format!("{speaker:?} before the pause"),
+                start_time: 0.01,
+                end_time: 0.05,
+                is_final: true,
+                speaker: Some(speaker),
+                language: None,
+                confidence: None,
+            })
+            .collect();
+        for frame in 0..100 {
+            if frame == 99 {
+                engine
+                    .dual_transcribe_responses
+                    .push_back(Ok(finals.clone()));
+            }
+            mode.ingest_pair(vec![0.0; chunk_size], vec![0.0; chunk_size]);
+            let result = mode.step(&mut engine, chunk_size).unwrap().unwrap();
+            if frame == 99 {
+                assert_eq!(result.len(), 2);
+                for (segment, speaker) in result.iter().zip([Speaker::Me, Speaker::Them]) {
+                    assert_eq!(segment.speaker, Some(speaker));
+                    assert_eq!((segment.start_time, segment.end_time), (0.01, 0.05));
+                }
+            }
+        }
+        let fed = fed.lock().unwrap();
+        assert_eq!(fed.len(), 100);
+        assert!(
+            fed.iter()
+                .all(|(me, them)| me.len() == chunk_size && them.len() == chunk_size)
+        );
+        assert!(mode.finish_tail(&mut engine).unwrap().is_empty());
+        engine.flush_responses.push_back(Ok(finals));
+        for segment in engine.flush().unwrap() {
+            assert_eq!((segment.start_time, segment.end_time), (0.01, 0.05));
+        }
     }
 
     #[test]

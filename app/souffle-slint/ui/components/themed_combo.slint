@@ -1,4 +1,6 @@
+import { AppText, AppTextInput, Typography, TypographyStyle } from "@typography";
 import { Theme } from "../theme.slint";
+import { TranscriptionLabels } from "transcription_labels.slint";
 import { LucideIcon, IconSet } from "lucide_icon.slint";
 
 // Port of app.css `.field-select`. `std-widgets` ComboBox uses the Fluent
@@ -37,7 +39,7 @@ export component ThemedComboBox inherits Rectangle {
 
     accessible-role: combobox;
     accessible-label: root.control-label;
-    accessible-value: root.current-value;
+    accessible-value: label.text;
     accessible-enabled: root.enabled;
     accessible-expandable: true;
     accessible-expanded: popup.is-open;
@@ -69,11 +71,12 @@ export component ThemedComboBox inherits Rectangle {
         }
     }
 
-    label := Text {
+    label := AppText {
         x: 12px;
         width: parent.width - 36px;
         height: parent.height;
         text: root.current-value == "__AUTOMATIC__" ? @tr("Automatique")
+            : root.current-value == "__APPLE_SPEECH_SYSTEM__" ? TranscriptionLabels.speech-label()
             : root.current-value == "__FOLLOW_DEFAULT__" ? @tr("Suivre l'appareil par défaut")
             : root.current-value == "__CLAMSHELL_DEVICE_UNAVAILABLE__" ? @tr("Appareil personnalisé (indisponible)")
             : root.current-value == "__NEVER__" ? @tr("Jamais")
@@ -91,7 +94,7 @@ export component ThemedComboBox inherits Rectangle {
             : root.current-value == "__BULLETS__" ? @tr("Puces")
             : root.current-value == "__NO_FILLERS__" ? @tr("Sans fillers")
             : root.current-value;
-        font-size: 14px;
+        typography: Typography.body;
         color: Theme.text-secondary;
         vertical-alignment: center;
         overflow: elide;
@@ -202,7 +205,7 @@ export component ThemedComboBox inherits Rectangle {
                         border-width: index == root.highlighted-index ? 1px : 0px;
                         border-color: Theme.accent;
                         accessible-role: list-item;
-                        accessible-label: item;
+                        accessible-label: row-label.text;
                         accessible-enabled: root.enabled;
                         accessible-item-selectable: true;
                         accessible-item-selected: item == root.current-value;
@@ -227,11 +230,12 @@ export component ThemedComboBox inherits Rectangle {
                             root.restore-focus();
                         }
 
-                        Text {
+                        row-label := AppText {
                             x: 10px;
                             width: parent.width - 20px;
                             height: parent.height;
                             text: item == "__AUTOMATIC__" ? @tr("Automatique")
+                                : item == "__APPLE_SPEECH_SYSTEM__" ? TranscriptionLabels.speech-label()
                                 : item == "__FOLLOW_DEFAULT__" ? @tr("Suivre l'appareil par défaut")
                                 : item == "__NEVER__" ? @tr("Jamais")
                                 : item == "__DEFAULT__" ? @tr("Par défaut")
@@ -248,7 +252,7 @@ export component ThemedComboBox inherits Rectangle {
                                 : item == "__BULLETS__" ? @tr("Puces")
                                 : item == "__NO_FILLERS__" ? @tr("Sans fillers")
                                 : item;
-                            font-size: 13px;
+                            typography: Typography.content;
                             color: item == root.current-value ? Theme.text-primary : Theme.text-secondary;
                             vertical-alignment: center;
                             overflow: elide;

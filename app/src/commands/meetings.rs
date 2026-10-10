@@ -129,6 +129,34 @@ pub fn apply_live_paragraph_edit(
     segment_indices: Vec<u32>,
     new_text: String,
 ) -> Result<(), String> {
+    apply_live_paragraph_edit_inner(state, meeting_id, segment_indices, new_text, None).map(|_| ())
+}
+
+/// A native editor freezes both the recording session and the original text.
+/// Grouping may change while it is open; neither a resumed session nor another
+/// edit may silently receive the stale replacement.
+pub struct LiveParagraphEditContext {
+    pub session_started_at: chrono::DateTime<chrono::Utc>,
+    pub original_text: String,
+}
+
+pub fn apply_live_paragraph_edit_checked(
+    state: Arc<AppState>,
+    meeting_id: String,
+    segment_indices: Vec<u32>,
+    new_text: String,
+    context: LiveParagraphEditContext,
+) -> Result<Vec<(u32, String)>, String> {
+    apply_live_paragraph_edit_inner(state, meeting_id, segment_indices, new_text, Some(context))
+}
+
+fn apply_live_paragraph_edit_inner(
+    state: Arc<AppState>,
+    meeting_id: String,
+    segment_indices: Vec<u32>,
+    new_text: String,
+    context: Option<LiveParagraphEditContext>,
+) -> Result<Vec<(u32, String)>, String> {
     use crate::filter::session_terms::{cap_learned_pairs, derive_corrections_from_edit};
     use crate::lock_ext::MutexExt;
 
@@ -148,7 +176,7 @@ pub fn apply_live_paragraph_edit(
     // put stale words over a newer edit.
     let _serialized = state.live_edit_lock.acquire()?;
 
-    let (previous_texts, db_updates, corrections) = {
+    let (previous_texts, db_updates, corrections, original_text, edited_texts) = {
         let mut acc = state.meeting_accumulator.acquire()?;
         let Some(meeting) = acc.as_mut() else {
             return Err("No meeting is recording".into());
@@ -171,11 +199,20 @@ pub fn apply_live_paragraph_edit(
             .map(|&index| meeting.new_segments[index].text.as_str())
             .collect::<Vec<_>>()
             .join(" ");
+        if let Some(context) = &context
+            && (context.session_started_at != meeting.session_started_at
+                || context.original_text != original_text)
+        {
+            return Err("This paragraph changed or its recording session ended".into());
+        }
         // Bail before touching anything: redistribution would still reshuffle
         // the words across the segments, and with no database write behind it
         // the accumulator would drift from the rows already on disk.
         if original_text == new_text {
-            return Ok(());
+            return Ok(indices
+                .iter()
+                .map(|&index| (index as u32, meeting.new_segments[index].text.clone()))
+                .collect());
         }
         let corrections =
             cap_learned_pairs(derive_corrections_from_edit(&original_text, &new_text));
@@ -186,6 +223,10 @@ pub fn apply_live_paragraph_edit(
             .collect();
 
         redistribute_segment_texts_at(&mut meeting.new_segments, &indices, &new_text);
+        let edited_texts = indices
+            .iter()
+            .map(|&index| (index as u32, meeting.new_segments[index].text.clone()))
+            .collect();
 
         let global_base = meeting.existing_segments.len();
         let db_updates: Vec<(i64, String)> = indices
@@ -200,7 +241,13 @@ pub fn apply_live_paragraph_edit(
             })
             .collect();
 
-        (previous_texts, db_updates, corrections)
+        (
+            previous_texts,
+            db_updates,
+            corrections,
+            original_text,
+            edited_texts,
+        )
     };
 
     // The accumulator drives the summary and the rows still to be flushed, so
@@ -223,7 +270,18 @@ pub fn apply_live_paragraph_edit(
         }
     }
 
-    Ok(())
+    // The edit and its immediate session corrections already landed. A queue
+    // failure must not make the caller undo the committed transcript.
+    if let Err(error) = super::dictionary::collect_edit_corrections(
+        &state.db,
+        &original_text,
+        &new_text,
+        crate::db::dictionary::DictionaryCorrectionSource::LiveMeeting,
+    ) {
+        tracing::warn!(%error, "Live edit could not collect dictionary suggestions");
+    }
+
+    Ok(edited_texts)
 }
 
 /// Undo a live edit in the accumulator after the database refused it.

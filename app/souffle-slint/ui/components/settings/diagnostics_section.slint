@@ -1,3 +1,4 @@
+import { AppText, AppTextInput, Typography, TypographyStyle } from "@typography";
 import { SettingsField } from "settings_field.slint";
 import { SettingsGroup } from "settings_group.slint";
 import { Theme } from "../../theme.slint";
@@ -92,14 +93,14 @@ export component DiagnosticsSection inherits VerticalLayout {
             spacing: 8px;
             alignment: start;
 
-            Text {
+            AppText {
                 text: @tr("Journal en direct");
-                font-size: 13.5px;
+                typography: Typography.field-label;
                 color: Theme.text-secondary;
             }
-            Text {
+            AppText {
                 text: @tr("Fin du fichier journal actuel, actualisé toutes les quelques secondes.");
-                font-size: 12px;
+                typography: Typography.secondary;
                 color: Theme.text-muted;
                 wrap: word-wrap;
             }
@@ -128,10 +129,10 @@ export component DiagnosticsSection inherits VerticalLayout {
 
                         Rectangle { height: root.log-spacer-before * 1px; }
 
-                        if root.log-line-count == 0: Text {
+                        if root.log-line-count == 0: AppText {
                             text: @tr("Aucune entrée de journal pour l'instant.");
-                            font-family: "JetBrains Mono";
-                            font-size: 10.5px;
+                            typography: Typography.micro-detail;
+
                             color: Theme.text-secondary;
                             wrap: word-wrap;
                         }
@@ -142,10 +143,10 @@ export component DiagnosticsSection inherits VerticalLayout {
                         // ones (SOU-224). Selection/copy still works within
                         // a line; the "Copier les diagnostics" button below
                         // remains the way to grab the full text.
-                        for line in root.log-lines: TextInput {
+                        for line in root.log-lines: AppTextInput {
                             text: line;
-                            font-family: "JetBrains Mono";
-                            font-size: 10.5px;
+                            typography: Typography.micro-detail;
+
                             color: Theme.text-secondary;
                             wrap: word-wrap;
                             single-line: false;

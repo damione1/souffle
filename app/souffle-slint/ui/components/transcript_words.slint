@@ -1,3 +1,4 @@
+import { AppText, AppTextInput, Typography, TypographyStyle } from "@typography";
 import { Theme } from "../theme.slint";
 import { ThemedLineEdit } from "themed_line_edit.slint";
 import { LucideIcon, IconSet } from "lucide_icon.slint";
@@ -32,7 +33,7 @@ export struct TranscriptWord {
 // why not `StyledText`).
 export component TranscriptWordFlow inherits FlexboxLayout {
     in property <[TranscriptWord]> words;
-    in property <length> font-size: 13px;
+    in property <TypographyStyle> typography: Typography.content;
     in property <brush> color: Theme.text-primary;
     // The exact token text of the clicked word, and the window position
     // of its bottom-left corner (where the alias popover opens).
@@ -55,21 +56,21 @@ export component TranscriptWordFlow inherits FlexboxLayout {
                 }
             }
 
-            word-label := Text {
+            word-label := AppText {
                 text: word.text;
                 width: self.preferred-width;
                 color: root.color;
-                font-size: root.font-size;
+                typography: root.typography;
                 opacity: word.provisional ? Theme.provisional-opacity : 1.0;
             }
         }
 
-        trailing-label := Text {
+        trailing-label := AppText {
             x: word-area.width;
             text: word.trailing-text;
             width: self.preferred-width;
             color: root.color;
-            font-size: root.font-size;
+            typography: root.typography;
             opacity: word.provisional ? Theme.provisional-opacity : 1.0;
         }
     }
@@ -159,11 +160,10 @@ export component DictionaryAliasPopover inherits Rectangle {
                     HorizontalLayout {
                         alignment: space-between;
 
-                        Text {
+                        AppText {
                             text: @tr("Alias de dictionnaire");
-                            font-family: "Archivo SemiBold";
-                            font-size: 13px;
-                            font-weight: 600;
+                            typography: Typography.section;
+
                             color: Theme.text-primary;
                             vertical-alignment: center;
                         }
@@ -220,10 +220,10 @@ export component DictionaryAliasPopover inherits Rectangle {
                             clicked => { root.save-and-close(); }
                         }
 
-                        Text {
+                        AppText {
                             text: @tr("Enregistrer");
-                            font-size: 13px;
-                            font-weight: 600;
+                            typography: Typography.section;
+
                             color: Theme.text-primary;
                             horizontal-alignment: center;
                             vertical-alignment: center;

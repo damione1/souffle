@@ -1,4 +1,4 @@
-//! "Learn from my corrections" (`dictation_learn_from_edit`): port of
+//! Post-paste dictionary learning: port of
 //! `scheduleLearnFromEdit` in the Tauri-era
 //! `features/transcription/controller.svelte.ts`. A few seconds after an
 //! auto-paste, the focused field of the app the text went into is read back
@@ -12,6 +12,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use crate::AppHandle;
+use souffle_lib::settings::DictionaryLearningMode;
 
 /// Time the user gets to fix the pasted text before it is read back.
 const LEARN_FROM_EDIT_DELAY: Duration = Duration::from_secs(4);
@@ -34,12 +35,12 @@ pub(crate) fn cancel_pending() {
 /// pending from an earlier paste.
 pub(crate) fn schedule(
     handle: AppHandle,
-    enabled: bool,
+    mode: DictionaryLearningMode,
     pasted: String,
     target_app: Option<String>,
 ) {
     let generation = GENERATION.fetch_add(1, Ordering::AcqRel) + 1;
-    if !enabled || pasted.is_empty() {
+    if !collects_corrections(mode) || pasted.is_empty() {
         return;
     }
     souffle_lib::async_runtime::spawn(async move {
@@ -47,9 +48,9 @@ pub(crate) fn schedule(
         if GENERATION.load(Ordering::Acquire) != generation {
             return;
         }
-        // The user may have turned the toggle off during the delay.
+        // The policy may have changed during the delay.
         let still_enabled = souffle_lib::commands::get_settings(std::sync::Arc::clone(&handle))
-            .map(|settings| settings.dictation_learn_from_edit)
+            .map(|settings| collects_corrections(settings.dictionary_learning_mode))
             .unwrap_or(false);
         if !still_enabled {
             return;
@@ -79,6 +80,13 @@ pub(crate) fn schedule(
             Err(error) => eprintln!("Learn from edit worker failed: {error}"),
         }
     });
+}
+
+fn collects_corrections(mode: DictionaryLearningMode) -> bool {
+    match mode {
+        DictionaryLearningMode::Disabled => false,
+        DictionaryLearningMode::Suggestions | DictionaryLearningMode::Automatic => true,
+    }
 }
 
 /// The read-back only means something in the app the text was pasted into.
@@ -165,6 +173,13 @@ fn count_correction_pairs(original: &str, corrected: &str) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn post_paste_observation_runs_only_for_suggestions_and_automatic() {
+        assert!(!collects_corrections(DictionaryLearningMode::Disabled));
+        assert!(collects_corrections(DictionaryLearningMode::Suggestions));
+        assert!(collects_corrections(DictionaryLearningMode::Automatic));
+    }
 
     #[test]
     fn same_app_needs_both_names_and_a_match() {

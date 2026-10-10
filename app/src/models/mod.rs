@@ -2,7 +2,10 @@ pub mod download;
 
 use std::path::{Path, PathBuf};
 
-use crate::engine::{TranscriptionProfile, resolve_transcription_artifact};
+use crate::engine::{
+    ModelAssetSource, ModelLocation, TranscriptionProfile, resolve_model_assets,
+    resolve_transcription_artifact,
+};
 
 pub use download::{DownloadProgress, DownloadStatus};
 
@@ -10,6 +13,14 @@ pub use download::{DownloadProgress, DownloadStatus};
 /// exists in the expected model directory. If the profile references a legacy layout,
 /// files are automatically migrated to the new layout before checking.
 pub fn model_exists(profile: &TranscriptionProfile) -> bool {
+    match resolve_model_assets(profile) {
+        Ok(ModelAssetSource::SystemSpeech { locale }) => {
+            let status = crate::engine::apple_speech::status();
+            return status.is_installed_for(&locale);
+        }
+        Ok(ModelAssetSource::Files { .. }) => {}
+        Err(_) => return false,
+    }
     if ensure_model_layout(profile).is_err() {
         return false;
     }
@@ -23,6 +34,20 @@ pub fn model_exists(profile: &TranscriptionProfile) -> bool {
         &artifact.required_files,
         artifact.download_size_bytes,
     )
+}
+
+pub fn model_location(profile: &TranscriptionProfile) -> Result<ModelLocation, String> {
+    match resolve_model_assets(profile)? {
+        ModelAssetSource::Files { .. } => Ok(ModelLocation::Files(model_dir(profile))),
+        ModelAssetSource::SystemSpeech { locale } => Ok(ModelLocation::SystemSpeech { locale }),
+    }
+}
+
+pub fn can_delete_model_files(profile: &TranscriptionProfile) -> bool {
+    match resolve_model_assets(profile) {
+        Ok(ModelAssetSource::Files { .. }) => true,
+        Ok(ModelAssetSource::SystemSpeech { .. }) | Err(_) => false,
+    }
 }
 
 /// Returns the fully qualified local filesystem path where the model for a
@@ -42,6 +67,20 @@ pub fn download_model(
     profile: &TranscriptionProfile,
     progress_callback: impl Fn(DownloadProgress),
 ) -> Result<(), String> {
+    match resolve_model_assets(profile)? {
+        ModelAssetSource::SystemSpeech { locale } => {
+            progress_callback(DownloadProgress {
+                file: "AssetInventory".into(),
+                downloaded_bytes: 0,
+                total_bytes: None,
+                completed_files: 0,
+                total_files: 1,
+                status: DownloadStatus::Starting,
+            });
+            return crate::engine::apple_speech::install(&locale);
+        }
+        ModelAssetSource::Files { .. } => {}
+    }
     ensure_model_layout(profile)?;
     let artifact = resolve_transcription_artifact(profile)?;
     let model_dir = model_dir(profile);

@@ -1,4 +1,7 @@
 // Shared enums for closed state sets, instead of comparing bare strings
+// TypefaceWeight is generated from the shared Rust contract, not copied here.
+import { TypefaceWeight } from "@typography";
+export { TypefaceWeight }
 // (kept as plain `string` in milestones 1-5 for recording-mode/kind-filter/
 // TimelineEntry.kind/notes-save-state - corrected here before more state
 // like this accumulates in the milestones ahead).
@@ -76,6 +79,8 @@ export enum MarkdownBlockKind { heading, bullet, paragraph, link }
 // Projection of souffle_lib::engine::TranscriptionRuntimePhase. The Rust
 // AppStateMachine owns every transition; Slint only derives presentation.
 export enum TranscriptionPhase { download-required, downloading, load-required, loading, ready, unloading, failed }
+export enum TranscriptionUnavailableReason { os-unsupported, device-unsupported, build-unsupported, locale-unsupported, assets-unsupported, check-failed }
+export enum SystemSettingsPane { apple-intelligence, language-and-region, software-update }
 
 // Today's calendar row: computed in Rust from start/end vs now, never a
 // free-form string. Adding a variant must break every `if phase ==` site.
@@ -93,6 +98,7 @@ export enum AppLocale { en, fr }
 
 // `typing` not `type`: `type` is reserved in Slint. Maps to PasteMethod::Type.
 export enum PasteMethod { clipboard, typing, ax }
+export enum DictionaryLearningMode { disabled, suggestions, automatic }
 
 export enum MeetingLanguage { auto, en, fr }
 

@@ -1,10 +1,10 @@
+import { AppText, AppTextInput, Typography, TypographyStyle } from "@typography";
 import { SettingsField } from "settings_field.slint";
 import { SettingsGroup } from "settings_group.slint";
 import { Theme } from "../../theme.slint";
-import { ThemedSwitch } from "../themed_switch.slint";
-import { ThemedButton } from "../themed_button.slint";
+import { DictionaryLearningMode } from "../../types.slint";
+import { ThemedButton, ThemedButtonKind } from "../themed_button.slint";
 import { ThemedLineEdit } from "../themed_line_edit.slint";
-
 
 // Port of DictionarySettingsSection.svelte. Simplified: aliases (comma-
 // separated pronunciations) show as plain text per entry rather than
@@ -18,8 +18,20 @@ export struct DictionaryRow {
     category: string,
 }
 
+export struct DictionaryLearningOption { mode: DictionaryLearningMode }
+export struct DictionarySuggestionRow { id: int, misspelling: string, term: string }
+
 export component DictionarySection inherits VerticalLayout {
-    in property <bool> learn-from-edit;
+    in property <DictionaryLearningMode> learning-mode;
+    in property <[DictionaryLearningOption]> learning-options;
+    in property <[DictionarySuggestionRow]> suggestions;
+    in property <int> suggestion-count;
+    in property <float> suggestion-content-height;
+    in property <float> suggestion-spacer-before;
+    in property <float> suggestion-spacer-after;
+    in-out property <length> suggestion-scroll-top;
+    in property <string> suggestion-error;
+    in property <bool> suggestion-busy;
     // Only the currently visible slice of the dictionary, not the whole
     // thing (SOU-229) - `lists_ui.rs` owns the full row list and pushes a
     // new slice in whenever `list-scroll-top` moves far enough, same
@@ -44,7 +56,9 @@ export component DictionarySection inherits VerticalLayout {
     in property <int> delete-error-id;
     in property <string> delete-error;
 
-    callback learn-from-edit-changed(bool);
+    callback learning-mode-changed(DictionaryLearningMode);
+    callback suggestion-accept-requested(int);
+    callback suggestion-dismiss-requested(int);
     callback add-requested(string, string, string);
     callback delete-requested(int);
 
@@ -56,13 +70,71 @@ export component DictionarySection inherits VerticalLayout {
 
     SettingsField {
         show-divider: false;
-        label: @tr("Apprendre depuis les corrections après collage");
-        description: @tr("Quand le collage auto est actif, retenir les corrections mot à mot faites dans l'app cible pour les dictées suivantes.");
+        label: @tr("Apprentissage depuis les corrections");
+        description: @tr("Suggestions propose les corrections après collage et en réunion. Automatique apprend après collage. Les corrections de session restent immédiates.");
 
-        ThemedSwitch {
-            control-label: @tr("Apprendre depuis les corrections après collage");
-            checked: root.learn-from-edit;
-            toggled(new) => { root.learn-from-edit-changed(new); }
+        HorizontalLayout {
+            spacing: 6px;
+            horizontal-stretch: 0;
+            for option in root.learning-options: ThemedButton {
+                text: option.mode == DictionaryLearningMode.disabled ? @tr("Désactivé") :
+                    option.mode == DictionaryLearningMode.suggestions ? @tr("Suggestions") :
+                    option.mode == DictionaryLearningMode.automatic ? @tr("Automatique") : "";
+                compact: true;
+                kind: root.learning-mode == option.mode ? ThemedButtonKind.active : ThemedButtonKind.default;
+                clicked => {
+                    if root.learning-mode != option.mode { root.learning-mode-changed(option.mode); }
+                }
+            }
+        }
+    }
+
+    VerticalLayout {
+        padding-left: Theme.settings-inset;
+        padding-right: Theme.settings-inset;
+        spacing: 8px;
+        AppText { text: @tr("CORRECTIONS À VALIDER"); color: Theme.text-muted; typography: Typography.secondary; }
+        if root.suggestion-count == 0: AppText {
+            text: @tr("Aucune suggestion en attente."); color: Theme.text-muted; typography: Typography.secondary;
+        }
+        if root.suggestion-error != "": AppText {
+            text: root.suggestion-error; color: Theme.danger; typography: Typography.caption; wrap: word-wrap;
+        }
+        suggestion-list := Flickable {
+            height: min(root.suggestion-content-height * 1px, 240px);
+            content-width: self.width;
+            content-height: root.suggestion-content-height * 1px;
+            content-y <=> root.suggestion-scroll-top;
+            VerticalLayout {
+                width: suggestion-list.width;
+                alignment: start;
+                Rectangle { height: root.suggestion-spacer-before * 1px; }
+                for row in root.suggestions: Rectangle {
+                    height: 64px;
+                    HorizontalLayout {
+                        padding: 8px;
+                        spacing: 6px;
+                        AppText {
+                            text: @tr("Correction : {} → {}", row.misspelling, row.term);
+                            color: Theme.text-primary; typography: Typography.secondary;
+                            overflow: elide; horizontal-stretch: 1;
+                        }
+                        ThemedButton {
+                            text: @tr("Accepter");
+                            accessible-label: @tr("Accepter {} → {}", row.misspelling, row.term);
+                            enabled: !root.suggestion-busy;
+                            clicked => { root.suggestion-accept-requested(row.id); }
+                        }
+                        ThemedButton {
+                            text: @tr("Ignorer");
+                            accessible-label: @tr("Ignorer {} → {}", row.misspelling, row.term);
+                            enabled: !root.suggestion-busy;
+                            clicked => { root.suggestion-dismiss-requested(row.id); }
+                        }
+                    }
+                }
+                Rectangle { height: root.suggestion-spacer-after * 1px; }
+            }
         }
     }
 
@@ -73,9 +145,9 @@ export component DictionarySection inherits VerticalLayout {
         padding-bottom: 8px;
         spacing: 8px;
 
-        Text {
+        AppText {
             text: @tr("Termes techniques, noms propres ou acronymes mal reconnus.");
-            font-size: 12px;
+            typography: Typography.secondary;
             color: Theme.text-muted;
             wrap: word-wrap;
         }
@@ -85,28 +157,25 @@ export component DictionarySection inherits VerticalLayout {
 
             HorizontalLayout {
                 spacing: 6px;
-                Text {
+                AppText {
                     text: @tr("TERME");
-                    font-size: 10.5px;
+                    typography: Typography.table-heading;
                     color: Theme.text-tertiary;
-                    font-family: "Archivo Bold";
-                    letter-spacing: 1px;
+
                     horizontal-stretch: 1;
                 }
-                Text {
+                AppText {
                     text: @tr("PRONONCIATION");
-                    font-size: 10.5px;
+                    typography: Typography.table-heading;
                     color: Theme.text-tertiary;
-                    font-family: "Archivo Bold";
-                    letter-spacing: 1px;
+
                     width: 110px;
                 }
-                Text {
+                AppText {
                     text: @tr("CATÉGORIE");
-                    font-size: 10.5px;
+                    typography: Typography.table-heading;
                     color: Theme.text-tertiary;
-                    font-family: "Archivo Bold";
-                    letter-spacing: 1px;
+
                     width: 100px;
                 }
                 Rectangle {
@@ -146,15 +215,15 @@ export component DictionarySection inherits VerticalLayout {
             }
         }
 
-        if root.add-error != "": Text {
+        if root.add-error != "": AppText {
             text: root.add-error;
             color: Theme.danger;
-            font-size: 11px;
+            typography: Typography.caption;
         }
 
-        if root.entry-count == 0: Text {
+        if root.entry-count == 0: AppText {
             text: @tr("Aucune entrée.");
-            font-size: 12px;
+            typography: Typography.secondary;
             color: Theme.text-muted;
         }
     }
@@ -194,15 +263,15 @@ export component DictionarySection inherits VerticalLayout {
                         VerticalLayout {
                             spacing: 1px;
                             horizontal-stretch: 1;
-                            Text {
+                            AppText {
                                 text: row.term + (row.aliases-display == "" ? "" : "  (" + row.aliases-display + ")");
-                                font-size: 12.5px;
+                                typography: Typography.hint;
                                 color: Theme.text-primary;
                                 overflow: elide;
                             }
-                            if row.category != "": Text {
+                            if row.category != "": AppText {
                                 text: row.category;
-                                font-size: 10.5px;
+                                typography: Typography.micro-detail;
                                 color: Theme.text-muted;
                                 overflow: elide;
                             }
@@ -213,10 +282,10 @@ export component DictionarySection inherits VerticalLayout {
                         }
                     }
 
-                    if root.delete-error != "" && root.delete-error-id == row.id: Text {
+                    if root.delete-error != "" && root.delete-error-id == row.id: AppText {
                         text: root.delete-error;
                         color: Theme.danger;
-                        font-size: 11px;
+                        typography: Typography.caption;
                         overflow: elide;
                     }
                 }

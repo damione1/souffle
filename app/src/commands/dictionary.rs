@@ -1,9 +1,10 @@
 use std::sync::Arc;
 
 use crate::db::Database;
-use crate::filter::learned_pair::{MAX_LEARNED_PAIRS, is_learned_pair_acceptable};
-use crate::filter::session_terms::derive_corrections_from_edit;
-use crate::filter::{DictionaryEntry, pronunciation_aliases};
+use crate::db::dictionary::{DictionaryCorrectionSource, DictionarySuggestion};
+use crate::filter::DictionaryEntry;
+use crate::filter::session_terms::{cap_learned_pairs, derive_corrections_from_edit};
+use crate::settings::{AppSettings, DictionaryLearningMode};
 use crate::state::AppState;
 
 /// Lists all current user dictionary entries from the database.
@@ -54,13 +55,67 @@ pub fn clear_dictionary(state: Arc<AppState>) -> Result<(), String> {
     state.db.clear_dictionary()
 }
 
-/// Persist word-level misspelling→term pairs from a post-paste edit.
+/// Apply the current persistence policy to word pairs from a post-paste edit.
 pub fn learn_from_edit(
     state: Arc<AppState>,
     original: String,
     corrected: String,
 ) -> Result<u32, String> {
-    persist_learned_corrections(&state.db, &original, &corrected)
+    collect_edit_corrections(
+        &state.db,
+        &original,
+        &corrected,
+        DictionaryCorrectionSource::PostPaste,
+    )
+}
+
+pub fn list_dictionary_suggestions(
+    state: Arc<AppState>,
+) -> Result<Vec<DictionarySuggestion>, String> {
+    state.db.list_dictionary_suggestions()
+}
+
+pub fn accept_dictionary_suggestion(state: Arc<AppState>, id: i64) -> Result<bool, String> {
+    state.db.accept_dictionary_suggestion(id)
+}
+
+pub fn dismiss_dictionary_suggestion(state: Arc<AppState>, id: i64) -> Result<(), String> {
+    state.db.dismiss_dictionary_suggestion(id)
+}
+
+pub(crate) fn collect_edit_corrections(
+    db: &Database,
+    original: &str,
+    corrected: &str,
+    source: DictionaryCorrectionSource,
+) -> Result<u32, String> {
+    match AppSettings::load_read_only(db)?.dictionary_learning_mode {
+        DictionaryLearningMode::Disabled => Ok(0),
+        DictionaryLearningMode::Suggestions => {
+            let mut collected = 0;
+            for correction in admissible_corrections(original, corrected) {
+                collected += u32::from(db.suggest_dictionary_alias(
+                    &correction.misspelling,
+                    &correction.term,
+                    source,
+                )?);
+            }
+            Ok(collected)
+        }
+        DictionaryLearningMode::Automatic => match source {
+            DictionaryCorrectionSource::PostPaste => {
+                persist_learned_corrections(db, original, corrected)
+            }
+            DictionaryCorrectionSource::LiveMeeting => Ok(0),
+        },
+    }
+}
+
+fn admissible_corrections(
+    original: &str,
+    corrected: &str,
+) -> Vec<crate::filter::session_terms::SessionCorrection> {
+    cap_learned_pairs(derive_corrections_from_edit(original, corrected))
 }
 
 /// Helper to extract learned corrections from an original/corrected text pair, filter them,
@@ -70,17 +125,9 @@ pub(crate) fn persist_learned_corrections(
     original: &str,
     corrected: &str,
 ) -> Result<u32, String> {
-    let corrections: Vec<_> = derive_corrections_from_edit(original, corrected)
-        .into_iter()
-        .filter(|correction| is_persistable_pair(&correction.misspelling, &correction.term))
-        .take(MAX_LEARNED_PAIRS)
-        .collect();
-
-    let mut entries = db.list_dictionary_entries()?;
     let mut persisted = 0u32;
-
-    for correction in corrections {
-        if upsert_learned_alias(&mut entries, db, &correction.term, &correction.misspelling)? {
+    for correction in admissible_corrections(original, corrected) {
+        if db.upsert_dictionary_alias(&correction.term, &correction.misspelling)? {
             persisted += 1;
         }
     }
@@ -88,100 +135,154 @@ pub(crate) fn persist_learned_corrections(
     Ok(persisted)
 }
 
-/// Checks if a given misspelling and term pair meets the threshold and safety rules for learning.
-fn is_persistable_pair(misspelling: &str, term: &str) -> bool {
-    is_learned_pair_acceptable(misspelling, term)
-}
-
-/// Finds a dictionary entry that exactly matches the provided term (case-insensitive).
-fn find_entry_by_term<'a>(
-    entries: &'a [DictionaryEntry],
-    term: &str,
-) -> Option<&'a DictionaryEntry> {
-    entries
-        .iter()
-        .find(|entry| entry.term.eq_ignore_ascii_case(term))
-}
-
-/// Appends a new misspelling alias to an entry's pronunciation field, avoiding duplicates.
-fn append_misspelling_alias(entry: &DictionaryEntry, misspelling: &str) -> Option<String> {
-    let existing = pronunciation_aliases(&entry.term, entry.pronunciation.as_deref());
-    if existing
-        .iter()
-        .any(|alias| alias.eq_ignore_ascii_case(misspelling))
-    {
-        return None;
-    }
-    match entry
-        .pronunciation
-        .as_deref()
-        .map(str::trim)
-        .filter(|raw| !raw.is_empty())
-    {
-        Some(raw) => Some(format!("{raw}, {misspelling}")),
-        None => Some(misspelling.to_string()),
-    }
-}
-
-/// Determines if an SQLite error string matches a unique constraint violation.
-fn is_unique_constraint(err: &str) -> bool {
-    let lower = err.to_ascii_lowercase();
-    lower.contains("unique") || lower.contains("constraint failed")
-}
-
-/// Upserts an alias into the database, either adding a new entry or appending to an existing one.
-fn upsert_learned_alias(
-    entries: &mut Vec<DictionaryEntry>,
-    db: &Database,
-    term: &str,
-    misspelling: &str,
-) -> Result<bool, String> {
-    if let Some(existing) = find_entry_by_term(entries, term).cloned() {
-        return apply_alias_update(entries, db, &existing, misspelling);
-    }
-
-    match db.add_dictionary_entry(term, Some(misspelling), None) {
-        Ok(entry) => {
-            entries.push(entry);
-            Ok(true)
-        }
-        Err(err) if is_unique_constraint(&err) => {
-            *entries = db.list_dictionary_entries()?;
-            match find_entry_by_term(entries, term).cloned() {
-                Some(existing) => apply_alias_update(entries, db, &existing, misspelling),
-                None => Err(err),
-            }
-        }
-        Err(err) => Err(err),
-    }
-}
-
-/// Applies a misspelling alias update to a known dictionary entry both in DB and in-memory list.
-fn apply_alias_update(
-    entries: &mut [DictionaryEntry],
-    db: &Database,
-    existing: &DictionaryEntry,
-    misspelling: &str,
-) -> Result<bool, String> {
-    let Some(pronunciation) = append_misspelling_alias(existing, misspelling) else {
-        return Ok(false);
-    };
-    db.update_dictionary_entry(
-        existing.id,
-        &existing.term,
-        Some(&pronunciation),
-        existing.category.as_deref(),
-    )?;
-    if let Some(row) = entries.iter_mut().find(|entry| entry.id == existing.id) {
-        row.pronunciation = Some(pronunciation);
-    }
-    Ok(true)
-}
-
 #[cfg(test)]
 mod learn_from_edit {
-    use super::persist_learned_corrections;
+    use super::{collect_edit_corrections, persist_learned_corrections};
+    use crate::db::Database;
+    use crate::db::dictionary::DictionaryCorrectionSource::{LiveMeeting, PostPaste};
+    use crate::settings::{AppSettings, DictionaryLearningMode};
     use crate::test_helpers::fixtures::test_db;
+
+    #[test]
+    fn over_limit_edits_never_persist_a_partial_rewrite() {
+        let original = (0..9)
+            .map(|i| format!("Kubernetis{i}"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let corrected = (0..9)
+            .map(|i| format!("Kubernetes{i}"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        for mode in DictionaryLearningMode::ALL {
+            let (db, _dir) = test_db();
+            AppSettings {
+                dictionary_learning_mode: mode,
+                ..AppSettings::default()
+            }
+            .save(&db)
+            .unwrap();
+            for source in [PostPaste, LiveMeeting] {
+                assert_eq!(
+                    collect_edit_corrections(&db, &original, &corrected, source).unwrap(),
+                    0
+                );
+            }
+            assert!(db.list_dictionary_entries().unwrap().is_empty());
+            assert!(db.list_dictionary_suggestions().unwrap().is_empty());
+        }
+    }
+
+    #[test]
+    fn suggestions_deduplicate_both_sources_without_learning_and_survive_restart() {
+        let (db, dir) = test_db();
+        AppSettings {
+            dictionary_learning_mode: DictionaryLearningMode::Suggestions,
+            ..AppSettings::default()
+        }
+        .save(&db)
+        .unwrap();
+        assert_eq!(
+            collect_edit_corrections(&db, "use Kubernetis", "use Kubernetes", PostPaste).unwrap(),
+            1
+        );
+        assert_eq!(
+            collect_edit_corrections(&db, "use KUBERNETIS", "use KUBERNETES", LiveMeeting).unwrap(),
+            0
+        );
+        assert!(db.list_dictionary_entries().unwrap().is_empty());
+        let pending = db.list_dictionary_suggestions().unwrap();
+        assert_eq!(pending.len(), 1);
+        drop(db);
+        let db = Database::open(&dir.path().join("test.db")).unwrap();
+        assert_eq!(
+            AppSettings::load(&db).unwrap().dictionary_learning_mode,
+            DictionaryLearningMode::Suggestions
+        );
+        assert_eq!(db.list_dictionary_suggestions().unwrap(), pending);
+        db.dismiss_dictionary_suggestion(pending[0].id).unwrap();
+        drop(db);
+        let db = Database::open(&dir.path().join("test.db")).unwrap();
+        assert_eq!(
+            collect_edit_corrections(&db, "use Kubernetis", "use Kubernetes", PostPaste).unwrap(),
+            0
+        );
+        assert_eq!(
+            collect_edit_corrections(&db, "use KUBERNETIS", "use KUBERNETES", LiveMeeting).unwrap(),
+            0
+        );
+        assert!(!db.accept_dictionary_suggestion(pending[0].id).unwrap());
+        assert!(db.list_dictionary_suggestions().unwrap().is_empty());
+        assert!(db.list_dictionary_entries().unwrap().is_empty());
+    }
+
+    #[test]
+    fn exclusive_modes_preserve_post_paste_automatic_and_never_automate_meeting_edits() {
+        for mode in DictionaryLearningMode::ALL {
+            for source in [PostPaste, LiveMeeting] {
+                let (db, _dir) = test_db();
+                AppSettings {
+                    dictionary_learning_mode: mode,
+                    ..AppSettings::default()
+                }
+                .save(&db)
+                .unwrap();
+                collect_edit_corrections(&db, "use Kubernetis", "use Kubernetes", source).unwrap();
+                let (dictionary_count, suggestion_count) = match mode {
+                    DictionaryLearningMode::Disabled => (0, 0),
+                    DictionaryLearningMode::Suggestions => (0, 1),
+                    DictionaryLearningMode::Automatic => match source {
+                        PostPaste => (1, 0),
+                        LiveMeeting => (0, 0),
+                    },
+                };
+                assert_eq!(
+                    db.list_dictionary_entries().unwrap().len(),
+                    dictionary_count
+                );
+                assert_eq!(
+                    db.list_dictionary_suggestions().unwrap().len(),
+                    suggestion_count
+                );
+                // Manual dictionary writes never consult the learning policy.
+                db.add_dictionary_entry("Manual", Some("manuel"), None)
+                    .unwrap();
+                assert!(
+                    db.list_dictionary_entries()
+                        .unwrap()
+                        .iter()
+                        .any(|entry| entry.term == "Manual")
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn suggestions_and_automatic_share_stopword_rewrite_and_short_pair_guardrails() {
+        for mode in DictionaryLearningMode::ALL {
+            let (db, _dir) = test_db();
+            AppSettings {
+                dictionary_learning_mode: mode,
+                ..AppSettings::default()
+            }
+            .save(&db)
+            .unwrap();
+            for source in [PostPaste, LiveMeeting] {
+                for (original, corrected) in [
+                    ("on passe par Pierre", "on passe pour Pierre"),
+                    ("je pense que oui", "je crois que oui"),
+                    ("ok fine", "ok ok"),
+                    ("same words", "same words"),
+                ] {
+                    assert_eq!(
+                        collect_edit_corrections(&db, original, corrected, source).unwrap(),
+                        0
+                    );
+                }
+            }
+            assert!(db.list_dictionary_entries().unwrap().is_empty());
+            assert!(db.list_dictionary_suggestions().unwrap().is_empty());
+        }
+    }
 
     #[test]
     fn persist_learned_corrections_inserts_new_term() {
@@ -266,13 +367,13 @@ mod learn_from_edit {
     }
 
     #[test]
-    fn persist_learned_corrections_caps_at_eight_pairs() {
+    fn persist_learned_corrections_accepts_exactly_eight_pairs() {
         let (db, _dir) = test_db();
-        let original = (0..11)
+        let original = (0..8)
             .map(|i| format!("Kubernetis{i:02}"))
             .collect::<Vec<_>>()
             .join(" ");
-        let corrected = (0..11)
+        let corrected = (0..8)
             .map(|i| format!("Kubernetes{i:02}"))
             .collect::<Vec<_>>()
             .join(" ");

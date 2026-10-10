@@ -1,3 +1,4 @@
+import { AppText, AppTextInput, Typography, TypographyStyle } from "@typography";
 import { AutostartSection } from "components/settings/autostart_section.slint";
 import { PermissionsSection } from "components/settings/permissions_section.slint";
 import { DiagnosticsSection } from "components/settings/diagnostics_section.slint";
@@ -13,12 +14,13 @@ import { DictationPolishSection } from "components/settings/dictation_polish_sec
 import { SummaryTemplatesSection } from "components/settings/summary_templates_section.slint";
 import { ModelSection } from "components/settings/model_section.slint";
 import { ModelDeleteSection } from "components/settings/model_delete_section.slint";
-import { DictionarySection, DictionaryRow } from "components/settings/dictionary_section.slint";
+import { DictionarySection, DictionaryRow, DictionarySuggestionRow, DictionaryLearningOption } from "components/settings/dictionary_section.slint";
 import { SnippetsSection, SnippetRow } from "components/settings/snippets_section.slint";
 import { Theme } from "theme.slint";
+import { TranscriptionUnavailableReason, SystemSettingsPane } from "types.slint";
 import { LucideIcon, IconSet } from "components/lucide_icon.slint";
 import { SettingsTabBar, SettingsTabPage } from "components/settings/settings_tabs.slint";
-import { TranscriptionPhase, AppTheme, AppLocale, PasteMethod, MeetingLanguage, LogLevel, AudioRetention, AccessState, ShortcutField, ShortcutNotice, SummaryProvider, AppleIntelligenceUnavailableReason, SettingsTab, InstallBlockReason, UpdateRowStatus } from "types.slint";
+import { TranscriptionPhase, AppTheme, AppLocale, PasteMethod, MeetingLanguage, LogLevel, AudioRetention, AccessState, ShortcutField, ShortcutNotice, SummaryProvider, AppleIntelligenceUnavailableReason, SettingsTab, InstallBlockReason, UpdateRowStatus, DictionaryLearningMode } from "types.slint";
 
 // Port of components/SettingsView.svelte's tab shell (SOU-188). Svelte
 // groups its 17 sections into 6 tabs (Transcription / IA / Audio / Interface
@@ -158,6 +160,10 @@ export component SettingsView inherits Rectangle {
     in property <bool> model-ready;
     in property <[string]> model-labels;
     in property <string> selected-model-label;
+    in property <bool> apple-speech-selected;
+    in property <bool> apple-speech-unavailable;
+    in property <TranscriptionUnavailableReason> apple-speech-unavailable-reason;
+    callback open-system-settings-requested(SystemSettingsPane);
     in property <bool> model-busy;
     in property <TranscriptionPhase> model-phase;
     in property <bool> model-downloading;
@@ -167,7 +173,18 @@ export component SettingsView inherits Rectangle {
     in property <string> unload-timeout-label;
     in property <string> model-error-message;
     in property <string> model-delete-error;
-    in property <bool> dictation-learn-from-edit;
+    in property <bool> model-files-deletable;
+
+    in property <DictionaryLearningMode> dictionary-learning-mode;
+    in property <[DictionaryLearningOption]> dictionary-learning-options;
+    in property <[DictionarySuggestionRow]> dictionary-suggestions;
+    in property <int> dictionary-suggestion-count;
+    in property <float> dictionary-suggestion-content-height;
+    in property <float> dictionary-suggestion-spacer-before;
+    in property <float> dictionary-suggestion-spacer-after;
+    in-out property <length> dictionary-suggestion-scroll-top;
+    in property <string> dictionary-suggestion-error;
+    in property <bool> dictionary-suggestion-busy;
     // `dictionary-entries` / `snippets` are windowed slices, not the full
     // lists - see the SOU-229 comment in `dictionary_section.slint`.
     in property <[DictionaryRow]> dictionary-entries;
@@ -267,7 +284,9 @@ export component SettingsView inherits Rectangle {
     callback model-changed(string);
     callback unload-timeout-changed(string);
     callback delete-model-requested();
-    callback dictation-learn-from-edit-changed(bool);
+    callback dictionary-learning-mode-changed(DictionaryLearningMode);
+    callback dictionary-suggestion-accept-requested(int);
+    callback dictionary-suggestion-dismiss-requested(int);
     callback dictionary-add-requested(string, string, string);
     callback dictionary-delete-requested(int);
     callback snippet-add-requested(string, string);
@@ -325,11 +344,11 @@ export component SettingsView inherits Rectangle {
                 x: 10px;
                 y: (parent.height - self.height) / 2;
             }
-            done-label := Text {
+            done-label := AppText {
                 x: 32px;
                 y: (parent.height - self.height) / 2;
                 text: @tr("Terminé");
-                font-size: 13px;
+                typography: Typography.content;
                 color: done-area.has-hover ? Theme.text-primary : Theme.text-muted;
             }
             done-area := TouchArea {
@@ -340,15 +359,15 @@ export component SettingsView inherits Rectangle {
             }
         }
 
-        Text {
+        AppText {
             text: @tr("Paramètres");
-            font-size: 20px;
-            font-weight: 700;
+            typography: Typography.settings-title;
+
             color: Theme.text-primary;
             vertical-stretch: 0;
         }
 
-        if root.save-error != "" && root.draft-save-error == "": Text {
+        if root.save-error != "" && root.draft-save-error == "": AppText {
             text: root.save-error-unavailable
                 ? @tr("État des réglages enregistrés inconnu : {}", root.save-error)
                 : @tr("Enregistrement des réglages : {}", root.save-error);
@@ -357,7 +376,7 @@ export component SettingsView inherits Rectangle {
             vertical-stretch: 0;
         }
 
-        if root.draft-save-error != "": Text {
+        if root.draft-save-error != "": AppText {
             text: root.draft-save-error-unavailable
                 ? @tr("Brouillon conservé, état des réglages inconnu : {}", root.draft-save-error)
                 : @tr("Brouillon conservé : {}", root.draft-save-error);
@@ -388,6 +407,10 @@ export component SettingsView inherits Rectangle {
                             ready: root.model-ready;
                             model-labels: root.model-labels;
                             selected-model-label: root.selected-model-label;
+                            apple-speech-selected: root.apple-speech-selected;
+                            apple-speech-unavailable: root.apple-speech-unavailable;
+                            apple-speech-unavailable-reason: root.apple-speech-unavailable-reason;
+                            open-system-settings-requested(pane) => { root.open-system-settings-requested(pane); }
                             busy: root.model-busy;
                             downloading: root.model-downloading;
                             download-progress-label: root.model-download-progress-label;
@@ -400,7 +423,16 @@ export component SettingsView inherits Rectangle {
                         }
 
                         DictionarySection {
-                            learn-from-edit: root.dictation-learn-from-edit;
+                            learning-mode: root.dictionary-learning-mode;
+                            learning-options: root.dictionary-learning-options;
+                            suggestions: root.dictionary-suggestions;
+                            suggestion-count: root.dictionary-suggestion-count;
+                            suggestion-content-height: root.dictionary-suggestion-content-height;
+                            suggestion-spacer-before: root.dictionary-suggestion-spacer-before;
+                            suggestion-spacer-after: root.dictionary-suggestion-spacer-after;
+                            suggestion-scroll-top <=> root.dictionary-suggestion-scroll-top;
+                            suggestion-error: root.dictionary-suggestion-error;
+                            suggestion-busy: root.dictionary-suggestion-busy;
                             entries: root.dictionary-entries;
                             entry-count: root.dictionary-entry-count;
                             list-content-height: root.dictionary-list-content-height;
@@ -413,7 +445,9 @@ export component SettingsView inherits Rectangle {
                             add-error: root.dictionary-add-error;
                             delete-error-id: root.dictionary-delete-error-id;
                             delete-error: root.dictionary-delete-error;
-                            learn-from-edit-changed(value) => { root.dictation-learn-from-edit-changed(value); }
+                            learning-mode-changed(value) => { root.dictionary-learning-mode-changed(value); }
+                            suggestion-accept-requested(id) => { root.dictionary-suggestion-accept-requested(id); }
+                            suggestion-dismiss-requested(id) => { root.dictionary-suggestion-dismiss-requested(id); }
                             add-requested(term, pronunciation, category) => { root.dictionary-add-requested(term, pronunciation, category); }
                             delete-requested(id) => { root.dictionary-delete-requested(id); }
                         }
@@ -675,6 +709,7 @@ export component SettingsView inherits Rectangle {
                         }
 
                         ModelDeleteSection {
+                            files-deletable: root.model-files-deletable;
                             model-phase: root.model-phase;
                             model-label: root.selected-model-label;
                             delete-error: root.model-delete-error;

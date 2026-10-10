@@ -1,3 +1,4 @@
+import { AppText, AppTextInput, Typography, TypographyStyle } from "@typography";
 import { NotesSaveState, MeetingExportFormat, WakeResumeNotice } from "types.slint";
 import { StatusBanner } from "components/status_banner.slint";
 import { ThemedLineEdit } from "components/themed_line_edit.slint";
@@ -68,11 +69,11 @@ component ExportMenuRow inherits Rectangle {
         clicked => { root.chosen(); }
     }
 
-    Text {
+    AppText {
         x: 10px;
         width: parent.width - 20px;
         text: root.label;
-        font-size: 12.5px;
+        typography: Typography.hint;
         color: Theme.text-primary;
         vertical-alignment: center;
         overflow: elide;
@@ -172,7 +173,6 @@ export component MeetingDetail inherits Rectangle {
     property <int> export-item-count: root.has-audio ? 5 : 4;
     property <int> export-highlighted: 0;
 
-
     function commit-title(value: string) {
         // `accepted` (Enter) removes the field, which then also reports a
         // focus loss: only the first of the two may commit.
@@ -257,9 +257,9 @@ export component MeetingDetail inherits Rectangle {
                     icon: IconSet.ArrowLeft;
                     icon-color: Theme.text-secondary;
                 }
-                Text {
+                AppText {
                     text: @tr("Historique");
-                    font-size: 13px;
+                    typography: Typography.content;
                     color: Theme.text-secondary;
                     vertical-alignment: center;
                 }
@@ -311,7 +311,7 @@ export component MeetingDetail inherits Rectangle {
                         }
                     }
 
-                    Text {
+                    AppText {
                         // Pinned to the left edge: without an explicit x/width a
                         // Text child is centred in this full-width hover box, which
                         // is what pushed the title right of "History" and the meta
@@ -319,9 +319,8 @@ export component MeetingDetail inherits Rectangle {
                         x: 0px;
                         width: parent.width;
                         text: root.title;
-                        font-family: "Archivo SemiBold";
-                        font-size: 24px;
-                        font-weight: 700;
+                        typography: Typography.title;
+
                         horizontal-alignment: left;
                         vertical-alignment: center;
                     }
@@ -333,7 +332,7 @@ export component MeetingDetail inherits Rectangle {
                 if root.editing-title: ThemedLineEdit {
                     text <=> root.title-draft;
                     control-label: @tr("Titre de la réunion");
-                    text-size: 22px;
+                    typography: Typography.title-input;
                     init => { self.focus(); }
                     accepted(value) => { root.commit-title(value); }
                     // MeetingHeaderSection.svelte commits on blur too, so
@@ -348,12 +347,12 @@ export component MeetingDetail inherits Rectangle {
                     spacing: 9px;
                     alignment: start;
 
-                    Text {
+                    AppText {
                         text: root.meta.sessions > 1
                             ? @tr("{0}/{1}/{2} {3}:{4} · {5} · {6} segments · {7} sessions", root.meta.day, root.meta.month, root.meta.year, root.meta.hour, root.meta.minute, root.meta.duration, root.meta.segments, root.meta.sessions)
                             : @tr("{0}/{1}/{2} {3}:{4} · {5} · {6} segments", root.meta.day, root.meta.month, root.meta.year, root.meta.hour, root.meta.minute, root.meta.duration, root.meta.segments);
                         color: Theme.text-muted;
-                        font-size: 12px;
+                        typography: Typography.secondary;
                         vertical-alignment: center;
                     }
 
@@ -364,11 +363,11 @@ export component MeetingDetail inherits Rectangle {
                         border-width: 1px;
                         border-color: Theme.surface-4;
 
-                        model-chip := Text {
+                        model-chip := AppText {
                             text: root.model-label;
                             color: Theme.accent;
-                            font-family: "JetBrains Mono";
-                            font-size: 11px;
+                            typography: Typography.caption;
+
                             horizontal-alignment: center;
                             vertical-alignment: center;
                         }
@@ -408,13 +407,13 @@ export component MeetingDetail inherits Rectangle {
                             border-width: 1px;
                             border-color: Theme.rule;
 
-                            chip-text := Text {
+                            chip-text := AppText {
                                 text: participant.is-organizer && participant.is-current-user ? @tr("{} (organisateur) (vous)", participant.name)
                                     : participant.is-organizer ? @tr("{} (organisateur)", participant.name)
                                     : participant.is-current-user ? @tr("{} (vous)", participant.name)
                                     : participant.name;
                                 color: Theme.text-tertiary;
-                                font-size: 11.5px;
+                                typography: Typography.small;
                                 horizontal-alignment: center;
                                 vertical-alignment: center;
                             }
@@ -467,10 +466,10 @@ export component MeetingDetail inherits Rectangle {
                             }
                         }
 
-                        resume-txt := Text {
+                        resume-txt := AppText {
                             text: @tr("Reprendre");
-                            font-family: "Archivo SemiBold";
-                            font-size: 13px;
+                            typography: Typography.section;
+
                             color: Theme.text-primary;
                             horizontal-alignment: center;
                             vertical-alignment: center;
@@ -543,9 +542,9 @@ export component MeetingDetail inherits Rectangle {
                                     icon-color: Theme.text-secondary;
                                 }
                             }
-                            Text {
+                            AppText {
                                 text: @tr("Exporter");
-                                font-size: 12.5px;
+                                typography: Typography.hint;
                                 color: Theme.text-secondary;
                                 vertical-alignment: center;
                             }
@@ -637,26 +636,26 @@ export component MeetingDetail inherits Rectangle {
                     }
                 }
 
-                if root.export-error != "": Text {
+                if root.export-error != "": AppText {
                     text: root.export-error;
                     color: Theme.danger;
-                    font-size: 11px;
+                    typography: Typography.caption;
                     horizontal-alignment: right;
                     wrap: word-wrap;
                 }
 
-                if root.audio-export-error != "": Text {
+                if root.audio-export-error != "": AppText {
                     text: root.audio-export-error;
                     color: Theme.danger;
-                    font-size: 11px;
+                    typography: Typography.caption;
                     horizontal-alignment: right;
                     wrap: word-wrap;
                 }
 
-                if root.resume-error != "": Text {
+                if root.resume-error != "": AppText {
                     text: root.resume-error;
                     color: Theme.danger;
-                    font-size: 11px;
+                    typography: Typography.caption;
                 }
             }
         }
@@ -718,25 +717,24 @@ export component MeetingDetail inherits Rectangle {
                             icon-color: Theme.accent;
                         }
 
-                        Text {
+                        AppText {
                             text: @tr("Notes");
-                            font-size: 13px;
-                            font-family: "Archivo SemiBold";
-                            font-weight: 600;
+                            typography: Typography.section;
+
                             vertical-alignment: center;
                         }
 
                         Rectangle { horizontal-stretch: 1; }
 
-                        if root.notes-save-state == NotesSaveState.saved: Text {
+                        if root.notes-save-state == NotesSaveState.saved: AppText {
                             text: @tr("Enregistr\u{e9}");
-                            font-size: 11px;
+                            typography: Typography.caption;
                             color: Theme.text-muted;
                             vertical-alignment: center;
                         }
-                        if root.notes-save-state == NotesSaveState.pending: Text {
+                        if root.notes-save-state == NotesSaveState.pending: AppText {
                             text: @tr("Enregistrement\u{2026}");
-                            font-size: 11px;
+                            typography: Typography.caption;
                             color: Theme.text-muted;
                             vertical-alignment: center;
                         }
@@ -750,10 +748,10 @@ export component MeetingDetail inherits Rectangle {
                         edited(value) => { root.notes-changed(value); }
                     }
 
-                    Text {
+                    AppText {
                         text: @tr("Les notes sont enregistr\u{e9}es avec la r\u{e9}union et am\u{e9}liorent le r\u{e9}sum\u{e9}.");
                         color: Theme.text-muted;
-                        font-size: 11px;
+                        typography: Typography.caption;
                     }
                 }
 
@@ -775,16 +773,16 @@ export component MeetingDetail inherits Rectangle {
                         spacing: 5px;
                         alignment: center;
 
-                        Text {
+                        AppText {
                             text: @tr("Cette réunion ne contient aucun enregistrement.");
-                            font-family: "Archivo SemiBold";
-                            font-size: 13px;
+                            typography: Typography.section;
+
                             color: Theme.text-secondary;
                             horizontal-alignment: center;
                         }
-                        Text {
+                        AppText {
                             text: @tr("Aucun audio, aucune transcription et aucun résumé.");
-                            font-size: 11.5px;
+                            typography: Typography.small;
                             color: Theme.text-muted;
                             horizontal-alignment: center;
                         }
@@ -896,9 +894,9 @@ export component MeetingDetail inherits Rectangle {
                                 icon-color: Theme.danger-strong;
                             }
                         }
-                        Text {
+                        AppText {
                             text: @tr("Supprimer la réunion");
-                            font-size: 12.5px;
+                            typography: Typography.hint;
                             color: Theme.danger-strong;
                             vertical-alignment: center;
                         }
@@ -911,9 +909,9 @@ export component MeetingDetail inherits Rectangle {
                     vertical-stretch: 0;
                     horizontal-stretch: 1;
 
-                    Text {
+                    AppText {
                         text: @tr("Supprimer cette réunion définitivement ?");
-                        font-size: 13px;
+                        typography: Typography.content;
                         color: Theme.text-muted;
                         vertical-alignment: center;
                     }
@@ -952,10 +950,10 @@ export component MeetingDetail inherits Rectangle {
                             clicked => { root.confirm-delete(); }
                         }
 
-                        confirm-txt := Text {
+                        confirm-txt := AppText {
                             text: @tr("Oui, supprimer");
-                            font-family: "Archivo SemiBold";
-                            font-size: 13px;
+                            typography: Typography.section;
+
                             color: Theme.on-danger;
                             horizontal-alignment: center;
                             vertical-alignment: center;
@@ -970,9 +968,9 @@ export component MeetingDetail inherits Rectangle {
                 }
                 }
 
-                if root.delete-error != "": Text {
+                if root.delete-error != "": AppText {
                     text: @tr("Impossible de supprimer la réunion : {}", root.delete-error);
-                    font-size: 12px;
+                    typography: Typography.secondary;
                     color: Theme.danger;
                     wrap: word-wrap;
                 }

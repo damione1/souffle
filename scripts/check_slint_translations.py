@@ -12,7 +12,7 @@ from pathlib import Path
 UNCHANGED_ENGLISH = {
     "100% local", "AUDIO", "Audio", "Claude Code", "DIAGNOSTICS",
     "English", "EXPANSION", "INTERFACE", "Interface", "MICROPHONE",
-    "NOTES", "Notes", "PERMISSIONS", "Soufflé", "Transcription", "×", "✕",
+    "NOTES", "Notes", "PERMISSIONS", "Soufflé", "Suggestions", "Transcription", "×", "✕",
     # Symbols, acronyms and placeholder-only templates: identical spelling
     # in both languages is correct, not a missed translation.
     "USB", "Bluetooth", "⏸", "▶", "✓", "•",
@@ -20,6 +20,8 @@ UNCHANGED_ENGLISH = {
     # prose - the same words in both languages.
     "Markdown (.md)", "JSON (.json)", "Audio (.ogg)",
     " {}", " / {}", "• {}", "→ {}", "Version {}",
+    # Brand plus Foundation-localized open-set locale data.
+    "Apple Speech", "Apple Speech ({})", "Apple Speech — {} [{}]",
 }
 
 

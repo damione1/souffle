@@ -19,6 +19,9 @@
 
 slint::include_modules!();
 
+#[path = "../src/typography.rs"]
+mod typography;
+
 // The app is a binary crate, so the modules the live path needs are pulled
 // in by path. Only a fraction of timeline/transcript is used here.
 #[allow(dead_code)]
@@ -103,6 +106,7 @@ fn main() {
         .expect("failed to select the skia renderer");
 
     let window = MainWindow::new().expect("failed to create the mock window");
+    typography::initialize(&window).expect("Inter renderer font resolution failed");
     window
         .window()
         .set_size(slint::LogicalSize::new(width, height));

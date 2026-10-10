@@ -84,6 +84,7 @@ impl LivePara {
         };
         let (has_speaker, speaker) = speaker_fields(self.speaker);
         TranscriptBlock {
+            can_edit: !self.text.is_empty(),
             is_session_break: false,
             has_speaker,
             speaker,
@@ -127,6 +128,9 @@ pub struct LiveTranscript {
     /// Finals in emission order, bounded by the visible paragraph window.
     /// Text is immutable; grouping can still change for a delayed other lane.
     pub(crate) finals: Vec<TranscriptionSegment>,
+    /// Accumulator indices stay stable when old rows are evicted or re-sorted.
+    final_indices: Vec<u32>,
+    next_final_index: u32,
     /// Pending-word slot for Me lane.
     pub tentative_me: TentativeSlot,
     /// Pending-word slot for Them lane.
@@ -140,6 +144,8 @@ impl LiveTranscript {
         Self {
             generation: 0,
             finals: Vec::new(),
+            final_indices: Vec::new(),
+            next_final_index: 0,
             tentative_me: TentativeSlot::default(),
             tentative_them: TentativeSlot::default(),
             tentative_none: TentativeSlot::default(),
@@ -149,6 +155,8 @@ impl LiveTranscript {
     /// Push a final segment. Clears only the tentative slot of the
     /// finalizing speaker (SOU-061 invariant).
     pub fn push_final(&mut self, seg: &TranscriptionSegment) {
+        let index = self.next_final_index;
+        self.next_final_index += 1;
         // Clear the matching tentative slot.
         match seg.speaker {
             Some(Speaker::Me) => self.tentative_me.clear(),
@@ -160,6 +168,7 @@ impl LiveTranscript {
             return;
         }
         self.finals.push(seg.clone());
+        self.final_indices.push(index);
         self.trim_history();
     }
 
@@ -189,6 +198,8 @@ impl LiveTranscript {
             .iter()
             .map(|s| !consumed.contains(&std::ptr::from_ref(s)))
             .collect();
+        let mut keep_indices = keep.iter();
+        self.final_indices.retain(|_| *keep_indices.next().unwrap());
         let mut keep = keep.into_iter();
         self.finals.retain(|_| keep.next().unwrap_or(false));
     }
@@ -197,16 +208,7 @@ impl LiveTranscript {
     /// A preview can open a new turn; it never mutates finalized text.
     /// The visible window can be recut by a delayed lane or a revision.
     pub fn build_blocks(&self) -> Vec<TranscriptBlock> {
-        let mut segments = self.finals.clone();
-        segments.extend(
-            [
-                &self.tentative_me,
-                &self.tentative_them,
-                &self.tentative_none,
-            ]
-            .into_iter()
-            .filter_map(|slot| slot.segment.clone()),
-        );
+        let segments = self.render_segments();
         let mut blocks = Vec::new();
         for group in group_into_paragraph_segments(&segments, PAUSE_THRESHOLD_SECONDS) {
             let provisional = group
@@ -222,6 +224,50 @@ impl LiveTranscript {
         blocks
     }
 
+    fn render_segments(&self) -> Vec<TranscriptionSegment> {
+        let mut segments = self.finals.clone();
+        segments.extend(
+            [
+                &self.tentative_me,
+                &self.tentative_them,
+                &self.tentative_none,
+            ]
+            .into_iter()
+            .filter_map(|slot| slot.segment.clone()),
+        );
+        segments
+    }
+
+    /// Freeze the finalized part of the selected visible paragraph. Provisional
+    /// words never become edits, even when they share that paragraph.
+    pub fn edit_target(&self, row: usize) -> Option<(Vec<u32>, String)> {
+        let segments = self.render_segments();
+        let groups = group_into_paragraph_segments(&segments, PAUSE_THRESHOLD_SECONDS);
+        let offset = groups.len().saturating_sub(LIVE_PARAGRAPH_WINDOW);
+        let group = groups.get(offset.checked_add(row)?)?;
+        let mut indices = Vec::new();
+        let mut text = Vec::new();
+        for segment in group.iter().filter(|s| s.is_final) {
+            let local = segments.iter().position(|s| std::ptr::eq(s, *segment))?;
+            indices.push(*self.final_indices.get(local)?);
+            text.push(segment.text.as_str());
+        }
+        (!indices.is_empty()).then(|| (indices, text.join(" ")))
+    }
+
+    /// Apply only the committed segment texts. New arrivals, timestamps,
+    /// speaker tags and previews are unaffected by an editor completing.
+    pub fn apply_edit(&mut self, generation: u64, updates: &[(u32, String)]) {
+        if self.generation != generation {
+            return;
+        }
+        for (index, text) in updates {
+            if let Some(local) = self.final_indices.iter().position(|i| i == index) {
+                self.finals[local].text.clone_from(text);
+            }
+        }
+    }
+
     /// True if there is nothing to show (no blocks, no tentative).
     pub fn is_empty(&self) -> bool {
         self.finals.is_empty()
@@ -234,6 +280,8 @@ impl LiveTranscript {
     pub fn clear(&mut self) {
         self.generation = self.generation.wrapping_add(1);
         self.finals.clear();
+        self.final_indices.clear();
+        self.next_final_index = 0;
         self.tentative_me.clear();
         self.tentative_them.clear();
         self.tentative_none.clear();
@@ -248,6 +296,69 @@ impl LiveTranscript {
 pub mod tests {
     use super::*;
     use crate::SpeakerRole;
+
+    #[test]
+    fn edit_snapshot_keeps_emission_indices_after_eviction_sorting_and_previews() {
+        let mut live = LiveTranscript::new();
+        // Empty finals still occupy a slot in the backend accumulator.
+        live.push_final(&seg("", 0.0, 1.0, true, None));
+        for i in 0..40 {
+            live.push_final(&seg(
+                "Older paragraph.",
+                i as f64 * 20.0,
+                i as f64 * 20.0 + 1.0,
+                true,
+                None,
+            ));
+        }
+        live.push_final(&seg(
+            "Later source",
+            805.0,
+            806.0,
+            true,
+            Some(Speaker::Them),
+        ));
+        live.push_final(&seg(
+            "use Kubernetis",
+            800.0,
+            801.0,
+            true,
+            Some(Speaker::Me),
+        ));
+        live.push_tentative(&seg("unfinished", 801.0, 802.0, false, Some(Speaker::Me)));
+        let blocks = live.build_blocks();
+        let row = blocks
+            .iter()
+            .position(|b| b.text.starts_with("use Kubernetis"))
+            .unwrap();
+        let (indices, text) = live.edit_target(row).unwrap();
+        assert_eq!(indices, vec![42]);
+        assert_eq!(text, "use Kubernetis");
+        let generation = live.generation();
+        // Another lane arriving while the editor is open can regroup rows.
+        live.push_final(&seg(
+            "new interruption",
+            802.5,
+            803.0,
+            true,
+            Some(Speaker::Them),
+        ));
+        live.apply_edit(generation, &[(42, "use Kubernetes".into())]);
+        let edited = live
+            .finals
+            .iter()
+            .find(|s| s.text == "use Kubernetes")
+            .unwrap();
+        assert_eq!(
+            (edited.start_time, edited.end_time, edited.speaker),
+            (800.0, 801.0, Some(Speaker::Me))
+        );
+        assert_eq!(live.tentative_me.active_text(), Some("unfinished"));
+        live.clear();
+        live.push_final(&seg("new session", 0.0, 1.0, true, None));
+        live.apply_edit(generation, &[(0, "stale write".into())]);
+        assert_eq!(live.finals[0].text, "new session");
+    }
 
     #[test]
     fn resumed_preview_opens_a_timestamped_turn_after_the_other_speaker() {

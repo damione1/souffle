@@ -1,3 +1,4 @@
+import { AppText, AppTextInput, AppNumericText, Typography, TypographyStyle } from "@typography";
 import { TimelineEntry, TimelineItemRow } from "timeline_item.slint";
 import { EmptyState } from "empty_state.slint";
 import { TimelineKind, TimelineDay, UpcomingPhase, AccessState } from "../types.slint";
@@ -90,11 +91,10 @@ export component TimelineSection inherits VerticalLayout {
         alignment: start;
         spacing: 6px;
 
-        Text {
+        AppText {
             text: @tr("À VENIR AUJOURD'HUI");
-            font-family: "Archivo SemiBold";
-            font-size: 11px;
-            letter-spacing: 1.1px;
+            typography: Typography.timeline-heading;
+
             color: Theme.text-muted;
         }
 
@@ -124,11 +124,11 @@ export component TimelineSection inherits VerticalLayout {
                             y: (parent.height - self.height) / 2;
                         }
 
-                        Text {
+                        AppText {
                             text: event.title;
                             overflow: elide;
                             horizontal-stretch: 1;
-                            font-size: 13.5px;
+                            typography: Typography.field-label;
                             color: Theme.text-primary;
                             vertical-alignment: center;
                         }
@@ -139,13 +139,12 @@ export component TimelineSection inherits VerticalLayout {
                             horizontal-stretch: 0;
                             background: Theme.text-primary;
                             y: (parent.height - self.height) / 2;
-                            now-label := Text {
+                            now-label := AppText {
                                 x: 8px;
                                 height: 100%;
                                 text: @tr("EN COURS");
-                                font-family: "Archivo SemiBold";
-                                font-size: 10.5px;
-                                letter-spacing: 0.6px;
+                                typography: Typography.date-heading;
+
                                 color: Theme.canvas;
                                 vertical-alignment: center;
                             }
@@ -157,13 +156,12 @@ export component TimelineSection inherits VerticalLayout {
                             border-width: 1px;
                             border-color: Theme.rule;
                             y: (parent.height - self.height) / 2;
-                            next-label := Text {
+                            next-label := AppText {
                                 x: 8px;
                                 height: 100%;
                                 text: @tr("SUIVANT");
-                                font-family: "Archivo SemiBold";
-                                font-size: 10.5px;
-                                letter-spacing: 0.6px;
+                                typography: Typography.date-heading;
+
                                 color: Theme.text-muted;
                                 vertical-alignment: center;
                             }
@@ -180,9 +178,9 @@ export component TimelineSection inherits VerticalLayout {
                                 size: 13px;
                                 y: (parent.height - self.height) / 2;
                             }
-                            Text {
+                            AppText {
                                 text: event.participant-count;
-                                font-size: 12px;
+                                typography: Typography.secondary;
                                 color: Theme.text-muted;
                                 vertical-alignment: center;
                             }
@@ -193,13 +191,13 @@ export component TimelineSection inherits VerticalLayout {
                             alignment: end;
                             horizontal-stretch: 0;
 
-                            Text {
+                            AppNumericText {
                                 text: event.time-range;
                                 width: Theme.row-time-width;
                                 horizontal-alignment: right;
-                                font-family: "JetBrains Mono";
-                                font-size: 11.5px;
-                                color: Theme.text-muted;
+                                typography: Typography.small;
+
+                                text-color: Theme.text-muted;
                                 vertical-alignment: center;
                             }
 
@@ -268,24 +266,24 @@ export component TimelineSection inherits VerticalLayout {
                         horizontal-stretch: 1;
                         spacing: 2px;
 
-                        Text {
+                        AppText {
                             text: @tr("Affichez vos réunions du jour ici");
                             overflow: elide;
-                            font-size: 13.5px;
+                            typography: Typography.field-label;
                             color: Theme.text-primary;
                         }
-                        Text {
+                        AppText {
                             text: @tr("Connectez le calendrier macOS pour des rappels et un démarrage en un clic.");
                             overflow: elide;
-                            font-size: 12px;
+                            typography: Typography.secondary;
                             color: Theme.text-muted;
                         }
                     }
 
-                    Text {
+                    AppText {
                         text: @tr("Configurer");
-                        font-family: "Archivo SemiBold";
-                        font-size: 12px;
+                        typography: Typography.secondary-emphasis;
+
                         color: Theme.accent;
                         vertical-alignment: center;
                     }
@@ -310,11 +308,10 @@ export component TimelineSection inherits VerticalLayout {
             alignment: start;
             spacing: 6px;
 
-            Text {
+            AppText {
                 text: root.day-label(group).to-uppercase();
-                font-family: "Archivo SemiBold";
-                font-size: 11px;
-                letter-spacing: 1.1px;
+                typography: Typography.timeline-heading;
+
                 color: Theme.text-muted;
             }
 

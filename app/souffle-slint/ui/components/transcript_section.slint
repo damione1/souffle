@@ -1,3 +1,4 @@
+import { AppText, AppTextInput, AppNumericText, Typography, TypographyStyle } from "@typography";
 import { Theme } from "../theme.slint";
 import { TranscriptWord, TranscriptWordFlow, DictionaryAliasPopover } from "transcript_words.slint";
 export { TranscriptWord }
@@ -21,6 +22,7 @@ export global SpeakerLabels {
 }
 
 export struct TranscriptBlock {
+    can-edit: bool,
     is-session-break: bool,
     // Diarized lane of the paragraph. `has-speaker` false means an
     // undiarized (mono) paragraph: no label at all, `speaker` is then
@@ -125,10 +127,10 @@ export component TranscriptSection inherits VerticalLayout {
         vertical-stretch: 0;
         alignment: space-between;
 
-        Text {
+        AppText {
             text: @tr("Transcription");
-            font-family: "Archivo SemiBold";
-            font-size: 13px;
+            typography: Typography.section;
+
             color: Theme.text-primary;
             vertical-alignment: center;
         }
@@ -182,9 +184,9 @@ export component TranscriptSection inherits VerticalLayout {
                         icon-color: root.just-copied ? Theme.accent : Theme.text-secondary;
                     }
                 }
-                Text {
+                AppText {
                     text: root.just-copied ? @tr("Copié") : @tr("Copier");
-                    font-size: 11.5px;
+                    typography: Typography.small;
                     color: Theme.text-secondary;
                     vertical-alignment: center;
                 }
@@ -192,10 +194,10 @@ export component TranscriptSection inherits VerticalLayout {
         }
     }
 
-    if root.segment-count == 0: Text {
+    if root.segment-count == 0: AppText {
         text: @tr("Aucun texte transcrit pour cette r\u{e9}union.");
         color: Theme.text-muted;
-        font-size: 12px;
+        typography: Typography.secondary;
     }
 
     if root.segment-count > 0: Rectangle {
@@ -239,10 +241,10 @@ export component TranscriptSection inherits VerticalLayout {
                             spacing: 8px;
                             alignment: start;
 
-                            if block.has-speaker: Text {
+                            if block.has-speaker: AppText {
                                 text: SpeakerLabels.of(block.speaker);
-                                font-size: 11px;
-                                font-weight: 600;
+                                typography: Typography.caption-emphasis;
+
                                 color: Theme.accent;
                                 vertical-alignment: center;
                             }
@@ -282,11 +284,11 @@ export component TranscriptSection inherits VerticalLayout {
                                     }
                                 }
 
-                                Text {
+                                AppNumericText {
                                     text: block.timestamp;
-                                    font-family: "monospace";
-                                    font-size: 10.5px;
-                                    color: Theme.text-faint;
+                                    typography: Typography.micro-detail;
+
+                                    text-color: Theme.text-faint;
                                     vertical-alignment: center;
                                 }
                             }
@@ -320,9 +322,9 @@ export component TranscriptSection inherits VerticalLayout {
                             background: Theme.surface-4;
                             vertical-stretch: 1;
                         }
-                        Text {
+                        AppText {
                             text: @tr("Fin de l'enregistrement précédent") + " / " + @tr("Nouvelle session d'enregistrement");
-                            font-size: 10px;
+                            typography: Typography.micro;
                             color: Theme.text-faint;
                         }
                         Rectangle {

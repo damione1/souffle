@@ -1,3 +1,4 @@
+import { AppText, AppTextInput, Typography, TypographyStyle } from "@typography";
 import { Theme } from "../theme.slint";
 import { ThemedButton, ThemedButtonKind } from "themed_button.slint";
 import { ThemedTextArea } from "themed_text_area.slint";
@@ -24,16 +25,16 @@ export component DictationRecovery inherits Rectangle {
         spacing: 8px;
         alignment: start;
 
-        Text {
+        AppText {
             text: @tr("Dictée à récupérer");
             color: Theme.text-primary;
-            font-size: 14px;
-            font-weight: 600;
+            typography: Typography.body-emphasis;
+
         }
-        Text {
+        AppText {
             text: @tr("Le texte reste ici tant que vous ne l’avez pas copié ou supprimé.");
             color: Theme.text-muted;
-            font-size: 12px;
+            typography: Typography.secondary;
             wrap: word-wrap;
         }
         ThemedTextArea {

@@ -18,6 +18,7 @@ fn main() {
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
     {
         build_apple_intelligence_bridge();
+        build_apple_speech_bridge();
         build_pill_panel_bridge();
         // Both bridges link against the Swift runtime, but the rpath belongs
         // to the link line rather than to either of them: emitting it from
@@ -31,6 +32,80 @@ fn main() {
     // to keep half of, so it is gone along with `tauri` itself rather than
     // left permanently broken. It provided Info.plist/icon generation from
     // `tauri.conf.json`; SOU-192 (packaging without Tauri) replaces that.
+}
+
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+fn build_apple_speech_bridge() {
+    use std::{env, path::PathBuf, process::Command};
+    println!("cargo::rustc-check-cfg=cfg(apple_speech_stub)");
+    println!("cargo:rerun-if-env-changed=SOUFFLE_FORCE_SPEECH_STUB");
+    for file in ["swift/apple_speech.swift", "swift/apple_speech_stub.swift"] {
+        println!("cargo:rerun-if-changed={file}");
+    }
+    let sdk = env::var("SDKROOT").unwrap_or_else(|_| {
+        let output = Command::new("xcrun")
+            .args(["--sdk", "macosx", "--show-sdk-path"])
+            .output()
+            .expect("macOS SDK");
+        assert!(output.status.success());
+        String::from_utf8(output.stdout)
+            .expect("SDK path")
+            .trim()
+            .into()
+    });
+    let interface = PathBuf::from(&sdk).join("System/Library/Frameworks/Speech.framework/Modules/Speech.swiftmodule/arm64e-apple-macos.swiftinterface");
+    let real = env::var("SOUFFLE_FORCE_SPEECH_STUB").as_deref() != Ok("1")
+        && std::fs::read_to_string(interface)
+            .is_ok_and(|text| text.contains("class SpeechTranscriber"));
+    let source = if real {
+        "swift/apple_speech.swift"
+    } else {
+        println!("cargo:rustc-cfg=apple_speech_stub");
+        println!(
+            "cargo:warning=Building Apple Speech with stubs (SpeechTranscriber not found in SDK or SOUFFLE_FORCE_SPEECH_STUB=1)."
+        );
+        "swift/apple_speech_stub.swift"
+    };
+    let out = PathBuf::from(env::var_os("OUT_DIR").expect("OUT_DIR"));
+    let object = out.join("apple_speech.o");
+    let library = out.join("libapple_speech.a");
+    let swift = env::var("SWIFTC").unwrap_or_else(|_| "swiftc".into());
+    assert!(
+        Command::new("xcrun")
+            .arg(swift)
+            .args([
+                "-parse-as-library",
+                "-target",
+                "arm64-apple-macosx11.0",
+                "-sdk",
+                &sdk,
+                "-O",
+                "-c",
+                source,
+                "-o"
+            ])
+            .arg(&object)
+            .status()
+            .expect("Speech swiftc")
+            .success(),
+        "Speech bridge compilation failed"
+    );
+    assert!(
+        Command::new("libtool")
+            .args(["-static", "-o"])
+            .arg(&library)
+            .arg(&object)
+            .status()
+            .expect("Speech libtool")
+            .success()
+    );
+    println!("cargo:rustc-link-search=native={}", out.display());
+    println!("cargo:rustc-link-lib=static=apple_speech");
+    if real {
+        println!("cargo:rustc-link-arg=-Wl,-weak_framework,Speech");
+        println!("cargo:rustc-link-lib=framework=AVFAudio");
+        println!("cargo:rustc-link-lib=framework=CoreMedia");
+    }
 }
 
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
@@ -177,9 +252,23 @@ fn build_pill_panel_bridge() {
     println!("cargo:rerun-if-changed={SWIFT_FILE}");
     println!("cargo:rerun-if-changed={BRIDGE_HEADER}");
 
+    souffle_typography::validate_swift(std::path::Path::new(SWIFT_FILE))
+        .expect("HUD Typography contract failed");
+
     let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR not set"));
     let object_path = out_dir.join("pill_panel.o");
     let static_lib_path = out_dir.join("libpill_panel.a");
+    let assets = souffle_typography::asset_dir();
+    souffle_typography::validate_assets(&assets).expect("Inter font validation failed");
+    println!("cargo:rerun-if-changed={}", assets.display());
+    // Compile the generated projection and the panel in the same module.
+    let merged = out_dir.join("pill_panel.swift");
+    let source = format!(
+        "{}\n{}",
+        souffle_typography::swift_projection(),
+        std::fs::read_to_string(SWIFT_FILE).expect("pill panel source")
+    );
+    std::fs::write(&merged, source).expect("merged pill panel source");
 
     let sdk_path = env::var("SDKROOT").unwrap_or_else(|_| {
         String::from_utf8(
@@ -225,7 +314,7 @@ fn build_pill_panel_bridge() {
             "-import-objc-header",
             BRIDGE_HEADER,
             "-c",
-            SWIFT_FILE,
+            merged.to_str().expect("merged panel path"),
             "-o",
             object_path.to_str().expect("object path"),
         ])

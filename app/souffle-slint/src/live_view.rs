@@ -112,6 +112,7 @@ pub fn push_live_blocks(window: &MainWindow, live_state: &LiveTranscriptState) {
 /// are clickable.
 fn same_rendering(a: &TranscriptBlock, b: &TranscriptBlock) -> bool {
     a.text == b.text
+        && a.can_edit == b.can_edit
         && a.has_speaker == b.has_speaker
         && a.speaker == b.speaker
         && a.timestamp == b.timestamp
@@ -168,6 +169,7 @@ mod tests {
     fn meeting_window() -> MainWindow {
         let _ = slint::platform::set_platform(Box::new(TestPlatform));
         let window = MainWindow::new().unwrap();
+        crate::typography::initialize(&window).unwrap();
         window
             .window()
             .set_size(slint::PhysicalSize::new(WIDTH, HEIGHT));
@@ -970,5 +972,28 @@ mod tests {
 
         sync_blocks(&model, Vec::new());
         assert_eq!(model.row_count(), 0);
+    }
+    #[test]
+    fn inter_counter_rollover_preserves_digit_cell_geometry_and_full_ax_label() {
+        let window = meeting_window();
+        window.set_live_elapsed_offset_seconds(9);
+        settle();
+        let counter = element(&window, "RecordingView::elapsed-counter");
+        let before_size = counter.size();
+        text_element(&window, "0:09");
+        let before: Vec<_> =
+            ElementHandle::find_by_element_id(&window, "AppNumericText::numeric-glyph")
+                .map(|glyph| (glyph.absolute_position(), glyph.size()))
+                .collect();
+        assert_eq!(before.len(), 4, "the real counter must draw four glyphs");
+        window.set_live_elapsed_offset_seconds(10);
+        settle();
+        text_element(&window, "0:10");
+        let after: Vec<_> =
+            ElementHandle::find_by_element_id(&window, "AppNumericText::numeric-glyph")
+                .map(|glyph| (glyph.absolute_position(), glyph.size()))
+                .collect();
+        assert_eq!(counter.size(), before_size);
+        assert_eq!(before, after, "rollover must not move any glyph slot");
     }
 }
