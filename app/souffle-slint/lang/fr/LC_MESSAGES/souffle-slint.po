@@ -53,6 +53,110 @@ msgstr ""
 "POT-Creation-Date: 2026-09-22 21:45+0000\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 
+msgctxt "AppBranchesSection"
+msgid "RETOUCHE PAR APPLICATION"
+msgstr "RETOUCHE PAR APPLICATION"
+
+msgctxt "AppBranchesSection"
+msgid "Passez à l'application à tester. Capture dans {} secondes."
+msgstr "Passez à l'application à tester. Capture dans {} secondes."
+
+msgctxt "AppBranchesSection"
+msgid "Recherche de la règle pour l'application capturée…"
+msgstr "Recherche de la règle pour l'application capturée…"
+
+msgctxt "AppBranchesSection"
+msgid "La première règle active valide gagne. Le nom de l'application contient le motif, sans tenir compte de la casse. Par défaut suit le modèle global ; les instructions sont partagées."
+msgstr "La première règle active valide gagne. Le nom de l'application contient le motif, sans tenir compte de la casse. Par défaut suit le modèle global ; les instructions sont partagées."
+
+msgctxt "AppBranchesSection"
+msgid "Nom d'application"
+msgstr "Nom d'application"
+
+msgctxt "AppBranchesSection"
+msgid "Nouvelle règle d'application"
+msgstr "Nouvelle règle d'application"
+
+msgctxt "AppBranchesSection"
+msgid "Modèle de la nouvelle règle"
+msgstr "Modèle de la nouvelle règle"
+
+msgctxt "AppBranchesSection"
+msgid "Ajouter"
+msgstr "Ajouter"
+
+msgctxt "AppBranchesSection"
+msgid "Activer la règle {}"
+msgstr "Activer la règle {}"
+
+msgctxt "AppBranchesSection"
+msgid "Motif de la règle"
+msgstr "Motif de la règle"
+
+msgctxt "AppBranchesSection"
+msgid "Modèle partagé de la règle"
+msgstr "Modèle partagé de la règle"
+
+msgctxt "AppBranchesSection"
+msgid "Monter"
+msgstr "Monter"
+
+msgctxt "AppBranchesSection"
+msgid "Descendre"
+msgstr "Descendre"
+
+msgctxt "AppBranchesSection"
+msgid "Supprimer"
+msgstr "Supprimer"
+
+msgctxt "AppBranchesSection"
+msgid "Tester l'application actuelle"
+msgstr "Tester l'application actuelle"
+
+msgctxt "AppBranchesSection"
+msgid "Application actuelle : {}"
+msgstr "Application actuelle : {}"
+
+msgctxt "AppBranchesSection"
+msgid "Règle gagnante : {}"
+msgstr "Règle gagnante : {}"
+
+msgctxt "AppBranchesSection"
+msgid "Retouche désactivée : les règles sont sans effet."
+msgstr "Retouche désactivée : les règles sont sans effet."
+
+msgctxt "AppBranchesSection"
+msgid "Application inconnue : modèle global."
+msgstr "Application inconnue : modèle global."
+
+msgctxt "AppBranchesSection"
+msgid "Aucune règle active correspondante : modèle global."
+msgstr "Aucune règle active correspondante : modèle global."
+
+msgctxt "AppBranchesSection"
+msgid "Motif vide ignoré : modèle global."
+msgstr "Motif vide ignoré : modèle global."
+
+msgctxt "AppBranchesSection"
+msgid "Modèle de règle introuvable : modèle global."
+msgstr "Modèle de règle introuvable : modèle global."
+
+msgctxt "AppBranchesSection"
+msgid "Modèle résolu"
+msgstr "Modèle résolu"
+
+msgctxt "ThemedComboBox"
+msgid "Chat"
+msgstr "Chat"
+
+msgctxt "ThemedComboBox"
+msgid "Code"
+msgstr "Code"
+
+msgctxt "ThemedComboBox"
+msgid "Modèle introuvable"
+msgstr "Modèle introuvable"
+
 #: app/souffle-slint/ui/meeting_detail.slint:90
 msgctxt "MeetingDetail"
 msgid "Retour à l'historique"

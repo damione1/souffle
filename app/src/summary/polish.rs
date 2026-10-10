@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use unicode_normalization::{UnicodeNormalization, char::is_combining_mark};
 
 use crate::filter::{DictionaryEntry, pronunciation_aliases};
-use crate::settings::{AppSettings, DictationPolishTemplate};
+use crate::settings::{AppBranchRule, AppBranchTarget, AppSettings, DictationPolishTemplate};
 
 use super::{
     SummarizeProgress, SummaryProviderKind, choose_summary_model, extract::extract_json_payload,
@@ -15,6 +15,19 @@ pub const TEMPLATE_CLEAN: &str = "clean";
 pub const TEMPLATE_EMAIL: &str = "email";
 pub const TEMPLATE_BULLETS: &str = "bullets";
 pub const TEMPLATE_NO_FILLERS: &str = "no_fillers";
+pub const TEMPLATE_CHAT: &str = "chat";
+pub const TEMPLATE_CODE: &str = "code";
+
+/// Time to bring the intended app forward after pressing Tester in Settings.
+pub const APP_BRANCH_TEST_DELAY: std::time::Duration = std::time::Duration::from_secs(3);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AppBranchTestPhase {
+    Idle,
+    Waiting,
+    Resolving,
+    Result,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DictationPolishResult {
@@ -71,6 +84,23 @@ pub fn default_polish_templates() -> Vec<DictationPolishTemplate> {
                       the original language."
                 .to_string(),
         },
+        DictationPolishTemplate {
+            id: TEMPLATE_CHAT.to_string(),
+            label: "Chat".to_string(),
+            prompt: "Clean the dictation as a short, natural chat message. Fix grammar and \
+                     punctuation, keep a conversational tone, and preserve all facts and the \
+                     original language. Do not add greetings, explanations, or new content."
+                .to_string(),
+        },
+        DictationPolishTemplate {
+            id: TEMPLATE_CODE.to_string(),
+            label: "Code".to_string(),
+            prompt: "Clean this dictation for a code editor. Preserve identifiers, code, \
+                     file paths, commands, and technical terms exactly. Fix only surrounding \
+                     prose and punctuation. Preserve the meaning and original language. \
+                     Do not invent code or add explanations."
+                .to_string(),
+        },
     ]
 }
 
@@ -107,6 +137,13 @@ fn superseded_default_prompts(id: &str) -> &'static [&'static str] {
 pub fn merge_polish_templates(
     stored: Vec<DictationPolishTemplate>,
 ) -> Vec<DictationPolishTemplate> {
+    let stored: Vec<_> = stored
+        .into_iter()
+        .filter_map(|mut template| {
+            template.id = template.id.trim().to_string();
+            (!template.id.is_empty()).then_some(template)
+        })
+        .collect();
     let defaults = default_polish_templates();
     if stored.is_empty() {
         return defaults;
@@ -123,6 +160,15 @@ pub fn merge_polish_templates(
             _ => merged.push(default),
         }
     }
+    // Template ids are an open catalogue. Preserve stored custom entries in
+    // their order, with the first occurrence owning a shared id, just as for
+    // the built-ins above. New presets must not discard a branch's prompt.
+    let mut ids: HashSet<_> = merged.iter().map(|template| template.id.clone()).collect();
+    for template in stored {
+        if ids.insert(template.id.clone()) {
+            merged.push(template);
+        }
+    }
     merged
 }
 
@@ -132,6 +178,83 @@ pub fn resolve_active_template(settings: &AppSettings) -> Option<&DictationPolis
         .iter()
         .find(|template| template.id == settings.dictation_polish_template_id)
         .or_else(|| settings.dictation_polish_templates.first())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AppBranchFallback {
+    PolishDisabled,
+    AppUnavailable,
+    NoMatch,
+    InvalidPattern,
+    MissingTemplate,
+}
+
+#[derive(Debug)]
+pub enum AppBranchResolution<'a> {
+    Rule {
+        rule: &'a AppBranchRule,
+        template: &'a DictationPolishTemplate,
+    },
+    Global {
+        reason: AppBranchFallback,
+        template: Option<&'a DictationPolishTemplate>,
+    },
+}
+
+impl<'a> AppBranchResolution<'a> {
+    pub fn template(&self) -> Option<&'a DictationPolishTemplate> {
+        match self {
+            Self::Rule { template, .. } => Some(template),
+            Self::Global { template, .. } => *template,
+        }
+    }
+}
+
+/// Shared by settings preview and the finalization pipeline. Invalid rules
+/// cannot hide a later valid match; no valid winner always preserves global.
+pub fn resolve_app_branch<'a>(
+    settings: &'a AppSettings,
+    focused_app: Option<&str>,
+) -> AppBranchResolution<'a> {
+    let global = resolve_active_template(settings);
+    let fallback = |reason| AppBranchResolution::Global {
+        reason,
+        template: global,
+    };
+    if !settings.dictation_polish_enabled {
+        return fallback(AppBranchFallback::PolishDisabled);
+    }
+    let Some(app) = focused_app.map(str::trim).filter(|app| !app.is_empty()) else {
+        return fallback(AppBranchFallback::AppUnavailable);
+    };
+    let app = app.to_lowercase();
+    let mut reason = AppBranchFallback::NoMatch;
+    for rule in settings
+        .dictation_app_branches
+        .iter()
+        .filter(|rule| rule.enabled)
+    {
+        let pattern = rule.app_pattern.trim();
+        if pattern.is_empty() {
+            reason = AppBranchFallback::InvalidPattern;
+            continue;
+        }
+        if !app.contains(&pattern.to_lowercase()) {
+            continue;
+        }
+        let template = match &rule.target {
+            AppBranchTarget::Global => global,
+            AppBranchTarget::Template(id) => settings
+                .dictation_polish_templates
+                .iter()
+                .find(|template| template.id == id.0),
+        };
+        if let Some(template) = template {
+            return AppBranchResolution::Rule { rule, template };
+        }
+        reason = AppBranchFallback::MissingTemplate;
+    }
+    fallback(reason)
 }
 
 /// Returns immediately when polish is disabled or the stripped input is blank.
@@ -902,7 +1025,16 @@ pub async fn polish_dictation_text(
         return result;
     }
 
-    let Some(template) = resolve_active_template(settings) else {
+    let resolution = resolve_app_branch(settings, focused_app);
+    match &resolution {
+        AppBranchResolution::Rule { rule, template } => {
+            tracing::debug!(rule_id = %rule.id.0, template_id = %template.id, "App branch selected");
+        }
+        AppBranchResolution::Global { reason, .. } => {
+            tracing::debug!(?reason, "App branch uses global polish template");
+        }
+    }
+    let Some(template) = resolution.template() else {
         return DictationPolishResult {
             text: stripped.trim().to_string(),
             skipped: true,
@@ -1028,6 +1160,307 @@ mod tests {
     use crate::filter::DictionaryEntry;
     use crate::settings::{AppSettings, DictationPolishTemplate};
 
+    #[test]
+    fn app_branch_shared_chat_and_code_presets_are_available() {
+        let templates = default_polish_templates();
+        assert!(templates.iter().any(|template| template.id == "chat"));
+        assert!(templates.iter().any(|template| template.id == "code"));
+    }
+
+    fn branch(pattern: &str, template: &str, enabled: bool) -> crate::settings::AppBranchRule {
+        let mut rule = crate::settings::AppBranchRule::new(
+            pattern.into(),
+            crate::settings::AppBranchTarget::Template(crate::settings::PolishTemplateId(
+                template.into(),
+            )),
+        );
+        rule.enabled = enabled;
+        rule
+    }
+
+    #[test]
+    fn app_branch_first_active_valid_substring_wins_and_reorder_changes_winner() {
+        let mut settings = AppSettings {
+            dictation_app_branches: vec![
+                branch("mail", "chat", false),
+                branch("MAIL", "email", true),
+                branch("Apple", "code", true),
+            ],
+            ..AppSettings::default()
+        };
+        assert_eq!(
+            super::resolve_app_branch(&settings, Some("Apple Mail"))
+                .template()
+                .unwrap()
+                .id,
+            "email"
+        );
+        settings.dictation_app_branches.swap(1, 2);
+        assert_eq!(
+            super::resolve_app_branch(&settings, Some("Apple Mail"))
+                .template()
+                .unwrap()
+                .id,
+            "code"
+        );
+        settings.dictation_app_branches[1].enabled = false;
+        assert_eq!(
+            super::resolve_app_branch(&settings, Some("Apple Mail"))
+                .template()
+                .unwrap()
+                .id,
+            "email"
+        );
+    }
+
+    #[test]
+    fn app_branch_invalid_rules_cannot_mask_valid_match_and_fallback_is_global() {
+        let mut settings = AppSettings {
+            dictation_polish_template_id: "bullets".into(),
+            dictation_app_branches: vec![
+                branch("", "chat", true),
+                branch("Mail", "deleted", true),
+                branch("mail", "email", true),
+            ],
+            ..AppSettings::default()
+        };
+        assert_eq!(
+            super::resolve_app_branch(&settings, Some("MAIL"))
+                .template()
+                .unwrap()
+                .id,
+            "email"
+        );
+        settings.dictation_app_branches.pop();
+        for app in [None, Some(""), Some("Finder"), Some("Mail")] {
+            assert_eq!(
+                super::resolve_app_branch(&settings, app)
+                    .template()
+                    .unwrap()
+                    .id,
+                "bullets"
+            );
+        }
+        assert!(matches!(
+            super::resolve_app_branch(&settings, Some("Mail")),
+            super::AppBranchResolution::Global {
+                reason: super::AppBranchFallback::MissingTemplate,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn app_branch_global_target_follows_global_and_shared_edits_reach_all_branches() {
+        let mut settings = AppSettings::default();
+        let mut global = branch("Mail", "email", true);
+        global.target = crate::settings::AppBranchTarget::Global;
+        settings.dictation_app_branches = vec![
+            global,
+            branch("Slack", "chat", true),
+            branch("Messages", "chat", true),
+        ];
+        settings.dictation_polish_template_id = "code".into();
+        assert_eq!(
+            super::resolve_app_branch(&settings, Some("Mail"))
+                .template()
+                .unwrap()
+                .id,
+            "code"
+        );
+        settings
+            .dictation_polish_templates
+            .iter_mut()
+            .find(|template| template.id == "chat")
+            .unwrap()
+            .prompt = "New shared instruction".into();
+        for app in ["Slack", "Messages"] {
+            assert_eq!(
+                super::resolve_app_branch(&settings, Some(app))
+                    .template()
+                    .unwrap()
+                    .prompt,
+                "New shared instruction"
+            );
+        }
+    }
+
+    #[test]
+    fn app_branch_polish_off_has_no_effect_and_stop_snapshot_remains_authoritative() {
+        let mut settings = AppSettings {
+            dictation_app_branches: vec![
+                branch("Mail", "email", true),
+                branch("Code", "code", true),
+            ],
+            ..AppSettings::default()
+        };
+        let mut frontmost = "Mail".to_owned();
+        let captured_at_stop = frontmost.clone();
+        frontmost = "Code".into();
+        assert_eq!(
+            super::resolve_app_branch(&settings, Some(&captured_at_stop))
+                .template()
+                .unwrap()
+                .id,
+            "email"
+        );
+        assert_eq!(
+            super::resolve_app_branch(&settings, Some(&frontmost))
+                .template()
+                .unwrap()
+                .id,
+            "code"
+        );
+        settings.dictation_polish_enabled = false;
+        assert!(matches!(
+            super::resolve_app_branch(&settings, Some(&captured_at_stop)),
+            super::AppBranchResolution::Global {
+                reason: super::AppBranchFallback::PolishDisabled,
+                ..
+            }
+        ));
+        assert_eq!(
+            early_polish_dictation_result(&settings, "Raw dictation")
+                .unwrap()
+                .text,
+            "Raw dictation"
+        );
+    }
+
+    #[tokio::test]
+    async fn app_branch_pipeline_sends_stop_app_shared_prompt_and_global_fallback() {
+        use std::io::{Read, Write};
+        use std::time::{Duration, Instant};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let (prompt_tx, prompt_rx) = std::sync::mpsc::channel();
+        let server = std::thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(10);
+            let mut generations = 0;
+            while generations < 3 {
+                let (mut stream, _) = match listener.accept() {
+                    Ok(connection) => connection,
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        assert!(Instant::now() < deadline, "polish request timed out");
+                        std::thread::sleep(Duration::from_millis(2));
+                        continue;
+                    }
+                    Err(error) => panic!("accept: {error}"),
+                };
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(3)))
+                    .unwrap();
+                let mut request = Vec::new();
+                let (header_end, length) = loop {
+                    let mut buffer = [0; 4096];
+                    let count = stream.read(&mut buffer).unwrap();
+                    assert!(count > 0, "request closed before headers");
+                    request.extend_from_slice(&buffer[..count]);
+                    if let Some(end) = request.windows(4).position(|part| part == b"\r\n\r\n") {
+                        let headers = String::from_utf8_lossy(&request[..end]);
+                        let length = headers
+                            .lines()
+                            .find_map(|line| {
+                                let (key, value) = line.split_once(':')?;
+                                key.eq_ignore_ascii_case("content-length")
+                                    .then(|| value.trim().parse::<usize>().unwrap())
+                            })
+                            .unwrap();
+                        break (end + 4, length);
+                    }
+                };
+                while request.len() < header_end + length {
+                    let mut buffer = [0; 4096];
+                    let count = stream.read(&mut buffer).unwrap();
+                    assert!(count > 0, "request closed before body");
+                    request.extend_from_slice(&buffer[..count]);
+                }
+                let body = if request.starts_with(b"POST /api/show ") {
+                    r#"{"model_info":{"qwen2.context_length":32768}}"#.to_string()
+                } else {
+                    assert!(request.starts_with(b"POST /api/generate "));
+                    let request: serde_json::Value =
+                        serde_json::from_slice(&request[header_end..header_end + length]).unwrap();
+                    prompt_tx
+                        .send(request["prompt"].as_str().unwrap().to_string())
+                        .unwrap();
+                    generations += 1;
+                    format!(
+                        "{}\n",
+                        serde_json::json!({"response": "{\"text\":\"Dictated text.\"}", "done": true})
+                    )
+                };
+                write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+            }
+        });
+        let mut settings = AppSettings {
+            ollama_url: url,
+            dictation_polish_template_id: "bullets".into(),
+            dictation_app_branches: vec![
+                branch("Mail", "chat", true),
+                branch("Messages", "chat", true),
+            ],
+            ..AppSettings::default()
+        };
+        let models = vec![super::super::SummaryModelDescriptor {
+            id: "qwen2.5:7b".into(),
+            label: "Fixture".into(),
+            provider: super::super::SummaryProviderKind::Ollama,
+            can_summarize: true,
+        }];
+        settings
+            .dictation_polish_templates
+            .iter_mut()
+            .find(|template| template.id == "chat")
+            .unwrap()
+            .prompt = "Shared v1 instruction".into();
+        let captured_at_stop = "Mail".to_owned();
+        let frontmost_during_finalize = "Visual Studio Code";
+        assert_ne!(captured_at_stop, frontmost_during_finalize);
+        let result = super::polish_dictation_text(
+            &settings,
+            "Dictated text.",
+            &models,
+            &[],
+            Some(&captured_at_stop),
+        )
+        .await;
+        assert_eq!(result.warning, None);
+        assert!(prompt_rx.recv().unwrap().contains("Shared v1 instruction"));
+        settings
+            .dictation_polish_templates
+            .iter_mut()
+            .find(|template| template.id == "chat")
+            .unwrap()
+            .prompt = "Shared v2 instruction".into();
+        let result = super::polish_dictation_text(
+            &settings,
+            "Dictated text.",
+            &models,
+            &[],
+            Some("Messages"),
+        )
+        .await;
+        assert_eq!(result.warning, None);
+        assert!(prompt_rx.recv().unwrap().contains("Shared v2 instruction"));
+        settings.dictation_app_branches[0].target = crate::settings::AppBranchTarget::Template(
+            crate::settings::PolishTemplateId("deleted".into()),
+        );
+        let result =
+            super::polish_dictation_text(&settings, "Dictated text.", &models, &[], Some("Mail"))
+                .await;
+        assert_eq!(result.warning, None);
+        assert!(prompt_rx.recv().unwrap().contains("concise bullet list"));
+        server.join().unwrap();
+        settings.dictation_polish_enabled = false;
+        let result =
+            super::polish_dictation_text(&settings, "Dictated text.", &models, &[], Some("Mail"))
+                .await;
+        assert!(result.skipped);
+        assert_eq!(result.text, "Dictated text.");
+    }
+
     fn dict_entry(term: &str, pronunciation: Option<&str>) -> DictionaryEntry {
         DictionaryEntry {
             id: 0,
@@ -1125,7 +1558,9 @@ mod tests {
                 TEMPLATE_CLEAN,
                 TEMPLATE_EMAIL,
                 TEMPLATE_BULLETS,
-                TEMPLATE_NO_FILLERS
+                TEMPLATE_NO_FILLERS,
+                super::TEMPLATE_CHAT,
+                super::TEMPLATE_CODE
             ]
         );
     }
@@ -1178,7 +1613,7 @@ mod tests {
             prompt: "My email prompt".to_string(),
         }];
         let merged = merge_polish_templates(stored);
-        assert_eq!(merged.len(), 4);
+        assert_eq!(merged.len(), 6);
         assert_eq!(merged[0].id, TEMPLATE_CLEAN);
         assert_eq!(merged[1].prompt, "My email prompt");
         assert_eq!(merged[2].id, TEMPLATE_BULLETS);
@@ -1211,7 +1646,9 @@ mod tests {
                 TEMPLATE_CLEAN,
                 TEMPLATE_EMAIL,
                 TEMPLATE_BULLETS,
-                TEMPLATE_NO_FILLERS
+                TEMPLATE_NO_FILLERS,
+                super::TEMPLATE_CHAT,
+                super::TEMPLATE_CODE
             ]
         );
         assert_eq!(merged[1].prompt, "Edited email");

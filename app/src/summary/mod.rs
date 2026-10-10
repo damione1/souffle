@@ -26,9 +26,10 @@ pub use language::{
 };
 pub use ollama::{OllamaPullProgress, RECOMMENDED_MODEL as RECOMMENDED_OLLAMA_MODEL, pull_model};
 pub use polish::{
-    DictationPolishResult, TEMPLATE_BULLETS, TEMPLATE_CLEAN, TEMPLATE_EMAIL, TEMPLATE_NO_FILLERS,
-    default_polish_templates, early_polish_dictation_result, merge_polish_templates,
-    polish_dictation_text,
+    APP_BRANCH_TEST_DELAY, AppBranchFallback, AppBranchResolution, AppBranchTestPhase,
+    DictationPolishResult, TEMPLATE_BULLETS, TEMPLATE_CHAT, TEMPLATE_CLEAN, TEMPLATE_CODE,
+    TEMPLATE_EMAIL, TEMPLATE_NO_FILLERS, default_polish_templates, early_polish_dictation_result,
+    merge_polish_templates, polish_dictation_text, resolve_app_branch,
 };
 pub use prompts::{
     build_reduce_prompt, build_structured_extract_prompt, build_summarize_prompt,

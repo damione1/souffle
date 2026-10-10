@@ -93,6 +93,9 @@ export component ThemedComboBox inherits Rectangle {
             : root.current-value == "__PROFESSIONAL_EMAIL__" ? @tr("E-mail professionnel")
             : root.current-value == "__BULLETS__" ? @tr("Puces")
             : root.current-value == "__NO_FILLERS__" ? @tr("Sans fillers")
+            : root.current-value == "__CHAT__" ? @tr("Chat")
+            : root.current-value == "__CODE__" ? @tr("Code")
+            : root.current-value == "__MISSING_TEMPLATE__" ? @tr("Modèle introuvable")
             : root.current-value;
         typography: Typography.body;
         color: Theme.text-secondary;
@@ -251,6 +254,9 @@ export component ThemedComboBox inherits Rectangle {
                                 : item == "__PROFESSIONAL_EMAIL__" ? @tr("E-mail professionnel")
                                 : item == "__BULLETS__" ? @tr("Puces")
                                 : item == "__NO_FILLERS__" ? @tr("Sans fillers")
+                                : item == "__CHAT__" ? @tr("Chat")
+                                : item == "__CODE__" ? @tr("Code")
+                                : item == "__MISSING_TEMPLATE__" ? @tr("Modèle introuvable")
                                 : item;
                             typography: Typography.content;
                             color: item == root.current-value ? Theme.text-primary : Theme.text-secondary;

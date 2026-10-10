@@ -59,6 +59,7 @@ const SHORTCUT_PUSH_TO_TALK_KEY: &str = "shortcut_push_to_talk";
 const DICTATION_POLISH_ENABLED_KEY: &str = "dictation_polish_enabled";
 const DICTATION_POLISH_TEMPLATE_ID_KEY: &str = "dictation_polish_template_id";
 const DICTATION_POLISH_TEMPLATES_KEY: &str = "dictation_polish_templates";
+const DICTATION_APP_BRANCHES_KEY: &str = "dictation_app_branches";
 const DEFAULT_SUMMARY_TEMPLATE_ID_KEY: &str = "default_summary_template_id";
 const SUMMARY_TEMPLATES_KEY: &str = "summary_templates";
 const LOG_LEVEL_KEY: &str = "log_level";
@@ -111,6 +112,64 @@ pub struct DictationPolishTemplate {
     pub id: String,
     pub label: String,
     pub prompt: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(transparent)]
+pub struct AppBranchId(pub String);
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(transparent)]
+pub struct PolishTemplateId(pub String);
+
+/// Global follows the current global selection, including later changes.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", content = "template_id", rename_all = "snake_case")]
+pub enum AppBranchTarget {
+    Global,
+    Template(PolishTemplateId),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AppBranchRule {
+    pub id: AppBranchId,
+    pub app_pattern: String,
+    pub enabled: bool,
+    pub target: AppBranchTarget,
+}
+
+impl AppBranchRule {
+    pub fn new(app_pattern: String, target: AppBranchTarget) -> Self {
+        Self {
+            id: AppBranchId(uuid::Uuid::new_v4().to_string()),
+            app_pattern: app_pattern.trim().to_string(),
+            enabled: false,
+            target,
+        }
+    }
+}
+
+/// Offered only when the setting does not yet exist. An explicitly empty
+/// stored list means the user deleted the suggestions and stays empty.
+pub fn default_app_branches() -> Vec<AppBranchRule> {
+    [
+        ("seed-slack", "Slack", crate::summary::TEMPLATE_CHAT),
+        ("seed-mail", "Mail", crate::summary::TEMPLATE_EMAIL),
+        (
+            "seed-code",
+            "Visual Studio Code",
+            crate::summary::TEMPLATE_CODE,
+        ),
+        ("seed-xcode", "Xcode", crate::summary::TEMPLATE_CODE),
+    ]
+    .into_iter()
+    .map(|(id, pattern, template)| AppBranchRule {
+        id: AppBranchId(id.into()),
+        app_pattern: pattern.into(),
+        enabled: false,
+        target: AppBranchTarget::Template(PolishTemplateId(template.into())),
+    })
+    .collect()
 }
 
 /// A meeting-summary template: `prompt` replaces the final-pass system
@@ -256,6 +315,9 @@ pub struct AppSettings {
     pub dictation_polish_templates: Vec<DictationPolishTemplate>,
     /// How recognition corrections enter the persistent dictionary.
     pub dictionary_learning_mode: DictionaryLearningMode,
+    /// Ordered app rules. Their position is their persisted priority.
+    #[serde(default = "default_app_branches")]
+    pub dictation_app_branches: Vec<AppBranchRule>,
     /// Hard failsafe: stop dictation after this many seconds.
     pub dictation_ceiling_seconds: u32,
     /// Active default meeting-summary template id: used by the Generate
@@ -377,6 +439,7 @@ impl Default for AppSettings {
             dictation_polish_template_id: crate::summary::TEMPLATE_CLEAN.to_string(),
             dictation_polish_templates: crate::summary::default_polish_templates(),
             dictionary_learning_mode: DictionaryLearningMode::Automatic,
+            dictation_app_branches: default_app_branches(),
             dictation_ceiling_seconds: 300,
             default_summary_template_id: crate::summary::TEMPLATE_SUMMARY_DEFAULT.to_string(),
             summary_templates: crate::summary::default_summary_templates(),
@@ -601,6 +664,11 @@ impl AppSettings {
                     Some(true) | None => DictionaryLearningMode::Automatic,
                 },
             };
+        if let Some(rules) =
+            read_json_setting::<Vec<AppBranchRule>>(db, DICTATION_APP_BRANCHES_KEY)?
+        {
+            settings.dictation_app_branches = rules;
+        }
         if let Some(dictation_ceiling_seconds) =
             read_json_setting::<u32>(db, DICTATION_CEILING_SECONDS_KEY)?
         {
@@ -826,6 +894,18 @@ impl AppSettings {
             template.label = template.label.trim().to_string();
             template.prompt = template.prompt.trim().to_string();
         }
+        let mut branch_ids = std::collections::HashSet::new();
+        normalized.dictation_app_branches.retain_mut(|rule| {
+            rule.app_pattern = rule.app_pattern.trim().to_string();
+            if rule.app_pattern.is_empty() {
+                return false;
+            }
+            if rule.id.0.trim().is_empty() || !branch_ids.insert(rule.id.0.clone()) {
+                rule.id = AppBranchId(uuid::Uuid::new_v4().to_string());
+                branch_ids.insert(rule.id.0.clone());
+            }
+            true
+        });
 
         normalized.default_summary_template_id =
             normalized.default_summary_template_id.trim().to_string();
@@ -1100,6 +1180,11 @@ impl AppSettings {
                 transaction,
                 DICTIONARY_LEARNING_MODE_KEY,
                 &normalized.dictionary_learning_mode,
+            )?;
+            write_json_setting_in_transaction(
+                transaction,
+                DICTATION_APP_BRANCHES_KEY,
+                &normalized.dictation_app_branches,
             )?;
             write_json_setting_in_transaction(
                 transaction,
@@ -1509,6 +1594,7 @@ mod tests {
             dictation_polish_template_id: "email".into(),
             dictation_polish_templates: crate::summary::default_polish_templates(),
             dictionary_learning_mode: DictionaryLearningMode::Automatic,
+            dictation_app_branches: super::default_app_branches(),
             dictation_ceiling_seconds: 120,
             default_summary_template_id: crate::summary::TEMPLATE_SUMMARY_BRIEF.into(),
             summary_templates: crate::summary::default_summary_templates(),
@@ -2013,7 +2099,7 @@ mod tests {
 
         assert!(loaded.dictation_polish_enabled);
         assert_eq!(loaded.dictation_polish_template_id, "bullets");
-        assert_eq!(loaded.dictation_polish_templates.len(), 4);
+        assert_eq!(loaded.dictation_polish_templates.len(), 6);
         assert_eq!(
             loaded
                 .dictation_polish_templates
@@ -2022,6 +2108,170 @@ mod tests {
                 .map(|template| template.prompt.as_str()),
             Some("Custom email prompt")
         );
+    }
+
+    #[test]
+    fn app_branches_round_trip_preserves_identity_order_activation_and_targets() {
+        use super::{AppBranchRule, AppBranchTarget, PolishTemplateId};
+        let (db, _dir) = test_db();
+        let mut settings = AppSettings::default();
+        let mut first = AppBranchRule::new("MAIL".into(), AppBranchTarget::Global);
+        first.enabled = true;
+        let second = AppBranchRule::new(
+            "Slack".into(),
+            AppBranchTarget::Template(PolishTemplateId("chat".into())),
+        );
+        settings.dictation_app_branches = vec![second, first];
+        settings.save(&db).unwrap();
+        let loaded = AppSettings::load(&db).unwrap();
+        assert_eq!(
+            loaded.dictation_app_branches,
+            settings.dictation_app_branches
+        );
+        settings.dictation_app_branches.clear();
+        settings.save(&db).unwrap();
+        assert!(
+            AppSettings::load(&db)
+                .unwrap()
+                .dictation_app_branches
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn app_branch_custom_shared_template_survives_restart_and_duplicate_ids() {
+        use super::{AppBranchRule, AppBranchTarget, DictationPolishTemplate, PolishTemplateId};
+        let (db, _dir) = test_db();
+        let mut settings = AppSettings {
+            dictation_polish_template_id: "custom-note".into(),
+            ..AppSettings::default()
+        };
+        let builtin_count = settings.dictation_polish_templates.len();
+        settings
+            .dictation_polish_templates
+            .iter_mut()
+            .find(|template| template.id == crate::summary::TEMPLATE_EMAIL)
+            .unwrap()
+            .prompt = "Edited built-in instruction".into();
+        settings.dictation_polish_templates.extend([
+            DictationPolishTemplate {
+                id: " custom-note ".into(),
+                label: "My note".into(),
+                prompt: "Shared custom instruction".into(),
+            },
+            DictationPolishTemplate {
+                id: "custom-note".into(),
+                label: "Duplicate".into(),
+                prompt: "Must not replace the first instruction".into(),
+            },
+            DictationPolishTemplate {
+                id: "another-custom".into(),
+                label: "Second custom".into(),
+                prompt: "Second instruction".into(),
+            },
+            DictationPolishTemplate {
+                id: " email ".into(),
+                label: "Duplicate built-in".into(),
+                prompt: "Must not replace the edited built-in".into(),
+            },
+        ]);
+        let mut rule = AppBranchRule::new(
+            "Notes".into(),
+            AppBranchTarget::Template(PolishTemplateId("custom-note".into())),
+        );
+        rule.enabled = true;
+        settings.dictation_app_branches = vec![rule];
+        settings.save(&db).unwrap();
+        let restored = AppSettings::load(&db).unwrap();
+        assert_eq!(restored.dictation_polish_template_id, "custom-note");
+        let customs: Vec<_> = restored.dictation_polish_templates[builtin_count..]
+            .iter()
+            .map(|template| template.id.as_str())
+            .collect();
+        assert_eq!(customs, ["custom-note", "another-custom"]);
+        assert_eq!(
+            restored
+                .dictation_polish_templates
+                .iter()
+                .find(|template| template.id == crate::summary::TEMPLATE_EMAIL)
+                .unwrap()
+                .prompt,
+            "Edited built-in instruction"
+        );
+        let template = crate::summary::resolve_app_branch(&restored, Some("Apple Notes"))
+            .template()
+            .unwrap();
+        assert_eq!(template.id, "custom-note");
+        assert_eq!(template.prompt, "Shared custom instruction");
+        restored.save(&db).unwrap();
+        assert_eq!(
+            AppSettings::load(&db).unwrap().dictation_polish_templates,
+            restored.dictation_polish_templates
+        );
+    }
+
+    #[test]
+    fn app_branch_upgrade_adds_disabled_seeds_and_preserves_global_and_prompts() {
+        let (db, _dir) = test_db();
+        db.set_setting("dictation_polish_template_id", "\"email\"")
+            .unwrap();
+        db.set_setting(
+            "dictation_polish_templates",
+            &serde_json::to_string(&vec![super::DictationPolishTemplate {
+                id: "email".into(),
+                label: "My email".into(),
+                prompt: "User instruction".into(),
+            }])
+            .unwrap(),
+        )
+        .unwrap();
+        let loaded = AppSettings::load(&db).unwrap();
+        assert_eq!(loaded.dictation_polish_template_id, "email");
+        assert_eq!(
+            loaded
+                .dictation_polish_templates
+                .iter()
+                .find(|template| template.id == "email")
+                .unwrap()
+                .prompt,
+            "User instruction"
+        );
+        assert!(!loaded.dictation_app_branches.is_empty());
+        assert!(
+            loaded
+                .dictation_app_branches
+                .iter()
+                .all(|rule| !rule.enabled)
+        );
+        loaded.save(&db).unwrap();
+        assert_eq!(
+            AppSettings::load(&db).unwrap().dictation_app_branches,
+            loaded.dictation_app_branches
+        );
+    }
+
+    #[test]
+    fn app_branch_save_rejects_blank_patterns_and_repairs_duplicate_ids() {
+        let mut settings = AppSettings::default();
+        let mut duplicate = settings.dictation_app_branches[0].clone();
+        duplicate.app_pattern = "   ".into();
+        settings.dictation_app_branches.push(duplicate);
+        settings
+            .dictation_app_branches
+            .push(settings.dictation_app_branches[0].clone());
+        let saved = settings.sanitize_for_save().unwrap();
+        assert!(
+            saved
+                .dictation_app_branches
+                .iter()
+                .all(|rule| !rule.app_pattern.is_empty())
+        );
+        let ids: std::collections::HashSet<_> = saved
+            .dictation_app_branches
+            .iter()
+            .map(|rule| &rule.id)
+            .collect();
+        assert_eq!(ids.len(), saved.dictation_app_branches.len());
     }
 
     #[test]

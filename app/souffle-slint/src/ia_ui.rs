@@ -12,12 +12,14 @@ fn shared_string_vec(values: &[String]) -> slint::ModelRc<slint::SharedString> {
     std::rc::Rc::new(slint::VecModel::from(values)).into()
 }
 
-fn dictation_polish_label(template: &DictationPolishTemplate) -> String {
+pub(crate) fn dictation_polish_label(template: &DictationPolishTemplate) -> String {
     match template.id.as_str() {
         "clean" => "__CLEANUP__".to_string(),
         "email" => "__PROFESSIONAL_EMAIL__".to_string(),
         "bullets" => "__BULLETS__".to_string(),
         "no_fillers" => "__NO_FILLERS__".to_string(),
+        souffle_lib::summary::TEMPLATE_CHAT => "__CHAT__".to_string(),
+        souffle_lib::summary::TEMPLATE_CODE => "__CODE__".to_string(),
         _ => template.label.clone(),
     }
 }
@@ -176,6 +178,7 @@ pub fn populate_dictation_polish(
     provider_available: bool,
 ) {
     window.set_settings_dictation_polish_enabled(settings.dictation_polish_enabled);
+    crate::app_branch_ui::populate(window, settings);
     window.set_settings_dictation_polish_provider_available(provider_available);
     let labels: Vec<String> = settings
         .dictation_polish_templates
@@ -195,6 +198,14 @@ pub fn populate_dictation_polish(
         .iter()
         .find(|t| t.id == settings.dictation_polish_template_id)
         .or_else(|| settings.dictation_polish_templates.first());
+    // Prompt edits belong to this displayed template even when an
+    // intermediate save has already advanced the observed settings cache.
+    window.set_settings_active_dictation_polish_id(
+        active
+            .map(|template| template.id.as_str())
+            .unwrap_or_default()
+            .into(),
+    );
     window.set_settings_active_dictation_polish_label(
         active
             .map(dictation_polish_label)
