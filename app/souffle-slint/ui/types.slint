@@ -7,6 +7,8 @@ export { TypefaceWeight }
 // like this accumulates in the milestones ahead).
 
 export enum RecordingMode { idle, dictation, meeting }
+export enum AppBranchFallback { polish-disabled, app-unavailable, no-match, invalid-pattern, missing-template }
+export enum AppBranchTestPhase { idle, waiting, resolving, result }
 
 // Where the system-audio leg of the meeting being recorded stands, from
 // souffle_lib's live `SystemAudioStatus` snapshot (system-audio.ts's

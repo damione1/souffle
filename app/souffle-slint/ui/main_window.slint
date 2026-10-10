@@ -17,6 +17,9 @@ import { CalendarRow } from "components/settings/calendar_section.slint";
 import { MicrophoneRow } from "components/settings/microphone_section.slint";
 import { DictionaryRow, DictionarySuggestionRow, DictionaryLearningOption } from "components/settings/dictionary_section.slint";
 import { SnippetRow } from "components/settings/snippets_section.slint";
+import { AppBranchRow } from "components/settings/app_branches_section.slint";
+import { AppBranchFallback, AppBranchTestPhase } from "types.slint";
+export { AppBranchFallback, AppBranchTestPhase }
 import { TimelineDayGroup, UpcomingEvent } from "components/timeline_section.slint";
 import { TranscriptBlock } from "components/transcript_section.slint";
 import { TranscriptWord } from "components/transcript_words.slint";
@@ -314,8 +317,18 @@ export component MainWindow inherits Window {
     in property <bool> settings-dictation-polish-provider-available;
     in property <[string]> settings-dictation-polish-template-ids;
     in property <[string]> settings-dictation-polish-template-labels;
+    in property <string> settings-active-dictation-polish-id;
     in property <string> settings-active-dictation-polish-label;
     in-out property <string> settings-active-dictation-polish-prompt;
+    in property <[AppBranchRow]> settings-app-branch-rules;
+    in property <[string]> settings-app-branch-target-labels;
+    in property <AppBranchTestPhase> settings-app-branch-test-phase;
+    in property <int> settings-app-branch-test-delay-seconds;
+    in property <bool> settings-app-branch-preview-matched;
+    in property <AppBranchFallback> settings-app-branch-preview-fallback;
+    in property <string> settings-app-branch-preview-app;
+    in property <string> settings-app-branch-preview-pattern;
+    in property <string> settings-app-branch-preview-template;
     in property <[string]> settings-summary-template-ids;
     in property <[string]> settings-summary-template-labels;
     in property <string> settings-default-summary-template-label;
@@ -472,6 +485,13 @@ export component MainWindow inherits Window {
     callback settings-dictation-polish-enabled-changed(bool);
     callback settings-dictation-polish-template-changed(string);
     callback settings-dictation-polish-prompt-changed(string);
+    callback settings-app-branch-added(string, int);
+    callback settings-app-branch-deleted(string);
+    callback settings-app-branch-enabled(string, bool);
+    callback settings-app-branch-pattern-changed(string, string);
+    callback settings-app-branch-target-changed(string, int);
+    callback settings-app-branch-moved(string, int);
+    callback settings-app-branch-test-requested();
     callback settings-summary-template-default-changed(string);
     callback settings-summary-template-edit-target-changed(string);
     callback settings-summary-template-delete-requested();
@@ -894,6 +914,15 @@ export component MainWindow inherits Window {
         dictation-polish-template-labels: root.settings-dictation-polish-template-labels;
         active-dictation-polish-label: root.settings-active-dictation-polish-label;
         active-dictation-polish-prompt <=> root.settings-active-dictation-polish-prompt;
+        app-branch-rules: root.settings-app-branch-rules;
+        app-branch-target-labels: root.settings-app-branch-target-labels;
+        app-branch-test-phase: root.settings-app-branch-test-phase;
+        app-branch-test-delay-seconds: root.settings-app-branch-test-delay-seconds;
+        app-branch-preview-matched: root.settings-app-branch-preview-matched;
+        app-branch-preview-fallback: root.settings-app-branch-preview-fallback;
+        app-branch-preview-app: root.settings-app-branch-preview-app;
+        app-branch-preview-pattern: root.settings-app-branch-preview-pattern;
+        app-branch-preview-template: root.settings-app-branch-preview-template;
         summary-template-ids: root.settings-summary-template-ids;
         summary-template-labels: root.settings-summary-template-labels;
         default-summary-template-label: root.settings-default-summary-template-label;
@@ -1023,6 +1052,13 @@ export component MainWindow inherits Window {
         dictation-polish-enabled-changed(value) => { root.settings-dictation-polish-enabled-changed(value); }
         dictation-polish-template-changed(value) => { root.settings-dictation-polish-template-changed(value); }
         dictation-polish-prompt-changed(value) => { root.settings-dictation-polish-prompt-changed(value); }
+        app-branch-added(pattern, target) => { root.settings-app-branch-added(pattern, target); }
+        app-branch-deleted(id) => { root.settings-app-branch-deleted(id); }
+        app-branch-enabled(id, value) => { root.settings-app-branch-enabled(id, value); }
+        app-branch-pattern-changed(id, value) => { root.settings-app-branch-pattern-changed(id, value); }
+        app-branch-target-changed(id, target) => { root.settings-app-branch-target-changed(id, target); }
+        app-branch-moved(id, index) => { root.settings-app-branch-moved(id, index); }
+        app-branch-test-requested => { root.settings-app-branch-test-requested(); }
         summary-template-default-changed(value) => { root.settings-summary-template-default-changed(value); }
         summary-template-edit-target-changed(value) => { root.settings-summary-template-edit-target-changed(value); }
         summary-template-delete-requested => { root.settings-summary-template-delete-requested(); }

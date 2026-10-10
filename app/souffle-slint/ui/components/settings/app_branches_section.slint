@@ -1,0 +1,171 @@
+import { ListView } from "std-widgets.slint";
+import { SettingsGroup } from "settings_group.slint";
+import { Theme } from "../../theme.slint";
+import { AppText, Typography } from "@typography";
+import { AppBranchFallback, AppBranchTestPhase } from "../../types.slint";
+import { ThemedButton } from "../themed_button.slint";
+import { ThemedComboBox } from "../themed_combo.slint";
+import { ThemedLineEdit } from "../themed_line_edit.slint";
+import { ThemedSwitch } from "../themed_switch.slint";
+
+export struct AppBranchRow {
+    id: string,
+    app-pattern: string,
+    enabled: bool,
+    target-label: string,
+}
+
+export component AppBranchesSection inherits VerticalLayout {
+    in property <[AppBranchRow]> rules;
+    in property <[string]> target-labels;
+    in property <AppBranchTestPhase> test-phase;
+    in property <int> test-delay-seconds;
+    in property <bool> preview-matched;
+    in property <AppBranchFallback> preview-fallback;
+    in property <string> preview-app;
+    in property <string> preview-pattern;
+    in property <string> preview-template;
+    private property <int> new-target-index: 0;
+    private property <string> new-pattern;
+
+    callback rule-added(string, int);
+    callback rule-deleted(string);
+    callback rule-enabled(string, bool);
+    callback rule-pattern-changed(string, string);
+    callback rule-target-changed(string, int);
+    callback rule-moved(string, int);
+    callback test-requested();
+
+    spacing: 12px;
+    alignment: start;
+    SettingsGroup {
+        title: @tr("RETOUCHE PAR APPLICATION");
+        VerticalLayout {
+            padding: Theme.settings-inset;
+            spacing: 12px;
+            alignment: start;
+            AppText {
+                text: @tr("La première règle active valide gagne. Le nom de l'application contient le motif, sans tenir compte de la casse. Par défaut suit le modèle global ; les instructions sont partagées.");
+                wrap: word-wrap;
+                typography: Typography.secondary;
+                color: Theme.text-muted;
+            }
+            HorizontalLayout {
+                spacing: 8px;
+                ThemedLineEdit {
+                    text <=> root.new-pattern;
+                    placeholder: @tr("Nom d'application");
+                    control-label: @tr("Nouvelle règle d'application");
+                    horizontal-stretch: 1;
+                }
+                ThemedComboBox {
+                    control-label: @tr("Modèle de la nouvelle règle");
+                    model: root.target-labels;
+                    current-value: root.target-labels[root.new-target-index];
+                    selected-index(index) => { root.new-target-index = index; }
+                }
+                ThemedButton {
+                    text: @tr("Ajouter");
+                    enabled: root.new-pattern != "";
+                    clicked => {
+                        root.rule-added(root.new-pattern, root.new-target-index);
+                        root.new-pattern = "";
+                    }
+                }
+            }
+            ListView {
+                height: min(root.rules.length * 116px, 348px);
+                for rule[index] in root.rules: Rectangle {
+                    height: 116px;
+                    background: Theme.surface-2;
+                    border-radius: 4px;
+                    VerticalLayout {
+                        padding: 10px;
+                        spacing: 8px;
+                        HorizontalLayout {
+                            spacing: 8px;
+                            ThemedSwitch {
+                                control-label: @tr("Activer la règle {}", rule.app-pattern);
+                                checked: rule.enabled;
+                                toggled(value) => { root.rule-enabled(rule.id, value); }
+                            }
+                            ThemedLineEdit {
+                                text: rule.app-pattern;
+                                control-label: @tr("Motif de la règle");
+                                horizontal-stretch: 1;
+                                accepted(value) => { root.rule-pattern-changed(rule.id, value); }
+                                focus-lost(value) => { root.rule-pattern-changed(rule.id, value); }
+                            }
+                            ThemedComboBox {
+                                control-label: @tr("Modèle partagé de la règle");
+                                model: root.target-labels;
+                                current-value: rule.target-label;
+                                selected-index(value) => { root.rule-target-changed(rule.id, value); }
+                            }
+                        }
+                        HorizontalLayout {
+                            spacing: 8px;
+                            alignment: end;
+                            ThemedButton {
+                                compact: true;
+                                text: @tr("Monter");
+                                enabled: index > 0;
+                                clicked => { root.rule-moved(rule.id, index - 1); }
+                            }
+                            ThemedButton {
+                                compact: true;
+                                text: @tr("Descendre");
+                                enabled: index + 1 < root.rules.length;
+                                clicked => { root.rule-moved(rule.id, index + 1); }
+                            }
+                            ThemedButton {
+                                compact: true;
+                                text: @tr("Supprimer");
+                                clicked => { root.rule-deleted(rule.id); }
+                            }
+                        }
+                    }
+                }
+            }
+            ThemedButton {
+                text: @tr("Tester l'application actuelle");
+                clicked => { root.test-requested(); }
+            }
+            if root.test-phase == AppBranchTestPhase.waiting: AppText {
+                text: @tr("Passez à l'application à tester. Capture dans {} secondes.", root.test-delay-seconds);
+                wrap: word-wrap;
+                typography: Typography.secondary;
+                color: Theme.text-secondary;
+            }
+            if root.test-phase == AppBranchTestPhase.resolving: AppText {
+                text: @tr("Recherche de la règle pour l'application capturée…");
+                wrap: word-wrap;
+                typography: Typography.secondary;
+                color: Theme.text-secondary;
+            }
+            if root.test-phase == AppBranchTestPhase.result: VerticalLayout {
+                spacing: 6px;
+                AppText {
+                    text: @tr("Application actuelle : {}", root.preview-app);
+                    color: Theme.text-secondary;
+                    wrap: word-wrap;
+                }
+                AppText {
+                    text: root.preview-matched ? @tr("Règle gagnante : {}", root.preview-pattern)
+                        : root.preview-fallback == AppBranchFallback.polish-disabled ? @tr("Retouche désactivée : les règles sont sans effet.")
+                        : root.preview-fallback == AppBranchFallback.app-unavailable ? @tr("Application inconnue : modèle global.")
+                        : root.preview-fallback == AppBranchFallback.no-match ? @tr("Aucune règle active correspondante : modèle global.")
+                        : root.preview-fallback == AppBranchFallback.invalid-pattern ? @tr("Motif vide ignoré : modèle global.")
+                        : @tr("Modèle de règle introuvable : modèle global.");
+                    color: Theme.text-secondary;
+                    wrap: word-wrap;
+                }
+                ThemedComboBox {
+                    control-label: @tr("Modèle résolu");
+                    current-value: root.preview-template;
+                    enabled: false;
+                }
+            }
+        }
+    }
+}

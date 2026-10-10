@@ -61,6 +61,110 @@ msgstr ""
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
 
+msgctxt "AppBranchesSection"
+msgid "RETOUCHE PAR APPLICATION"
+msgstr "POLISH BY APPLICATION"
+
+msgctxt "AppBranchesSection"
+msgid "Passez à l'application à tester. Capture dans {} secondes."
+msgstr "Switch to the application you want to test. Capture in {} seconds."
+
+msgctxt "AppBranchesSection"
+msgid "Recherche de la règle pour l'application capturée…"
+msgstr "Finding the rule for the captured application…"
+
+msgctxt "AppBranchesSection"
+msgid "La première règle active valide gagne. Le nom de l'application contient le motif, sans tenir compte de la casse. Par défaut suit le modèle global ; les instructions sont partagées."
+msgstr "The first valid active rule wins. The application name contains the pattern, ignoring case. Default follows the global template; instructions are shared."
+
+msgctxt "AppBranchesSection"
+msgid "Nom d'application"
+msgstr "Application name"
+
+msgctxt "AppBranchesSection"
+msgid "Nouvelle règle d'application"
+msgstr "New application rule"
+
+msgctxt "AppBranchesSection"
+msgid "Modèle de la nouvelle règle"
+msgstr "New rule template"
+
+msgctxt "AppBranchesSection"
+msgid "Ajouter"
+msgstr "Add"
+
+msgctxt "AppBranchesSection"
+msgid "Activer la règle {}"
+msgstr "Enable rule {}"
+
+msgctxt "AppBranchesSection"
+msgid "Motif de la règle"
+msgstr "Rule pattern"
+
+msgctxt "AppBranchesSection"
+msgid "Modèle partagé de la règle"
+msgstr "Shared rule template"
+
+msgctxt "AppBranchesSection"
+msgid "Monter"
+msgstr "Move up"
+
+msgctxt "AppBranchesSection"
+msgid "Descendre"
+msgstr "Move down"
+
+msgctxt "AppBranchesSection"
+msgid "Supprimer"
+msgstr "Delete"
+
+msgctxt "AppBranchesSection"
+msgid "Tester l'application actuelle"
+msgstr "Test current application"
+
+msgctxt "AppBranchesSection"
+msgid "Application actuelle : {}"
+msgstr "Current application: {}"
+
+msgctxt "AppBranchesSection"
+msgid "Règle gagnante : {}"
+msgstr "Winning rule: {}"
+
+msgctxt "AppBranchesSection"
+msgid "Retouche désactivée : les règles sont sans effet."
+msgstr "Polish is disabled: rules have no effect."
+
+msgctxt "AppBranchesSection"
+msgid "Application inconnue : modèle global."
+msgstr "Unknown application: global template."
+
+msgctxt "AppBranchesSection"
+msgid "Aucune règle active correspondante : modèle global."
+msgstr "No matching active rule: global template."
+
+msgctxt "AppBranchesSection"
+msgid "Motif vide ignoré : modèle global."
+msgstr "Empty pattern ignored: global template."
+
+msgctxt "AppBranchesSection"
+msgid "Modèle de règle introuvable : modèle global."
+msgstr "Rule template missing: global template."
+
+msgctxt "AppBranchesSection"
+msgid "Modèle résolu"
+msgstr "Resolved template"
+
+msgctxt "ThemedComboBox"
+msgid "Chat"
+msgstr "Chat message"
+
+msgctxt "ThemedComboBox"
+msgid "Code"
+msgstr "Code editor"
+
+msgctxt "ThemedComboBox"
+msgid "Modèle introuvable"
+msgstr "Missing template"
+
 #: app/souffle-slint/ui/meeting_detail.slint:90
 msgctxt "MeetingDetail"
 msgid "Retour à l'historique"

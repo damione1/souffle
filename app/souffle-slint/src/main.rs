@@ -5,6 +5,7 @@
 // in-process function calls, no IPC, no serialization.
 slint::include_modules!();
 
+mod app_branch_ui;
 mod audio_player;
 mod audio_ui;
 mod data_ui;
@@ -4057,6 +4058,12 @@ fn wire_callbacks(
     live_state: LiveTranscriptState,
 ) {
     let lists_models = lists_ui::SettingsListModels::install(window);
+    let app_branches = app_branch_ui::register(
+        window,
+        settings_io.clone(),
+        settings_state.clone(),
+        settings_drafts.clone(),
+    );
     live_edit::wire_callbacks(window, tauri_handle.clone(), live_state.clone());
 
     // Shared with load_meeting_audio/stop_audio_player/open_meeting_detail
@@ -5062,6 +5069,7 @@ fn wire_callbacks(
     let settings_values_for_open = settings_values.clone();
     let permissions_for_open = permissions.clone();
     let lists_models_for_open = lists_models.clone();
+    let app_branches_for_open = app_branches.clone();
     window.on_settings_requested(move || {
         settings_instrumentation::handler(settings_instrumentation::SettingsScenario::Open);
         let Some(window) = weak.upgrade() else {
@@ -5070,6 +5078,7 @@ fn wire_callbacks(
         reset_stale_save_error(&window);
         summary_refresh_state_for_open.begin_session();
         let token = settings_io_for_open.begin_open();
+        app_branches_for_open.cancel_test();
         if let Some(settings) = settings_state_for_open.known_snapshot() {
             summary_refresh_state_for_open.project_url_if_pristine(&window, &settings.ollama_url);
             settings_ui::populate(&window, &settings);
@@ -5262,7 +5271,9 @@ fn wire_callbacks(
     let handle_for_close = tauri_handle.clone();
     let settings_io_for_close = settings_io.clone();
     let permissions_for_close = permissions.clone();
+    let app_branches_for_close = app_branches.clone();
     window.on_settings_closed(move || {
+        app_branches_for_close.cancel_test();
         permissions_for_close.sync_activity();
         let close_token = settings_io_for_close.close();
         let weak = weak.clone();
@@ -6363,86 +6374,7 @@ fn wire_callbacks(
         souffle_lib::commands::open_system_settings(pane.into());
     });
 
-    let settings_io_for_polish_enabled = settings_io.clone();
-    let weak = window.as_weak();
-    let settings_state_for_polish_enabled = settings_state.clone();
-    window.on_settings_dictation_polish_enabled_changed(move |enabled| {
-        let weak = weak.clone();
-        let state = settings_state_for_polish_enabled.clone();
-        save_settings_field_then(
-            &settings_io_for_polish_enabled,
-            souffle_lib::commands::SettingsSaveLane::General,
-            move |settings| settings.dictation_polish_enabled = enabled,
-            move |order, _outcome| {
-                if !order.publishes_to_open_window() {
-                    return;
-                }
-                if let Some(window) = weak.upgrade() {
-                    let guard = state.borrow();
-                    if let Some(settings) = guard.as_ref() {
-                        let provider_available =
-                            window.get_settings_summary_unusable_message().is_empty();
-                        ia_ui::populate_dictation_polish(&window, settings, provider_available);
-                    }
-                }
-            },
-        );
-    });
-
-    let weak = window.as_weak();
-    let settings_io_for_polish_template = settings_io.clone();
-    let settings_state_for_polish_template = settings_state.clone();
-    let settings_drafts_for_polish_template = settings_drafts.clone();
-    window.on_settings_dictation_polish_template_changed(move |template_id| {
-        let template_id = template_id.to_string();
-        let valid = settings_state_for_polish_template
-            .borrow()
-            .as_ref()
-            .is_some_and(|settings| {
-                ia_ui::contains_dictation_polish_id(
-                    &settings.dictation_polish_templates,
-                    &template_id,
-                )
-            });
-        if !valid {
-            return;
-        }
-        let weak = weak.clone();
-        let state = settings_state_for_polish_template.clone();
-        let drafts = settings_drafts_for_polish_template.clone();
-        save_settings_field_then(
-            &settings_io_for_polish_template,
-            souffle_lib::commands::SettingsSaveLane::General,
-            move |settings| settings.dictation_polish_template_id = template_id,
-            move |order, _outcome| {
-                if !order.publishes_to_open_window() {
-                    return;
-                }
-                let Some(window) = weak.upgrade() else {
-                    return;
-                };
-                let guard = state.borrow();
-                if let Some(settings) = guard.as_ref() {
-                    let provider_available =
-                        window.get_settings_summary_unusable_message().is_empty();
-                    ia_ui::populate_dictation_polish(&window, settings, provider_available);
-                    drafts.reapply_polish_prompt(&window, &settings.dictation_polish_template_id);
-                }
-            },
-        );
-    });
-
-    let settings_state_for_polish_prompt = settings_state.clone();
-    let settings_drafts_for_polish_prompt = settings_drafts.clone();
-    window.on_settings_dictation_polish_prompt_changed(move |text| {
-        let active_id = settings_state_for_polish_prompt
-            .borrow()
-            .as_ref()
-            .map(|settings| settings.dictation_polish_template_id.clone());
-        if let Some(active_id) = active_id {
-            settings_drafts_for_polish_prompt.edit_polish_prompt(active_id, text.to_string());
-        }
-    });
+    app_branch_ui::wire_polish_routing_callbacks(window, app_branches);
 
     let weak = window.as_weak();
     let settings_io_for_template_default = settings_io.clone();
