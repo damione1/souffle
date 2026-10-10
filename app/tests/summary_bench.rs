@@ -150,6 +150,118 @@ fn rescore_uses_only_saved_models_for_each_meeting() {
         saved_models(output.path(), "ollama-only"),
         vec!["qwen2.5:7b"]
     );
+    assert!(saved_models(output.path(), "unmeasured").is_empty());
+}
+
+#[test]
+fn rescore_reports_partial_campaign_and_unknown_calls_without_fabricating_runs() {
+    let private = tempfile::tempdir().unwrap();
+    let corpus = private.path().join("corpus");
+    let output = private.path().join("output");
+    std::fs::create_dir(&corpus).unwrap();
+    std::fs::create_dir(&output).unwrap();
+    for (id, duration_seconds) in [
+        ("valid", 1800.0),
+        ("invalid", 2700.0),
+        ("unmeasured", 4500.0),
+    ] {
+        let input = Input {
+            id: id.into(),
+            title: "Synthetic scoring fixture".into(),
+            duration_seconds,
+            segments: vec![],
+            edited_transcript: Some("Known fact".into()),
+            notes: None,
+            participants: vec![],
+            language: french(),
+            template: default_template(),
+        };
+        let input_path = corpus.join(format!("{id}.json"));
+        write_json(&input_path, &input);
+        let corpus_sha256 = hash(&std::fs::read(&input_path).unwrap());
+        let gold = Gold {
+            meeting_id: id.into(),
+            corpus_sha256: corpus_sha256.clone(),
+            validated_by: Some("Synthetic fixture (no quality measurement)".into()),
+            validated_at: Some("2026-01-01T00:00:00Z".into()),
+            facts: (1..=15)
+                .map(|n| Fact {
+                    id: format!("f{n}"),
+                    text: "Known fact".into(),
+                    third: Third::Beginning,
+                    keywords: vec![vec!["Known fact".into()]],
+                    owner: None,
+                })
+                .collect(),
+        };
+        let gold_path = corpus.join(format!("{id}.gold.json"));
+        write_json(&gold_path, &gold);
+        let metadata = serde_json::json!({"corpus_sha256":corpus_sha256,"gold_sha256":hash(&std::fs::read(&gold_path).unwrap())});
+        let repetitions = match id {
+            "valid" => vec![
+                (1, serde_json::json!({"calls":[],"merge_rounds":0})),
+                (3, serde_json::json!({"calls":[],"merge_rounds":0})),
+            ],
+            "invalid" => vec![
+                (1, serde_json::json!({})),
+                (2, serde_json::json!({"calls":null})),
+                (3, serde_json::json!({"calls":"malformed"})),
+            ],
+            "unmeasured" => vec![],
+            _ => unreachable!("fixture IDs"),
+        };
+        for (repetition, diagnostics) in repetitions {
+            write_json(
+                &output.join(format!("{id}-qwen2.5-7b-{repetition}.run.json")),
+                &Run {
+                    meeting_id: id.into(),
+                    model: "qwen2.5:7b".into(),
+                    repetition,
+                    metadata: metadata.clone(),
+                    prose: Some("Known fact".into()),
+                    structured: Some(StructuredSummary {
+                        decisions: vec![],
+                        action_items: vec![],
+                        open_questions: vec![],
+                    }),
+                    diagnostics,
+                    elapsed_ms: 1,
+                    error: None,
+                },
+            );
+        }
+    }
+    let result = benchmark_command()
+        .env("SOUFFLE_BENCH_MODE", "score")
+        .env("SOUFFLE_BENCH_CORPUS_DIR", &corpus)
+        .env("SOUFFLE_BENCH_OUTPUT_DIR", &output)
+        .env("SOUFFLE_BENCH_OLLAMA_URL", "http://127.0.0.1:1")
+        .output()
+        .unwrap();
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let report = std::fs::read_to_string(output.join(format!(
+        "bench-resumes-{}.md",
+        chrono::Local::now().format("%Y-%m-%d")
+    )))
+    .unwrap();
+    assert!(report.contains("| valid | qwen2.5:7b | 2 | MISSING |"));
+    assert!(report.contains("| unmeasured | — | — | MISSING (no saved runs) |"));
+    assert_eq!(report.matches("INVALID (diagnostics)").count(), 3);
+    assert!(report.contains("| valid | qwen2.5:7b | 2 / 3 | 1.000 | 1 | 0.00 |"));
+    assert!(!report.contains("| invalid | qwen2.5:7b | 3 / 3 |"));
+    assert!(output.join("valid-qwen2.5-7b-1.score.json").exists());
+    assert!(output.join("valid-qwen2.5-7b-3.score.json").exists());
+    for entry in std::fs::read_dir(&output).unwrap() {
+        let name = entry.unwrap().file_name().to_string_lossy().into_owned();
+        assert!(!name.starts_with("valid-qwen2.5-7b-2."));
+        assert!(!(name.starts_with("invalid-") && name.ends_with(".score.json")));
+        assert!(!name.starts_with("unmeasured-"));
+    }
+    assert!(!output.join("provider-availability.json").exists());
 }
 
 #[test]

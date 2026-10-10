@@ -132,6 +132,19 @@ pub(crate) fn update(f: impl FnOnce(&mut Metrics)) {
 mod tests {
     use super::*;
     #[tokio::test]
+    async fn abandoned_call_keeps_incomplete_fallback() {
+        let (_, metrics) = measure(async {
+            let _guard = context().unwrap().start("synthetic", 0.2, None, None);
+        })
+        .await;
+        assert_eq!(metrics.calls.len(), 1);
+        assert!(!metrics.calls[0].completed);
+        assert_eq!(
+            metrics.calls[0].error.as_deref(),
+            Some("request failed, cancelled or timed out before completion")
+        );
+    }
+    #[tokio::test]
     async fn measured_calls_preserve_absent_tokens_errors_and_phase() {
         let (_, metrics) = measure(async {
             phase(Phase::Map, async {

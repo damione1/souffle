@@ -79,6 +79,12 @@ removes measured runs. Older artifacts without availability provenance are label
 accordingly. Apple hard timeouts are finalized by the waiting thread before a retry;
 a late abandoned response cannot turn the timed-out attempt into a success.
 
+Interrupted campaigns can be rescored: absent repetitions or unmeasured meetings
+are reported as `MISSING`, without fabricating artifacts or provider availability.
+A missing or malformed calls array makes a saved run `INVALID`; an explicitly
+empty array remains a valid known zero-call measurement. Missing and invalid runs
+are excluded from quality aggregates.
+
 `*.review.json` binds to a run hash. Set `matches` fact-id overrides to correct
 keyword false positives/negatives, and `reviewed_by` before saving manual decisions.
 Set `invented_facts` only after reading the output against the transcript. An

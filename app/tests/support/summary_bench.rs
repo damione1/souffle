@@ -222,7 +222,6 @@ fn saved_models(output_dir: &Path, meeting_id: &str) -> Vec<String> {
             }
         }
     }
-    assert!(!models.is_empty(), "no saved runs for meeting {meeting_id}");
     models.into_iter().collect()
 }
 
@@ -429,6 +428,9 @@ pub(crate) async fn run_bench() {
         } else {
             run_models.clone()
         };
+        if mode == "score" && models.is_empty() {
+            table.push_str(&format!("| {} | — | — | MISSING (no saved runs) | — | — | — | — | — | — | — | NOT REVIEWED |\n", input.id));
+        }
         for model in &models {
             for repetition in 1..=3 {
                 let stem = format!("{}-{}-{repetition}", input.id, model.replace(':', "-"));
@@ -490,6 +492,13 @@ pub(crate) async fn run_bench() {
                         },
                     );
                 }
+                if mode == "score" && !path.exists() {
+                    table.push_str(&format!(
+                        "| {} | {} | {} | MISSING | — | — | — | — | — | — | — | NOT REVIEWED |\n",
+                        input.id, model, repetition
+                    ));
+                    continue;
+                }
                 let run: Run = read_json(&path);
                 assert_eq!(run.meeting_id, input.id);
                 assert_eq!(&run.model, model);
@@ -524,7 +533,10 @@ pub(crate) async fn run_bench() {
                         "manual review requires reviewer provenance"
                     );
                 }
-                let calls = run.diagnostics["calls"].as_array().unwrap();
+                let Some(calls) = run.diagnostics["calls"].as_array() else {
+                    table.push_str(&format!("| {} | {} | {} | INVALID (diagnostics) | — | — | — | — | — | {} | {} | NOT REVIEWED |\n", input.id, model, repetition, run.elapsed_ms, run.diagnostics["merge_rounds"]));
+                    continue;
+                };
                 let tokens = |field: &str| -> Option<u64> {
                     calls
                         .iter()
