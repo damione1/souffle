@@ -19,6 +19,7 @@ export component ThemedButton inherits Rectangle {
     // app.css `.btn-sm` (`padding: 0.25rem 0.5rem; font-size: 0.75rem`):
     // the locale toggles on the wizard, inline "Vérifier"/banner actions.
     in property <bool> compact: false;
+    out property <bool> has-focus: key-focus.has-focus;
 
     callback clicked();
 

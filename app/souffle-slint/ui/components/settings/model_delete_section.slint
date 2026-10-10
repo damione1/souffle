@@ -22,11 +22,12 @@ export component ModelDeleteSection inherits VerticalLayout {
     in property <TranscriptionPhase> model-phase;
     in property <string> model-label;
     in property <string> delete-error;
+    in property <bool> files-deletable;
 
     callback delete-requested();
 
     property <bool> confirming: false;
-    property <bool> can-delete: root.model-phase == TranscriptionPhase.load-required;
+    property <bool> can-delete: root.files-deletable && root.model-phase == TranscriptionPhase.load-required;
 
     spacing: 22px;
     alignment: start;
@@ -37,11 +38,13 @@ export component ModelDeleteSection inherits VerticalLayout {
         SettingsField {
             show-divider: false;
             label: @tr("Supprimer le mod\u{e8}le t\u{e9}l\u{e9}charg\u{e9}");
-            description: root.can-delete
+            description: !root.files-deletable
+                ? @tr("Les assets Apple Speech sont gérés par macOS. Soufflé ne les supprime pas.")
+                : root.can-delete
                 ? @tr("Supprime les fichiers de {} du disque. Il faudra le t\u{e9}l\u{e9}charger \u{e0} nouveau pour l'utiliser.", root.model-label)
                 : @tr("Le mod\u{e8}le doit \u{ea}tre t\u{e9}l\u{e9}charg\u{e9} et d\u{e9}charg\u{e9} (pas en cours d'utilisation) pour \u{ea}tre supprim\u{e9}.");
 
-            HorizontalLayout {
+            if root.files-deletable: HorizontalLayout {
                 spacing: 8px;
                 horizontal-stretch: 0;
 
@@ -54,6 +57,7 @@ export component ModelDeleteSection inherits VerticalLayout {
 
                 if root.confirming: ThemedButton {
                     text: @tr("Confirmer");
+                    enabled: root.can-delete;
                     kind: ThemedButtonKind.danger;
                     clicked => {
                         root.confirming = false;

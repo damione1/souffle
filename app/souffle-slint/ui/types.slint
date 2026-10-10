@@ -79,6 +79,8 @@ export enum MarkdownBlockKind { heading, bullet, paragraph, link }
 // Projection of souffle_lib::engine::TranscriptionRuntimePhase. The Rust
 // AppStateMachine owns every transition; Slint only derives presentation.
 export enum TranscriptionPhase { download-required, downloading, load-required, loading, ready, unloading, failed }
+export enum TranscriptionUnavailableReason { os-unsupported, device-unsupported, build-unsupported, locale-unsupported, assets-unsupported, check-failed }
+export enum SystemSettingsPane { apple-intelligence, language-and-region, software-update }
 
 // Today's calendar row: computed in Rust from start/end vs now, never a
 // free-form string. Adding a variant must break every `if phase ==` site.

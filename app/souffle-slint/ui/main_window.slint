@@ -24,6 +24,10 @@ import { StructuredActionItem } from "components/summary_section.slint";
 import { RecordingMode, LiveSystemAudio, MicStall, MeetingIdleBanner, WakeResumeNotice,SpeakerRole, TimelineFilter, TimelineKind, NotesSaveState, ModelPhase, TranscriptionPhase, UpcomingPhase, SettingsTab, SettingsInteraction, AppTheme, AppLocale, PasteMethod, MeetingLanguage, LogLevel, AudioRetention, AccessState, PermissionKind, ShortcutField, ShortcutNotice, SummaryProvider, AppleIntelligenceUnavailableReason, OnboardingStep, UpdatePhase, InstallBlockReason, UpdateRowStatus, MeetingExportFormat, DictionaryLearningMode } from "types.slint";
 export { SettingsTab, SettingsInteraction, AppTheme, AppLocale, PasteMethod, MeetingLanguage, LogLevel, AudioRetention, AccessState, PermissionKind, ShortcutField, SummaryProvider, AppleIntelligenceUnavailableReason, SpeakerRole }
 import { Theme } from "theme.slint";
+import { TranscriptionLabels } from "components/transcription_labels.slint";
+export { TranscriptionLabels }
+import { TranscriptionUnavailableReason, SystemSettingsPane } from "types.slint";
+export { TranscriptionUnavailableReason, SystemSettingsPane }
 // Re-exported (not just imported) so Slint's codegen generates a Rust
 // accessor for it (`window.global::<Theme>()`) - main.rs sets `Theme.dark`
 // at launch and on every theme toggle. A plain `import` alone is enough for
@@ -322,6 +326,11 @@ export component MainWindow inherits Window {
     in-out property <string> settings-new-summary-template-draft: "";
     in property <[string]> settings-model-labels;
     in property <string> settings-selected-model-label;
+    in property <bool> settings-apple-speech-selected;
+    in property <bool> settings-apple-speech-unavailable;
+    in property <TranscriptionUnavailableReason> settings-apple-speech-unavailable-reason;
+    changed settings-locale => { TranscriptionLabels.app-locale = root.settings-locale; }
+    callback settings-open-system-settings-requested(SystemSettingsPane);
     // Bare model label ("STT 1B FR/EN") for AppHeader's status pill - kept
     // separate from `settings-selected-model-label` above, which is the
     // combined "Engine — Model" form the settings picker needs to
@@ -339,6 +348,8 @@ export component MainWindow inherits Window {
     in property <string> settings-unload-timeout-label;
     in property <string> settings-model-error-message;
     in property <string> settings-model-delete-error;
+    in property <bool> settings-model-files-deletable;
+
     in property <DictionaryLearningMode> settings-dictionary-learning-mode;
     in property <[DictionaryLearningOption]> settings-dictionary-learning-options;
     in property <[DictionarySuggestionRow]> settings-dictionary-suggestions;
@@ -895,6 +906,10 @@ export component MainWindow inherits Window {
         model-ready: root.model-ready;
         model-labels: root.settings-model-labels;
         selected-model-label: root.settings-selected-model-label;
+        apple-speech-selected: root.settings-apple-speech-selected;
+        apple-speech-unavailable: root.settings-apple-speech-unavailable;
+        apple-speech-unavailable-reason: root.settings-apple-speech-unavailable-reason;
+        open-system-settings-requested(pane) => { root.settings-open-system-settings-requested(pane); }
         model-busy: root.settings-model-busy;
         model-downloading: root.settings-model-downloading;
         model-download-progress-label: root.settings-model-download-progress-label;
@@ -903,6 +918,8 @@ export component MainWindow inherits Window {
         unload-timeout-label: root.settings-unload-timeout-label;
         model-error-message: root.settings-model-error-message;
         model-delete-error: root.settings-model-delete-error;
+        model-files-deletable: root.settings-model-files-deletable;
+
         dictionary-learning-mode: root.settings-dictionary-learning-mode;
         dictionary-learning-options: root.settings-dictionary-learning-options;
         dictionary-suggestions: root.settings-dictionary-suggestions;

@@ -18,6 +18,26 @@ use souffle_lib::settings::{
     PasteMethod, SettingsOptions, ShortcutSettings, Theme,
 };
 
+impl From<crate::SystemSettingsPane> for souffle_lib::commands::SystemSettingsPane {
+    fn from(pane: crate::SystemSettingsPane) -> Self {
+        match pane {
+            crate::SystemSettingsPane::AppleIntelligence => Self::AppleIntelligence,
+            crate::SystemSettingsPane::LanguageAndRegion => Self::LanguageAndRegion,
+            crate::SystemSettingsPane::SoftwareUpdate => Self::SoftwareUpdate,
+        }
+    }
+}
+
+impl From<souffle_lib::commands::SystemSettingsPane> for crate::SystemSettingsPane {
+    fn from(pane: souffle_lib::commands::SystemSettingsPane) -> Self {
+        match pane {
+            souffle_lib::commands::SystemSettingsPane::AppleIntelligence => Self::AppleIntelligence,
+            souffle_lib::commands::SystemSettingsPane::LanguageAndRegion => Self::LanguageAndRegion,
+            souffle_lib::commands::SystemSettingsPane::SoftwareUpdate => Self::SoftwareUpdate,
+        }
+    }
+}
+
 /// Pushes `settings` into the Slint properties this shell currently wires.
 /// Mirrors `controller.svelte.ts` setting `app.settings` after
 /// `getSettings()`. Grows with each milestone; the "Système" and

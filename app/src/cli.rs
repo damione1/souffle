@@ -178,8 +178,18 @@ fn run(cli: CliArgs) -> i32 {
         }
     };
 
-    let model_dir = crate::models::model_dir(&profile);
-    if let Err(e) = engine.load_model(&model_dir) {
+    let location = match crate::models::model_location(&profile) {
+        Ok(location) => location,
+        Err(error) => {
+            eprintln!("Error: {error}");
+            return 1;
+        }
+    };
+    let load = match location {
+        crate::engine::ModelLocation::Files(path) => engine.load_model(&path),
+        crate::engine::ModelLocation::SystemSpeech { locale } => engine.load_system_assets(&locale),
+    };
+    if let Err(e) = load {
         eprintln!("Error: failed to load model: {e}");
         return 1;
     }

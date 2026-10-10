@@ -1,0 +1,59 @@
+import { AppText, AppNumericText, Typography } from "@typography";
+import { Theme } from "../theme.slint";
+import { TranscriptBlock, SpeakerLabels } from "transcript_section.slint";
+import { TranscriptWordFlow } from "transcript_words.slint";
+import { ThemedButton, ThemedButtonKind } from "themed_button.slint";
+
+// The card tracks the pointer once; repeated rows do not add TouchAreas
+// around their clickable words. Reserving the action prevents hover reflow.
+export component LiveTranscriptParagraph inherits VerticalLayout {
+    in property <TranscriptBlock> block;
+    in property <bool> editing-enabled: true;
+    in property <bool> pointer-active;
+    in property <length> pointer-x;
+    in property <length> pointer-y;
+    callback edit-requested();
+    callback word-clicked(string, length, length);
+
+    property <bool> hovered: root.pointer-active
+        && root.pointer-x >= root.absolute-position.x
+        && root.pointer-x < root.absolute-position.x + root.width
+        && root.pointer-y >= root.absolute-position.y
+        && root.pointer-y < root.absolute-position.y + root.height;
+
+    alignment: start;
+    spacing: 2px;
+
+    HorizontalLayout {
+        alignment: start;
+        spacing: 8px;
+
+        AppText {
+            text: root.block.has-speaker ? SpeakerLabels.of(root.block.speaker) : "";
+            typography: Typography.small-emphasis;
+            color: Theme.accent;
+        }
+        AppNumericText {
+            text: root.block.timestamp;
+            typography: Typography.micro-detail;
+            text-color: Theme.text-faint;
+        }
+        if root.block.can-edit: ThemedButton {
+            // Keep the existing catalogue context when extracting this row.
+            text: @tr("RecordingView" => "Corriger");
+            kind: ThemedButtonKind.ghost;
+            compact: true;
+            enabled: root.editing-enabled;
+            opacity: root.hovered || self.has-focus
+                ? (root.editing-enabled ? 1.0 : 0.5) : 0.0;
+            clicked => { root.edit-requested(); }
+        }
+    }
+    TranscriptWordFlow {
+        width: parent.width;
+        words: root.block.words;
+        typography: Typography.action-body;
+        color: Theme.text-secondary;
+        word-clicked(word, at-x, at-y) => { root.word-clicked(word, at-x, at-y); }
+    }
+}
