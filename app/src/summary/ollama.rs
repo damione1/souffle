@@ -785,7 +785,7 @@ mod tests {
             if let Some(server) = server {
                 server.join().unwrap();
             }
-            let error = result.err().expect("synthetic failure");
+            let error = result.expect_err("synthetic failure");
             let prefix = match response {
                 Some(value) if value.starts_with("HTTP/1.1 503") => "Ollama error:",
                 Some(_) => "Stream read:",
