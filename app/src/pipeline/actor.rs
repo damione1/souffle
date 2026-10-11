@@ -374,18 +374,19 @@ impl EngineActorHandle {
     /// Shut down the actor thread: unloads and drops the engine on the actor
     /// thread, then joins. Idempotent.
     pub fn shutdown(&self) -> Result<(), String> {
-        let handle = {
-            let mut guard = self
-                .handle
-                .lock()
-                .map_err(|e| format!("Lock poisoned: {e}"))?;
-            guard.take()
-        };
-        if let Some(handle) = handle {
+        // A concurrent caller must wait for destruction too, not merely see
+        // that another caller took the handle. This mutex is only the thread
+        // handle; the actor never acquires it while processing shutdown.
+        let mut guard = self
+            .handle
+            .lock()
+            .map_err(|e| format!("Lock poisoned: {e}"))?;
+        if let Some(handle) = guard.take() {
             let _ = self.cmd_tx.send(EngineCommand::Shutdown);
             handle
                 .join()
                 .map_err(|_| "Engine actor thread panicked during shutdown".to_string())?;
+            info!("Transcription engine released; actor shutdown completed");
         }
         Ok(())
     }
@@ -2596,6 +2597,96 @@ mod tests {
         let (actor, _audio_tx) = spawn_with_mock(MockEngine::new());
         actor.shutdown().expect("first shutdown");
         actor.shutdown().expect("second shutdown");
+    }
+
+    #[test]
+    fn concurrent_shutdown_waits_for_actor_resources_to_be_released() {
+        let (cmd_tx, cmd_rx) = unbounded();
+        let (entered_tx, entered_rx) = unbounded();
+        let (release_tx, release_rx) = unbounded();
+        let worker = std::thread::spawn(move || {
+            assert!(matches!(
+                cmd_rx.recv().unwrap(),
+                super::EngineCommand::Shutdown
+            ));
+            entered_tx.send(()).unwrap();
+            // Model destruction may take time. No caller may exit the process
+            // while this thread still owns its native resources.
+            release_rx.recv().unwrap();
+        });
+        let actor = Arc::new(EngineActorHandle {
+            cmd_tx,
+            handle: Mutex::new(Some(worker)),
+            engine_info: Arc::new(Mutex::new(None)),
+        });
+        let first_actor = Arc::clone(&actor);
+        let first = std::thread::spawn(move || first_actor.shutdown().unwrap());
+        entered_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        let second_actor = Arc::clone(&actor);
+        let (started_tx, started_rx) = unbounded();
+        let (done_tx, done_rx) = unbounded();
+        let second = std::thread::spawn(move || {
+            started_tx.send(()).unwrap();
+            second_actor.shutdown().unwrap();
+            done_tx.send(()).unwrap();
+        });
+        started_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        let early = done_rx.recv_timeout(Duration::from_millis(200));
+        release_tx.send(()).unwrap();
+        first.join().unwrap();
+        second.join().unwrap();
+        assert!(
+            early.is_err(),
+            "shutdown returned while actor resources were still alive"
+        );
+    }
+
+    #[test]
+    #[ignore = "requires installed Whisper weights; exercises GPU cleanup in a subprocess"]
+    fn loaded_whisper_actor_shuts_down_before_process_exit() {
+        const CHILD: &str = "SOUFFLE_QUIT_GPU_CHILD";
+        const MODEL: &str = "SOUFFLE_QUIT_GPU_MODEL_DIR";
+        if std::env::var_os(CHILD).is_some() {
+            let model = PathBuf::from(std::env::var_os(MODEL).expect("set model directory"));
+            let (_audio_tx, audio_rx) = unbounded();
+            let actor = EngineActorHandle::spawn(
+                audio_rx,
+                Arc::new(std::sync::atomic::AtomicU64::new(0)),
+                Arc::new(Mutex::new(None)),
+                Box::new(|_profile| Ok(Box::new(crate::engine::whisper::WhisperEngine::new()))),
+            )
+            .unwrap();
+            let profile = crate::engine::resolve_transcription_profile(
+                Some("whisper"),
+                Some("turbo"),
+                Some("whisper-rs"),
+            )
+            .unwrap();
+            actor.load_model(profile, model).unwrap();
+            actor.shutdown().unwrap();
+            // Intentionally bypass Rust Drop just like the app's terminal quit.
+            // GGML's static Metal destructor must now find no live resources.
+            std::process::exit(0);
+        }
+        assert!(
+            std::env::var_os(MODEL).is_some(),
+            "set {MODEL} to installed weights"
+        );
+        let result = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "pipeline::actor::tests::loaded_whisper_actor_shuts_down_before_process_exit",
+                "--ignored",
+                "--nocapture",
+            ])
+            .env(CHILD, "1")
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "GPU cleanup child failed: {}",
+            String::from_utf8_lossy(&result.stderr)
+        );
     }
 
     fn queued_pair_calls(me: Vec<f32>, them: Vec<f32>) -> Vec<(Vec<f32>, Vec<f32>)> {

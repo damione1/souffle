@@ -7421,6 +7421,12 @@ fn main() {
     let startup_gate = Arc::new(StartupPresentationGate::new());
     spawn_native_action_receiver(window.as_weak(), handle.clone(), Arc::clone(&startup_gate));
 
+    #[cfg(target_os = "macos")]
+    souffle_lib::native::termination::install(
+        objc2::MainThreadMarker::new().expect("UI must start on main"),
+    )
+    .expect("could not install safe native quit routing");
+
     window.set_settings_app_version(souffle_lib::commands::get_app_version().version.into());
 
     // Startup Settings are loaded through the same serialized worker as every
@@ -7807,6 +7813,7 @@ fn wire_mic_stall_banner(
 /// meeting's segments are saved as they come, so past this the next launch
 /// recovers it anyway; this only buys the complete, finalized save.
 const QUIT_FINALIZE_BUDGET: Duration = Duration::from_secs(20);
+static QUIT_FINALIZATION_STARTED: AtomicBool = AtomicBool::new(false);
 
 /// Terminal action of the app's Quit (tray menu, Settings), SOU-260 AC4:
 /// stop and save whatever is recording, then exit. Runs on a worker while
@@ -7814,16 +7821,26 @@ const QUIT_FINALIZE_BUDGET: Duration = Duration::from_secs(20);
 /// synchronously (tray, pill), which would hang if the main thread waited
 /// here. The window is already hidden by the settings flush before this.
 fn quit_after_finalizing_recording(handle: &AppHandle) {
+    if QUIT_FINALIZATION_STARTED.swap(true, Ordering::AcqRel) {
+        return;
+    }
     let handle = handle.clone();
     let spawned = std::thread::Builder::new()
         .name("quit-finalize".into())
         .spawn(move || {
             souffle_lib::commands::finalize_recording_before_quit(&handle, QUIT_FINALIZE_BUDGET);
+            if let Err(error) = handle.engine_actor.shutdown() {
+                eprintln!("Could not release the transcription engine before quit: {error}");
+                QUIT_FINALIZATION_STARTED.store(false, Ordering::Release);
+                souffle_lib::native::bridge::dispatch(NativeAction::ShowMainWindow);
+                return;
+            }
             std::process::exit(0);
         });
     if let Err(e) = spawned {
         eprintln!("Could not finalize the recording before quit: {e}");
-        std::process::exit(0);
+        QUIT_FINALIZATION_STARTED.store(false, Ordering::Release);
+        souffle_lib::native::bridge::dispatch(NativeAction::ShowMainWindow);
     }
 }
 

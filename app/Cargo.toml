@@ -34,6 +34,11 @@ name = "native_paste_main_thread"
 path = "tests/native_paste_main_thread.rs"
 harness = false
 
+[[test]]
+name = "native_termination_main_thread"
+path = "tests/native_termination_main_thread.rs"
+harness = false
+
 [lints]
 workspace = true
 
