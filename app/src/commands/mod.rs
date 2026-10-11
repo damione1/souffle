@@ -13,6 +13,8 @@ mod pill;
 mod settings;
 mod snippets;
 pub(crate) mod transcription;
+#[cfg(any(test, feature = "test-support"))]
+pub use transcription::meeting_callback_for_test;
 pub mod updater;
 
 pub use audio::*;

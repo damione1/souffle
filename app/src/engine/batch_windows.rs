@@ -4,15 +4,131 @@
 //! split words at the boundary (`data | platform`, `Snow | flake`) and
 //! push Parakeet into inventing a completion (`The next one is the same
 //! thing.`). Cut on a silence gap in [4 s, 7 s] instead; if none, cut at
-//! 7 s. The advertised pipeline hop stays 5 s — leftover samples sit in
-//! the engine buffer.
+//! 7 s. A 100 ms delivery hop permits revisable snapshots without changing
+//! these final cuts. Snapshots never consume or advance the buffered PCM.
+
+use std::time::{Duration, Instant};
+
+use super::{EngineError, TranscriptionSegment};
 
 /// Whisper / Parakeet sample rate.
 pub const SAMPLE_RATE: u32 = 16_000;
 
-/// Pipeline hop advertised as `chunk_size_samples`. Actor and CLI still
-/// deliver this many samples per `transcribe` call.
-pub const CHUNK_SAMPLES: usize = SAMPLE_RATE as usize * 5;
+/// Audio delivery hop, independent of the final inference-window length.
+pub const CHUNK_SAMPLES: usize = SAMPLE_RATE as usize / 10;
+
+/// The previous 5 s delivery hop rounded both VAD holds up to 5 s. Keep
+/// that audio retention budget when shortening delivery for previews.
+pub const VAD_HOLD_SECONDS: f64 = 5.0;
+
+const PREVIEW_INTERVAL: Duration = Duration::from_millis(1500);
+const PREVIEW_SAMPLES: usize = SAMPLE_RATE as usize * 3 / 2;
+
+/// Actor-owned, synchronous optional work. Audio and monotonic time both
+/// advance before a revision; missed opportunities are coalesced, never queued.
+pub(super) struct PreviewPolicy {
+    enabled: bool,
+    last_samples: usize,
+    last_attempt: Option<Instant>,
+    visible: bool,
+}
+
+impl Default for PreviewPolicy {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            last_samples: 0,
+            last_attempt: None,
+            visible: false,
+        }
+    }
+}
+
+impl PreviewPolicy {
+    pub fn set_enabled(&mut self, enabled: bool) {
+        self.enabled = enabled;
+    }
+
+    pub fn reset(&mut self) {
+        self.last_samples = 0;
+        self.last_attempt = None;
+        self.visible = false;
+    }
+
+    /// Withdraw a snapshot when its PCM is finalized, including a final
+    /// window whose silence/hallucination filters produce no final words.
+    pub fn clear(&mut self, offset: f64) -> Option<TranscriptionSegment> {
+        std::mem::take(&mut self.visible).then(|| empty_preview(offset))
+    }
+
+    pub fn decode(
+        &mut self,
+        pcm: &[f32],
+        consumed_samples: usize,
+        now: Instant,
+        decode: impl FnOnce(&[f32], f64) -> Result<Vec<TranscriptionSegment>, EngineError>,
+    ) -> Option<TranscriptionSegment> {
+        let total = consumed_samples + pcm.len();
+        if !self.enabled
+            || pcm.len() < PREVIEW_SAMPLES
+            || total.saturating_sub(self.last_samples) < PREVIEW_SAMPLES
+            || self
+                .last_attempt
+                .is_some_and(|last| now.saturating_duration_since(last) < PREVIEW_INTERVAL)
+        {
+            return None;
+        }
+        self.last_samples = total;
+        self.last_attempt = Some(now);
+        let offset = consumed_samples as f64 / SAMPLE_RATE as f64;
+        // Silence must never be sent to Parakeet's decoder; Whisper also
+        // applies its existing near-silence and hallucination gates.
+        let result = if pcm.iter().all(|s| *s == 0.0) {
+            Ok(Vec::new())
+        } else {
+            decode(pcm, offset)
+        };
+        match result {
+            Ok(segments) => {
+                let mut snapshot = empty_preview(offset);
+                for segment in segments {
+                    let text = segment.text.trim();
+                    if text.is_empty() {
+                        continue;
+                    }
+                    if !snapshot.text.is_empty() {
+                        snapshot.text.push(' ');
+                    }
+                    snapshot.text.push_str(text);
+                    snapshot.end_time = snapshot.end_time.max(segment.end_time);
+                    snapshot.language = snapshot.language.or(segment.language);
+                }
+                if snapshot.text.is_empty() {
+                    self.clear(offset)
+                } else {
+                    self.visible = true;
+                    Some(snapshot)
+                }
+            }
+            Err(error) => {
+                tracing::warn!(%error, "Optional batch preview failed; final PCM retained");
+                None
+            }
+        }
+    }
+}
+
+fn empty_preview(offset: f64) -> TranscriptionSegment {
+    TranscriptionSegment {
+        text: String::new(),
+        start_time: offset,
+        end_time: offset,
+        is_final: false,
+        speaker: None,
+        language: None,
+        confidence: None,
+    }
+}
 
 const MIN_CUT_SAMPLES: usize = SAMPLE_RATE as usize * 4;
 const MAX_CUT_SAMPLES: usize = SAMPLE_RATE as usize * 7;
@@ -116,6 +232,207 @@ mod tests {
         vec![0.0; (seconds * SAMPLE_RATE as f64).round() as usize]
     }
 
+    fn hypothesis(text: &str, start: f64, end: f64) -> TranscriptionSegment {
+        TranscriptionSegment {
+            text: text.into(),
+            start_time: start,
+            end_time: end,
+            is_final: true,
+            speaker: None,
+            language: Some("fr".into()),
+            confidence: None,
+        }
+    }
+
+    #[test]
+    fn first_preview_at_1500ms_and_revisions_need_new_pcm_and_monotonic_time() {
+        let mut policy = PreviewPolicy::default();
+        let clock = Instant::now();
+        let mut pcm = Vec::new();
+        let mut calls = 0;
+        for hop in 1..=15 {
+            pcm.extend(vec![0.1; CHUNK_SAMPLES]);
+            let snapshot = policy.decode(
+                &pcm,
+                0,
+                clock + Duration::from_millis(hop * 100),
+                |_, offset| {
+                    calls += 1;
+                    Ok(vec![
+                        hypothesis("Premier", offset, 1.5),
+                        hypothesis("aperçu.", 1.0, 1.5),
+                    ])
+                },
+            );
+            if hop < 15 {
+                assert!(snapshot.is_none());
+            } else {
+                let snapshot = snapshot.unwrap();
+                assert_eq!(snapshot.text, "Premier aperçu.");
+                assert!(!snapshot.is_final);
+                assert_eq!(snapshot.start_time, 0.0);
+            }
+        }
+        assert_eq!(calls, 1);
+        let before = pcm.clone();
+        assert!(
+            policy
+                .decode(&pcm, 0, clock + Duration::from_secs(10), |_, _| panic!(
+                    "no new PCM"
+                ))
+                .is_none()
+        );
+        assert_eq!(pcm, before, "snapshot must not consume audio");
+        pcm.extend(vec![0.1; PREVIEW_SAMPLES]);
+        assert!(
+            policy
+                .decode(&pcm, 0, clock + Duration::from_millis(2999), |_, _| panic!(
+                    "too soon"
+                ))
+                .is_none()
+        );
+        let revision = policy
+            .decode(&pcm, 0, clock + Duration::from_secs(3), |_, offset| {
+                Ok(vec![hypothesis("Révision", offset, 3.0)])
+            })
+            .unwrap();
+        assert_eq!(revision.text, "Révision");
+        assert!(!revision.is_final);
+    }
+
+    #[test]
+    fn failed_preview_preserves_the_final_window_and_does_not_spin() {
+        let mut policy = PreviewPolicy::default();
+        let clock = Instant::now();
+        let mut pcm = sine(1.5, 0.3);
+        let before = pcm.clone();
+        assert!(
+            policy
+                .decode(&pcm, 0, clock, |_, _| Err(EngineError::InferenceError(
+                    "test failure".into()
+                )))
+                .is_none()
+        );
+        assert_eq!(pcm, before);
+        assert!(
+            policy
+                .decode(&pcm, 0, clock + PREVIEW_INTERVAL, |_, _| panic!(
+                    "no new audio after error"
+                ))
+                .is_none()
+        );
+        pcm.extend(sine(5.5, 0.3));
+        let windows = drain_ready_windows(&mut pcm);
+        assert_eq!(windows[0].len(), MAX_CUT_SAMPLES);
+        assert_eq!(&windows[0][..before.len()], &before);
+        assert!(pcm.is_empty());
+    }
+
+    #[test]
+    fn silence_does_not_decode_and_empty_revisions_withdraw_visible_text() {
+        let mut policy = PreviewPolicy::default();
+        let clock = Instant::now();
+        assert!(
+            policy
+                .decode(&silence(1.5), 0, clock, |_, _| panic!(
+                    "digital silence must not decode"
+                ))
+                .is_none()
+        );
+        let offset_samples = SAMPLE_RATE as usize * 7;
+        let snapshot = policy
+            .decode(
+                &sine(1.5, 0.3),
+                offset_samples,
+                clock + PREVIEW_INTERVAL,
+                |_, offset| Ok(vec![hypothesis("Bonjour", offset, offset + 1.5)]),
+            )
+            .unwrap();
+        assert_eq!(snapshot.start_time, 7.0);
+        let withdrawn = policy
+            .decode(
+                &sine(3.0, 0.3),
+                offset_samples,
+                clock + PREVIEW_INTERVAL * 2,
+                |_, _| Ok(vec![]),
+            )
+            .unwrap();
+        assert!(!withdrawn.is_final);
+        assert!(withdrawn.text.is_empty());
+        assert!(policy.clear(7.0).is_none(), "withdraw only once");
+    }
+
+    #[test]
+    fn catch_up_coalesces_previews_and_reset_starts_a_fresh_session() {
+        let mut policy = PreviewPolicy::default();
+        let clock = Instant::now();
+        policy.set_enabled(false);
+        for hop in 15..=60 {
+            let pcm = sine(hop as f64 / 10.0, 0.3);
+            assert!(
+                policy
+                    .decode(&pcm, 0, clock, |_, _| panic!("catch-up preview"))
+                    .is_none()
+            );
+        }
+        policy.set_enabled(true);
+        let snapshot = policy
+            .decode(&sine(6.0, 0.3), 0, clock, |_, offset| {
+                Ok(vec![hypothesis("Un seul aperçu", offset, 6.0)])
+            })
+            .unwrap();
+        assert_eq!(snapshot.text, "Un seul aperçu");
+        policy.reset();
+        assert!(policy.clear(0.0).is_none());
+        assert!(
+            policy
+                .decode(&sine(1.5, 0.3), 0, clock, |_, offset| Ok(vec![hypothesis(
+                    "Nouvelle session",
+                    offset,
+                    1.5
+                )]))
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn previews_preserve_final_pcm_and_offsets_across_cuts_and_short_tail() {
+        let mut source = sine(6.0, 0.3);
+        source.extend(silence(0.3));
+        source.extend(sine(7.1, 0.3)); // forced cut, then short tail
+        let run = |previews: bool| {
+            let mut policy = PreviewPolicy::default();
+            policy.set_enabled(previews);
+            let mut buffer = Vec::new();
+            let mut finals = Vec::new();
+            let mut consumed = 0;
+            let clock = Instant::now();
+            for (i, hop) in source.chunks(CHUNK_SAMPLES).enumerate() {
+                buffer.extend_from_slice(hop);
+                for window in drain_ready_windows(&mut buffer) {
+                    policy.clear(consumed as f64 / SAMPLE_RATE as f64);
+                    let len = window.len();
+                    finals.push((consumed, window));
+                    consumed += len;
+                }
+                policy.decode(
+                    &buffer,
+                    consumed,
+                    clock + Duration::from_millis(i as u64 * 100),
+                    |_, offset| Ok(vec![hypothesis("Révisable", offset, offset + 1.5)]),
+                );
+            }
+            finals.push((consumed, buffer));
+            finals
+        };
+        let baseline = run(false);
+        assert_eq!(run(true), baseline);
+        assert_eq!(baseline[0].0, 0);
+        assert_eq!(baseline[0].1.len(), SAMPLE_RATE as usize * 6);
+        assert_eq!(baseline[1].1.len(), MAX_CUT_SAMPLES);
+        assert!(baseline.last().unwrap().1.len() < SAMPLE_RATE as usize / 2);
+    }
+
     #[test]
     fn continuous_speech_does_not_cut_at_five_seconds() {
         let pcm = sine(5.0, 0.3);
@@ -165,7 +482,7 @@ mod tests {
         pcm.extend(silence(0.3));
         pcm.extend(sine(1.5, 0.3));
         let cut = find_cut_samples(&pcm).expect("gap at 6 s");
-        let five = CHUNK_SAMPLES;
+        let five = SAMPLE_RATE as usize * 5;
         assert!(
             cut > five,
             "cut {cut} must keep the ~5 s boundary (data platform / Snowflake / next checkpoint) intact"

@@ -120,6 +120,16 @@ fn build_meeting_on_segment(
     })
 }
 
+/// Exercise the shipped callback from cross-crate UI/persistence tests.
+#[cfg(any(test, feature = "test-support"))]
+pub fn meeting_callback_for_test(
+    channel: ProgressChannel<TranscriptionSegment>,
+    accumulator: Arc<Mutex<Option<MeetingAccumulator>>>,
+    db: Arc<Database>,
+) -> SegmentCallback {
+    build_meeting_on_segment(channel, accumulator, db)
+}
+
 /// Set up and launch a meeting recording (new or resumed). Persists the header
 /// up front, stores the accumulator, then starts the engine session off-thread.
 async fn launch_meeting(
@@ -321,10 +331,10 @@ fn system_audio_plan(
 fn capture_and_diarize_after_probe(
     capture_requested: bool,
     tap_alive: bool,
-    engine_id: &str,
+    supports_diarization: bool,
 ) -> (bool, bool) {
     let capture = capture_requested && tap_alive;
-    let diarize = capture && engine_id == crate::engine::KYUTAI_ENGINE_ID;
+    let diarize = capture && supports_diarization;
     (capture, diarize)
 }
 
@@ -391,11 +401,11 @@ fn start_pipeline_blocking(
     #[cfg(not(target_os = "macos"))]
     let tap_alive = true;
 
-    let (actual_capture_system_audio, diarize) = capture_and_diarize_after_probe(
-        capture_system_audio,
-        tap_alive,
-        &settings.transcription_engine_id,
-    );
+    let info = engine_actor
+        .loaded_engine_info()
+        .ok_or_else(|| "No model loaded".to_string())?;
+    let (actual_capture_system_audio, diarize) =
+        capture_and_diarize_after_probe(capture_system_audio, tap_alive, info.supports_diarization);
 
     // Auto-stop detection only applies to meetings: dictation sessions are
     // short and user-driven, so "meeting is over" doesn't apply. This is a
@@ -426,9 +436,6 @@ fn start_pipeline_blocking(
     // SOU-260: capture starts now, not once the engine is ready, so the
     // capture rate comes from the engine as it was loaded rather than from
     // the session reply (it is a property of the engine, not of the mode).
-    let info = engine_actor
-        .loaded_engine_info()
-        .ok_or_else(|| "No model loaded".to_string())?;
 
     // Recording is opt-in and meeting-only; resolve the actual path only
     // once the retention setting is known (a `RecordingTarget` just means
@@ -1481,19 +1488,19 @@ mod tests {
     #[test]
     fn tap_probe_failure_downgrades_to_single_stream() {
         assert_eq!(
-            capture_and_diarize_after_probe(true, false, crate::engine::KYUTAI_ENGINE_ID),
+            capture_and_diarize_after_probe(true, false, true),
             (false, false)
         );
         assert_eq!(
-            capture_and_diarize_after_probe(true, true, crate::engine::KYUTAI_ENGINE_ID),
+            capture_and_diarize_after_probe(true, true, true),
             (true, true)
         );
         assert_eq!(
-            capture_and_diarize_after_probe(true, true, "whisper"),
+            capture_and_diarize_after_probe(true, true, false),
             (true, false)
         );
         assert_eq!(
-            capture_and_diarize_after_probe(false, true, crate::engine::KYUTAI_ENGINE_ID),
+            capture_and_diarize_after_probe(false, true, true),
             (false, false)
         );
     }

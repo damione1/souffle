@@ -1,3 +1,4 @@
+mod batch_session;
 pub mod batch_windows;
 pub mod kyutai;
 pub mod parakeet;
@@ -203,6 +204,12 @@ pub struct ContextWindowStats {
 
 /// Methods take &mut self and there is no Send/Sync bound: engines are
 /// created, used, and dropped on the engine actor thread only.
+///
+/// All decoding strategies publish the same [`TranscriptionSegment`]
+/// contract. Native streaming emits it directly; chunk decoders pass through
+/// `batch_session::BatchSession`, which converts window-local timestamps to
+/// the captured session timeline. Meeting consumers must not branch on an
+/// engine/model id or infer turns from the size/order of returned batches.
 pub trait TranscriptionEngine {
     fn load_model(&mut self, model_path: &Path) -> Result<(), EngineError>;
     fn unload_model(&mut self) -> Result<(), EngineError>;
@@ -212,6 +219,14 @@ pub trait TranscriptionEngine {
         language: Option<&str>,
     ) -> Result<Vec<TranscriptionSegment>, EngineError>;
     fn flush(&mut self) -> Result<Vec<TranscriptionSegment>, EngineError>;
+    /// Optional batch snapshots are suppressed during catch-up and stop.
+    /// All inference still runs synchronously on the existing actor thread.
+    fn set_preview_enabled(&mut self, _enabled: bool) {}
+    /// Retention floor independent of delivery hop. Batch engines preserve
+    /// their pre-preview VAD drain/lookback duration when feeding smaller hops.
+    fn minimum_vad_hold_seconds(&self) -> f64 {
+        0.0
+    }
     /// Stop-only salvage after a failed flush. Returns already decoded words,
     /// never performs inference or repairs state, and consumes them once.
     /// The caller must retain/report the flush error separately.
@@ -263,9 +278,8 @@ pub trait TranscriptionEngine {
     }
 
     /// Whether this engine can transcribe two synchronized audio streams (mic +
-    /// system audio) and label each segment by speaker. Only streaming engines
-    /// that support a batch dimension (Kyutai/moshi) can; others run meetings as
-    /// a single mixed stream with no Me/Them labels.
+    /// system audio) and label each segment by capture source. Streaming engines
+    /// may batch both lanes; batch engines serialize them on one loaded model.
     fn supports_diarization(&self) -> bool {
         false
     }
@@ -308,7 +322,22 @@ pub trait TranscriptionEngine {
 /// keep addressing it as `engine::Speaker`.
 pub use souffle_schema::Speaker;
 
-/// A piece of transcribed text with metadata
+/// Engine-independent transcript stream contract, consumed by the pipeline,
+/// meeting callback, live grouper and persistence.
+///
+/// - Times are seconds on the captured session timeline, including silence,
+///   never callback arrival time. `0 <= start_time <= end_time`; decoding
+///   padding does not extend the audio span. Zero-duration pending words are
+///   valid. Native words and batch phrases may have different granularity.
+/// - A final appends immutable text in its source lane's emission order.
+///   Cross-lane delivery may be late, and small same-lane timestamp jitter
+///   must not reorder words. Consumers group by audio time, not callback order.
+/// - A non-final replaces that lane's current preview; empty text retracts
+///   it. The next final clears only that lane's preview. Previews are never
+///   persisted and must retain their times through the UI boundary.
+/// - Speaker identifies capture source, not a guessed voice identity. One
+///   shared paragraph policy handles interruptions, pauses and length limits
+///   for all engines; engine adapters never manufacture paragraphs.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TranscriptionSegment {
     pub text: String,
@@ -643,12 +672,12 @@ fn whisper_turbo_model_descriptor() -> TranscriptionModelDescriptor {
             supports_batch_transcription: true,
             supports_language_auto_detect: true,
             supports_word_timestamps: true,
-            supports_partial_results: false,
+            supports_partial_results: true,
         },
         audio_input: AudioInputRequirements {
             sample_rate_hz: 16_000,
             channels: 1,
-            chunk_size_samples: 16_000 * 5,
+            chunk_size_samples: batch_windows::CHUNK_SAMPLES as u32,
         },
         available_in_app: true,
         availability_note: None,
@@ -692,12 +721,12 @@ fn parakeet_tdt_06b_v3_model_descriptor() -> TranscriptionModelDescriptor {
             supports_batch_transcription: true,
             supports_language_auto_detect: true,
             supports_word_timestamps: true,
-            supports_partial_results: false,
+            supports_partial_results: true,
         },
         audio_input: AudioInputRequirements {
             sample_rate_hz: 16_000,
             channels: 1,
-            chunk_size_samples: 16_000 * 5,
+            chunk_size_samples: batch_windows::CHUNK_SAMPLES as u32,
         },
         available_in_app: true,
         availability_note: None,
@@ -940,7 +969,7 @@ mod tests {
         let engine = create_engine(&profile).unwrap();
         let reqs = engine.audio_requirements();
         assert_eq!(reqs.sample_rate_hz, 16_000);
-        assert_eq!(reqs.chunk_size_samples, 16_000 * 5);
+        assert_eq!(reqs.chunk_size_samples, batch_windows::CHUNK_SAMPLES as u32);
     }
 
     #[test]

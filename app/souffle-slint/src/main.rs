@@ -1884,19 +1884,13 @@ async fn ensure_model_ready(handle: &AppHandle) -> Result<(), String> {
     .map_err(|error| format!("Join ensure_model_ready task: {error}"))?
 }
 
-/// Pushes each transcribed segment into the window's `live-text`/
-/// `live-tentative` properties. Runs on the engine-actor thread, not the
-/// Slint main thread, so every update is marshaled via
-/// `invoke_from_event_loop` - the same reasoning as `run_on_main_thread`,
-/// just fire-and-forget instead of awaited. Milestone 5 scope: a single
-/// running text block for both dictation and meetings, not the full
-/// paragraph-grouped/speaker-lane rendering LiveSessionCard.svelte does -
-/// that's real, separate work (windowing, speaker lanes, inline edit),
-/// deliberately deferred and noted here rather than half-built.
+/// Marshal actor segments onto Slint, retaining the originating session's
+/// generation even when publication waits until after stop/new-session.
 fn live_segment_channel(
     weak: slint::Weak<MainWindow>,
     live_state: LiveTranscriptState,
 ) -> ProgressChannel<TranscriptionSegment> {
+    let generation = live_state.lock().unwrap().generation();
     ProgressChannel::new(move |segment: TranscriptionSegment| {
         let weak = weak.clone();
         let live_state = live_state.clone();
@@ -1904,7 +1898,12 @@ fn live_segment_channel(
             let Some(window) = weak.upgrade() else {
                 return;
             };
-            live_view::apply_live_segment(&window, &live_state, &segment);
+            live_view::apply_live_segment_for_generation(
+                &window,
+                &live_state,
+                generation,
+                &segment,
+            );
         });
     })
 }

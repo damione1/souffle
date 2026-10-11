@@ -4,11 +4,9 @@
 //! `tests/fixtures/paragraph_grouping.json` pins its output; the consumers
 //! prove their [`SegmentLike`] implementations against the same fixture.
 //!
-//! The live transcript view (`souffle-slint/src/live_transcript.rs`) is the
-//! deliberate exception: this algorithm splits a turn based on a *later*
-//! interrupter, so it cannot run incrementally without re-cutting paragraphs
-//! already on screen. The live view keeps its own simpler append rule and
-//! shares only [`PAUSE_THRESHOLD_SECONDS`].
+//! The live view uses [`group_into_paragraph_segments`] on its bounded tail,
+//! including timestamped previews. Keeping the original segments lets it
+//! distinguish provisional words without duplicating the grouping policy.
 
 use crate::Speaker;
 
@@ -22,9 +20,9 @@ pub const SOFT_MAX_CHARS: usize = 480;
 /// Absolute ceiling for streams with no punctuation at all.
 pub const HARD_MAX_CHARS: usize = 700;
 
-/// Sequential handoff: another speaker starting at least this long after
-/// the interrupted speaker's last end closes the turn immediately.
-const HANDOFF_GAP_S: f64 = 0.35;
+/// Sequential handoff: an actual overlap gets the short interruption hold;
+/// a speaker starting at/after the other lane's end starts a new turn.
+const HANDOFF_GAP_S: f64 = 0.0;
 /// Overlap: the interrupted turn closes at the latest this long after the
 /// interrupter started, when no sentence end comes first.
 const INTERRUPT_HOLD_S: f64 = 1.0;
@@ -126,7 +124,7 @@ struct Turn<'a, S> {
 /// KV refresh; time-sorting the same speaker zippers two hypotheses).
 /// Overlapping turns from another speaker split the interrupted turn
 /// so the interruption can sort between the two halves:
-/// - Sequential handoff (>= 350ms after the other speaker's last end):
+/// - Sequential handoff (at/after the other speaker's last end):
 ///   close immediately.
 /// - Overlap: close at the earlier of the next sentence end or 1s after
 ///   the interrupter started, but only when the interrupted turn is long
@@ -137,6 +135,9 @@ fn cluster_into_turns<S: SegmentLike>(segments: &[S], pause_threshold: f64) -> V
     let mut untagged: Vec<&S> = Vec::new();
 
     for seg in segments {
+        if seg.text().trim().is_empty() {
+            continue;
+        }
         match seg.speaker() {
             Some(speaker) => {
                 lanes
@@ -223,11 +224,11 @@ fn interrupt_split_index<S: SegmentLike>(
     let apply_hold = turn.last_end - turn.start >= monologue_min_s;
     for i in spoken_before..turn.segments.len() {
         let seg = turn.segments[i];
-        if ends_sentence(seg.text().trim()) {
-            return Some(i + 1);
-        }
         if apply_hold && seg.start_time() >= hold_at {
             return Some(i);
+        }
+        if ends_sentence(seg.text().trim()) {
+            return Some(i + 1);
         }
     }
     None
@@ -302,104 +303,44 @@ fn split_interrupted_turns<'a, S: SegmentLike>(
     out
 }
 
-fn flush_paragraph(
-    paragraphs: &mut Vec<Paragraph>,
-    timestamp: &str,
-    start_time: f64,
-    speaker: Option<Speaker>,
-    words: &mut Vec<String>,
-) {
-    paragraphs.push(Paragraph {
-        timestamp: timestamp.to_string(),
-        start_time,
-        text: words.join(" "),
-        speaker,
-    });
-    words.clear();
-}
-
-fn paragraphs_from_refs<S: SegmentLike>(
-    segments: &[&S],
+fn paragraphs_from_refs<'a, S: SegmentLike>(
+    segments: &[&'a S],
     pause_threshold: f64,
-    break_on_speaker_change: bool,
-) -> Vec<Paragraph> {
-    if segments.is_empty() {
-        return Vec::new();
-    }
-
-    let mut paragraphs: Vec<Paragraph> = Vec::new();
-    let mut current_timestamp = format_timestamp(segments[0].start_time());
-    let mut current_start = segments[0].start_time();
-    let mut current_speaker: Option<Speaker> = segments[0].speaker();
-    let mut current_words: Vec<String> = Vec::new();
+) -> Vec<Vec<&'a S>> {
+    let mut paragraphs = Vec::new();
+    let mut current: Vec<&S> = Vec::new();
     let mut current_chars: usize = 0;
     let mut sentence_count: usize = 0;
     let mut ends_sentence_flag = false;
-    let mut last_end = segments[0].start_time();
+    let mut last_end = 0.0;
 
     for seg in segments {
         let text = seg.text().trim();
         if text.is_empty() {
             continue;
         }
-        let speaker = seg.speaker();
-
-        if !current_words.is_empty() {
-            let mut broke = false;
-            if break_on_speaker_change && speaker != current_speaker {
-                flush_paragraph(
-                    &mut paragraphs,
-                    &current_timestamp,
-                    current_start,
-                    current_speaker,
-                    &mut current_words,
-                );
-                broke = true;
-            } else {
-                let gap = seg.start_time() - last_end;
-                let break_at_sentence = ends_sentence_flag
-                    && (gap >= pause_threshold
-                        || sentence_count >= MAX_SENTENCES_PER_PARAGRAPH
-                        || current_chars >= SOFT_MAX_CHARS);
-                let break_hard = current_chars >= HARD_MAX_CHARS;
-
-                if break_at_sentence || break_hard {
-                    flush_paragraph(
-                        &mut paragraphs,
-                        &current_timestamp,
-                        current_start,
-                        current_speaker,
-                        &mut current_words,
-                    );
-                    broke = true;
-                }
-            }
-
-            if broke {
-                current_timestamp = format_timestamp(seg.start_time());
-                current_start = seg.start_time();
-                current_speaker = speaker;
+        if !current.is_empty() {
+            let gap = seg.start_time() - last_end;
+            let break_at_sentence = ends_sentence_flag
+                && (sentence_count >= MAX_SENTENCES_PER_PARAGRAPH
+                    || current_chars >= SOFT_MAX_CHARS);
+            if gap >= pause_threshold || break_at_sentence || current_chars >= HARD_MAX_CHARS {
+                paragraphs.push(std::mem::take(&mut current));
                 current_chars = 0;
                 sentence_count = 0;
+                last_end = seg.start_time();
             }
-        } else {
-            current_speaker = speaker;
         }
 
-        current_words.push(text.to_string());
+        current.push(*seg);
         current_chars += text.chars().count() + 1;
         sentence_count += count_sentence_ends(text);
         ends_sentence_flag = ends_sentence(text);
         last_end = last_end.max(seg_end(*seg));
     }
 
-    if !current_words.is_empty() {
-        paragraphs.push(Paragraph {
-            timestamp: current_timestamp,
-            start_time: current_start,
-            text: current_words.join(" "),
-            speaker: current_speaker,
-        });
+    if !current.is_empty() {
+        paragraphs.push(current);
     }
 
     paragraphs
@@ -416,6 +357,29 @@ pub fn group_into_paragraphs<S: SegmentLike>(
     segments: &[S],
     pause_threshold: f64,
 ) -> Vec<Paragraph> {
+    group_into_paragraph_segments(segments, pause_threshold)
+        .into_iter()
+        .map(|group| Paragraph {
+            timestamp: format_timestamp(group[0].start_time()),
+            start_time: group[0].start_time(),
+            speaker: group[0].speaker(),
+            text: group
+                .iter()
+                .map(|s| s.text().trim())
+                .collect::<Vec<_>>()
+                .join(" "),
+        })
+        .collect()
+}
+
+/// The same paragraphs, retaining their nonempty source segments. Every
+/// group is nonempty and keeps emission order within its speaker lane.
+/// Renderers can preserve per-segment metadata (such as provisional text)
+/// without guessing which words belong to a paragraph after flattening it.
+pub fn group_into_paragraph_segments<S: SegmentLike>(
+    segments: &[S],
+    pause_threshold: f64,
+) -> Vec<Vec<&S>> {
     if segments.is_empty() {
         return Vec::new();
     }
@@ -423,17 +387,17 @@ pub fn group_into_paragraphs<S: SegmentLike>(
     let diarized = segments.iter().any(|s| s.speaker().is_some());
     if !diarized {
         let refs: Vec<&S> = segments.iter().collect();
-        return paragraphs_from_refs(&refs, pause_threshold, false);
+        return paragraphs_from_refs(&refs, pause_threshold);
     }
 
     let turns = cluster_into_turns(segments, pause_threshold);
-    let mut pieces: Vec<Paragraph> = Vec::new();
+    let mut pieces = Vec::new();
     for turn in &turns {
-        pieces.extend(paragraphs_from_refs(&turn.segments, pause_threshold, false));
+        pieces.extend(paragraphs_from_refs(&turn.segments, pause_threshold));
     }
     pieces.sort_by(|a, b| {
-        a.start_time
-            .partial_cmp(&b.start_time)
+        a[0].start_time()
+            .partial_cmp(&b[0].start_time())
             .unwrap_or(std::cmp::Ordering::Equal)
     });
     pieces
@@ -540,6 +504,64 @@ mod tests {
     // ── turn interruption (crosstalk vs. monologue) ─────────────────────
 
     #[test]
+    fn quick_handoff_is_a_new_turn_without_requiring_a_long_silence() {
+        let segments = [
+            seg("Question", 0.0, 1.0, Speaker::Me),
+            seg("Answer", 1.1, 1.7, Speaker::Them),
+            seg("Thanks", 1.8, 2.1, Speaker::Me),
+        ];
+        let result = group_into_paragraphs(&segments, PAUSE_THRESHOLD_SECONDS);
+        assert_eq!(result.len(), 3);
+        assert_eq!(result[0].text, "Question");
+        assert_eq!(result[2].text, "Thanks");
+    }
+
+    #[test]
+    fn a_coarse_segment_after_the_overlap_hold_starts_the_resumed_turn() {
+        // No word alignment inside the first 5-second batch segment. The
+        // next one must nevertheless follow the interjection, even when it
+        // ends in punctuation (do not consume it into the interrupted turn).
+        let segments = [
+            seg("The first window.", 0.0, 5.0, Speaker::Me),
+            seg("The next window.", 5.0, 10.0, Speaker::Me),
+            seg("Wait.", 2.0, 3.0, Speaker::Them),
+        ];
+        let result = group_into_paragraphs(&segments, PAUSE_THRESHOLD_SECONDS);
+        assert_eq!(result.len(), 3);
+        assert_eq!(result[1].text, "Wait.");
+        assert_eq!(result[2].start_time, 5.0);
+    }
+
+    #[test]
+    fn mono_pause_splits_without_punctuation_and_ignores_empty_input() {
+        let mut segments = vec![
+            seg("", 0.0, 0.0, Speaker::Me),
+            seg("before", 10.0, 11.0, Speaker::Me),
+            seg("after", 12.5, 13.0, Speaker::Me),
+        ];
+        for s in &mut segments {
+            s.speaker = None;
+        }
+        let result = group_into_paragraphs(&segments, PAUSE_THRESHOLD_SECONDS);
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].timestamp, "0:10");
+        assert_eq!(result[1].text, "after");
+    }
+
+    #[test]
+    fn empty_other_lane_does_not_interrupt_a_turn() {
+        let segments = [
+            seg("start", 10.0, 11.0, Speaker::Me),
+            seg("", 11.1, 11.2, Speaker::Them),
+            seg("end", 11.3, 12.0, Speaker::Me),
+        ];
+        assert_eq!(
+            group_into_paragraphs(&segments, PAUSE_THRESHOLD_SECONDS)[0].text,
+            "start end"
+        );
+    }
+
+    #[test]
     fn interrupted_turn_closes_at_the_following_sentence_end() {
         // Me monologues without a pause; Them interjects mid-monologue. Me's
         // turn must not absorb everything: it closes at the first sentence
@@ -548,7 +570,7 @@ mod tests {
         let segments = vec![
             seg("Let me explain the whole plan", 0.0, 0.5, Speaker::Me),
             seg("in detail because it's", 0.6, 1.1, Speaker::Me),
-            seg("wait", 1.2, 1.7, Speaker::Them),
+            seg("wait", 1.0, 1.7, Speaker::Them),
             seg("complicated.", 1.8, 2.3, Speaker::Me),
             seg("So let's start now", 3.0, 3.5, Speaker::Me),
         ];
@@ -574,7 +596,7 @@ mod tests {
         let segments = vec![
             seg("First point.", 0.0, 0.5, Speaker::Me),
             seg("Second part continues", 0.6, 1.1, Speaker::Me),
-            seg("quick question", 1.2, 1.7, Speaker::Them),
+            seg("quick question", 1.0, 1.7, Speaker::Them),
             seg("and concludes.", 1.8, 2.3, Speaker::Me),
             seg("New topic starts", 3.0, 3.5, Speaker::Me),
         ];
@@ -595,7 +617,7 @@ mod tests {
     #[test]
     fn unpunctuated_sequential_handoff_opens_a_new_line() {
         // Me never produces sentence-final punctuation. Them starts clearly
-        // after Me's last end (>= 350ms handoff), so Me closes immediately
+        // after Me's last end, so Me closes immediately
         // and later Me speech opens a fresh turn below.
         let segments = vec![
             seg("so basically", 0.0, 0.5, Speaker::Me),
