@@ -170,13 +170,9 @@ pub fn check(
     }
     let selection = Selection::resolve(input_uid, output_uid)?;
     eprintln!(
-        "{} / {}: input {} ({} Hz), output {} ({} Hz); device identity in the private manifest",
+        "{} / {}: device identity and formats will be recorded in the private manifest",
         mode.name(),
-        scene.name(),
-        selection.input.name,
-        selection.input.nominal_rate,
-        selection.output.name,
-        selection.output.nominal_rate
+        scene.name()
     );
     run_trial(
         trial,
