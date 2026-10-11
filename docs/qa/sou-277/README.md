@@ -122,13 +122,14 @@ transcripts or private references. Required fields:
   weights before the second engine's runs. The probe compares profile metadata
   but does not discover/hash model directories itself.
 
-Use an already built develop Soufflé bundle for the existing headless ASR CLI.
-Set its actual absolute path; this executable never launches the GUI for these
-flags. Do not rebuild, replace, reset or launch the running Nightly for this task.
+Build the existing Soufflé executable in this worktree for its headless ASR CLI.
+These flags exit before GUI initialization. This builds a standalone executable;
+it does not replace or launch the installed Nightly bundle.
 
 ```sh
-bundle="/absolute/path/to/develop/Soufflé.app"
-asr="$bundle/Contents/MacOS/souffle"
+MACOSX_DEPLOYMENT_TARGET=13.0 cargo build --manifest-path app/Cargo.toml -p souffle-slint --bin souffle-slint
+target=$(cargo metadata --manifest-path app/Cargo.toml --no-deps --format-version 1 | sed -n 's/.*"target_directory":"\([^"]*\)".*/\1/p')
+asr="$target/debug/souffle-slint"
 "$asr" --list-models --json > "$qa/catalogue.json"
 ```
 
@@ -224,6 +225,11 @@ For a scored trial, rerun only evaluation with
 `"$probe" score "$qa/apple-remote-1" --engine whisper`. Existing successful ASR
 provenance is not overwritten; archive the ASR JSON if intentionally rerunning.
 Transcribe the positive control separately with the same command and its folder.
+Both `score` and `report` verify every track's WAV and ASR JSON against the
+successful-run marker, its pinned profile, and the current protocol against the
+capture hash. Changed artifacts are errors. The executable path and hash record
+its identity at transcription time; evaluation does not require that executable
+to remain installed or claim to re-hash it later.
 
 Normalization is fixed: lowercase Unicode, punctuation removed (apostrophes and
 hyphens removed, not split), whitespace tokens, accents retained. Local WER is

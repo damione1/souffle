@@ -2,7 +2,7 @@
 //! Shared gold words are ambiguous and excluded from remote-overlap counts.
 use crate::{
     Result,
-    protocol::{self, Mode, Protocol, Scene, Track, TrialStatus},
+    protocol::{self, AsrProfile, Mode, Protocol, Scene, Track, TrialStatus},
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -10,7 +10,7 @@ use souffle_lib::engine::{PARAKEET_ENGINE_ID, WHISPER_ENGINE_ID};
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs,
-    path::Path,
+    path::{Path, PathBuf},
 };
 use unicode_normalization::{UnicodeNormalization, char::is_combining_mark};
 
@@ -148,19 +148,43 @@ struct Asr {
     backend: String,
     runs: Vec<Value>,
 }
-fn asr(trial: &Path, track: Track, engine: &str, manifest: &Value) -> Result<Asr> {
-    let stem = track.stem();
-    let file = track.filename();
-    if manifest["files"][&file].as_str() != Some(&protocol::hash(&trial.join(&file))?) {
-        return Err(format!("{file}: missing/mismatched manifest hash").into());
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AsrArtifact {
+    wav_sha256: String,
+    json_sha256: String,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AsrProvenance {
+    binary: PathBuf,
+    binary_sha256: String,
+    profile: AsrProfile,
+    artifacts: BTreeMap<String, AsrArtifact>,
+}
+fn trial_protocol(trial: &Path, manifest: &Value) -> Result<Protocol> {
+    let path = trial.join("protocol.json");
+    if manifest["protocol_sha256"].as_str() != Some(&protocol::hash(&path)?) {
+        return Err("protocol changed after capture".into());
     }
-    let result: Asr =
-        serde_json::from_slice(&fs::read(trial.join(format!("{stem}.{engine}.json")))?)?;
-    let wav = hound::WavReader::open(trial.join(file))?;
+    let protocol: Protocol = serde_json::from_slice(&fs::read(path)?)?;
+    protocol.validate()?;
+    Ok(protocol)
+}
+fn profile<'a>(protocol: &'a Protocol, engine: &str) -> Result<&'a AsrProfile> {
+    match engine {
+        WHISPER_ENGINE_ID => Ok(&protocol.whisper_profile),
+        PARAKEET_ENGINE_ID => Ok(&protocol.parakeet_profile),
+        _ => Err("this protocol requires whisper then parakeet catalogue profiles".into()),
+    }
+}
+fn asr_metadata(bytes: &[u8], wav: &Path, engine: &str, profile: &AsrProfile) -> Result<Asr> {
+    let result: Asr = serde_json::from_slice(bytes)?;
+    let wav = hound::WavReader::open(wav)?;
     let seconds = f64::from(wav.duration()) / f64::from(wav.spec().sample_rate);
     if result.engine != engine
-        || result.model.is_empty()
-        || result.backend.is_empty()
+        || result.model != profile.model
+        || result.backend != profile.backend
         || result.runs.is_empty()
         || !result.audio_seconds.is_finite()
         || (result.audio_seconds - seconds).abs() > 0.05
@@ -169,39 +193,61 @@ fn asr(trial: &Path, track: Track, engine: &str, manifest: &Value) -> Result<Asr
     }
     Ok(result)
 }
-pub fn score(trial: &Path, engine: &str) -> Result<()> {
-    if engine != WHISPER_ENGINE_ID && engine != PARAKEET_ENGINE_ID {
-        return Err("this protocol requires whisper then parakeet catalogue profiles".into());
+fn asr(
+    trial: &Path,
+    track: Track,
+    engine: &str,
+    manifest: &Value,
+    profile: &AsrProfile,
+) -> Result<Asr> {
+    let provenance: AsrProvenance =
+        serde_json::from_slice(&fs::read(trial.join(format!("asr.{engine}.json")))?)?;
+    // The executable identity is historical evidence; reports remain usable if
+    // the operator later moves or updates that binary. Never imply a fresh hash.
+    if provenance.profile != *profile
+        || !provenance.binary.is_absolute()
+        || provenance.binary_sha256.len() != 64
+        || !provenance
+            .binary_sha256
+            .bytes()
+            .all(|b| b.is_ascii_hexdigit())
+    {
+        return Err("invalid ASR provenance / fixed protocol profile".into());
     }
+    let stem = track.stem();
+    let file = track.filename();
+    let wav_hash = protocol::hash(&trial.join(&file))?;
+    if manifest["files"][&file].as_str() != Some(&wav_hash) {
+        return Err(format!("{file}: missing/mismatched manifest hash").into());
+    }
+    let artifact = provenance
+        .artifacts
+        .get(stem)
+        .ok_or("missing ASR artifact provenance")?;
+    let target = trial.join(format!("{stem}.{engine}.json"));
+    if artifact.wav_sha256 != wav_hash || artifact.json_sha256 != protocol::hash(&target)? {
+        return Err(format!(
+            "{stem}/{engine}: ASR artifact changed since successful transcription"
+        )
+        .into());
+    }
+    asr_metadata(&fs::read(target)?, &trial.join(file), engine, profile)
+}
+pub fn score(trial: &Path, engine: &str) -> Result<()> {
     let manifest: Value = serde_json::from_slice(&fs::read(trial.join("manifest.json"))?)?;
     if manifest["valid"] != true
         || !serde_json::from_value::<TrialStatus>(manifest["status"].clone())?.complete()
     {
         return Err("cannot score failed or incomplete capture".into());
     }
-    let protocol: Protocol = serde_json::from_slice(&fs::read(trial.join("protocol.json"))?)?;
-    protocol.validate()?;
-    if manifest["protocol_sha256"].as_str() != Some(&protocol::hash(&trial.join("protocol.json"))?)
-    {
-        return Err("protocol changed after capture".into());
-    }
+    let protocol = trial_protocol(trial, &manifest)?;
+    let expected = profile(&protocol, engine)?;
     let mode: Mode = serde_json::from_value(manifest["mode"].clone())?;
     let scene: Scene = serde_json::from_value(manifest["scene"].clone())?;
-    let them = asr(trial, Track::Them, engine, &manifest)?;
-    let expected = if engine == WHISPER_ENGINE_ID {
-        &protocol.whisper_profile
-    } else {
-        &protocol.parakeet_profile
-    };
-    if them.model != expected.model || them.backend != expected.backend {
-        return Err("ASR differs from fixed protocol profile".into());
-    }
+    let them = asr(trial, Track::Them, engine, &manifest, expected)?;
     let mut outputs = BTreeMap::new();
     for &variant in mode.me_tracks() {
-        let me = asr(trial, variant, engine, &manifest)?;
-        if me.model != them.model || me.backend != them.backend {
-            return Err("Me/Them must use exactly the same model and backend".into());
-        }
+        let me = asr(trial, variant, engine, &manifest, expected)?;
         let metrics = measure(
             scene,
             &protocol.local_reference,
@@ -220,7 +266,7 @@ pub fn score(trial: &Path, engine: &str) -> Result<()> {
         None
     };
     let score = json!({"engine": engine, "model": them.model, "backend": them.backend,
-        "profile_record": if engine == WHISPER_ENGINE_ID { &protocol.whisper_profile } else { &protocol.parakeet_profile },
+        "profile_record": expected,
         "scene": scene, "repetition": manifest["repetition"], "positive_control": manifest["positive_control"],
         "normalization": "lowercase, punctuation removed, whitespace split, accents retained",
         "outputs": outputs, "them_reference_edits": them_edits,
@@ -262,6 +308,10 @@ pub fn report(directory: &Path) -> Result<()> {
                     }
                     let manifest: Value =
                         serde_json::from_slice(&fs::read(trial.join("manifest.json"))?)?;
+                    let protocol = trial_protocol(&trial, &manifest)?;
+                    if row["protocol_sha256"] != manifest["protocol_sha256"] {
+                        return Err("stale score: protocol hash differs; rerun score".into());
+                    }
                     if manifest["comparison_eligible"] != true {
                         return Err("auxiliary/headphone/invalid trial cannot enter the 27-variant comparison".into());
                     }
@@ -271,7 +321,13 @@ pub fn report(directory: &Path) -> Result<()> {
                         return Err("ASR provenance changed; rerun score".into());
                     }
                     for track in mode.asr_tracks() {
-                        asr(&trial, track, engine, &manifest)?;
+                        asr(
+                            &trial,
+                            track,
+                            engine,
+                            &manifest,
+                            profile(&protocol, engine)?,
+                        )?;
                     }
                     protocols.insert(row["protocol_sha256"].to_string());
                     profiles.insert(format!(
@@ -321,26 +377,23 @@ pub fn report(directory: &Path) -> Result<()> {
 /// ASR stays in the established headless CLI/catalogue; this only fixes its
 /// arguments, checks exit status and binds the JSON to input/output hashes.
 pub fn transcribe(trial: &Path, binary: &Path, engine: &str) -> Result<()> {
-    if engine != WHISPER_ENGINE_ID && engine != PARAKEET_ENGINE_ID {
-        return Err("use whisper or parakeet".into());
-    }
     let manifest: Value = serde_json::from_slice(&fs::read(trial.join("manifest.json"))?)?;
     if manifest["valid"] != true
         || !serde_json::from_value::<TrialStatus>(manifest["status"].clone())?.complete()
     {
         return Err("cannot transcribe invalid/incomplete trial".into());
     }
-    let p: Protocol = serde_json::from_slice(&fs::read(trial.join("protocol.json"))?)?;
-    p.validate()?;
-    let profile = if engine == WHISPER_ENGINE_ID {
-        &p.whisper_profile
-    } else {
-        &p.parakeet_profile
-    };
+    let p = trial_protocol(trial, &manifest)?;
+    let profile = profile(&p, engine)?;
     let mode: Mode = serde_json::from_value(manifest["mode"].clone())?;
 
     let executable = fs::canonicalize(binary)?;
-    let mut provenance = json!({"binary": executable, "binary_sha256": protocol::hash(&executable)?, "profile": profile, "artifacts": {}});
+    let mut provenance = AsrProvenance {
+        binary: executable.clone(),
+        binary_sha256: protocol::hash(&executable)?,
+        profile: profile.clone(),
+        artifacts: BTreeMap::new(),
+    };
     // A crash / failed subprocess leaves no successful provenance marker.
     let marker = trial.join(format!("asr.{engine}.json"));
     if marker.exists() {
@@ -378,11 +431,16 @@ pub fn transcribe(trial: &Path, binary: &Path, engine: &str) -> Result<()> {
             .into());
         }
         // Check valid CLI schema before publishing any successful result.
-        let _: Asr = serde_json::from_slice(&output.stdout)?;
+        asr_metadata(&output.stdout, &wav, engine, profile)?;
         let target = trial.join(format!("{stem}.{engine}.json"));
         fs::write(&target, output.stdout)?;
-        provenance["artifacts"][stem] =
-            json!({"wav_sha256": wav_hash, "json_sha256": protocol::hash(&target)?});
+        provenance.artifacts.insert(
+            stem.into(),
+            AsrArtifact {
+                wav_sha256: wav_hash,
+                json_sha256: protocol::hash(&target)?,
+            },
+        );
     }
     protocol::write_json(&marker, &provenance)?;
     score(trial, engine)
@@ -391,6 +449,145 @@ pub fn transcribe(trial: &Path, binary: &Path, engine: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn scored_trial() -> (tempfile::TempDir, PathBuf) {
+        let directory = tempfile::tempdir().unwrap();
+        let trial = directory.path().join("baseline-remote-1");
+        fs::create_dir(&trial).unwrap();
+        let profile = AsrProfile {
+            model: "synthetic-model".into(),
+            backend: "synthetic-backend".into(),
+            weights_sha256: "a".repeat(64),
+        };
+        let protocol = Protocol {
+            fixture: "synthetic.wav".into(),
+            fixture_sha256: "b".repeat(64),
+            remote_reference: "distant words".into(),
+            local_reference: "nearby voice".into(),
+            standard_microphone_mode_confirmed: true,
+            machine_position: "synthetic test".into(),
+            mouth_distance_cm: 50.0,
+            output_volume_description: "synthetic".into(),
+            browser_version: "synthetic".into(),
+            schedule: "synthetic".into(),
+            whisper_profile: profile.clone(),
+            parakeet_profile: profile.clone(),
+        };
+        protocol::write_json(&trial.join("protocol.json"), &protocol).unwrap();
+        let mut provenance = AsrProvenance {
+            binary: PathBuf::from("/synthetic/souffle"),
+            binary_sha256: "c".repeat(64),
+            profile: profile.clone(),
+            artifacts: BTreeMap::new(),
+        };
+        let mut files = BTreeMap::new();
+        for track in Mode::Baseline.asr_tracks() {
+            let wav = trial.join(track.filename());
+            protocol::write_wav(&wav, &[0.1; 800], 8000).unwrap();
+            let target = trial.join(format!("{}.whisper.json", track.stem()));
+            protocol::write_json(
+                &target,
+                &json!({
+                    "text": "distant words", "audio_seconds": 0.1,
+                    "engine": WHISPER_ENGINE_ID, "model": profile.model,
+                    "backend": profile.backend, "runs": [{}],
+                }),
+            )
+            .unwrap();
+            let wav_sha256 = protocol::hash(&wav).unwrap();
+            files.insert(track.filename(), wav_sha256.clone());
+            provenance.artifacts.insert(
+                track.stem().into(),
+                AsrArtifact {
+                    wav_sha256,
+                    json_sha256: protocol::hash(&target).unwrap(),
+                },
+            );
+        }
+        protocol::write_json(
+            &trial.join("manifest.json"),
+            &json!({
+                "valid": true, "status": TrialStatus::Complete, "mode": Mode::Baseline,
+                "scene": Scene::Remote, "repetition": 1, "positive_control": false,
+                "comparison_eligible": true, "files": files,
+                "protocol_sha256": protocol::hash(&trial.join("protocol.json")).unwrap(),
+            }),
+        )
+        .unwrap();
+        protocol::write_json(&trial.join("asr.whisper.json"), &provenance).unwrap();
+        score(&trial, WHISPER_ENGINE_ID).unwrap();
+        report(directory.path()).unwrap();
+        (directory, trial)
+    }
+
+    #[test]
+    fn replaced_track_json_is_rejected_by_score_and_report() {
+        let (directory, trial) = scored_trial();
+        for track in Mode::Baseline.asr_tracks() {
+            let target = trial.join(format!("{}.whisper.json", track.stem()));
+            let original = fs::read(&target).unwrap();
+            let mut edited: Value = serde_json::from_slice(&original).unwrap();
+            edited["text"] = json!("replacement transcript with unchanged metadata");
+            protocol::write_json(&target, &edited).unwrap();
+            for result in [score(&trial, WHISPER_ENGINE_ID), report(directory.path())] {
+                assert!(
+                    result
+                        .unwrap_err()
+                        .to_string()
+                        .contains("ASR artifact changed")
+                );
+            }
+            fs::write(target, original).unwrap();
+        }
+        report(directory.path()).unwrap();
+    }
+
+    #[test]
+    fn changed_protocol_invalidates_existing_scores_and_report() {
+        let (directory, trial) = scored_trial();
+        let path = trial.join("protocol.json");
+        let mut protocol: Protocol = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        protocol.remote_reference = "changed reference".into();
+        protocol::write_json(&path, &protocol).unwrap();
+        for result in [score(&trial, WHISPER_ENGINE_ID), report(directory.path())] {
+            assert!(
+                result
+                    .unwrap_err()
+                    .to_string()
+                    .contains("protocol changed after capture")
+            );
+        }
+    }
+
+    #[test]
+    fn provenance_requires_matching_wav_profile_and_binary_identity() {
+        let (_directory, trial) = scored_trial();
+        let marker = trial.join("asr.whisper.json");
+        let original = fs::read(&marker).unwrap();
+        for replacement in [
+            json!({"profile": {"model": "other-model"}}),
+            json!({"binary_sha256": "missing hash"}),
+            json!({"binary": "relative/path"}),
+            json!({"artifacts": {"them": {"wav_sha256": "d".repeat(64)}}}),
+        ] {
+            let mut provenance: Value = serde_json::from_slice(&original).unwrap();
+            // Mutate just the selected leaf, retaining the otherwise valid marker.
+            match replacement.as_object().unwrap().iter().next().unwrap() {
+                (key, value) if key == "profile" => {
+                    provenance[key]["model"] = value["model"].clone()
+                }
+                (key, value) if key == "artifacts" => {
+                    provenance[key]["them"]["wav_sha256"] = value["them"]["wav_sha256"].clone()
+                }
+                (key, value) => provenance[key] = value.clone(),
+            }
+            protocol::write_json(&marker, &provenance).unwrap();
+            assert!(score(&trial, WHISPER_ENGINE_ID).is_err());
+        }
+        fs::remove_file(marker).unwrap();
+        assert!(score(&trial, WHISPER_ENGINE_ID).is_err());
+    }
+
     #[test]
     fn normalization_preserves_accents_and_removes_punctuation() {
         assert_eq!(words("L'ÉTÉ, a-t-il fini ?"), vec!["lété", "atil", "fini"]);

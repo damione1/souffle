@@ -119,7 +119,7 @@ pub struct Protocol {
     pub whisper_profile: AsrProfile,
     pub parakeet_profile: AsrProfile,
 }
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct AsrProfile {
     pub model: String,
