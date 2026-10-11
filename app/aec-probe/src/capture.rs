@@ -1,7 +1,8 @@
 use crate::{
     Result,
+    devices::{Selection, global, property},
     native::Native,
-    protocol::{self, Mode, Scene, Track, TrialStatus},
+    protocol::{self, Mode, Scene, Track, TrialPurpose, TrialStatus},
 };
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use objc2_core_audio::*;
@@ -17,7 +18,6 @@ use souffle_lib::audio::{
 };
 use std::{
     path::Path,
-    ptr::NonNull,
     sync::{
         Arc,
         atomic::{AtomicBool, AtomicU64, Ordering},
@@ -44,40 +44,7 @@ pub struct Telemetry {
     pub errors: AtomicU64,
     pub accepting: AtomicBool,
 }
-fn property<T: Default>(
-    device: u32,
-    selector: u32,
-    scope: u32,
-    element: u32,
-) -> std::result::Result<T, String> {
-    let mut result = T::default();
-    let address = AudioObjectPropertyAddress {
-        mSelector: selector,
-        mScope: scope,
-        mElement: element,
-    };
-    let mut size = size_of::<T>() as u32;
-    let status = unsafe {
-        AudioObjectGetPropertyData(
-            device,
-            NonNull::from(&address),
-            0,
-            std::ptr::null(),
-            NonNull::from(&mut size),
-            NonNull::from(&mut result).cast(),
-        )
-    };
-    if status != 0 {
-        return Err(format!(
-            "CoreAudio property {selector:#x}: OSStatus {status}"
-        ));
-    }
-    Ok(result)
-}
-fn global<T: Default>(device: u32, selector: u32) -> std::result::Result<T, String> {
-    property(device, selector, kAudioObjectPropertyScopeGlobal, 0)
-}
-fn snapshot() -> Value {
+fn snapshot(selection: Option<&Selection>) -> Value {
     let input = global::<u32>(
         kAudioObjectSystemObject as u32,
         kAudioHardwarePropertyDefaultInputDevice,
@@ -95,7 +62,11 @@ fn snapshot() -> Value {
             "mute": property::<u32>(id, kAudioDevicePropertyMute, kAudioObjectPropertyScopeOutput, 0)}),
         Err(e) => json!({"error": e}),
     };
-    json!({"input": describe(input), "output": describe(output), "production_aec_route_eligible": souffle_lib::audio::output_route::output_can_leak_into_mic()})
+    let selected_input = selection.map_or_else(|| input.clone(), |s| Ok(s.input.id));
+    let selected_output = selection.map_or_else(|| output.clone(), |s| Ok(s.output.id));
+    json!({"input": describe(selected_input), "output": describe(selected_output),
+        "default_input_id": input, "default_output_id": output,
+        "production_aec_route_eligible": souffle_lib::audio::output_route::output_can_leak_into_mic()})
 }
 fn usage() -> libc::rusage {
     let mut u = std::mem::MaybeUninit::zeroed();
@@ -149,6 +120,92 @@ impl Drop for TapWorker {
     }
 }
 
+enum Plan {
+    Formal {
+        protocol: Box<protocol::Protocol>,
+        repetition: u8,
+        positive: bool,
+    },
+    Listening {
+        selection: Selection,
+    },
+}
+impl Plan {
+    fn selection(&self) -> Option<&Selection> {
+        match self {
+            Self::Formal { .. } => None,
+            Self::Listening { selection } => Some(selection),
+        }
+    }
+    fn purpose(&self) -> TrialPurpose {
+        match self {
+            Self::Formal { .. } => TrialPurpose::Comparison,
+            Self::Listening { .. } => TrialPurpose::ListeningCheck,
+        }
+    }
+    fn positive(&self) -> bool {
+        match self {
+            Self::Formal { positive, .. } => *positive,
+            Self::Listening { .. } => false,
+        }
+    }
+    fn playback(&self) -> Result<Option<(Vec<f32>, u32)>> {
+        match self {
+            Self::Formal {
+                protocol, positive, ..
+            } => {
+                if *positive {
+                    Ok(Some(protocol::read_wav(Path::new(&protocol.fixture))?))
+                } else {
+                    Ok(None)
+                }
+            }
+            Self::Listening { .. } => Ok(None),
+        }
+    }
+}
+fn private_trial(trial: &Path) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::create_dir(trial)?;
+    std::fs::set_permissions(trial, std::fs::Permissions::from_mode(0o700))?;
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn check(
+    trial: &Path,
+    mode: Mode,
+    scene: Scene,
+    input_uid: &str,
+    output_uid: Option<&str>,
+    notes: &str,
+    seconds: u32,
+) -> Result<()> {
+    if trial.exists() {
+        return Err("trial directory already exists; choose a new private folder".into());
+    }
+    let selection = Selection::resolve(input_uid, output_uid)?;
+    eprintln!(
+        "{} / {}: input {} ({:?}, {} Hz), output {} ({:?}, {} Hz)",
+        mode.name(),
+        scene.name(),
+        selection.input.name,
+        selection.input.uid,
+        selection.input.nominal_rate,
+        selection.output.name,
+        selection.output.uid,
+        selection.output.nominal_rate
+    );
+    run_trial(
+        trial,
+        mode,
+        scene,
+        notes,
+        seconds,
+        Plan::Listening { selection },
+    )
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn run(
     dir: &Path,
@@ -163,11 +220,6 @@ pub fn run(
     if positive && mode != Mode::Apple {
         return Err("positive control requires apple mode".into());
     }
-    if notes.trim().is_empty() {
-        return Err(
-            "record reading deviations and route/coexistence notes (use 'none' if none)".into(),
-        );
-    }
     let name = format!(
         "{}-{}-{repetition}{}{}",
         mode.name(),
@@ -176,19 +228,58 @@ pub fn run(
         if seconds != 30 { "-aux" } else { "" }
     );
     let trial = dir.join(name);
-    std::fs::create_dir(&trial)?; // Refuse to overwrite a previous capture.
-    protocol::write_json(&trial.join("protocol.json"), &protocol)?;
-    let mut manifest = json!({"schema": 1, "valid": false, "status": TrialStatus::Starting, "mode": mode, "scene": scene, "repetition": repetition,
-        "seconds_requested": seconds, "positive_control": positive, "operator_notes": notes,
+    run_trial(
+        &trial,
+        mode,
+        scene,
+        notes,
+        seconds,
+        Plan::Formal {
+            protocol: Box::new(protocol),
+            repetition,
+            positive,
+        },
+    )
+}
+
+fn run_trial(
+    trial: &Path,
+    mode: Mode,
+    scene: Scene,
+    notes: &str,
+    seconds: u32,
+    plan: Plan,
+) -> Result<()> {
+    if !(1..=60).contains(&seconds) || notes.trim().is_empty() {
+        return Err("duration must be 1..60 seconds and notes nonempty (use 'none')".into());
+    }
+    private_trial(trial)?;
+    let mut manifest = json!({"schema": 2, "valid": false, "status": TrialStatus::Starting, "purpose": plan.purpose(),
+        "comparison_eligible": false, "mode": mode, "scene": scene,
+        "seconds_requested": seconds, "positive_control": plan.positive(), "operator_notes": notes,
         "machine": command("sysctl", &["-n", "hw.model"]), "os": command("sw_vers", &[]),
         "git_commit": option_env!("SOU277_COMMIT").unwrap_or("not embedded"),
-        "before": snapshot(), "api": {}, "protocol_sha256": protocol::hash(&trial.join("protocol.json"))?,
+        "before": snapshot(plan.selection()), "api": {},
         "tap_alignment": "common drain epoch, nominal 10ms polling plus unbounded scheduling/device phase uncertainty; no hardware timestamp alignment claimed",
         "latency_definition": "maximum mic capture host timestamp to worker delivery (includes callback buffer duration); tap timestamp latency unavailable",
-        "microphone_mode": "Standard, operator assertion; not programmatically verified"});
+        "microphone_mode": "unverified; operator should choose Standard and record deviations in notes"});
+    match &plan {
+        Plan::Formal {
+            protocol,
+            repetition,
+            ..
+        } => {
+            protocol::write_json(&trial.join("protocol.json"), protocol)?;
+            manifest["protocol_sha256"] = json!(protocol::hash(&trial.join("protocol.json"))?);
+            manifest["repetition"] = json!(repetition);
+            manifest["microphone_mode"] =
+                json!("Standard, operator assertion; not programmatically verified");
+        }
+        Plan::Listening { selection } => manifest["requested_devices"] = json!(selection),
+    }
     protocol::write_json(&trial.join("manifest.json"), &manifest)?;
-    let outcome = record(&trial, mode, seconds, positive, &protocol, &mut manifest);
-    manifest["after"] = snapshot();
+    let outcome = record(trial, mode, seconds, &plan, &mut manifest);
+    manifest["after"] = snapshot(plan.selection());
     match &outcome {
         Ok(()) => manifest["status"] = json!(TrialStatus::Complete),
         Err(e) => {
@@ -201,14 +292,7 @@ pub fn run(
     outcome
 }
 
-fn record(
-    trial: &Path,
-    mode: Mode,
-    seconds: u32,
-    positive: bool,
-    protocol: &protocol::Protocol,
-    manifest: &mut Value,
-) -> Result<()> {
+fn record(trial: &Path, mode: Mode, seconds: u32, plan: &Plan, manifest: &mut Value) -> Result<()> {
     // Off the realtime callbacks: retain the existing tap/DSP tracing, including
     // exact CoreAudio teardown OSStatus values, in this private trial folder.
     tracing_subscriber::fmt()
@@ -218,7 +302,7 @@ fn record(
         )?))
         .try_init()
         .map_err(|e| format!("cannot install trial logger: {e}"))?;
-    let before = snapshot();
+    let before = snapshot(plan.selection());
     // A new process hosts exactly one tap. No production orphan sweep is called.
     let (tap_prod, mut tap_cons) = HeapRb::<f32>::new(192000 * 2).split();
     let (ready_tx, ready_rx) = mpsc::channel();
@@ -260,15 +344,12 @@ fn record(
     let mut cpal_stream = None;
     let rate = match mode {
         Mode::Apple => {
-            let playback = if positive {
-                Some(protocol::read_wav(Path::new(&protocol.fixture))?)
-            } else {
-                None
-            };
+            let playback = plan.playback()?;
             let n = Native::start(
                 mic_prod,
                 Arc::clone(&telemetry),
                 playback,
+                plan.selection(),
                 &mut manifest["api"],
             )?;
             let rate = n.rate;
@@ -278,11 +359,16 @@ fn record(
         }
         Mode::Baseline => {
             let host = cpal::default_host();
-            let device = host.default_input_device().ok_or("no default input")?;
-            let input_id = global::<u32>(
-                kAudioObjectSystemObject as u32,
-                kAudioHardwarePropertyDefaultInputDevice,
-            )?;
+            let (device, input_id) = match plan.selection() {
+                Some(s) => (s.cpal_input()?, s.input.id),
+                None => (
+                    host.default_input_device().ok_or("no default input")?,
+                    global::<u32>(
+                        kAudioObjectSystemObject as u32,
+                        kAudioHardwarePropertyDefaultInputDevice,
+                    )?,
+                ),
+            };
             let current = global::<f64>(input_id, kAudioDevicePropertyNominalSampleRate)? as u32;
             let config = device
                 .supported_input_configs()?
@@ -297,8 +383,8 @@ fn record(
                 .with_sample_rate(current)
                 .config();
             let channels = config.channels as usize;
-            manifest["cpal"] =
-                json!({"sample_rate": current, "channels": channels, "sample_format": "f32"});
+            manifest["cpal"] = json!({"sample_rate": current, "channels": channels, "sample_format": "f32",
+                    "input_id": input_id, "input_uid": device.id()?.1, "input_name": device.description()?.name()});
             let mut producer = mic_prod;
             let t = Arc::clone(&telemetry);
             let errors = Arc::clone(&telemetry);
@@ -380,7 +466,7 @@ fn record(
             tap.push(s);
         }
         if start.elapsed().as_secs() >= next_route {
-            routes.push(json!({"seconds": start.elapsed().as_secs_f64(), "route": snapshot()}));
+            routes.push(json!({"seconds": start.elapsed().as_secs_f64(), "route": snapshot(plan.selection())}));
             next_route += 1;
         }
         if start.elapsed() >= Duration::from_secs(u64::from(seconds)) {
@@ -411,7 +497,7 @@ fn record(
     manifest["route_samples"] = json!(routes);
     protocol::write_wav(&trial.join(Track::MicNative.filename()), &mic, rate)?;
     protocol::write_wav(&trial.join(Track::TapNative.filename()), &tap, tap_rate)?;
-    let after = snapshot();
+    let after = snapshot(plan.selection());
     let known_rates = ["input", "output"]
         .iter()
         .all(|side| before[side]["rate"]["Ok"].as_f64().is_some());
@@ -441,8 +527,9 @@ fn record(
         && telemetry.errors.load(Ordering::Relaxed) == 0;
     manifest["comparison_eligible"] = json!(
         valid
+            && plan.purpose().allows_comparison()
             && seconds == 30
-            && !positive
+            && !plan.positive()
             && before["production_aec_route_eligible"] == true
             && before["input"]["transport"]["Ok"] == kAudioDeviceTransportTypeBuiltIn
     );
@@ -521,5 +608,22 @@ mod tests {
     fn bypass_replay_preserves_partial_tail() {
         let mic: Vec<f32> = (0..1003).map(|i| i as f32 / 2000.0).collect();
         assert_eq!(replay(&mic, &vec![0.0; mic.len()], false), mic);
+    }
+    #[test]
+    fn private_trial_refuses_overwrite_and_restricts_access() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = tempfile::tempdir().unwrap();
+        let trial = root.path().join("trial");
+        private_trial(&trial).unwrap();
+        std::fs::write(trial.join("keep"), "original").unwrap();
+        assert_eq!(
+            std::fs::metadata(&trial).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
+        assert!(private_trial(&trial).is_err());
+        assert_eq!(
+            std::fs::read_to_string(trial.join("keep")).unwrap(),
+            "original"
+        );
     }
 }

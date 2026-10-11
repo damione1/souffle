@@ -2,7 +2,7 @@
 //! Shared gold words are ambiguous and excluded from remote-overlap counts.
 use crate::{
     Result,
-    protocol::{self, AsrProfile, Mode, Protocol, Scene, Track, TrialStatus},
+    protocol::{self, AsrProfile, Mode, Protocol, Scene, Track, TrialPurpose, TrialStatus},
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -163,6 +163,17 @@ struct AsrProvenance {
     artifacts: BTreeMap<String, AsrArtifact>,
 }
 fn trial_protocol(trial: &Path, manifest: &Value) -> Result<Protocol> {
+    // Schema 1 predates listening checks and contains only formal trials.
+    let purpose = if manifest["schema"] == 1 && manifest.get("purpose").is_none() {
+        TrialPurpose::Comparison
+    } else {
+        serde_json::from_value(manifest["purpose"].clone())?
+    };
+    if !purpose.allows_comparison() {
+        return Err(
+            "auxiliary listening checks cannot be scored or enter the formal comparison".into(),
+        );
+    }
     let path = trial.join("protocol.json");
     if manifest["protocol_sha256"].as_str() != Some(&protocol::hash(&path)?) {
         return Err("protocol changed after capture".into());
@@ -507,6 +518,7 @@ mod tests {
         protocol::write_json(
             &trial.join("manifest.json"),
             &json!({
+                "schema": 2, "purpose": TrialPurpose::Comparison,
                 "valid": true, "status": TrialStatus::Complete, "mode": Mode::Baseline,
                 "scene": Scene::Remote, "repetition": 1, "positive_control": false,
                 "comparison_eligible": true, "files": files,
@@ -557,6 +569,30 @@ mod tests {
                     .contains("protocol changed after capture")
             );
         }
+    }
+
+    #[test]
+    fn auxiliary_listening_trial_cannot_be_scored_or_reported() {
+        let (directory, trial) = scored_trial();
+        let path = trial.join("manifest.json");
+        let mut manifest: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        manifest["purpose"] = json!(TrialPurpose::ListeningCheck);
+        manifest["comparison_eligible"] = json!(false);
+        protocol::write_json(&path, &manifest).unwrap();
+        // Even a score carrying the current manifest hash must reject this purpose.
+        let scores = trial.join("scores.whisper.json");
+        let mut row: Value = serde_json::from_slice(&fs::read(&scores).unwrap()).unwrap();
+        row["manifest_sha256"] = json!(protocol::hash(&path).unwrap());
+        protocol::write_json(&scores, &row).unwrap();
+        for result in [score(&trial, WHISPER_ENGINE_ID), report(directory.path())] {
+            assert!(
+                result
+                    .unwrap_err()
+                    .to_string()
+                    .contains("auxiliary listening checks")
+            );
+        }
+        assert!(!TrialPurpose::ListeningCheck.allows_comparison());
     }
 
     #[test]

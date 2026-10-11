@@ -4,6 +4,7 @@
 use crate::{
     Result,
     capture::{Sample, Telemetry},
+    devices::{self, Device, Selection, Side},
 };
 use block2::RcBlock;
 use objc2::{
@@ -11,6 +12,10 @@ use objc2::{
     rc::Retained,
     runtime::{Bool, NSObjectProtocol},
     sel,
+};
+use objc2_audio_toolbox::{
+    AudioUnit, AudioUnitGetProperty, AudioUnitSetProperty, kAudioOutputUnitProperty_CurrentDevice,
+    kAudioUnitScope_Global,
 };
 use objc2_avf_audio::*;
 use objc2_core_audio_types::{AudioBufferList, AudioTimeStamp};
@@ -31,24 +36,121 @@ pub struct Native {
     pub evidence: Value,
     pub rendered: Arc<AtomicUsize>,
 }
+
+#[derive(Clone, Copy)]
+enum ReadbackPhase {
+    BeforeStart,
+    AfterStart,
+}
+impl ReadbackPhase {
+    fn name(self) -> &'static str {
+        match self {
+            Self::BeforeStart => "before_start",
+            Self::AfterStart => "after_start",
+        }
+    }
+}
+unsafe fn read_device(
+    unit: AudioUnit,
+    side: Side,
+    expected: &Device,
+    phase: ReadbackPhase,
+    log: &mut Value,
+) -> Result<()> {
+    if unit.is_null() {
+        return Err(format!("{} AudioUnit missing", side.name()).into());
+    }
+    let mut id = 0u32;
+    let mut size = size_of::<u32>() as u32;
+    let status = unsafe {
+        AudioUnitGetProperty(
+            unit,
+            kAudioOutputUnitProperty_CurrentDevice,
+            kAudioUnitScope_Global,
+            side.bus(),
+            NonNull::from(&mut id).cast(),
+            NonNull::from(&mut size),
+        )
+    };
+    let entry = &mut log["devices"][side.name()][phase.name()];
+    *entry = json!({"get_status": status, "id": id, "size": size, "bus": side.bus()});
+    if status != 0 || size != size_of::<u32>() as u32 {
+        return Err(format!(
+            "{} CurrentDevice readback: OSStatus {status}, size {size}",
+            side.name()
+        )
+        .into());
+    }
+    let uid = souffle_lib::audio::output_route::device_uid(id);
+    entry["uid"] = json!(uid);
+    devices::confirm(expected, id, &uid?)
+}
+unsafe fn select_device(
+    unit: AudioUnit,
+    side: Side,
+    expected: &Device,
+    log: &mut Value,
+) -> Result<()> {
+    log["devices"][side.name()]["requested"] = json!(expected);
+    if unit.is_null() {
+        return Err(format!(
+            "{} AudioUnit missing after enabling voice processing",
+            side.name()
+        )
+        .into());
+    }
+    // VPIO CurrentDevice uses global scope: microphone bus 1, speaker bus 0.
+    // Only this stopped AudioUnit is changed, never CoreAudio's global defaults.
+    let status = unsafe {
+        AudioUnitSetProperty(
+            unit,
+            kAudioOutputUnitProperty_CurrentDevice,
+            kAudioUnitScope_Global,
+            side.bus(),
+            std::ptr::from_ref(&expected.id).cast(),
+            size_of::<u32>() as u32,
+        )
+    };
+    log["devices"][side.name()]["set_status"] = json!(status);
+    if status != 0 {
+        return Err(format!("{} CurrentDevice selection: OSStatus {status}", side.name()).into());
+    }
+    unsafe { read_device(unit, side, expected, ReadbackPhase::BeforeStart, log) }
+}
 impl Native {
     pub fn start(
         producer: HeapProd<Sample>,
         telemetry: Arc<Telemetry>,
         playback: Option<(Vec<f32>, u32)>,
+        selection: Option<&Selection>,
         log: &mut Value,
     ) -> Result<Self> {
         // Engine retains nodes/blocks; Drop stops IO before releasing them.
         unsafe {
             let engine = AVAudioEngine::new();
             let input = engine.inputNode();
-            let output = engine.outputNode();
             let enabled = input.setVoiceProcessingEnabled_error(true);
             log["setVoiceProcessingEnabled"] = match &enabled {
                 Ok(()) => json!({"success": true}),
                 Err(e) => json!({"success": false, "error": format!("{e:?}")}),
             };
             enabled.map_err(|e| format!("setVoiceProcessingEnabled: {e:?}"))?;
+            // Voice processing may replace the underlying units. Reacquire the
+            // nodes/units after the switch and bind devices before prepare/start.
+            let input = engine.inputNode();
+            let output = engine.outputNode();
+            if let Some(s) = selection {
+                select_device(input.audioUnit(), Side::Input, &s.input, log)?;
+                select_device(output.audioUnit(), Side::Output, &s.output, log)?;
+                // Selecting the output must not silently undo the input choice.
+                read_device(
+                    input.audioUnit(),
+                    Side::Input,
+                    &s.input,
+                    ReadbackPhase::BeforeStart,
+                    log,
+                )?;
+            }
             input.setVoiceProcessingBypassed(false);
             input.setVoiceProcessingAGCEnabled(false);
             let mut ducking = json!({"available": false, "requested": "minimum; advanced=false"});
@@ -228,6 +330,29 @@ impl Native {
                 return Err(format!("startAndReturnError: {e:?}").into());
             }
             log["running_readback"] = serde_json::json!({"running": engine.isRunning(), "input_voice_processing": input.isVoiceProcessingEnabled(), "output_voice_processing": output.isVoiceProcessingEnabled(), "agc": input.isVoiceProcessingAGCEnabled(), "bypassed": input.isVoiceProcessingBypassed()});
+            if let Some(s) = selection {
+                let selected = read_device(
+                    input.audioUnit(),
+                    Side::Input,
+                    &s.input,
+                    ReadbackPhase::AfterStart,
+                    log,
+                )
+                .and_then(|()| {
+                    read_device(
+                        output.audioUnit(),
+                        Side::Output,
+                        &s.output,
+                        ReadbackPhase::AfterStart,
+                        log,
+                    )
+                });
+                if let Err(error) = selected {
+                    engine.stop();
+                    input.removeTapOnBus(0);
+                    return Err(error);
+                }
+            }
             if !engine.isRunning()
                 || !input.isVoiceProcessingEnabled()
                 || !output.isVoiceProcessingEnabled()

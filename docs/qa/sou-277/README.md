@@ -1,5 +1,9 @@
 # SOU-277: native Apple voice-processing probe
 
+For a short webcam listening test without ASR preparation, use the
+[SOU-278 quick-check guide](../sou-278/README.md). Those auxiliary trials do not
+enter this formal comparison.
+
 **Investigation incomplete. No acoustic capture was run during implementation.**
 Damien owns the physical trials, permissions, listening and meeting-app checks.
 Nothing here demonstrates external-browser echo rejection or justifies enabling

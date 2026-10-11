@@ -23,7 +23,8 @@ objc2 = "0.6"
 objc2-foundation = "0.3"
 objc2-core-audio = "0.3"
 objc2-core-audio-types = "0.3"
-objc2-avf-audio = { version = "0.3", default-features = false, features = ["std", "AVAudioEngine", "AVAudioIONode", "AVAudioNode", "AVAudioSourceNode", "AVAudioFormat", "AVAudioBuffer", "AVAudioTime", "AVAudioTypes", "block2", "objc2-core-audio-types"] }
+objc2-avf-audio = { version = "0.3", default-features = false, features = ["std", "AVAudioEngine", "AVAudioIONode", "AVAudioNode", "AVAudioSourceNode", "AVAudioFormat", "AVAudioBuffer", "AVAudioTime", "AVAudioTypes", "block2", "objc2-core-audio-types", "objc2-audio-toolbox"] }
+objc2-audio-toolbox = { version = "0.3", default-features = false, features = ["std", "AUComponent", "AudioComponent", "AudioUnitProperties"] }
 block2 = "0.6"
 
 [dev-dependencies]

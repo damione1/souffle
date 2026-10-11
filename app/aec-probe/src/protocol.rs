@@ -53,6 +53,21 @@ pub enum TrialStatus {
     Complete,
     Failed,
 }
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum TrialPurpose {
+    Comparison,
+    ListeningCheck,
+}
+impl TrialPurpose {
+    pub fn allows_comparison(self) -> bool {
+        match self {
+            Self::Comparison => true,
+            Self::ListeningCheck => false,
+        }
+    }
+}
 impl TrialStatus {
     pub fn complete(self) -> bool {
         match self {
