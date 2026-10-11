@@ -4847,7 +4847,9 @@ version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "13a380031deed8e99db00065c45937da434ca987c034e13b87e4441f9e4090be"
 dependencies = [
+ "block2 0.6.2",
  "objc2 0.6.4",
+ "objc2-core-audio-types",
  "objc2-foundation 0.3.2",
 ]
 
@@ -7197,6 +7199,30 @@ dependencies = [
  "uuid",
  "vad-rs",
  "whisper-rs",
+]
+
+[[package]]
+name = "souffle-aec-probe"
+version = "0.1.0"
+dependencies = [
+ "block2 0.6.2",
+ "clap",
+ "cpal",
+ "hound",
+ "libc",
+ "objc2 0.6.4",
+ "objc2-avf-audio",
+ "objc2-core-audio",
+ "objc2-core-audio-types",
+ "objc2-foundation 0.3.2",
+ "ringbuf",
+ "serde",
+ "serde_json",
+ "sha2",
+ "souffle",
+ "tempfile",
+ "tracing-subscriber",
+ "unicode-normalization",
 ]
 
 [[package]]
