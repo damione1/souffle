@@ -13,6 +13,9 @@ path = "src/main.rs"
 [lints]
 workspace = true
 
+[features]
+experimental-native-aec = ["souffle_lib/experimental-native-aec"]
+
 [dependencies]
 # `unstable-winit-030`: lets main.rs configure the native NSWindow (hidden
 # title, transparent titlebar, full-size content view) via

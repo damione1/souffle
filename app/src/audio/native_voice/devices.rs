@@ -1,5 +1,5 @@
 //! Read-only CoreAudio enumeration and explicit, local capture-device selection.
-use crate::Result;
+use super::Result;
 use cpal::traits::{DeviceTrait, HostTrait};
 use objc2_core_audio::*;
 use serde::{Deserialize, Serialize};
@@ -53,7 +53,9 @@ pub fn parse_uid(value: &str) -> std::result::Result<String, String> {
     Ok(value.to_owned())
 }
 
-pub fn property<T: Default>(
+// SAFETY: T must accept every bit pattern written by the requested HAL scalar
+// property. Only the typed wrappers below call this private raw getter.
+unsafe fn property<T: Default>(
     device: u32,
     selector: u32,
     scope: u32,
@@ -83,8 +85,27 @@ pub fn property<T: Default>(
     }
     Ok(result)
 }
-pub fn global<T: Default>(device: u32, selector: u32) -> std::result::Result<T, String> {
-    property(device, selector, kAudioObjectPropertyScopeGlobal, 0)
+pub fn property_u32(
+    device: u32,
+    selector: u32,
+    scope: u32,
+    element: u32,
+) -> std::result::Result<u32, String> {
+    unsafe { property(device, selector, scope, element) }
+}
+pub fn property_f32(
+    device: u32,
+    selector: u32,
+    scope: u32,
+    element: u32,
+) -> std::result::Result<f32, String> {
+    unsafe { property(device, selector, scope, element) }
+}
+pub fn global_u32(device: u32, selector: u32) -> std::result::Result<u32, String> {
+    property_u32(device, selector, kAudioObjectPropertyScopeGlobal, 0)
+}
+pub fn global_f64(device: u32, selector: u32) -> std::result::Result<f64, String> {
+    unsafe { property(device, selector, kAudioObjectPropertyScopeGlobal, 0) }
 }
 
 fn hardware_ids() -> Result<Vec<u32>> {
@@ -134,13 +155,13 @@ pub fn catalog() -> Result<Catalog> {
         let id = ids
             .iter()
             .copied()
-            .find(|&id| souffle_lib::audio::output_route::device_uid(id).is_ok_and(|u| u == uid))
+            .find(|&id| crate::audio::output_route::device_uid(id).is_ok_and(|u| u == uid))
             .ok_or_else(|| format!("CoreAudio device disappeared while resolving UID {uid:?}"))?;
         Ok(Device {
             id,
             uid,
             name: device.description()?.name().to_owned(),
-            nominal_rate: global(id, kAudioDevicePropertyNominalSampleRate)?,
+            nominal_rate: global_f64(id, kAudioDevicePropertyNominalSampleRate)?,
         })
     };
     Ok(Catalog {
@@ -177,6 +198,43 @@ fn resolve(devices: &[Device], uid: &str) -> Result<Device> {
     Ok(device.clone())
 }
 impl Selection {
+    /// Resolve the app's already-selected UID with HAL property reads only.
+    /// CPAL capability/name enumeration can open unrelated devices (including
+    /// Bluetooth microphones), so it is kept out of meeting startup/rebuilds.
+    pub fn for_input_uid(input_uid: &str) -> Result<Self> {
+        use objc2_core_foundation::{CFRetained, CFString};
+        let ids = hardware_ids()?;
+        let describe = |id| -> Result<Device> {
+            let name = unsafe {
+                property::<*const CFString>(
+                    id,
+                    kAudioObjectPropertyName,
+                    kAudioObjectPropertyScopeGlobal,
+                    0,
+                )
+            }?;
+            let name = NonNull::new(name.cast_mut()).ok_or("CoreAudio device name is null")?;
+            let name = unsafe { CFRetained::from_raw(name) }.to_string();
+            Ok(Device {
+                id,
+                uid: crate::audio::output_route::device_uid(id)?,
+                name,
+                nominal_rate: global_f64(id, kAudioDevicePropertyNominalSampleRate)?,
+            })
+        };
+        let inputs = ids
+            .into_iter()
+            .filter(|&id| {
+                crate::audio::output_route::device_uid(id).is_ok_and(|uid| uid == input_uid)
+            })
+            .map(describe)
+            .collect::<Result<Vec<_>>>()?;
+        let input = resolve(&inputs, input_uid)?;
+        let output = describe(crate::audio::output_route::default_output_device()?)?;
+        let output = resolve(std::slice::from_ref(&output), &output.uid)?;
+        Ok(Self { input, output })
+    }
+
     pub fn resolve(input_uid: &str, output_uid: Option<&str>) -> Result<Self> {
         let catalog = catalog()?;
         let default_output = catalog

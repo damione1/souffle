@@ -111,6 +111,8 @@ objc2-foundation = "0.3"
 objc2-core-foundation = "0.3"
 objc2-core-audio = "0.3"
 objc2-core-audio-types = "0.3"
+objc2-avf-audio = { version = "0.3", optional = true, default-features = false, features = ["std", "AVAudioEngine", "AVAudioIONode", "AVAudioNode", "AVAudioSourceNode", "AVAudioFormat", "AVAudioBuffer", "AVAudioTime", "AVAudioTypes", "block2", "objc2-core-audio-types", "objc2-audio-toolbox"] }
+objc2-audio-toolbox = { version = "0.3", optional = true, default-features = false, features = ["std", "AUComponent", "AudioComponent", "AudioUnitProperties"] }
 # Calendar integration (read-only EventKit access)
 objc2-event-kit = "0.3"
 # Microphone TCC status (AVCaptureDevice.authorizationStatus), no prompt.
@@ -165,6 +167,10 @@ accessibility-sys = "0.2"
 
 [features]
 default = ["private-tcc"]
+# Shared capture implementation alone never changes the app's backend.
+native-voice = ["dep:objc2-avf-audio", "dep:objc2-audio-toolbox"]
+# Explicit experimental build only; dictation keeps CPAL.
+experimental-native-aec = ["native-voice"]
 
 # Exposes the mock transcription engine (normally `#[cfg(test)]`-only) so the
 # `tests/` integration binaries — which link the lib as a normal, non-`cfg(test)`

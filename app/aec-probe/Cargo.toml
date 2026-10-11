@@ -8,7 +8,7 @@ publish = false
 workspace = true
 
 [dependencies]
-souffle = { path = ".." }
+souffle = { path = "..", features = ["native-voice"] }
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -23,9 +23,8 @@ objc2 = "0.6"
 objc2-foundation = "0.3"
 objc2-core-audio = "0.3"
 objc2-core-audio-types = "0.3"
-objc2-avf-audio = { version = "0.3", default-features = false, features = ["std", "AVAudioEngine", "AVAudioIONode", "AVAudioNode", "AVAudioSourceNode", "AVAudioFormat", "AVAudioBuffer", "AVAudioTime", "AVAudioTypes", "block2", "objc2-core-audio-types", "objc2-audio-toolbox"] }
-objc2-audio-toolbox = { version = "0.3", default-features = false, features = ["std", "AUComponent", "AudioComponent", "AudioUnitProperties"] }
-block2 = "0.6"
+# Host-clock conversion in the probe; capture lives in souffle_lib.
+objc2-avf-audio = { version = "0.3", default-features = false, features = ["std", "AVAudioTime"] }
 
 [dev-dependencies]
 tempfile = "3"

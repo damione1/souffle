@@ -1034,7 +1034,8 @@ fn take_session_backlog(
         let own = match &message {
             AudioMessage::Chunk(_)
             | AudioMessage::DiarizedPair { .. }
-            | AudioMessage::EndOfStream { .. } => message.session_id() == session_id,
+            | AudioMessage::EndOfStream { .. }
+            | AudioMessage::SessionFailed { .. } => message.session_id() == session_id,
         };
         if own {
             kept.push_back(message);
@@ -1368,7 +1369,9 @@ fn ingest_message(mode: &mut dyn SessionMode, message: AudioMessage) {
     match message {
         AudioMessage::Chunk(chunk) => mode.ingest(chunk),
         AudioMessage::DiarizedPair { me, them, .. } => mode.ingest_pair(me, them),
-        AudioMessage::EndOfStream { .. } => unreachable!("EOS is not audio"),
+        AudioMessage::EndOfStream { .. } | AudioMessage::SessionFailed { .. } => {
+            unreachable!("control message is not audio")
+        }
     }
 }
 
@@ -1868,6 +1871,18 @@ fn run_session_loop(
 
         // Read audio with short timeout so command checks stay responsive
         match audio.recv_timeout(Duration::from_millis(50)) {
+            Ok(AudioMessage::SessionFailed {
+                session_id: failed_id,
+                reason,
+            }) => {
+                if failed_id != session_id {
+                    continue;
+                }
+                if let Some((reply, _)) = pending_stop.take() {
+                    let _ = reply.send(Err(reason.clone()));
+                }
+                return SessionEnd::Aborted(reason);
+            }
             Ok(AudioMessage::EndOfStream { session_id: eos_id }) => {
                 if eos_id != session_id {
                     continue; // stale marker from a previous session
@@ -1918,7 +1933,9 @@ fn run_session_loop(
                     AudioMessage::DiarizedPair {
                         captured_at, me, ..
                     } => (*captured_at, me.len()),
-                    AudioMessage::EndOfStream { .. } => unreachable!("handled above"),
+                    AudioMessage::EndOfStream { .. } | AudioMessage::SessionFailed { .. } => {
+                        unreachable!("handled above")
+                    }
                 };
                 health.note_chunk(captured_at);
                 // Audio is still arriving, so the audio thread is alive: the
@@ -2038,6 +2055,14 @@ fn finish_session(
             }
             AudioMessage::Chunk(_) | AudioMessage::DiarizedPair { .. } => {
                 summary.skipped_chunks += 1
+            }
+            AudioMessage::SessionFailed {
+                session_id: failed_id,
+                reason,
+            } => {
+                if failed_id == session_id {
+                    return Err(reason);
+                }
             }
             AudioMessage::EndOfStream { .. } => {}
         }
@@ -2290,6 +2315,142 @@ mod tests {
 
     fn end_of_stream(session_id: u64) -> AudioMessage {
         AudioMessage::EndOfStream { session_id }
+    }
+
+    #[test]
+    fn capture_failure_survives_setup_answers_stop_and_allows_next_session() {
+        use super::{EngineCommand, LiveFilterState, SessionAudio, SessionEnd, run_session_loop};
+        use crate::pipeline::health::SessionHealth;
+        let (audio_tx, audio_rx) = crossbeam_channel::bounded(4);
+        let (cmd_tx, cmd_rx) = unbounded();
+        let mut engine = MockEngine::new();
+        let (collected, callback) = collecting_callback();
+        let state = Rc::new(RefCell::new(LiveFilterState {
+            pipeline_config: noop_filter_config(),
+            dictionary_entries: vec![],
+            session_terms: vec![],
+            session_corrections: vec![],
+        }));
+        let filters = Rc::new(RefCell::new(TextFilterChain::new(vec![])));
+        let drops = Arc::new(std::sync::atomic::AtomicU64::new(0));
+        let mut timeout = None;
+
+        // Failure arrived while ASR was preparing: keep it in session preroll.
+        audio_tx
+            .send(AudioMessage::SessionFailed {
+                session_id: 1,
+                reason: "webcam gone".into(),
+            })
+            .unwrap();
+        let (backlog, discarded) = super::take_session_backlog(&audio_rx, 1);
+        assert_eq!((backlog.len(), discarded), (1, 0));
+        let mut audio = SessionAudio::new(&audio_rx, backlog);
+        let (stop_tx, stop_rx) = crossbeam_channel::bounded(1);
+        cmd_tx
+            .send(EngineCommand::StopSession { reply: stop_tx })
+            .unwrap();
+        let end = run_session_loop(
+            &cmd_rx,
+            &mut audio,
+            &mut engine,
+            &callback,
+            1,
+            &filters,
+            &state,
+            &mut SessionHealth::start(1, drops.clone()),
+            None,
+            &mut DiarizedMode::new(),
+            &mut timeout,
+            None,
+        );
+        match end {
+            SessionEnd::Aborted(reason) => assert_eq!(reason, "webcam gone"),
+            SessionEnd::Stopped(..)
+            | SessionEnd::SetupFailed
+            | SessionEnd::Shutdown
+            | SessionEnd::AudioGone => {
+                panic!("failure must reach the actor's visible session-abort path")
+            }
+        }
+        assert_eq!(
+            stop_rx
+                .recv_timeout(Duration::from_secs(1))
+                .unwrap()
+                .unwrap_err(),
+            "webcam gone"
+        );
+
+        // Same channel and engine stay usable. A late old failure cannot abort
+        // the next session; Me/Them still enter the real session loop.
+        audio_tx
+            .send(AudioMessage::SessionFailed {
+                session_id: 1,
+                reason: "stale failure".into(),
+            })
+            .unwrap();
+        audio_tx
+            .send(AudioMessage::DiarizedPair {
+                session_id: 2,
+                captured_at: Instant::now(),
+                me: vec![0.5; MIMI_FRAME_SIZE],
+                them: vec![0.0; MIMI_FRAME_SIZE],
+                queue_permit: None,
+            })
+            .unwrap();
+        audio_tx.send(end_of_stream(2)).unwrap();
+        let mut audio = SessionAudio::new(&audio_rx, std::collections::VecDeque::new());
+        let (stop_tx, _stop_rx) = crossbeam_channel::bounded(1);
+        cmd_tx
+            .send(EngineCommand::StopSession { reply: stop_tx })
+            .unwrap();
+        let end = run_session_loop(
+            &cmd_rx,
+            &mut audio,
+            &mut engine,
+            &callback,
+            2,
+            &filters,
+            &state,
+            &mut SessionHealth::start(2, drops),
+            None,
+            &mut DiarizedMode::new(),
+            &mut timeout,
+            None,
+        );
+        match end {
+            SessionEnd::Stopped(_, summary) => assert!(summary.frames_processed > 0),
+            SessionEnd::Aborted(reason) => panic!("next session unexpectedly aborted: {reason}"),
+            SessionEnd::SetupFailed | SessionEnd::Shutdown | SessionEnd::AudioGone => {
+                panic!("capture channel must remain usable")
+            }
+        }
+        assert!(
+            collected
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|segment| segment.text == "me-speaks")
+        );
+
+        audio_tx
+            .send(AudioMessage::SessionFailed {
+                session_id: 2,
+                reason: "failure during stop drain".into(),
+            })
+            .unwrap();
+        let mut audio = SessionAudio::new(&audio_rx, std::collections::VecDeque::new());
+        assert_eq!(
+            finish_session(
+                &mut audio,
+                &mut engine,
+                &callback,
+                2,
+                &filters,
+                &mut DiarizedMode::new(),
+                &mut SessionSummary::default()
+            ),
+            Err("failure during stop drain".into())
+        );
     }
 
     /// Spawn an actor whose factory hands out the given pre-configured mock
@@ -4790,6 +4951,9 @@ mod tests {
                 AudioMessage::Chunk(c) => format!("chunk {}", c.samples[0]),
                 AudioMessage::DiarizedPair { me, .. } => format!("pair {}", me[0]),
                 AudioMessage::EndOfStream { session_id } => format!("eos {session_id}"),
+                AudioMessage::SessionFailed { session_id, reason } => {
+                    format!("failed {session_id}: {reason}")
+                }
             })
             .collect();
         assert_eq!(kept, vec!["chunk 1", "chunk 5", "eos 2"]);

@@ -1,9 +1,9 @@
 //! Development-only SOU-277 probe. Never launched by the shipped app.
 mod capture;
-mod devices;
 mod metrics;
-mod native;
 mod protocol;
+
+use souffle_lib::audio::native_voice::devices;
 
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;

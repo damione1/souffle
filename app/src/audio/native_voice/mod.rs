@@ -1,12 +1,9 @@
 //! AVAudioEngine owns the real input/output device. All configuration happens
 //! while stopped. Input tap only copies to a bounded ring; source renders either
 //! silence or immutable fixture PCM, never the global system tap.
-use crate::{
-    Result,
-    capture::{Sample, Telemetry},
-    devices::{self, Device, Selection, Side},
-};
+pub mod devices;
 use block2::RcBlock;
+use devices::{Device, Selection, Side};
 use objc2::{
     AnyThread,
     rc::Retained,
@@ -25,9 +22,40 @@ use std::{
     ptr::NonNull,
     sync::{
         Arc, Mutex,
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
     },
 };
+
+pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
+
+#[derive(Clone, Copy, Default)]
+pub struct Sample {
+    pub value: f32,
+    pub host: u64,
+}
+
+#[derive(Default)]
+pub struct Telemetry {
+    pub callbacks: AtomicU64,
+    pub dropped: AtomicU64,
+    pub errors: AtomicU64,
+    pub accepting: AtomicBool,
+}
+
+/// The probe preserves host timestamps; the meeting mixer consumes mono PCM.
+/// Both destinations are bounded rings and have no blocking push operation.
+pub enum Sink {
+    Timestamped(HeapProd<Sample>),
+    Mono(HeapProd<f32>),
+}
+impl Sink {
+    fn push(&mut self, value: f32, host: u64) -> bool {
+        match self {
+            Self::Timestamped(producer) => producer.try_push(Sample { value, host }).is_ok(),
+            Self::Mono(producer) => producer.try_push(value).is_ok(),
+        }
+    }
+}
 
 pub struct Native {
     engine: Retained<AVAudioEngine>,
@@ -35,18 +63,21 @@ pub struct Native {
     pub rate: u32,
     pub evidence: Value,
     pub rendered: Arc<AtomicUsize>,
+    telemetry: Arc<Telemetry>,
 }
 
 #[derive(Clone, Copy)]
 enum ReadbackPhase {
     BeforeStart,
     AfterStart,
+    Running,
 }
 impl ReadbackPhase {
     fn name(self) -> &'static str {
         match self {
             Self::BeforeStart => "before_start",
             Self::AfterStart => "after_start",
+            Self::Running => "running",
         }
     }
 }
@@ -81,7 +112,7 @@ unsafe fn read_device(
         )
         .into());
     }
-    let uid = souffle_lib::audio::output_route::device_uid(id);
+    let uid = crate::audio::output_route::device_uid(id);
     entry["uid"] = json!(uid);
     devices::confirm(expected, id, &uid?)
 }
@@ -118,8 +149,61 @@ unsafe fn select_device(
     unsafe { read_device(unit, side, expected, ReadbackPhase::BeforeStart, log) }
 }
 impl Native {
+    /// Called by the owning capture thread, never by an audio callback.
+    /// Any route/format change requires a stopped-engine reconstruction.
+    pub fn check_route(&self, expected: &Selection, log: &mut Value) -> Result<()> {
+        use objc2_core_audio::{
+            kAudioDevicePropertyNominalSampleRate, kAudioHardwarePropertyDefaultOutputDevice,
+            kAudioObjectSystemObject,
+        };
+        let output_id = devices::global_u32(
+            kAudioObjectSystemObject as u32,
+            kAudioHardwarePropertyDefaultOutputDevice,
+        )?;
+        if output_id != expected.output.id {
+            return Err("system output changed; native capture needs reconstruction".into());
+        }
+        for device in [&expected.input, &expected.output] {
+            let rate = devices::global_f64(device.id, kAudioDevicePropertyNominalSampleRate)?;
+            log["nominal_rate_readback"][&device.uid] = json!(rate);
+            if rate != device.nominal_rate {
+                return Err(format!(
+                    "device rate changed for {:?}: {} -> {rate}",
+                    device.uid, device.nominal_rate
+                )
+                .into());
+            }
+        }
+        unsafe {
+            let output = self.engine.outputNode();
+            if !self.engine.isRunning()
+                || !self.input.isVoiceProcessingEnabled()
+                || !output.isVoiceProcessingEnabled()
+                || self.input.isVoiceProcessingBypassed()
+                || self.input.isVoiceProcessingAGCEnabled()
+                || self.input.outputFormatForBus(0).sampleRate() != self.rate as f64
+            {
+                return Err("native running configuration changed".into());
+            }
+            read_device(
+                self.input.audioUnit(),
+                Side::Input,
+                &expected.input,
+                ReadbackPhase::Running,
+                log,
+            )?;
+            read_device(
+                output.audioUnit(),
+                Side::Output,
+                &expected.output,
+                ReadbackPhase::Running,
+                log,
+            )
+        }
+    }
+
     pub fn start(
-        producer: HeapProd<Sample>,
+        producer: Sink,
         telemetry: Arc<Telemetry>,
         playback: Option<(Vec<f32>, u32)>,
         selection: Option<&Selection>,
@@ -207,6 +291,7 @@ impl Native {
                     "unsupported negotiated native format (requires mono planar f32)".into(),
                 );
             }
+            let retained_telemetry = Arc::clone(&telemetry);
             let render_telemetry = Arc::clone(&telemetry);
             let producer = Mutex::new(producer);
             let block = RcBlock::new(
@@ -238,12 +323,7 @@ impl Native {
                         for ch in 0..channels as usize {
                             value += *(*data.add(ch)).as_ptr().add(i);
                         }
-                        if p.try_push(Sample {
-                            value: value / channels as f32,
-                            host: timestamp,
-                        })
-                        .is_err()
-                        {
+                        if !p.push(value / channels as f32, timestamp) {
                             telemetry.dropped.fetch_add(1, Ordering::Relaxed);
                         }
                     }
@@ -263,8 +343,7 @@ impl Native {
             let source_format = format.clone();
             let pcm = match playback {
                 Some((samples, source_rate)) => {
-                    let mut r =
-                        souffle_lib::audio::Resampler::new(source_rate, 1, rate as u32, 1.0);
+                    let mut r = crate::audio::Resampler::new(source_rate, 1, rate as u32, 1.0);
                     let mut out = r.process(&samples);
                     out.extend(r.flush());
                     out
@@ -365,21 +444,55 @@ impl Native {
             }
             evidence["input_presentation_latency_seconds"] = json!(input.presentationLatency());
             evidence["output_presentation_latency_seconds"] = json!(output.presentationLatency());
-            Ok(Self {
+            let capture = Self {
                 engine,
                 input,
                 rate: rate as u32,
                 evidence,
                 rendered,
-            })
+                telemetry: retained_telemetry,
+            };
+            if let Some(selection) = selection {
+                capture.check_route(selection, log)?;
+            }
+            Ok(capture)
         }
     }
 }
 impl Drop for Native {
     fn drop(&mut self) {
         unsafe {
+            self.telemetry.accepting.store(false, Ordering::Release);
             self.engine.stop();
             self.input.removeTapOnBus(0);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ringbuf::{
+        HeapRb,
+        traits::{Consumer, Split},
+    };
+
+    #[test]
+    fn native_destinations_preserve_me_samples_and_bound_overflow() {
+        let (prod, mut cons) = HeapRb::new(2).split();
+        let mut mic = Sink::Mono(prod);
+        assert!(mic.push(0.25, 100));
+        assert!(mic.push(-0.5, 101));
+        assert!(!mic.push(0.75, 102));
+        assert_eq!(cons.try_pop(), Some(0.25));
+        assert_eq!(cons.try_pop(), Some(-0.5));
+        assert_eq!(cons.try_pop(), None);
+
+        let (prod, mut cons) = HeapRb::new(1).split();
+        let mut probe = Sink::Timestamped(prod);
+        assert!(probe.push(0.25, 123));
+        assert!(!probe.push(-0.5, 124));
+        let sample = cons.try_pop().unwrap();
+        assert_eq!((sample.value, sample.host), (0.25, 123));
     }
 }

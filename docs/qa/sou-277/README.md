@@ -4,13 +4,17 @@ For a short webcam listening test without ASR preparation, use the
 [SOU-278 quick-check guide](../sou-278/README.md). Those auxiliary trials do not
 enter this formal comparison.
 
+For the explicitly opt-in **Nightly app integration**, including the user's
+webcam, see [SOU-279](../sou-279/README.md). Its build flag changes meeting capture;
+the ordinary app build remains on CPAL/FDAF. Both use the same native capture core.
+
 **Investigation incomplete. No acoustic capture was run during implementation.**
 Damien owns the physical trials, permissions, listening and meeting-app checks.
 Nothing here demonstrates external-browser echo rejection or justifies enabling
 Apple processing by default. The reported transcript flash remains unrelated and
-uninvestigated. Production capture, settings, retention, ASR adapters and Slint UI
-are unchanged. The only production source additions are read-only accessors for
-the existing system-tap drop counter and teardown-failure flag.
+uninvestigated. SOU-277 itself does not change app capture, settings, retention,
+ASR adapters or Slint UI. SOU-279 adds the separately gated meeting integration;
+it does not establish acoustic effectiveness or change the formal comparison.
 
 ## Build and isolation
 

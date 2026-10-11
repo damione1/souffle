@@ -7163,7 +7163,9 @@ dependencies = [
  "moshi",
  "objc2 0.6.4",
  "objc2-app-kit 0.3.2",
+ "objc2-audio-toolbox",
  "objc2-av-foundation",
+ "objc2-avf-audio",
  "objc2-core-audio",
  "objc2-core-audio-types",
  "objc2-core-foundation",
@@ -7207,13 +7209,11 @@ dependencies = [
 name = "souffle-aec-probe"
 version = "0.1.0"
 dependencies = [
- "block2 0.6.2",
  "clap",
  "cpal",
  "hound",
  "libc",
  "objc2 0.6.4",
- "objc2-audio-toolbox",
  "objc2-avf-audio",
  "objc2-core-audio",
  "objc2-core-audio-types",

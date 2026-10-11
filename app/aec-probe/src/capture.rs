@@ -1,7 +1,6 @@
 use crate::{
     Result,
-    devices::{Selection, global, property},
-    native::Native,
+    devices::{Selection, global_f64, global_u32, property_f32, property_u32},
     protocol::{self, Mode, Scene, Track, TrialPurpose, TrialStatus},
 };
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
@@ -14,15 +13,12 @@ use serde_json::{Value, json};
 use souffle_lib::audio::{
     aec::Aec,
     mixer::{FRAME_SAMPLES, MIX_RATE, MeetingMixer},
+    native_voice::{Native, Sample, Sink, Telemetry},
     system_tap::SystemTap,
 };
 use std::{
     path::Path,
-    sync::{
-        Arc,
-        atomic::{AtomicBool, AtomicU64, Ordering},
-        mpsc,
-    },
+    sync::{Arc, atomic::Ordering, mpsc},
     time::{Duration, Instant},
 };
 
@@ -32,34 +28,22 @@ pub fn host_time() -> u64 {
     unsafe { libc::mach_absolute_time() }
 }
 
-#[derive(Clone, Copy, Default)]
-pub struct Sample {
-    pub value: f32,
-    pub host: u64,
-}
-#[derive(Default)]
-pub struct Telemetry {
-    pub callbacks: AtomicU64,
-    pub dropped: AtomicU64,
-    pub errors: AtomicU64,
-    pub accepting: AtomicBool,
-}
 fn snapshot(selection: Option<&Selection>) -> Value {
-    let input = global::<u32>(
+    let input = global_u32(
         kAudioObjectSystemObject as u32,
         kAudioHardwarePropertyDefaultInputDevice,
     );
-    let output = global::<u32>(
+    let output = global_u32(
         kAudioObjectSystemObject as u32,
         kAudioHardwarePropertyDefaultOutputDevice,
     );
     let describe = |id: std::result::Result<u32, String>| match id {
         Ok(id) => json!({"id": id, "uid": souffle_lib::audio::output_route::device_uid(id),
-            "rate": global::<f64>(id, kAudioDevicePropertyNominalSampleRate),
-            "transport": global::<u32>(id, kAudioDevicePropertyTransportType),
-            "volume_main": property::<f32>(id, kAudioDevicePropertyVolumeScalar, kAudioObjectPropertyScopeOutput, 0),
-            "volume_channel1": property::<f32>(id, kAudioDevicePropertyVolumeScalar, kAudioObjectPropertyScopeOutput, 1),
-            "mute": property::<u32>(id, kAudioDevicePropertyMute, kAudioObjectPropertyScopeOutput, 0)}),
+            "rate": global_f64(id, kAudioDevicePropertyNominalSampleRate),
+            "transport": global_u32(id, kAudioDevicePropertyTransportType),
+            "volume_main": property_f32(id, kAudioDevicePropertyVolumeScalar, kAudioObjectPropertyScopeOutput, 0),
+            "volume_channel1": property_f32(id, kAudioDevicePropertyVolumeScalar, kAudioObjectPropertyScopeOutput, 1),
+            "mute": property_u32(id, kAudioDevicePropertyMute, kAudioObjectPropertyScopeOutput, 0)}),
         Err(e) => json!({"error": e}),
     };
     let selected_input = selection.map_or_else(|| input.clone(), |s| Ok(s.input.id));
@@ -186,14 +170,12 @@ pub fn check(
     }
     let selection = Selection::resolve(input_uid, output_uid)?;
     eprintln!(
-        "{} / {}: input {} ({:?}, {} Hz), output {} ({:?}, {} Hz)",
+        "{} / {}: input {} ({} Hz), output {} ({} Hz); device identity in the private manifest",
         mode.name(),
         scene.name(),
         selection.input.name,
-        selection.input.uid,
         selection.input.nominal_rate,
         selection.output.name,
-        selection.output.uid,
         selection.output.nominal_rate
     );
     run_trial(
@@ -346,7 +328,7 @@ fn record(trial: &Path, mode: Mode, seconds: u32, plan: &Plan, manifest: &mut Va
         Mode::Apple => {
             let playback = plan.playback()?;
             let n = Native::start(
-                mic_prod,
+                Sink::Timestamped(mic_prod),
                 Arc::clone(&telemetry),
                 playback,
                 plan.selection(),
@@ -363,13 +345,13 @@ fn record(trial: &Path, mode: Mode, seconds: u32, plan: &Plan, manifest: &mut Va
                 Some(s) => (s.cpal_input()?, s.input.id),
                 None => (
                     host.default_input_device().ok_or("no default input")?,
-                    global::<u32>(
+                    global_u32(
                         kAudioObjectSystemObject as u32,
                         kAudioHardwarePropertyDefaultInputDevice,
                     )?,
                 ),
             };
-            let current = global::<f64>(input_id, kAudioDevicePropertyNominalSampleRate)? as u32;
+            let current = global_f64(input_id, kAudioDevicePropertyNominalSampleRate)? as u32;
             let config = device
                 .supported_input_configs()?
                 .find(|r| {

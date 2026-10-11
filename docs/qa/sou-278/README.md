@@ -1,7 +1,9 @@
 # SOU-278 — essai court avec la webcam
 
 Le **probe séparé** compare brut, FDAF et Apple sur trois scènes de 30 secondes.
-La Nightly garde son traitement habituel. Les trois essais déjà faits dans la
+La Nightly habituelle garde son traitement existant. La Nightly construite avec
+`--native-aec` utilise l'intégration [SOU-279](../sou-279/README.md) dans l'app.
+Les trois essais déjà faits dans la
 Nightly constituent la baseline du FDAF ; leurs fichiers mixtes ne permettent pas
 de reconstituer le micro brut. Ce parcours enregistre les pistes nécessaires à
 l'écoute comparative, sans gold, profils ASR ni téléchargement.
