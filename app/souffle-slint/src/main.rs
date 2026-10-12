@@ -3782,6 +3782,17 @@ fn wire_update_dialogs(
         }
     });
 
+    let weak = window.as_weak();
+    let handle = tauri_handle.clone();
+    window.on_update_install_permission_refresh_requested(move || {
+        if let Some(window) = weak.upgrade() {
+            let blocked = update_ui::install_block_for_display(
+                souffle_lib::commands::get_update_install_block(handle.clone()),
+            );
+            update_ui::refresh_install_block(&window, blocked);
+        }
+    });
+
     // Settings > "Mises à jour": one button that walks check -> download ->
     // install and restart. Rust decides what the click means from the row
     // (`update_ui::update_row_click`); Slint only renders it.
@@ -8093,7 +8104,63 @@ mod tests {
     }
 
     #[test]
+    fn transient_install_permission_refresh_runs_only_for_a_visible_refusal() {
+        std::thread::spawn(|| {
+            i_slint_backend_testing::init_no_event_loop();
+            let window = MainWindow::new().unwrap();
+            let reads = Rc::new(Cell::new(0));
+            let count = reads.clone();
+            window.on_update_install_permission_refresh_requested(move || {
+                count.set(count.get() + 1);
+            });
+            let tick = || {
+                slint::platform::update_timers_and_animations();
+                i_slint_backend_testing::mock_elapsed_time(Duration::from_secs(1));
+            };
+            window.set_update_phase(super::UpdatePhase::Ready);
+            crate::update_ui::project_install_block(
+                &window,
+                Some(souffle_lib::commands::InstallBlockReason::RuntimeBusy),
+            );
+            tick();
+            assert_eq!(reads.get(), 0, "closed surfaces do not poll");
+            window.set_update_available_open(true);
+            tick();
+            assert_eq!(reads.get(), 1, "visible dialog retries its refusal");
+            window.set_window_visible(false);
+            tick();
+            assert_eq!(reads.get(), 1, "hidden window does not poll");
+            window.set_window_visible(true);
+            window.set_update_phase(super::UpdatePhase::Downloading);
+            tick();
+            assert_eq!(reads.get(), 1, "download has no install control to retry");
+            window.set_update_available_open(false);
+            window.set_settings_open(true);
+            window.set_settings_tab(super::SettingsTab::System);
+            crate::update_ui::set_update_row(
+                &window,
+                crate::update_ui::UpdateRow::Ready {
+                    version: "fixture".into(),
+                    blocked: Some(souffle_lib::commands::InstallBlockReason::RuntimeBusy),
+                },
+            );
+            tick();
+            assert_eq!(reads.get(), 2, "visible Settings row retries its refusal");
+            window.set_settings_tab(super::SettingsTab::Audio);
+            tick();
+            assert_eq!(reads.get(), 2, "other Settings tabs do not poll");
+            window.set_settings_tab(super::SettingsTab::System);
+            crate::update_ui::refresh_install_block(&window, None);
+            tick();
+            assert_eq!(reads.get(), 2, "permission recovery stops polling");
+        })
+        .join()
+        .unwrap();
+    }
+
+    #[test]
     fn settings_callbacks_refuse_against_authority_with_stale_idle_projection() {
+        use crate::update_ui;
         use souffle_lib::engine::default_transcription_profile;
         use souffle_lib::state::AppState;
         use souffle_lib::state_machine::{AppStateMachine, RecordingKind};
@@ -8266,6 +8333,21 @@ mod tests {
         window.invoke_settings_model_changed("rejected model".into());
         window.invoke_update_install_requested();
         window.invoke_settings_delete_model_requested();
+        update_ui::set_update_row(
+            &window,
+            update_ui::UpdateRow::Ready {
+                version: "fixture".into(),
+                blocked: None,
+            },
+        );
+        window.set_settings_open(true);
+        window.set_settings_tab(super::SettingsTab::System);
+        window.invoke_settings_update_action_requested();
+        assert_eq!(
+            window.get_settings_update_block_reason(),
+            super::InstallBlockReason::RuntimeBusy
+        );
+        assert!(window.get_settings_update_blocked());
         let _ = release_tx.send(());
         assert!(
             worker.join().unwrap(),
@@ -8278,6 +8360,20 @@ mod tests {
         );
         assert!(!window.get_settings_resetting_sample_rate());
         assert!(io.is_idle_for_test());
+        assert_eq!(db.get_all_settings().unwrap(), before);
+        assert!(command_rx.try_recv().is_err());
+
+        // Releasing a transient lock emits no machine transition. The visible
+        // refusal must clear itself, without a second click or Settings reopen.
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        while (window.get_settings_update_blocked() || window.get_update_install_blocked())
+            && std::time::Instant::now() < deadline
+        {
+            slint::platform::update_timers_and_animations();
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(!window.get_settings_update_blocked());
+        assert!(!window.get_update_install_blocked());
         assert_eq!(db.get_all_settings().unwrap(), before);
         assert!(command_rx.try_recv().is_err());
         drop(audio_tx);

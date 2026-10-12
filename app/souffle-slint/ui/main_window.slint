@@ -636,9 +636,29 @@ export component MainWindow inherits Window {
         : root.update-install-block-reason;
     callback update-download-requested();
     callback update-install-requested();
+    callback update-install-permission-refresh-requested();
     callback update-open-release-requested();
     callback update-dismiss-requested();
     callback update-link-clicked(string);
+
+    // Releasing a contended lock emits no runtime transition. Re-read only
+    // this transient refusal while its install control is visible; stable
+    // machine refusals continue to follow the normal runtime events.
+    Timer {
+        interval: 500ms;
+        running: root.window-visible && !root.onboarding-open && (
+            (root.update-available-open && root.update-phase == UpdatePhase.ready
+                && root.current-update-install-blocked
+                && root.current-update-install-block-reason == InstallBlockReason.runtime-busy)
+            || (root.settings-open && root.settings-tab == SettingsTab.system
+                && root.settings-update-row == UpdateRowStatus.ready
+                && ((root.current-update-install-blocked
+                        && root.current-update-install-block-reason == InstallBlockReason.runtime-busy)
+                    || (root.settings-update-blocked
+                        && root.settings-update-block-reason == InstallBlockReason.runtime-busy)))
+        );
+        triggered => { root.update-install-permission-refresh-requested(); }
+    }
 
     // Header + content wrapped together so the gear icon (in `AppHeader`)
     // stays visible and clickable while Settings is open, matching
