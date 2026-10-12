@@ -7,60 +7,86 @@ on:
       - master
   pull_request:
   merge_group:
+  workflow_dispatch:
 
 # Checkout-only workflow: pin the GITHUB_TOKEN down instead of inheriting
 # the default scope (same convention as release.yml / deploy-site.yml).
 permissions:
   contents: read
 
-# A new push makes the in-flight run obsolete. Also cancel on develop:
-# two merges in a row otherwise serialize on the single macOS runner.
+# Superseded PR/push runs are obsolete. Keep a manually requested full run
+# independent from the quick run triggered by a push to the same branch.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  rust:
-    runs-on: macos-latest
-    # Warm cache: ~5 min. Cold cache (new stable Rust, Cargo.lock change):
-    # ~35 min, and a cancelled run never saves the cache, so the cap must
-    # leave room for a cold run. Without a cap, a hung step runs to GitHub's
-    # 6 h default, and macOS minutes bill at 10x.
-    timeout-minutes: 50
+  quick:
+    name: Quick checks
+    runs-on: ubuntu-latest
+    # Aim for five minutes, including a cold cache. A timeout is a failure,
+    # never a substitute for completing the checks within this budget.
+    timeout-minutes: 7
 
     steps:
       - uses: actions/checkout@v6.0.1
 
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
 
-      # Only the default branch writes the cache. GitHub scopes a cache to the
-      # ref that created it, and a run can read only its own ref, its base, and
-      # the default branch: never a sibling. Saving from PR runs therefore piled
-      # up ~1 GB entries per PR that no other run could reach, against a 10 GB
-      # repo-wide budget that GitHub reclaims by evicting the least recently
-      # used entry.
       - uses: Swatinem/rust-cache@v2.9.1
         with:
           workspaces: app -> target
+          shared-key: quick
           save-if: ${{ github.ref == 'refs/heads/develop' }}
 
-      # Cheap: cargo metadata honors CARGO_TARGET_DIR (no release build).
-      - run: ./scripts/build-mcp-sidecar.test.sh
-      # Tauri's build script validates `externalBin` during clippy/`cargo test`.
-      # Debug matches those profiles; --release (LTO) is packaging only.
-      - run: ./scripts/build-mcp-sidecar.sh --debug
-      # Two PRs can each be green and still break develop together: one turned
-      # a &str into a String while the other added a caller. Only the merged
-      # tree catches that, so run the suites here as well as locally.
       - run: cargo fmt --manifest-path app/Cargo.toml --all -- --check
-      - run: cargo clippy --manifest-path app/Cargo.toml --workspace --all-targets -- -D warnings
+      - run: ./scripts/build-mcp-sidecar.test.sh
+      # These crates exercise SQL contracts, paragraph grouping, MCP queries,
+      # bundled fonts and UI typography without compiling Slint/Metal/audio.
+      - name: Clippy (portable crates)
+        run: cargo clippy --locked --manifest-path app/Cargo.toml -p souffle-schema -p souffle-mcp -p souffle-typography --all-targets -- -D warnings
+      - name: Tests (portable crates)
+        run: cargo test --locked --manifest-path app/Cargo.toml -p souffle-schema -p souffle-mcp -p souffle-typography
+
+  native:
+    name: Full native checks
+    # Daily PRs into develop use Quick checks. Compile and test the whole app
+    # before promotion to master, or explicitly via Run workflow on any ref.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.base_ref == 'master' ||
+      github.ref == 'refs/heads/master' ||
+      github.event.merge_group.base_ref == 'refs/heads/master'
+    runs-on: macos-latest
+    # Cold native builds have exceeded 50 minutes before tests even started.
+    timeout-minutes: 75
+
+    steps:
+      - uses: actions/checkout@v6.0.1
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      # master seeds promotion PRs; a manual run on develop can seed any PR.
+      # Do not save large caches scoped to individual PR merge refs.
+      - uses: Swatinem/rust-cache@v2.9.1
+        with:
+          workspaces: app -> target
+          save-if: ${{ github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/master' }}
+
+      # Slint's build script no longer needs a prebuilt Tauri sidecar.
+      # The workspace commands already compile and test souffle-mcp.
+      - run: cargo clippy --locked --manifest-path app/Cargo.toml --workspace --all-targets -- -D warnings
       # Silero's two ort tests have hung here (SOU-132). The tests now share a
       # single bounded ort init and fail by name after 30 s; the watchdog is
       # the next net: past 5 min it saves `sample` stacks of the test binaries
       # as an artifact before killing them. The 15 min cap stays as the last
       # net. Compile first so neither deadline counts build time.
-      - run: cargo test --manifest-path app/Cargo.toml --workspace --no-run
-      - run: ./scripts/ci/cargo-test-watchdog.sh 300 "${RUNNER_TEMP}/cargo-test-samples" -- --manifest-path app/Cargo.toml --workspace
+      - run: cargo test --locked --manifest-path app/Cargo.toml --workspace --no-run
+      - run: ./scripts/ci/cargo-test-watchdog.sh 300 "${RUNNER_TEMP}/cargo-test-samples" -- --locked --manifest-path app/Cargo.toml --workspace
         timeout-minutes: 15
       - if: failure()
         uses: actions/upload-artifact@v4
@@ -70,5 +96,9 @@ jobs:
           if-no-files-found: ignore
       # The catalogue gate extracts the @tr() calls before validating both PO
       # files. Keep the extractor aligned with the Slint compiler in Cargo.lock.
-      - run: cargo install slint-tr-extractor --version 1.17.1 --locked
+      - name: Install matching translation extractor
+        run: |
+          version=$(awk '/^name = "slint"$/ { found = 1; next } found && /^version = / { gsub(/"/, "", $3); print $3; exit }' app/Cargo.lock)
+          test -n "$version"
+          cargo install slint-tr-extractor --version "$version" --locked
       - run: ./scripts/check_slint_translations.sh
