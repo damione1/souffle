@@ -27,6 +27,7 @@ import { StructuredActionItem } from "components/summary_section.slint";
 import { RecordingMode, LiveSystemAudio, MicStall, MeetingIdleBanner, WakeResumeNotice,SpeakerRole, TimelineFilter, TimelineKind, NotesSaveState, ModelPhase, TranscriptionPhase, UpcomingPhase, SettingsTab, SettingsInteraction, AppTheme, AppLocale, PasteMethod, MeetingLanguage, LogLevel, AudioRetention, AccessState, PermissionKind, ShortcutField, ShortcutNotice, SettingsCaptureError, SummaryProvider, AppleIntelligenceUnavailableReason, OnboardingStep, UpdatePhase, InstallBlockReason, UpdateRowStatus, MeetingExportFormat, DictionaryLearningMode } from "types.slint";
 export { SettingsTab, SettingsInteraction, AppTheme, AppLocale, PasteMethod, MeetingLanguage, LogLevel, AudioRetention, AccessState, PermissionKind, ShortcutField, SummaryProvider, AppleIntelligenceUnavailableReason, SpeakerRole }
 import { Theme } from "theme.slint";
+import { ModelDeletionError } from "types.slint";
 import { TranscriptionLabels } from "components/transcription_labels.slint";
 export { TranscriptionLabels }
 import { TranscriptionUnavailableReason, SystemSettingsPane } from "types.slint";
@@ -366,6 +367,7 @@ export component MainWindow inherits Window {
     in property <string> settings-unload-timeout-label;
     in property <string> settings-model-error-message;
     in property <string> settings-model-delete-error;
+    in property <ModelDeletionError> settings-model-delete-error-kind: ModelDeletionError.operation-failed;
     in property <bool> settings-model-files-deletable;
 
     in property <DictionaryLearningMode> settings-dictionary-learning-mode;
@@ -626,6 +628,12 @@ export component MainWindow inherits Window {
     // (`update_ui::project_install_block`) always writes the pair together.
     in property <bool> update-install-blocked: false;
     in property <InstallBlockReason> update-install-block-reason;
+    out property <bool> current-update-install-blocked: root.recording-starting
+        || root.recording-mode != RecordingMode.idle || root.update-install-blocked;
+    out property <InstallBlockReason> current-update-install-block-reason: root.recording-starting ? InstallBlockReason.starting
+        : root.recording-mode == RecordingMode.dictation ? InstallBlockReason.recording-dictation
+        : root.recording-mode == RecordingMode.meeting ? InstallBlockReason.recording-meeting
+        : root.update-install-block-reason;
     callback update-download-requested();
     callback update-install-requested();
     callback update-open-release-requested();
@@ -899,8 +907,8 @@ export component MainWindow inherits Window {
         update-error: root.settings-update-error;
         update-has-progress: root.settings-update-has-progress;
         update-progress: root.settings-update-progress;
-        update-blocked: root.settings-update-blocked;
-        update-block-reason: root.settings-update-block-reason;
+        update-blocked: root.current-update-install-blocked || root.settings-update-blocked;
+        update-block-reason: root.current-update-install-blocked ? root.current-update-install-block-reason : root.settings-update-block-reason;
         summary-provider: root.settings-summary-provider;
         apple-intelligence-available: root.settings-apple-intelligence-available;
         apple-intelligence-reason: root.settings-apple-intelligence-reason;
@@ -958,6 +966,7 @@ export component MainWindow inherits Window {
         unload-timeout-label: root.settings-unload-timeout-label;
         model-error-message: root.settings-model-error-message;
         model-delete-error: root.settings-model-delete-error;
+        model-delete-error-kind: root.settings-model-delete-error-kind;
         model-files-deletable: root.settings-model-files-deletable;
 
         dictionary-learning-mode: root.settings-dictionary-learning-mode;
@@ -1185,8 +1194,8 @@ export component MainWindow inherits Window {
         release-notes-blocks: root.update-release-notes-blocks;
         phase: root.update-phase;
         error-message: root.update-error-message;
-        install-blocked: root.update-install-blocked;
-        install-block-reason: root.update-install-block-reason;
+        install-blocked: root.current-update-install-blocked;
+        install-block-reason: root.current-update-install-block-reason;
         download-requested => { root.update-download-requested(); }
         install-requested => { root.update-install-requested(); }
         open-release-requested => { root.update-open-release-requested(); }

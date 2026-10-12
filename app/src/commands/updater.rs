@@ -20,6 +20,7 @@ use crate::state_machine::AppStateMachine;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum InstallBlockReason {
+    RuntimeBusy,
     Starting,
     RecordingDictation,
     RecordingMeeting,
@@ -32,6 +33,7 @@ pub enum InstallBlockReason {
 impl InstallBlockReason {
     pub fn as_str(self) -> &'static str {
         match self {
+            Self::RuntimeBusy => "runtime_busy",
             Self::Starting => "starting",
             Self::RecordingDictation => "recording_dictation",
             Self::RecordingMeeting => "recording_meeting",
@@ -152,14 +154,30 @@ pub fn get_update_download_status() -> Result<UpdateDownloadStatus, String> {
 pub fn get_update_install_block(
     state: Arc<AppState>,
 ) -> Result<Option<InstallBlockReason>, String> {
-    state.capture_start.with_start_boundary(|starting| {
-        let machine = state.machine.acquire()?;
+    read_install_block(&state.capture_start, &state.machine)
+}
+
+fn read_install_block(
+    gate: &crate::audio::start_gate::CaptureStartGate,
+    machine: &Mutex<AppStateMachine>,
+) -> Result<Option<InstallBlockReason>, String> {
+    gate.try_with_start_boundary(|starting| {
+        let machine = match machine.try_lock() {
+            Ok(machine) => machine,
+            Err(std::sync::TryLockError::WouldBlock) => {
+                return Ok(Some(InstallBlockReason::RuntimeBusy));
+            }
+            Err(std::sync::TryLockError::Poisoned(error)) => {
+                return Err(format!("Lock poisoned: {error}"));
+            }
+        };
         Ok(if starting {
             Some(InstallBlockReason::Starting)
         } else {
             install_blocked_reason(&machine)
         })
     })
+    .unwrap_or(Ok(Some(InstallBlockReason::RuntimeBusy)))
 }
 
 /// Start downloading the updater artifact. Detection has already happened via
@@ -253,23 +271,29 @@ fn install_update_blocking(state: Arc<AppState>) -> Result<(), String> {
         // No window operation inside this capture-gate -> machine boundary.
         // Release the machine before engine shutdown; keep capture reservations
         // excluded until native relaunch exits this process.
-        let package = with_install_permission(&state.machine, starting, || {
-            let package = with_state(|s| {
-                if s.phase != UpdatePhase::Ready {
-                    return Err("No update package is ready to install".to_string());
+        let package = with_install_permission(
+            &state.machine,
+            starting,
+            || {
+                with_state(|s| {
+                    if s.phase != UpdatePhase::Ready {
+                        return Err("No update package is ready to install".to_string());
+                    }
+                    s.ready
+                        .take()
+                        .ok_or_else(|| "No update package is ready to install".to_string())
+                })?
+            },
+            |package| {
+                info!(version = %package.version, "Installing update");
+                if let Err(e) = crate::native::updater::install_bundle(&package.bytes) {
+                    let error = format!("Update install failed: {e}");
+                    let _ = fail(error.clone(), true);
+                    return Err(error);
                 }
-                s.ready
-                    .take()
-                    .ok_or_else(|| "No update package is ready to install".to_string())
-            })??;
-            info!(version = %package.version, "Installing update");
-            if let Err(e) = crate::native::updater::install_bundle(&package.bytes) {
-                let error = format!("Update install failed: {e}");
-                let _ = fail(error.clone(), true);
-                return Err(error);
-            }
-            Ok(package)
-        })?;
+                Ok(package)
+            },
+        )?;
 
         // Explicit shutdown only once the new bundle is in place: free Metal
         // before the process exits as part of the relaunch, same requirement
@@ -287,9 +311,10 @@ fn install_update_blocking(state: Arc<AppState>) -> Result<(), String> {
 fn with_install_permission<T>(
     machine: &Mutex<AppStateMachine>,
     starting: bool,
-    install: impl FnOnce() -> Result<T, String>,
+    consume: impl FnOnce() -> Result<T, String>,
+    install: impl FnOnce(T) -> Result<T, String>,
 ) -> Result<T, String> {
-    {
+    let package = {
         let machine = machine.acquire()?;
         let reason = if starting {
             Some(InstallBlockReason::Starting)
@@ -302,8 +327,12 @@ fn with_install_permission<T>(
                 reason.as_str().replace('_', " ")
             ));
         }
-        install()
-    }
+        consume()?
+    };
+    // Package consumption is the installation decision. Extraction/swap may
+    // take seconds: neither UI refresh nor the engine actor waits on that I/O.
+    // The caller still owns the capture boundary through install and relaunch.
+    install(package)
 }
 
 fn fail(error: String, manual_fallback: bool) -> Result<UpdateDownloadStatus, String> {
@@ -366,10 +395,15 @@ mod tests {
             (AppStateMachine::Loading { profile }, false),
         ] {
             let consumed = Cell::new(false);
-            let result = super::with_install_permission(&Mutex::new(machine), starting, || {
-                consumed.set(true);
-                Ok(())
-            });
+            let result = super::with_install_permission(
+                &Mutex::new(machine),
+                starting,
+                || {
+                    consumed.set(true);
+                    Ok(())
+                },
+                |_| panic!("a refused install must not swap the bundle"),
+            );
             assert!(result.is_err());
             assert!(!consumed.get());
         }
@@ -387,6 +421,80 @@ mod tests {
             backend_id: "b".into(),
             backend_label: "B".into(),
         }
+    }
+
+    #[test]
+    fn install_reads_refuse_without_waiting_for_capture_or_machine_locks() {
+        use crate::audio::start_gate::CaptureStartGate;
+        use std::sync::mpsc;
+        use std::time::Duration;
+
+        let gate = Arc::new(CaptureStartGate::new());
+        let machine = Arc::new(Mutex::new(AppStateMachine::Idle));
+        let check = || {
+            let (tx, rx) = mpsc::channel();
+            let gate = gate.clone();
+            let machine = machine.clone();
+            let worker = std::thread::spawn(move || {
+                tx.send(read_install_block(&gate, &machine)).unwrap();
+            });
+            (worker, rx)
+        };
+        let (worker, observed) = gate.with_start_boundary(|_| {
+            let (worker, rx) = check();
+            (worker, rx.recv_timeout(Duration::from_secs(1)))
+        });
+        worker.join().unwrap();
+        assert_eq!(observed.unwrap(), Ok(Some(InstallBlockReason::RuntimeBusy)));
+
+        let held = machine.lock().unwrap();
+        let (worker, rx) = check();
+        let observed = rx.recv_timeout(Duration::from_secs(1));
+        drop(held);
+        worker.join().unwrap();
+        assert_eq!(observed.unwrap(), Ok(Some(InstallBlockReason::RuntimeBusy)));
+    }
+
+    #[test]
+    fn bundle_swap_releases_machine_but_keeps_capture_excluded() {
+        use crate::audio::start_gate::CaptureStartGate;
+        let gate = CaptureStartGate::new();
+        let machine = Mutex::new(AppStateMachine::Ready { profile: profile() });
+        let result = gate.with_start_boundary(|starting| {
+            with_install_permission(
+                &machine,
+                starting,
+                || {
+                    assert!(
+                        machine.try_lock().is_err(),
+                        "decision and consumption are atomic"
+                    );
+                    Ok("verified package")
+                },
+                |package| {
+                    assert!(
+                        machine.try_lock().is_ok(),
+                        "bundle I/O must release the machine"
+                    );
+                    assert_eq!(
+                        read_install_block(&gate, &machine).unwrap(),
+                        Some(InstallBlockReason::RuntimeBusy)
+                    );
+                    assert!(
+                        gate.start_in_flight_or_locked(),
+                        "capture stays excluded until relaunch"
+                    );
+                    assert_eq!(package, "verified package");
+                    Err("injected swap failure".into())
+                },
+            )
+        });
+        assert_eq!(result, Err("injected swap failure".into()));
+        assert_eq!(
+            read_install_block(&gate, &machine),
+            Ok(None),
+            "failure releases the boundary"
+        );
     }
 
     #[test]
@@ -439,6 +547,7 @@ mod tests {
     #[test]
     fn install_block_reason_wire_encoding_matches_as_str() {
         for reason in [
+            InstallBlockReason::RuntimeBusy,
             InstallBlockReason::Starting,
             InstallBlockReason::RecordingDictation,
             InstallBlockReason::RecordingMeeting,

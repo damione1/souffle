@@ -298,17 +298,42 @@ pub fn load_model(
     Ok(())
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ModelDeletionError {
+    ManagedAsset,
+    TransitionBusy,
+    ActiveModel,
+    OperationFailed { message: String },
+}
+
+impl std::fmt::Display for ModelDeletionError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::ManagedAsset => formatter.write_str("Apple Speech assets are managed by macOS and cannot be deleted by Soufflé."),
+            Self::TransitionBusy => formatter.write_str("Cannot delete a model while it is downloading, loading, unloading, or recovering from a failed unload."),
+            Self::ActiveModel => formatter.write_str("Cannot delete the currently loaded model. Unload it first or switch to a different model."),
+            Self::OperationFailed { message } => formatter.write_str(message),
+        }
+    }
+}
+
+impl std::error::Error for ModelDeletionError {}
+
+impl From<String> for ModelDeletionError {
+    fn from(message: String) -> Self {
+        Self::OperationFailed { message }
+    }
+}
+
 /// Delete a downloaded model from disk.
 pub fn delete_model(
     state: Arc<AppState>,
     selection: TranscriptionProfileSelection,
-) -> Result<(), String> {
+) -> Result<(), ModelDeletionError> {
     let profile = resolve_transcription_selection(&selection)?;
 
     if !models::can_delete_model_files(&profile) {
-        return Err(
-            "Apple Speech assets are managed by macOS and cannot be deleted by Soufflé.".into(),
-        );
+        return Err(ModelDeletionError::ManagedAsset);
     }
 
     let machine = state.machine.acquire()?;
@@ -331,29 +356,32 @@ pub fn delete_model(
 pub fn can_delete_model(
     state: &AppState,
     selection: &TranscriptionProfileSelection,
-) -> Result<(), String> {
+) -> Result<(), ModelDeletionError> {
     let profile = resolve_transcription_selection(selection)?;
     if !models::can_delete_model_files(&profile) {
-        return Err(
-            "Apple Speech assets are managed by macOS and cannot be deleted by Soufflé.".into(),
-        );
+        return Err(ModelDeletionError::ManagedAsset);
     }
-    let machine = state.machine.acquire()?;
+    let machine = match state.machine.try_lock() {
+        Ok(machine) => machine,
+        Err(std::sync::TryLockError::WouldBlock) => return Err(ModelDeletionError::TransitionBusy),
+        Err(std::sync::TryLockError::Poisoned(error)) => {
+            return Err(ModelDeletionError::OperationFailed {
+                message: format!("Lock poisoned: {error}"),
+            });
+        }
+    };
     validate_model_deletion(&machine, &profile)
 }
 
 fn validate_model_deletion(
     machine: &AppStateMachine,
     profile: &TranscriptionProfile,
-) -> Result<(), String> {
+) -> Result<(), ModelDeletionError> {
     if model_delete_blocked_by_transition(machine) {
-        return Err(
-            "Cannot delete a model while it is downloading, loading, unloading, or recovering from a failed unload."
-                .into(),
-        );
+        return Err(ModelDeletionError::TransitionBusy);
     }
     if machine.is_model_ready() && machine.active_profile() == Some(profile) {
-        return Err("Cannot delete the currently loaded model. Unload it first or switch to a different model.".into());
+        return Err(ModelDeletionError::ActiveModel);
     }
 
     Ok(())

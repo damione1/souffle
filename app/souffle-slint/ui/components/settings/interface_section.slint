@@ -376,7 +376,9 @@ export component InterfaceSection inherits VerticalLayout {
                 padding: 12px;
 
                 AppText {
-                    text: root.shortcut-error-kind == SettingsCaptureError.capture-busy ? @tr("Terminez l'enregistrement avant de modifier les raccourcis.") : root.shortcut-error;
+                    text: root.shortcut-error-kind == SettingsCaptureError.capture-busy ? @tr("Terminez l'enregistrement avant de modifier les raccourcis.")
+                        : root.shortcut-error-kind == SettingsCaptureError.runtime-busy ? @tr("Une opération est en cours. Réessayez dans un instant.")
+                        : root.shortcut-error;
                     color: Theme.danger;
                     typography: Typography.secondary;
                     wrap: word-wrap;

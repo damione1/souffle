@@ -1280,6 +1280,10 @@ fn project_model_machine_error(
 ) {
     if let Ok(machine) = &machine {
         window.set_settings_backend_capture_busy(machine.is_recording());
+        update_ui::refresh_install_block(
+            window,
+            souffle_lib::commands::install_blocked_reason(machine),
+        );
     }
     if let Ok(souffle_lib::state_machine::AppStateMachine::Error { message, .. }) = machine {
         project_model_error(window, message.into());
@@ -3799,9 +3803,9 @@ fn wire_update_dialogs(
             update_ui::UpdateRowClick::Install { version } => {
                 // Re-read: a recording or model load may have started or
                 // ended since the package became ready.
-                let blocked = souffle_lib::commands::get_update_install_block(Arc::clone(&handle))
-                    .ok()
-                    .flatten();
+                let blocked = update_ui::install_block_for_display(
+                    souffle_lib::commands::get_update_install_block(Arc::clone(&handle)),
+                );
                 match blocked {
                     Some(reason) => update_ui::set_update_row(
                         &window,
@@ -3948,9 +3952,9 @@ fn start_update_download(
                 window.set_update_error_message(e.as_str().into());
             }
         }
-        let blocked = souffle_lib::commands::get_update_install_block(Arc::clone(&handle))
-            .ok()
-            .flatten();
+        let blocked = update_ui::install_block_for_display(
+            souffle_lib::commands::get_update_install_block(Arc::clone(&handle)),
+        );
         update_ui::project_install_block(&window, blocked);
         let row = update_ui::update_row_from_download(
             version,
@@ -4022,9 +4026,9 @@ fn request_update_install(
             if let Ok(status) = &status {
                 window.set_update_phase(update_ui::update_phase_to_slint(status.phase));
             }
-            let blocked = souffle_lib::commands::get_update_install_block(Arc::clone(&handle))
-                .ok()
-                .flatten();
+            let blocked = update_ui::install_block_for_display(
+                souffle_lib::commands::get_update_install_block(Arc::clone(&handle)),
+            );
             update_ui::project_install_block(&window, blocked);
             // A refusal (still recording) leaves the package ready: the row
             // shows why. A failed swap marked the download failed: the row
@@ -4100,9 +4104,9 @@ fn apply_startup_update_dialogs(
                 window.set_update_release_url(result.release_url.unwrap_or_default().into());
                 window.set_update_phase(UpdatePhase::Idle);
                 let state = Arc::clone(&handle);
-                let blocked = souffle_lib::commands::get_update_install_block(state)
-                    .ok()
-                    .flatten();
+                let blocked = update_ui::install_block_for_display(
+                    souffle_lib::commands::get_update_install_block(state),
+                );
                 update_ui::project_install_block(&window, blocked);
                 window.set_update_available_open(true);
             }
@@ -6773,12 +6777,13 @@ fn wire_callbacks(
         let catalog = match souffle_lib::commands::get_transcription_catalog(handle.clone()) {
             Ok(catalog) => catalog,
             Err(e) => {
-                window.set_settings_model_delete_error(e.into());
+                settings_ui::project_model_deletion_error(&window, &e.into());
                 return;
             }
         };
         let selection = model_ui::selected_profile(&catalog);
-        if souffle_lib::commands::can_delete_model(&handle, &selection).is_err() {
+        if let Err(error) = souffle_lib::commands::can_delete_model(&handle, &selection) {
+            settings_ui::project_model_deletion_error(&window, &error);
             return;
         }
         match souffle_lib::commands::delete_model(handle.clone(), selection) {
@@ -6786,7 +6791,7 @@ fn wire_callbacks(
                 window.set_settings_model_delete_error("".into());
                 refresh_model_runtime(weak_delete_model.clone(), handle);
             }
-            Err(e) => window.set_settings_model_delete_error(e.into()),
+            Err(e) => settings_ui::project_model_deletion_error(&window, &e),
         }
     });
 
@@ -7413,9 +7418,9 @@ fn dispatch_native_action(
             );
             window.set_update_release_url(release_url.unwrap_or_default().into());
             window.set_update_phase(UpdatePhase::Idle);
-            let blocked = souffle_lib::commands::get_update_install_block(Arc::clone(handle))
-                .ok()
-                .flatten();
+            let blocked = update_ui::install_block_for_display(
+                souffle_lib::commands::get_update_install_block(Arc::clone(handle)),
+            );
             update_ui::project_install_block(window, blocked);
             window.set_update_available_open(true);
         }
@@ -7996,15 +8001,95 @@ mod tests {
 
     struct TestPlatform;
 
+    thread_local! {
+        static TEST_SOFTWARE_WINDOW: RefCell<Option<Rc<MinimalSoftwareWindow>>> = const { RefCell::new(None) };
+    }
+
     impl Platform for TestPlatform {
         fn create_window_adapter(&self) -> Result<Rc<dyn WindowAdapter>, slint::PlatformError> {
-            Ok(MinimalSoftwareWindow::new(Default::default()))
+            let window = MinimalSoftwareWindow::new(Default::default());
+            TEST_SOFTWARE_WINDOW.with(|slot| *slot.borrow_mut() = Some(window.clone()));
+            Ok(window)
         }
     }
 
     fn test_window() -> MainWindow {
         let _ = slint::platform::set_platform(Box::new(TestPlatform));
         MainWindow::new().unwrap()
+    }
+
+    #[test]
+    fn update_install_controls_follow_live_capture_and_model_transitions() {
+        use crate::update_ui::{self, UpdateRow};
+        use i_slint_backend_testing::ElementHandle;
+        use souffle_lib::engine::default_transcription_profile;
+        use souffle_lib::state_machine::AppStateMachine;
+        let window = test_window();
+        window.set_settings_open(true);
+        window.set_settings_tab(super::SettingsTab::System);
+        window
+            .window()
+            .set_size(slint::PhysicalSize::new(1200, 4000));
+        update_ui::set_update_row(
+            &window,
+            UpdateRow::Ready {
+                version: "fixture".into(),
+                blocked: None,
+            },
+        );
+        crate::typography::initialize(&window).unwrap();
+        let adapter = TEST_SOFTWARE_WINDOW
+            .with(|slot| slot.borrow().clone())
+            .unwrap();
+        let mut pixels =
+            vec![slint::platform::software_renderer::Rgb565Pixel::default(); 1200 * 4000];
+        for _ in 0..3 {
+            slint::platform::update_timers_and_animations();
+            adapter.request_redraw();
+            adapter.draw_if_needed(|renderer| {
+                renderer.render(&mut pixels, 1200);
+            });
+        }
+        let button = ElementHandle::find_by_element_id(&window, "AboutSection::update-action")
+            .next()
+            .expect("Settings update action");
+        assert_eq!(button.accessible_enabled(), Some(true));
+        for machine in [
+            AppStateMachine::RecordingDictation {
+                profile: default_transcription_profile(),
+                session_id: 1,
+            },
+            AppStateMachine::Loading {
+                profile: default_transcription_profile(),
+            },
+        ] {
+            super::project_model_machine_error(&window, Ok(machine));
+            assert_eq!(button.accessible_enabled(), Some(false));
+            assert!(window.get_current_update_install_blocked());
+        }
+        super::project_model_machine_error(
+            &window,
+            Ok(AppStateMachine::Ready {
+                profile: default_transcription_profile(),
+            }),
+        );
+        assert_eq!(button.accessible_enabled(), Some(true));
+        window.set_recording_starting(true);
+        assert_eq!(button.accessible_enabled(), Some(false));
+        assert_eq!(
+            window.get_current_update_install_block_reason(),
+            super::InstallBlockReason::Starting
+        );
+        window.set_recording_starting(false);
+        window.set_recording_mode(RecordingMode::Meeting);
+        assert_eq!(button.accessible_enabled(), Some(false));
+        assert_eq!(
+            window.get_current_update_install_block_reason(),
+            super::InstallBlockReason::RecordingMeeting
+        );
+        window.set_recording_mode(RecordingMode::Idle);
+        assert_eq!(button.accessible_enabled(), Some(true));
+        update_ui::set_update_row(&window, UpdateRow::Unchecked);
     }
 
     #[test]
@@ -8112,6 +8197,15 @@ mod tests {
             window.invoke_settings_reset_sample_rate_requested();
             window.invoke_settings_model_changed("rejected model".into());
             window.invoke_update_install_requested();
+            window.invoke_settings_delete_model_requested();
+            assert!(
+                !window.get_settings_model_delete_error().is_empty(),
+                "deletion refusal stays visible"
+            );
+            assert_eq!(
+                window.get_settings_model_delete_error_kind(),
+                super::ModelDeletionError::ActiveModel
+            );
             assert_eq!(window.get_settings_recording_field(), ShortcutField::Toggle);
             assert_eq!(window.get_settings_shortcut_error(), "retained error");
             assert_eq!(
@@ -8133,6 +8227,59 @@ mod tests {
             assert_eq!(cache.borrow().as_ref().unwrap(), &initial);
             state.capture_start.abandon(1);
         }
+        for machine in [
+            AppStateMachine::Downloading {
+                profile: default_transcription_profile(),
+            },
+            AppStateMachine::Loading {
+                profile: default_transcription_profile(),
+            },
+            AppStateMachine::Unloading {
+                profile: default_transcription_profile(),
+                next_profile: None,
+            },
+        ] {
+            *state.machine.lock().unwrap() = machine;
+            window.invoke_settings_delete_model_requested();
+            assert_eq!(
+                window.get_settings_model_delete_error_kind(),
+                super::ModelDeletionError::TransitionBusy
+            );
+            assert_eq!(db.get_all_settings().unwrap(), before);
+        }
+
+        // Exercise real UI callbacks with the authority held by another
+        // thread. The bounded release makes a regression fail, never hang.
+        let (held_tx, held_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let worker_state = state.clone();
+        let worker = std::thread::spawn(move || {
+            let mut machine = worker_state.machine.lock().unwrap();
+            *machine = AppStateMachine::Idle;
+            held_tx.send(()).unwrap();
+            release_rx.recv_timeout(Duration::from_secs(1)).is_ok()
+        });
+        held_rx.recv().unwrap();
+        window.invoke_settings_shortcut_record_requested(ShortcutField::Ptt);
+        window.invoke_settings_shortcut_cleared(ShortcutField::Toggle);
+        window.invoke_settings_reset_sample_rate_requested();
+        window.invoke_settings_model_changed("rejected model".into());
+        window.invoke_update_install_requested();
+        window.invoke_settings_delete_model_requested();
+        let _ = release_tx.send(());
+        assert!(
+            worker.join().unwrap(),
+            "UI callbacks must finish while the machine is locked"
+        );
+        assert_eq!(window.get_settings_recording_field(), ShortcutField::Toggle);
+        assert_eq!(
+            window.get_settings_model_delete_error_kind(),
+            super::ModelDeletionError::TransitionBusy
+        );
+        assert!(!window.get_settings_resetting_sample_rate());
+        assert!(io.is_idle_for_test());
+        assert_eq!(db.get_all_settings().unwrap(), before);
+        assert!(command_rx.try_recv().is_err());
         drop(audio_tx);
     }
 

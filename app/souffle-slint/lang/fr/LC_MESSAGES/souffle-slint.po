@@ -3277,6 +3277,10 @@ msgctxt "UpdateCopy"
 msgid "Attendez la fin du démarrage de l'enregistrement."
 msgstr "Attendez la fin du démarrage de l'enregistrement."
 
+msgctxt "UpdateCopy"
+msgid "Une opération est en cours. Réessayez dans un instant."
+msgstr "Une opération est en cours. Réessayez dans un instant."
+
 msgctxt "ShortcutRecorderButton"
 msgid "Enregistrer un raccourci"
 msgstr "Enregistrer un raccourci"
@@ -3292,3 +3296,19 @@ msgstr "Terminez l'enregistrement avant de réinitialiser la fréquence du micro
 msgctxt "ModelSection"
 msgid "Terminez l'enregistrement avant de changer de modèle."
 msgstr "Terminez l'enregistrement avant de changer de modèle."
+
+msgctxt "ModelDeleteSection"
+msgid "Les ressources Apple Speech sont gérées par macOS et ne peuvent pas être supprimées par Soufflé."
+msgstr "Les ressources Apple Speech sont gérées par macOS et ne peuvent pas être supprimées par Soufflé."
+
+msgctxt "ModelDeleteSection"
+msgid "Attendez la fin de l'opération sur le modèle avant de le supprimer."
+msgstr "Attendez la fin de l'opération sur le modèle avant de le supprimer."
+
+msgctxt "ModelDeleteSection"
+msgid "Déchargez le modèle actif ou choisissez un autre modèle avant de le supprimer."
+msgstr "Déchargez le modèle actif ou choisissez un autre modèle avant de le supprimer."
+
+msgctxt "InterfaceSection"
+msgid "Une opération est en cours. Réessayez dans un instant."
+msgstr "Une opération est en cours. Réessayez dans un instant."
