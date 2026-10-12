@@ -743,7 +743,7 @@ pub async fn stop_transcription(state: Arc<AppState>) -> Result<(), String> {
     );
 
     if !current_state.is_recording() {
-        return Err("Not recording".into());
+        return Err(current_state.inactive_recording_error());
     }
     if is_stopping_dictation {
         return Err("Already stopping".into());
@@ -933,7 +933,7 @@ pub async fn resume_meeting_recording(
 pub async fn stop_meeting_recording(state: Arc<AppState>) -> Result<String, String> {
     let machine = state.current_machine_state()?;
     if !machine.is_recording() {
-        return Err("Not recording".into());
+        return Err(machine.inactive_recording_error());
     }
     if !matches!(
         machine,

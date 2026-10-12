@@ -1,7 +1,9 @@
 //! AVAudioEngine owns the real input/output device. All configuration happens
 //! while stopped. Input tap only copies to a bounded ring; source renders either
 //! silence or immutable fixture PCM, never the global system tap.
+mod audio_unit;
 pub mod devices;
+use audio_unit::audio_unit;
 use block2::RcBlock;
 use devices::{Device, Selection, Side};
 use objc2::{
@@ -186,14 +188,14 @@ impl Native {
                 return Err("native running configuration changed".into());
             }
             read_device(
-                self.input.audioUnit(),
+                audio_unit(&self.input)?,
                 Side::Input,
                 &expected.input,
                 ReadbackPhase::Running,
                 log,
             )?;
             read_device(
-                output.audioUnit(),
+                audio_unit(&output)?,
                 Side::Output,
                 &expected.output,
                 ReadbackPhase::Running,
@@ -224,11 +226,11 @@ impl Native {
             let input = engine.inputNode();
             let output = engine.outputNode();
             if let Some(s) = selection {
-                select_device(input.audioUnit(), Side::Input, &s.input, log)?;
-                select_device(output.audioUnit(), Side::Output, &s.output, log)?;
+                select_device(audio_unit(&input)?, Side::Input, &s.input, log)?;
+                select_device(audio_unit(&output)?, Side::Output, &s.output, log)?;
                 // Selecting the output must not silently undo the input choice.
                 read_device(
-                    input.audioUnit(),
+                    audio_unit(&input)?,
                     Side::Input,
                     &s.input,
                     ReadbackPhase::BeforeStart,
@@ -410,22 +412,22 @@ impl Native {
             }
             log["running_readback"] = serde_json::json!({"running": engine.isRunning(), "input_voice_processing": input.isVoiceProcessingEnabled(), "output_voice_processing": output.isVoiceProcessingEnabled(), "agc": input.isVoiceProcessingAGCEnabled(), "bypassed": input.isVoiceProcessingBypassed()});
             if let Some(s) = selection {
-                let selected = read_device(
-                    input.audioUnit(),
-                    Side::Input,
-                    &s.input,
-                    ReadbackPhase::AfterStart,
-                    log,
-                )
-                .and_then(|()| {
+                let selected = (|| {
                     read_device(
-                        output.audioUnit(),
+                        audio_unit(&input)?,
+                        Side::Input,
+                        &s.input,
+                        ReadbackPhase::AfterStart,
+                        log,
+                    )?;
+                    read_device(
+                        audio_unit(&output)?,
                         Side::Output,
                         &s.output,
                         ReadbackPhase::AfterStart,
                         log,
                     )
-                });
+                })();
                 if let Err(error) = selected {
                     engine.stop();
                     input.removeTapOnBus(0);

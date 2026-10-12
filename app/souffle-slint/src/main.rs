@@ -1864,6 +1864,21 @@ fn open_meeting_detail(
 async fn ensure_model_ready(handle: &AppHandle) -> Result<(), String> {
     let worker_handle = handle.clone();
     souffle_lib::async_runtime::spawn_blocking(move || {
+        if let failure @ souffle_lib::state_machine::AppStateMachine::Error {
+            source: souffle_lib::state_machine::FailureSource::AudioCapture,
+            ..
+        } = worker_handle.current_machine_state()?
+        {
+            // Probe the capture worker before recovering. A dead worker keeps
+            // its original diagnostic; a live one can start a new session.
+            worker_handle
+                .audio_cmd_sender
+                .send(souffle_lib::state::AudioCommand::Stop)
+                .map_err(|_| failure.inactive_recording_error())?;
+            souffle_lib::commands::recover_state(worker_handle.clone())?;
+        }
+        // Recompute after recovery: the selected profile may differ from the
+        // retained model, or recovery may require a download/load first.
         let catalog = souffle_lib::commands::get_transcription_catalog(worker_handle.clone())?;
         let selection = model_ui::selected_profile(&catalog);
         let status =
@@ -1883,6 +1898,12 @@ async fn ensure_model_ready(handle: &AppHandle) -> Result<(), String> {
             }
             TranscriptionRuntimePhase::Failed => {
                 Err("Le modèle est en erreur. Réessayez depuis Réglages.".into())
+            }
+            TranscriptionRuntimePhase::AudioFailed => {
+                // A concurrent new audio failure retains its own diagnostic.
+                Err(worker_handle
+                    .current_machine_state()?
+                    .inactive_recording_error())
             }
         }
     })
@@ -2409,7 +2430,8 @@ fn start_model_transition(
             TranscriptionRuntimePhase::Downloading
             | TranscriptionRuntimePhase::Loading
             | TranscriptionRuntimePhase::Unloading
-            | TranscriptionRuntimePhase::Failed => {}
+            | TranscriptionRuntimePhase::Failed
+            | TranscriptionRuntimePhase::AudioFailed => {}
         }
     })
     .expect("slint event loop not running");
@@ -3020,6 +3042,7 @@ fn show_onboarding_step(
                     Some(TranscriptionRuntimePhase::DownloadRequired)
                     | Some(TranscriptionRuntimePhase::LoadRequired)
                     | Some(TranscriptionRuntimePhase::Failed)
+                    | Some(TranscriptionRuntimePhase::AudioFailed)
                     | None => ModelPhase::Pick,
                 };
                 window.set_onboarding_model_phase(model_phase);
@@ -3610,6 +3633,13 @@ fn start_onboarding_model_transition(
                 window.set_onboarding_busy(false);
                 window.set_onboarding_continue_enabled(true);
                 window.set_onboarding_status_message("Le modèle est en erreur.".into());
+            }
+            TranscriptionRuntimePhase::AudioFailed => {
+                window.set_onboarding_busy(false);
+                window.set_onboarding_continue_enabled(true);
+                if let Ok(machine) = handle.current_machine_state() {
+                    window.set_onboarding_status_message(machine.inactive_recording_error().into());
+                }
             }
         }
     })

@@ -378,6 +378,7 @@ mod tests {
         );
         assert!(
             install_blocked_reason(&AppStateMachine::Error {
+                source: crate::state_machine::FailureSource::Model,
                 message: "x".into(),
                 recovery: ErrorRecovery::RetryFromIdle,
             })

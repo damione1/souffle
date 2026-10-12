@@ -472,7 +472,7 @@ enum SessionEnd {
     /// Session never started — error already reported on the setup reply.
     SetupFailed,
     /// Session aborted mid-recording (e.g. repeated engine failures).
-    Aborted(String),
+    Aborted(crate::state_machine::FailureSource, String),
     /// Shutdown requested mid-session.
     Shutdown,
     /// Audio channel disconnected — nothing more can ever be transcribed.
@@ -572,9 +572,9 @@ impl EngineActor {
                             warn!("Inference session {session_count} failed during setup");
                             ran = false;
                         }
-                        SessionEnd::Aborted(message) => {
+                        SessionEnd::Aborted(source, message) => {
                             error!("Inference session {session_count} aborted: {message}");
-                            self.handle_session_abort(message);
+                            self.handle_session_abort(source, message);
                         }
                         SessionEnd::Shutdown => break,
                         SessionEnd::AudioGone => {
@@ -596,7 +596,10 @@ impl EngineActor {
                                 .unwrap_or_else(|| {
                                     "Audio capture stopped unexpectedly".to_string()
                                 });
-                            self.handle_session_abort(reason);
+                            self.handle_session_abort(
+                                crate::state_machine::FailureSource::AudioCapture,
+                                reason,
+                            );
                         }
                     }
                     // Pre-warm AFTER the stop reply above so stop latency is
@@ -645,9 +648,13 @@ impl EngineActor {
     /// salvage any in-progress meeting, and fail the state machine so the UI
     /// leaves the recording state. Without this, the old pipeline died
     /// silently and the app looked like it "just stopped transcribing".
-    fn handle_session_abort(&mut self, message: String) {
+    fn handle_session_abort(
+        &mut self,
+        source: crate::state_machine::FailureSource,
+        message: String,
+    ) {
         if let Some(app) = &self.app {
-            app.abort_active_session(message);
+            app.abort_active_session(source, message);
         }
         // Drain whatever audio is still queued (including the EndOfStream the
         // audio thread sends on Stop) so nothing stale leaks into the next session.
@@ -1750,7 +1757,10 @@ fn run_session_loop(
                     if let Some((reply, _)) = pending_stop.take() {
                         let _ = reply.send(Err(message.clone()));
                     }
-                    return SessionEnd::Aborted(message);
+                    return SessionEnd::Aborted(
+                        crate::state_machine::FailureSource::Model,
+                        message,
+                    );
                 }
                 None => {}
             }
@@ -1798,7 +1808,7 @@ fn run_session_loop(
                 }
                 if eos_received {
                     summary.dropped_chunks = health.dropped_chunks();
-                    if let Err(error) = finish_session(
+                    if let Err((source, error)) = finish_session(
                         audio,
                         engine,
                         on_segment,
@@ -1808,7 +1818,7 @@ fn run_session_loop(
                         &mut summary,
                     ) {
                         let _ = reply.send(Err(error.clone()));
-                        return SessionEnd::Aborted(error);
+                        return SessionEnd::Aborted(source, error);
                     }
                     return SessionEnd::Stopped(reply, summary);
                 }
@@ -1854,7 +1864,7 @@ fn run_session_loop(
             warn!("End-of-stream marker never arrived; finishing session anyway");
             let (reply, _) = pending_stop.take().expect("pending_stop checked above");
             summary.dropped_chunks = health.dropped_chunks();
-            if let Err(error) = finish_session(
+            if let Err((source, error)) = finish_session(
                 audio,
                 engine,
                 on_segment,
@@ -1864,7 +1874,7 @@ fn run_session_loop(
                 &mut summary,
             ) {
                 let _ = reply.send(Err(error.clone()));
-                return SessionEnd::Aborted(error);
+                return SessionEnd::Aborted(source, error);
             }
             return SessionEnd::Stopped(reply, summary);
         }
@@ -1881,7 +1891,10 @@ fn run_session_loop(
                 if let Some((reply, _)) = pending_stop.take() {
                     let _ = reply.send(Err(reason.clone()));
                 }
-                return SessionEnd::Aborted(reason);
+                return SessionEnd::Aborted(
+                    crate::state_machine::FailureSource::AudioCapture,
+                    reason,
+                );
             }
             Ok(AudioMessage::EndOfStream { session_id: eos_id }) => {
                 if eos_id != session_id {
@@ -1890,7 +1903,7 @@ fn run_session_loop(
                 eos_received = true;
                 if let Some((reply, _)) = pending_stop.take() {
                     summary.dropped_chunks = health.dropped_chunks();
-                    if let Err(error) = finish_session(
+                    if let Err((source, error)) = finish_session(
                         audio,
                         engine,
                         on_segment,
@@ -1900,7 +1913,7 @@ fn run_session_loop(
                         &mut summary,
                     ) {
                         let _ = reply.send(Err(error.clone()));
-                        return SessionEnd::Aborted(error);
+                        return SessionEnd::Aborted(source, error);
                     }
                     return SessionEnd::Stopped(reply, summary);
                 }
@@ -1993,9 +2006,12 @@ fn run_session_loop(
                                 if let Some((reply, _)) = pending_stop.take() {
                                     let _ = reply.send(Err(format!("Session aborted: {e}")));
                                 }
-                                return SessionEnd::Aborted(format!(
-                                    "Transcription failed {MAX_CONSECUTIVE_FRAME_ERRORS} frames in a row: {e}"
-                                ));
+                                return SessionEnd::Aborted(
+                                    crate::state_machine::FailureSource::Model,
+                                    format!(
+                                        "Transcription failed {MAX_CONSECUTIVE_FRAME_ERRORS} frames in a row: {e}"
+                                    ),
+                                );
                             }
                         }
                     }
@@ -2038,7 +2054,7 @@ fn finish_session(
     text_filters: &Rc<RefCell<TextFilterChain>>,
     mode: &mut dyn SessionMode,
     summary: &mut SessionSummary,
-) -> Result<(), String> {
+) -> Result<(), (crate::state_machine::FailureSource, String)> {
     let chunk_size = engine.audio_requirements().chunk_size_samples as usize;
     engine.set_preview_enabled(false);
 
@@ -2061,7 +2077,7 @@ fn finish_session(
                 reason,
             } => {
                 if failed_id == session_id {
-                    return Err(reason);
+                    return Err((crate::state_machine::FailureSource::AudioCapture, reason));
                 }
             }
             AudioMessage::EndOfStream { .. } => {}
@@ -2138,7 +2154,7 @@ fn finish_session(
                     error!("Pending-word salvage error after flush failed: {salvage_error}")
                 }
             }
-            Err(e)
+            Err((crate::state_machine::FailureSource::Model, e))
         }
     }
 }
@@ -2364,8 +2380,11 @@ mod tests {
             None,
         );
         match end {
-            SessionEnd::Aborted(reason) => assert_eq!(reason, "webcam gone"),
-            SessionEnd::Stopped(..)
+            SessionEnd::Aborted(crate::state_machine::FailureSource::AudioCapture, reason) => {
+                assert_eq!(reason, "webcam gone")
+            }
+            SessionEnd::Aborted(crate::state_machine::FailureSource::Model, _)
+            | SessionEnd::Stopped(..)
             | SessionEnd::SetupFailed
             | SessionEnd::Shutdown
             | SessionEnd::AudioGone => {
@@ -2419,7 +2438,11 @@ mod tests {
         );
         match end {
             SessionEnd::Stopped(_, summary) => assert!(summary.frames_processed > 0),
-            SessionEnd::Aborted(reason) => panic!("next session unexpectedly aborted: {reason}"),
+            SessionEnd::Aborted(
+                crate::state_machine::FailureSource::AudioCapture
+                | crate::state_machine::FailureSource::Model,
+                reason,
+            ) => panic!("next session unexpectedly aborted: {reason}"),
             SessionEnd::SetupFailed | SessionEnd::Shutdown | SessionEnd::AudioGone => {
                 panic!("capture channel must remain usable")
             }
@@ -2449,7 +2472,10 @@ mod tests {
                 &mut DiarizedMode::new(),
                 &mut SessionSummary::default()
             ),
-            Err("failure during stop drain".into())
+            Err((
+                crate::state_machine::FailureSource::AudioCapture,
+                "failure during stop drain".into()
+            ))
         );
     }
 

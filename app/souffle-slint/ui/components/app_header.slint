@@ -33,14 +33,15 @@ export component AppHeader inherits Rectangle {
     // keeping its own copy, so it can't drift from the actual palette.
     callback theme-toggle-requested();
 
-    property <string> status-label: root.recording-mode != RecordingMode.idle ? @tr("Enregistrement")
+    property <string> status-label: root.model-phase == TranscriptionPhase.failed ? @tr("Erreur du modèle")
+        : root.model-phase == TranscriptionPhase.audio-failed ? @tr("Erreur de capture audio")
+        : root.recording-mode != RecordingMode.idle ? @tr("Enregistrement")
         : root.model-phase == TranscriptionPhase.download-required ? @tr("Téléchargement requis")
         : root.model-phase == TranscriptionPhase.downloading ? @tr("Téléchargement…")
         : root.model-phase == TranscriptionPhase.load-required ? @tr("Chargement requis")
         : root.model-phase == TranscriptionPhase.loading ? @tr("Chargement…")
         : root.model-phase == TranscriptionPhase.ready ? @tr("Prêt")
         : root.model-phase == TranscriptionPhase.unloading ? @tr("Déchargement…")
-        : root.model-phase == TranscriptionPhase.failed ? @tr("Erreur du modèle")
         : "";
     property <color> status-color: root.recording-mode != RecordingMode.idle ? Theme.danger
         : root.model-phase == TranscriptionPhase.ready ? Theme.accent : Theme.warning;

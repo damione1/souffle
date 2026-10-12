@@ -227,6 +227,7 @@ pub enum TranscriptionRuntimePhase {
     Ready,
     Unloading,
     Failed,
+    AudioFailed,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]

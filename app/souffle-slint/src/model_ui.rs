@@ -136,6 +136,7 @@ impl From<TranscriptionRuntimePhase> for crate::TranscriptionPhase {
             TranscriptionRuntimePhase::Ready => Self::Ready,
             TranscriptionRuntimePhase::Unloading => Self::Unloading,
             TranscriptionRuntimePhase::Failed => Self::Failed,
+            TranscriptionRuntimePhase::AudioFailed => Self::AudioFailed,
         }
     }
 }
@@ -150,6 +151,7 @@ impl From<crate::TranscriptionPhase> for TranscriptionRuntimePhase {
             crate::TranscriptionPhase::Ready => Self::Ready,
             crate::TranscriptionPhase::Unloading => Self::Unloading,
             crate::TranscriptionPhase::Failed => Self::Failed,
+            crate::TranscriptionPhase::AudioFailed => Self::AudioFailed,
         }
     }
 }
@@ -168,7 +170,8 @@ pub fn load_is_already_in_progress_or_ready(phase: TranscriptionRuntimePhase) ->
         | TranscriptionRuntimePhase::Downloading
         | TranscriptionRuntimePhase::LoadRequired
         | TranscriptionRuntimePhase::Unloading
-        | TranscriptionRuntimePhase::Failed => false,
+        | TranscriptionRuntimePhase::Failed
+        | TranscriptionRuntimePhase::AudioFailed => false,
     }
 }
 
@@ -433,6 +436,7 @@ mod tests {
             TranscriptionRuntimePhase::Ready,
             TranscriptionRuntimePhase::Unloading,
             TranscriptionRuntimePhase::Failed,
+            TranscriptionRuntimePhase::AudioFailed,
         ] {
             assert_eq!(
                 TranscriptionRuntimePhase::from(crate::TranscriptionPhase::from(phase)),
@@ -469,6 +473,7 @@ mod tests {
             TranscriptionRuntimePhase::LoadRequired,
             TranscriptionRuntimePhase::Unloading,
             TranscriptionRuntimePhase::Failed,
+            TranscriptionRuntimePhase::AudioFailed,
         ] {
             assert!(!load_is_already_in_progress_or_ready(phase));
         }

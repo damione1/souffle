@@ -36,6 +36,39 @@ static SYSTEM_AUDIO_SIGNAL: AtomicU64 = AtomicU64::new(0);
 /// its totals would land on the new meeting and hide a silent leg.
 static SYSTEM_AUDIO_SESSION: AtomicU64 = AtomicU64::new(0);
 
+fn capture_panic_message(payload: &(dyn std::any::Any + Send)) -> String {
+    let detail = payload
+        .downcast_ref::<String>()
+        .map(String::as_str)
+        .or_else(|| payload.downcast_ref::<&str>().copied());
+    match detail {
+        Some(detail) => format!("Audio capture failed: {detail}"),
+        None => "Audio capture failed: capture worker panicked without a text diagnostic".into(),
+    }
+}
+
+#[cfg(test)]
+mod capture_failure_tests {
+    use super::capture_panic_message;
+
+    #[test]
+    fn panic_detail_survives_both_rust_text_payloads() {
+        let diagnostic = "invalid AVAudioInputNode audioUnit encoding";
+        assert_eq!(
+            capture_panic_message(&diagnostic),
+            format!("Audio capture failed: {diagnostic}")
+        );
+        assert_eq!(
+            capture_panic_message(&diagnostic.to_owned()),
+            format!("Audio capture failed: {diagnostic}")
+        );
+        assert_eq!(
+            capture_panic_message(&42_u32),
+            "Audio capture failed: capture worker panicked without a text diagnostic"
+        );
+    }
+}
+
 /// Snapshot of the system-audio leg for `commands::get_system_audio_status`.
 /// A read, never a rebuild: it does not touch the capture thread. The counts
 /// are refreshed on the way out, since the stored status only holds them as
@@ -2579,6 +2612,7 @@ impl AudioCapture {
 
                 // Block on commands while idle; during sessions, wake
                 // periodically to run the meeting mixer and mic health checks.
+                let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 loop {
                     let timeout = if capture.meeting.is_some() {
                         Some(MEETING_TICK)
@@ -2600,10 +2634,13 @@ impl AudioCapture {
                                     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                                         capture.meeting_tick()
                                     }));
-                                if ticked.is_err() {
+                                if let Err(payload) = ticked {
                                     tracing::error!(
                                         "Audio mixer panicked; ending session to keep the app alive"
                                     );
+                                    if let Ok(mut reason) = capture.audio_gone_reason.lock() {
+                                        *reason = Some(capture_panic_message(payload.as_ref()));
+                                    }
                                     capture.abort_after_panic();
                                     break;
                                 }
@@ -2725,6 +2762,15 @@ impl AudioCapture {
                     }
                 }
 
+                }));
+                if let Err(payload) = outcome {
+                    // Preserve the originating failure before dropping the last
+                    // sender; the actor then publishes it as an audio failure.
+                    if let Ok(mut reason) = capture.audio_gone_reason.lock() {
+                        *reason = Some(capture_panic_message(payload.as_ref()));
+                    }
+                    capture.abort_after_panic();
+                }
                 info!("Audio thread exiting");
             })
             .map_err(|e| format!("Failed to spawn audio thread: {e}"))?;
