@@ -3,6 +3,8 @@
 //! silence or immutable fixture PCM, never the global system tap.
 mod audio_unit;
 pub mod devices;
+#[cfg(feature = "experimental-native-aec")]
+pub(crate) mod owner;
 use audio_unit::audio_unit;
 use block2::RcBlock;
 use devices::{Device, Selection, Side};

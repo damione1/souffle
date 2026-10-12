@@ -1888,6 +1888,18 @@ fn run_session_loop(
                 if failed_id != session_id {
                     continue;
                 }
+                summary.dropped_chunks = health.dropped_chunks();
+                if let Err((_, error)) = finish_session(
+                    audio,
+                    engine,
+                    on_segment,
+                    session_id,
+                    text_filters,
+                    mode,
+                    &mut summary,
+                ) {
+                    warn!("Finalization after capture failure also failed: {error}");
+                }
                 if let Some((reply, _)) = pending_stop.take() {
                     let _ = reply.send(Err(reason.clone()));
                 }
@@ -2061,6 +2073,7 @@ fn finish_session(
     // Collect anything still queued (normally nothing — EndOfStream is the
     // last message — but the EOS-timeout path can leave chunks behind).
     let mut drained = 0usize;
+    let mut capture_failure = None;
     while let Some(msg) = audio.try_recv() {
         match msg {
             message @ (AudioMessage::Chunk(_) | AudioMessage::DiarizedPair { .. })
@@ -2077,7 +2090,7 @@ fn finish_session(
                 reason,
             } => {
                 if failed_id == session_id {
-                    return Err((crate::state_machine::FailureSource::AudioCapture, reason));
+                    capture_failure.get_or_insert(reason);
                 }
             }
             AudioMessage::EndOfStream { .. } => {}
@@ -2136,7 +2149,10 @@ fn finish_session(
             for seg in segments {
                 emit_filtered(engine, text_filters, seg, on_segment);
             }
-            Ok(())
+            match capture_failure {
+                Some(reason) => Err((crate::state_machine::FailureSource::AudioCapture, reason)),
+                None => Ok(()),
+            }
         }
         Err(e) => {
             error!("Flush error: {e}");
@@ -2154,7 +2170,10 @@ fn finish_session(
                     error!("Pending-word salvage error after flush failed: {salvage_error}")
                 }
             }
-            Err((crate::state_machine::FailureSource::Model, e))
+            match capture_failure {
+                Some(reason) => Err((crate::state_machine::FailureSource::AudioCapture, reason)),
+                None => Err((crate::state_machine::FailureSource::Model, e)),
+            }
         }
     }
 }
@@ -2331,6 +2350,111 @@ mod tests {
 
     fn end_of_stream(session_id: u64) -> AudioMessage {
         AudioMessage::EndOfStream { session_id }
+    }
+
+    #[test]
+    fn capture_failure_flushes_both_buffered_tails_and_preserves_capture_cause() {
+        use super::{LiveFilterState, SessionAudio, SessionEnd, run_session_loop};
+        use crate::pipeline::health::SessionHealth;
+        use std::collections::VecDeque;
+        use std::sync::atomic::AtomicU64;
+
+        for failure_during_drain in [false, true] {
+            let (audio_tx, audio_rx) = unbounded();
+            let (cmd_tx, cmd_rx) = unbounded();
+            let mut engine = MockEngine::new().with_flush_response(Err(
+                crate::engine::EngineError::InferenceError("secondary flush failure".into()),
+            ));
+            let mut salvage = seg("pending decoded word");
+            salvage.is_final = true;
+            engine.salvage_segments.push(salvage);
+            let fed = engine.fed_dual_handle();
+            let (collected, callback) = collecting_callback();
+            let filters = Rc::new(RefCell::new(TextFilterChain::new(vec![])));
+            let state = Rc::new(RefCell::new(LiveFilterState {
+                pipeline_config: noop_filter_config(),
+                dictionary_entries: vec![],
+                session_terms: vec![],
+                session_corrections: vec![],
+            }));
+            let me = vec![0.5; 11];
+            let them = vec![0.25; 11];
+            audio_tx
+                .send(AudioMessage::DiarizedPair {
+                    session_id: 1,
+                    captured_at: Instant::now(),
+                    me: me.clone(),
+                    them: them.clone(),
+                    queue_permit: None,
+                })
+                .unwrap();
+            audio_tx
+                .send(AudioMessage::SessionFailed {
+                    session_id: 1,
+                    reason: "webcam disappeared".into(),
+                })
+                .unwrap();
+            let mut audio = SessionAudio::new(&audio_rx, VecDeque::new());
+            let mut mode = DiarizedMode::new();
+            let expected = Err((
+                crate::state_machine::FailureSource::AudioCapture,
+                "webcam disappeared".into(),
+            ));
+            if failure_during_drain {
+                assert_eq!(
+                    finish_session(
+                        &mut audio,
+                        &mut engine,
+                        &callback,
+                        1,
+                        &filters,
+                        &mut mode,
+                        &mut SessionSummary::default(),
+                    ),
+                    expected
+                );
+            } else {
+                let (reply, stop_rx) = crossbeam_channel::bounded(1);
+                cmd_tx
+                    .send(super::EngineCommand::StopSession { reply })
+                    .unwrap();
+                let end = run_session_loop(
+                    &cmd_rx,
+                    &mut audio,
+                    &mut engine,
+                    &callback,
+                    1,
+                    &filters,
+                    &state,
+                    &mut SessionHealth::start(1, Arc::new(AtomicU64::new(0))),
+                    None,
+                    &mut mode,
+                    &mut None,
+                    None,
+                );
+                match end {
+                    SessionEnd::Aborted(source, reason) => {
+                        assert_eq!(Err((source, reason)), expected)
+                    }
+                    SessionEnd::Stopped(..)
+                    | SessionEnd::SetupFailed
+                    | SessionEnd::Shutdown
+                    | SessionEnd::AudioGone => {
+                        panic!("capture failure must remain the abort cause")
+                    }
+                }
+                assert_eq!(stop_rx.recv().unwrap().unwrap_err(), "webcam disappeared");
+            }
+            assert_eq!(*fed.lock().unwrap(), [(me, them)]);
+            let texts: Vec<_> = collected
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|segment| segment.text.clone())
+                .collect();
+            assert_eq!(texts, ["me-speaks", "them-speaks", "pending decoded word"]);
+            assert!(engine.flush_responses.is_empty());
+        }
     }
 
     #[test]

@@ -116,32 +116,39 @@ fn soft_only_verdict(summary: &Value, expected_samples: usize) -> Result<(), Con
 
 #[test]
 fn soft_only_verdict_rejects_famine_clamp_future_and_incomplete_traces() {
-    // Actual complete controls remain applicable after the failure-path fix.
-    for input in [
-        include_str!("../../../artifacts/sou-001-271/run1/summary.json"),
-        include_str!("../../../artifacts/sou-001-271/run2/summary.json"),
+    // Complete source/flush counters, including a partial final audio frame.
+    // Keep this unit fixture independent of archived measurement reports.
+    let healthy = json!({
+        "clamps": 0,
+        "future_times": 0,
+        "first_15s_famine": null,
+        "accepted_samples": 11_171_296,
+        "lost_samples": 0,
+        "source_calls": 5819,
+        "phase_counts": [[1016, 1014, 5819, 3437], [1, 1, 19, 17]],
+        "step_after_flush": 5838,
+        "previews": 1017,
+        "finals": 1017
+    });
+    assert_eq!(soft_only_verdict(&healthy, 11_171_296), Ok(()));
+    for (key, value, failure) in [
+        ("first_15s_famine", json!(20.0), ControlFailure::Famine),
+        ("clamps", json!(1), ControlFailure::Clamp),
+        ("future_times", json!(1), ControlFailure::FutureTimestamp),
+        (
+            "accepted_samples",
+            json!(1),
+            ControlFailure::IncompleteSource,
+        ),
+        (
+            "step_after_flush",
+            json!(1),
+            ControlFailure::InconsistentCounters,
+        ),
     ] {
-        let healthy: Value = serde_json::from_str(input).unwrap();
-        assert_eq!(soft_only_verdict(&healthy, 11_171_296), Ok(()));
-        for (key, value, failure) in [
-            ("first_15s_famine", json!(20.0), ControlFailure::Famine),
-            ("clamps", json!(1), ControlFailure::Clamp),
-            ("future_times", json!(1), ControlFailure::FutureTimestamp),
-            (
-                "accepted_samples",
-                json!(1),
-                ControlFailure::IncompleteSource,
-            ),
-            (
-                "step_after_flush",
-                json!(1),
-                ControlFailure::InconsistentCounters,
-            ),
-        ] {
-            let mut broken = healthy.clone();
-            broken[key] = value;
-            assert_eq!(soft_only_verdict(&broken, 11_171_296), Err(failure));
-        }
+        let mut broken = healthy.clone();
+        broken[key] = value;
+        assert_eq!(soft_only_verdict(&broken, 11_171_296), Err(failure));
     }
 }
 

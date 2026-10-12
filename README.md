@@ -35,7 +35,7 @@
 
 ## Meetings that know who is talking
 
-System-audio capture separates **Me** from **Them** in the live transcript, with no virtual audio device to install. That separation needs a Kyutai model; Whisper and Parakeet transcribe the meeting as one mixed stream. The recording looks after itself: it notifies you when a calendar meeting begins (today's events also get a start button on Home), notices when the meeting seems over and stops on its own after warning you, closes cleanly when the Mac sleeps and offers to resume on wake, and recovers or salvages the session if the engine stalls or the microphone disappears. If a microphone stops responding, a banner offers *Restart Soufflé*.
+System-audio capture separates **Me** from **Them** in the live transcript, with no virtual audio device to install. Kyutai, Whisper and Parakeet all support separate meeting lanes. The recording looks after itself: it notifies you when a calendar meeting begins (today's events also get a start button on Home), notices when the meeting seems over and stops on its own after warning you, closes cleanly when the Mac sleeps and offers to resume on wake, and recovers or salvages the session if the engine stalls or the microphone disappears. If a microphone stops responding, a banner offers *Restart Soufflé*.
 
 - **Live transcript** with editable notes, and the calendar's participants, beside it. Click a word to add a dictionary alias for it.
 - **Resume recording** on a stopped meeting adds another session to the same meeting.
@@ -104,10 +104,10 @@ All models run locally and are downloaded on first use from HuggingFace:
 
 - [Kyutai STT 1B](https://huggingface.co/kyutai/stt-1b-en_fr-candle) (default): French + English, ~2.4 GB, Metal GPU via Candle. Streams text while you speak.
 - [Kyutai STT 2.6B](https://huggingface.co/kyutai/stt-2.6b-en-candle): English only, higher quality, ~5.6 GB. Streams text while you speak. It has no pause detector, so long speech without a quiet gap can lose about 2.5 seconds every 28 seconds.
-- [Whisper Large V3 Turbo](https://huggingface.co/ggerganov/whisper.cpp): multilingual, ~1.6 GB, Metal via whisper.cpp. Transcribes once you stop.
-- [Parakeet TDT 0.6B v3](https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx): 25 languages with punctuation and capitalization, ~670 MB int8, fast CPU inference via ONNX Runtime. Transcribes once you stop.
+- [Whisper Large V3 Turbo](https://huggingface.co/ggerganov/whisper.cpp): multilingual, ~1.6 GB, Metal GPU. Supports progressive transcription and separate Me/Them meeting lanes.
+- [Parakeet TDT 0.6B v3](https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx): 25 languages with punctuation and capitalization, ~670 MB int8, CPU inference. Supports progressive transcription and separate Me/Them meeting lanes.
 
-The two Kyutai models are the streaming ones: text appears while you are still talking. The other two transcribe the whole recording once you stop, which suits a meeting you read afterwards but changes how dictation feels.
+Kyutai streams words as you speak. Whisper and Parakeet show progressive previews and finalize the transcript when you stop.
 
 ## Requirements
 
@@ -168,19 +168,13 @@ cd souffle
 make nightly
 ```
 
-`make nightly` builds and opens **Soufflé Nightly** (`com.souffle.desktop.nightly`), a debug build that sits next to the installed app with its own TCC rows; run it again after a code change. `make nightly-fresh` wipes Nightly's data and permissions first. `./scripts/bundle-macos.sh` builds a signed release bundle (see the script's header for `--dmg`, `--notarize` and the other flags).
+`make nightly` builds and opens **Soufflé Nightly**, which has its own data and permissions and can run alongside the installed app.
 
-### Replaying meeting audio through AEC
+## Audio diagnostics
 
-Settings > Audio > Advanced Audio offers **Pre-AEC diagnostic capture**, off by default. Enable meeting-audio retention in Data first; the diagnostic setting never enables recording by itself. Changes apply to the next session. Each recorded session gets a separate `<index>.pre-aec.wav` beside `<index>.ogg`: lossless float32 stereo at 48 kHz, left = microphone, right = system tap, sampled on the mixer's clock before echo cancellation and mixing. An unavailable source is silence. When system capture is disabled, the optional mic copy is resampled to the same clock independently, with a silent right lane. The principal recording keeps its existing mono or diarized stereo layout.
+If you need to investigate speaker audio leaking into the microphone, enable **Pre-AEC diagnostic capture** in Settings > Audio > Advanced Audio. Meeting-audio retention must also be enabled in Settings > Data. The setting applies to the next recording.
 
-This debug audio makes each participant's lane easy to isolate. It costs about **1.38 GB/hour**, or **806 MB for 35 minutes**. Capture stops after the first hour and keeps that aligned prefix; it does not stop the meeting. The writer checks free disk space before starting and every captured second, stopping diagnostics before using a 256 MiB reserve. Concurrent disk use by other processes can still exhaust the primary recording's space. The artifact follows meeting-audio retention without extending the primary recording's age. It is published only after audio capture ends and engine startup succeeds; stopping during startup keeps it private until that result arrives, and failed startup discards it. A failed or saturated diagnostic writer discards the diagnostic, while the meeting continues. Files ending in `.partial` are unfinished and cannot be replayed.
-
-```bash
-"/Applications/Soufflé.app/Contents/MacOS/souffle" --aec-replay /absolute/path/0.pre-aec.wav
-```
-
-Replay feeds the right lane as render, then the left lane as capture through the existing mixer/AEC, without loading a transcription model or reading settings. JSON reports the captured frame count, estimated **input-to-output pipeline delay** (16-sample resolution, up to 200 ms), raw ERLE and delay-compensated ERLE. In real meetings these ERLE fields are **mic/output energy attenuation proxies**, not isolated echo removal or near-end voice distortion: no separate voice ground truth exists. Compensation compares overlapping samples after aligning output to input. The bounded measurement window is the final quarter of the last eight seconds; silence gives zero dB and an unavailable delay estimate. Synthetic fixtures use the same evaluator with their known near-end voice subtracted from capture/output.
+The extra WAV stores the microphone on the left and system audio on the right. It uses about **1.38 GB per hour**, stops after one hour, and follows your audio-retention setting. Keep it private: it contains the meeting audio.
 
 ## License
 

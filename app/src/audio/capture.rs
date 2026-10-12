@@ -2068,8 +2068,6 @@ enum CaptureStream {
 
 #[cfg(all(target_os = "macos", feature = "experimental-native-aec"))]
 struct NativeMeeting {
-    capture: super::native_voice::Native,
-    selection: super::native_voice::devices::Selection,
     telemetry: Arc<super::native_voice::Telemetry>,
     log: serde_json::Value,
     callbacks: u64,
@@ -2078,7 +2076,11 @@ struct NativeMeeting {
 
 #[cfg(all(target_os = "macos", feature = "experimental-native-aec"))]
 impl NativeMeeting {
-    fn check(&mut self, last_callback: &AtomicU64) -> Result<(), String> {
+    fn check(
+        &mut self,
+        owner: &mut super::native_voice::owner::Owner,
+        last_callback: &AtomicU64,
+    ) -> Result<(), String> {
         let callbacks = self.telemetry.callbacks.load(Ordering::Relaxed);
         if callbacks != self.callbacks {
             self.callbacks = callbacks;
@@ -2095,9 +2097,8 @@ impl NativeMeeting {
         if self.telemetry.errors.load(Ordering::Relaxed) != 0 {
             return Err("Apple microphone callback reported an invalid buffer or timestamp".into());
         }
-        self.capture
-            .check_route(&self.selection, &mut self.log)
-            .map_err(|e| e.to_string())
+        self.log = owner.check(Duration::from_secs(1))?;
+        Ok(())
     }
 }
 
@@ -2444,6 +2445,10 @@ fn mic_device_is_alive(id: u32) -> bool {
 /// is still the right ownership model.)
 pub struct AudioCapture {
     stream: Option<CaptureStream>,
+    /// Retained across sessions so a stuck native start/check/Drop prevents
+    /// another owner from being stacked. Contains no thread-confined object.
+    #[cfg(all(target_os = "macos", feature = "experimental-native-aec"))]
+    native_owner: super::native_voice::owner::Owner,
     audio_sender: Sender<AudioMessage>,
     audio_budget: Arc<AudioQueueBudget>,
     /// Pinned input device UID (or legacy name during migration).
@@ -2574,6 +2579,8 @@ impl AudioCapture {
                 crate::thread_qos::set_current_thread_qos(crate::thread_qos::ThreadQos::UserInteractive);
                 let mut capture = AudioCapture {
                     stream: None,
+                    #[cfg(all(target_os = "macos", feature = "experimental-native-aec"))]
+                    native_owner: super::native_voice::owner::Owner::default(),
                     audio_sender: audio_tx,
                     audio_budget,
                     selected_device: None,
@@ -3371,34 +3378,24 @@ impl AudioCapture {
         tap: Option<super::system_tap::TapHandle>,
         tap_cons: Option<ringbuf::HeapCons<f32>>,
     ) -> Result<(), String> {
-        use super::native_voice::{Native, Sink, Telemetry, devices::Selection};
-        let selection = Selection::for_input_uid(uid)
-            .map_err(|e| format!("Apple microphone selection failed: {e}"))?;
-        self.mic_device_uid = Some(selection.input.uid.clone());
-        self.mic_device_name = Some(selection.input.name.clone());
-        self.mic_device_object_id = Some(selection.input.id);
+        use super::native_voice::{Sink, Telemetry};
         let (producer, consumer) = HeapRb::<f32>::new(192_000 * 2).split();
         let telemetry = Arc::new(Telemetry::default());
-        let mut log = serde_json::json!({});
-        // Silence is the native output. The existing system tap is never
-        // connected to it: browser/meeting audio already reaches the speakers.
-        let result = Native::start(
+        let started = self.native_owner.start(
+            uid.to_owned(),
             Sink::Mono(producer),
             Arc::clone(&telemetry),
-            None,
-            Some(&selection),
-            &mut log,
-        );
-        info!("Apple meeting microphone requested={selection:?} readbacks={log}");
-        let capture = result.map_err(|e| format!("Apple meeting microphone failed: {e}"))?;
-        let rate = capture.rate;
+            MIC_OPEN_TIMEOUT,
+        )?;
+        self.mic_device_uid = Some(started.selection.input.uid.clone());
+        self.mic_device_name = Some(started.selection.input.name.clone());
+        self.mic_device_object_id = Some(started.selection.input.id);
+        let rate = started.rate;
         self.active_session_id.store(session_id, Ordering::Release);
         telemetry.accepting.store(true, Ordering::Release);
         self.stream = Some(CaptureStream::Apple(Box::new(NativeMeeting {
-            capture,
-            selection,
             telemetry,
-            log,
+            log: started.log,
             callbacks: 0,
             dropped: 0,
         })));
@@ -3681,7 +3678,7 @@ impl AudioCapture {
 
         #[cfg(all(target_os = "macos", feature = "experimental-native-aec"))]
         if let Some(CaptureStream::Apple(native)) = self.stream.as_mut()
-            && let Err(error) = native.check(&self.last_mic_callback_ms)
+            && let Err(error) = native.check(&mut self.native_owner, &self.last_mic_callback_ms)
         {
             warn!(
                 "Apple microphone needs reconstruction: {error}; readbacks={}",
@@ -4406,6 +4403,7 @@ impl AudioCapture {
             }
             #[cfg(all(target_os = "macos", feature = "experimental-native-aec"))]
             CaptureStream::Apple(native) => {
+                self.native_owner.stop();
                 native.telemetry.accepting.store(false, Ordering::Release);
                 info!(
                     "Stopping Apple microphone: callbacks={}, dropped={}, errors={}",

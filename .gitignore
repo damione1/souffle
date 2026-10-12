@@ -50,8 +50,7 @@ claudedocs/
 site/_site/
 
 # impeccable-ignore-start
-# The whole directory is local: design notes and surface briefs are
-# working material, and DESIGN.md at the root is the shared record.
+# Local design notes and surface briefs are working material.
 .impeccable/
 # impeccable-ignore-end
 
