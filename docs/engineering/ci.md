@@ -43,7 +43,7 @@ on pushes to `develop`, outside the PR workflow.
 For Rust or Slint changes, run the full local gate before opening or updating
 the PR. A green Quick checks job does not replace native compilation and
 tests. Run these on an Apple Silicon Mac with the translation extractor
-matching `Cargo.lock`, GNU gettext and CodeQL installed:
+matching `Cargo.lock` and GNU gettext installed:
 
 ```bash
 ./scripts/build-mcp-sidecar.test.sh
@@ -51,12 +51,11 @@ cargo fmt --manifest-path app/Cargo.toml --all -- --check
 cargo clippy --locked --manifest-path app/Cargo.toml --workspace --all-targets -- -D warnings
 cargo test --locked --manifest-path app/Cargo.toml --workspace
 ./scripts/check_slint_translations.sh
-./scripts/codeql-local.sh
 ```
 
-For a stack processed with `process-souffle-backlog`, defer CodeQL until
-review and corrections are complete, then run it once on the final stack tip.
-The skill's stack policy takes precedence over repeating that scan per PR.
+Local CodeQL analysis is manual and is outside the pre-PR gate. Agents run
+`./scripts/codeql-local.sh` only when explicitly requested. The existing
+GitHub CodeQL workflow on pushes to `develop` is separate.
 
 For changes confined to CI or documentation, validate the affected workflows
 with `actionlint` and run the commands changed by the diff. Rebuilding the
