@@ -73,7 +73,8 @@ export component AboutSection inherits VerticalLayout {
     pure function update-button-enabled() -> bool {
         return root.update-row != UpdateRowStatus.checking
             && root.update-row != UpdateRowStatus.downloading
-            && root.update-row != UpdateRowStatus.installing;
+            && root.update-row != UpdateRowStatus.installing
+            && (root.update-row != UpdateRowStatus.ready || !root.update-blocked);
     }
 
     pure function update-button-kind() -> ThemedButtonKind {
@@ -150,7 +151,7 @@ export component AboutSection inherits VerticalLayout {
             label: @tr("Mises à jour");
             description: root.update-description();
 
-            ThemedButton {
+            update-action := ThemedButton {
                 text: root.update-button-label();
                 kind: root.update-button-kind();
                 enabled: root.update-button-enabled();

@@ -13,6 +13,7 @@ import { StatusIndicator } from "status_indicator.slint";
 // `load_model` commands the Svelte controller calls), this component only
 // displays whatever state Rust pushes and forwards the chosen label back.
 export component ModelSection inherits VerticalLayout {
+    in property <bool> capture-busy;
     in property <TranscriptionPhase> model-phase;
     in property <bool> ready;
     in property <[string]> model-labels;
@@ -41,7 +42,9 @@ export component ModelSection inherits VerticalLayout {
     SettingsField {
         show-divider: false;
         label: @tr("Modèle de transcription");
-        description: @tr("Choisissez un modèle : il se télécharge et se charge tout seul. Tout tourne sur ce Mac.");
+        description: root.capture-busy
+            ? @tr("Terminez l'enregistrement avant de changer de modèle.")
+            : @tr("Choisissez un modèle : il se télécharge et se charge tout seul. Tout tourne sur ce Mac.");
 
         StatusIndicator {
             text: root.model-phase == TranscriptionPhase.download-required ? @tr("Téléchargement requis")
@@ -71,7 +74,7 @@ export component ModelSection inherits VerticalLayout {
                 combo-width: parent.width;
                 model: root.model-labels;
                 current-value: root.selected-model-label;
-                enabled: !root.busy;
+                enabled: !root.busy && !root.capture-busy;
                 selected(value) => { root.model-changed(value); }
             }
         }

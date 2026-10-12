@@ -28,6 +28,8 @@ pub fn update_phase_to_slint(phase: LibUpdatePhase) -> UpdatePhase {
 
 pub fn install_block_reason_to_slint(reason: InstallBlockReason) -> SlintInstallBlockReason {
     match reason {
+        InstallBlockReason::RuntimeBusy => SlintInstallBlockReason::RuntimeBusy,
+        InstallBlockReason::Starting => SlintInstallBlockReason::Starting,
         InstallBlockReason::RecordingDictation => SlintInstallBlockReason::RecordingDictation,
         InstallBlockReason::RecordingMeeting => SlintInstallBlockReason::RecordingMeeting,
         InstallBlockReason::Stopping => SlintInstallBlockReason::Stopping,
@@ -45,6 +47,35 @@ pub fn project_install_block(window: &MainWindow, block: Option<InstallBlockReas
     window.set_update_install_blocked(block.is_some());
     if let Some(reason) = block {
         window.set_update_install_block_reason(install_block_reason_to_slint(reason));
+    }
+}
+
+/// Runtime refresh clears a stale refusal after StopComplete as well as
+/// disabling a ready package when a recording or model transition starts.
+pub fn refresh_install_block(window: &MainWindow, block: Option<InstallBlockReason>) {
+    project_install_block(window, block);
+    if let UpdateRow::Ready { version, .. } = current_update_row() {
+        set_update_row(
+            window,
+            UpdateRow::Ready {
+                version,
+                blocked: block,
+            },
+        );
+    }
+}
+
+/// An unavailable authority is not permission to install. The command still
+/// reports its error on an actual click; projections conservatively disable.
+pub fn install_block_for_display(
+    result: Result<Option<InstallBlockReason>, String>,
+) -> Option<InstallBlockReason> {
+    match result {
+        Ok(block) => block,
+        Err(error) => {
+            eprintln!("Cannot read update installation permission: {error}");
+            Some(InstallBlockReason::RuntimeBusy)
+        }
     }
 }
 
@@ -352,8 +383,19 @@ mod tests {
     }
 
     #[test]
+    fn unavailable_install_authority_never_projects_permission() {
+        assert_eq!(
+            install_block_for_display(Err("poisoned fixture".into())),
+            Some(InstallBlockReason::RuntimeBusy)
+        );
+        assert_eq!(install_block_for_display(Ok(None)), None);
+    }
+
+    #[test]
     fn install_block_reason_maps_every_variant_distinctly() {
         let variants = [
+            InstallBlockReason::RuntimeBusy,
+            InstallBlockReason::Starting,
             InstallBlockReason::RecordingDictation,
             InstallBlockReason::RecordingMeeting,
             InstallBlockReason::Stopping,

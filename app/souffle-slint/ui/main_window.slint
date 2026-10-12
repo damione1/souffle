@@ -24,9 +24,10 @@ import { TimelineDayGroup, UpcomingEvent } from "components/timeline_section.sli
 import { TranscriptBlock } from "components/transcript_section.slint";
 import { TranscriptWord } from "components/transcript_words.slint";
 import { StructuredActionItem } from "components/summary_section.slint";
-import { RecordingMode, LiveSystemAudio, MicStall, MeetingIdleBanner, WakeResumeNotice,SpeakerRole, TimelineFilter, TimelineKind, NotesSaveState, ModelPhase, TranscriptionPhase, UpcomingPhase, SettingsTab, SettingsInteraction, AppTheme, AppLocale, PasteMethod, MeetingLanguage, LogLevel, AudioRetention, AccessState, PermissionKind, ShortcutField, ShortcutNotice, SummaryProvider, AppleIntelligenceUnavailableReason, OnboardingStep, UpdatePhase, InstallBlockReason, UpdateRowStatus, MeetingExportFormat, DictionaryLearningMode } from "types.slint";
+import { RecordingMode, LiveSystemAudio, MicStall, MeetingIdleBanner, WakeResumeNotice,SpeakerRole, TimelineFilter, TimelineKind, NotesSaveState, ModelPhase, TranscriptionPhase, UpcomingPhase, SettingsTab, SettingsInteraction, AppTheme, AppLocale, PasteMethod, MeetingLanguage, LogLevel, AudioRetention, AccessState, PermissionKind, ShortcutField, ShortcutNotice, SettingsCaptureError, SummaryProvider, AppleIntelligenceUnavailableReason, OnboardingStep, UpdatePhase, InstallBlockReason, UpdateRowStatus, MeetingExportFormat, DictionaryLearningMode } from "types.slint";
 export { SettingsTab, SettingsInteraction, AppTheme, AppLocale, PasteMethod, MeetingLanguage, LogLevel, AudioRetention, AccessState, PermissionKind, ShortcutField, SummaryProvider, AppleIntelligenceUnavailableReason, SpeakerRole }
 import { Theme } from "theme.slint";
+import { ModelDeletionError } from "types.slint";
 import { TranscriptionLabels } from "components/transcription_labels.slint";
 export { TranscriptionLabels }
 import { TranscriptionUnavailableReason, SystemSettingsPane } from "types.slint";
@@ -234,6 +235,7 @@ export component MainWindow inherits Window {
     in property <bool> settings-native-tap-warning-visible;
     in-out property <ShortcutField> settings-recording-field: ShortcutField.none;
     in-out property <string> settings-shortcut-error: "";
+    in property <SettingsCaptureError> settings-shortcut-error-kind: SettingsCaptureError.operation-failed;
     in-out property <ShortcutNotice> settings-shortcut-notice: ShortcutNotice.none;
     in property <string> settings-save-error;
     in property <bool> settings-save-error-unavailable;
@@ -252,6 +254,7 @@ export component MainWindow inherits Window {
     in property <string> settings-sample-rate-label;
     in property <bool> settings-sample-rate-high;
     in property <bool> settings-resetting-sample-rate;
+    in property <bool> settings-backend-capture-busy: false;
     in property <bool> settings-allow-bluetooth-mic;
     in property <[MicrophoneRow]> settings-microphones;
     in property <bool> settings-has-disconnected-devices;
@@ -364,6 +367,7 @@ export component MainWindow inherits Window {
     in property <string> settings-unload-timeout-label;
     in property <string> settings-model-error-message;
     in property <string> settings-model-delete-error;
+    in property <ModelDeletionError> settings-model-delete-error-kind: ModelDeletionError.operation-failed;
     in property <bool> settings-model-files-deletable;
 
     in property <DictionaryLearningMode> settings-dictionary-learning-mode;
@@ -624,11 +628,37 @@ export component MainWindow inherits Window {
     // (`update_ui::project_install_block`) always writes the pair together.
     in property <bool> update-install-blocked: false;
     in property <InstallBlockReason> update-install-block-reason;
+    out property <bool> current-update-install-blocked: root.recording-starting
+        || root.recording-mode != RecordingMode.idle || root.update-install-blocked;
+    out property <InstallBlockReason> current-update-install-block-reason: root.recording-starting ? InstallBlockReason.starting
+        : root.recording-mode == RecordingMode.dictation ? InstallBlockReason.recording-dictation
+        : root.recording-mode == RecordingMode.meeting ? InstallBlockReason.recording-meeting
+        : root.update-install-block-reason;
     callback update-download-requested();
     callback update-install-requested();
+    callback update-install-permission-refresh-requested();
     callback update-open-release-requested();
     callback update-dismiss-requested();
     callback update-link-clicked(string);
+
+    // Releasing a contended lock emits no runtime transition. Re-read only
+    // this transient refusal while its install control is visible; stable
+    // machine refusals continue to follow the normal runtime events.
+    Timer {
+        interval: 500ms;
+        running: root.window-visible && !root.onboarding-open && (
+            (root.update-available-open && root.update-phase == UpdatePhase.ready
+                && root.current-update-install-blocked
+                && root.current-update-install-block-reason == InstallBlockReason.runtime-busy)
+            || (root.settings-open && root.settings-tab == SettingsTab.system
+                && root.settings-update-row == UpdateRowStatus.ready
+                && ((root.current-update-install-blocked
+                        && root.current-update-install-block-reason == InstallBlockReason.runtime-busy)
+                    || (root.settings-update-blocked
+                        && root.settings-update-block-reason == InstallBlockReason.runtime-busy)))
+        );
+        triggered => { root.update-install-permission-refresh-requested(); }
+    }
 
     // Header + content wrapped together so the gear icon (in `AppHeader`)
     // stays visible and clickable while Settings is open, matching
@@ -818,6 +848,7 @@ export component MainWindow inherits Window {
         log-scroll-top <=> root.settings-log-scroll-top;
         copying-diagnostics: root.settings-copying-diagnostics;
         theme: root.settings-theme;
+        capture-busy: root.settings-backend-capture-busy || root.recording-mode != RecordingMode.idle || root.recording-starting;
         locale: root.settings-locale;
         auto-paste: root.settings-auto-paste;
         paste-method: root.settings-paste-method;
@@ -835,6 +866,7 @@ export component MainWindow inherits Window {
         native-tap-warning-visible: root.settings-native-tap-warning-visible;
         recording-field <=> root.settings-recording-field;
         shortcut-error <=> root.settings-shortcut-error;
+        shortcut-error-kind: root.settings-shortcut-error-kind;
         shortcut-notice: root.settings-shortcut-notice;
         save-error: root.settings-save-error;
         save-error-unavailable: root.settings-save-error-unavailable;
@@ -895,8 +927,8 @@ export component MainWindow inherits Window {
         update-error: root.settings-update-error;
         update-has-progress: root.settings-update-has-progress;
         update-progress: root.settings-update-progress;
-        update-blocked: root.settings-update-blocked;
-        update-block-reason: root.settings-update-block-reason;
+        update-blocked: root.current-update-install-blocked || root.settings-update-blocked;
+        update-block-reason: root.current-update-install-blocked ? root.current-update-install-block-reason : root.settings-update-block-reason;
         summary-provider: root.settings-summary-provider;
         apple-intelligence-available: root.settings-apple-intelligence-available;
         apple-intelligence-reason: root.settings-apple-intelligence-reason;
@@ -954,6 +986,7 @@ export component MainWindow inherits Window {
         unload-timeout-label: root.settings-unload-timeout-label;
         model-error-message: root.settings-model-error-message;
         model-delete-error: root.settings-model-delete-error;
+        model-delete-error-kind: root.settings-model-delete-error-kind;
         model-files-deletable: root.settings-model-files-deletable;
 
         dictionary-learning-mode: root.settings-dictionary-learning-mode;
@@ -1181,8 +1214,8 @@ export component MainWindow inherits Window {
         release-notes-blocks: root.update-release-notes-blocks;
         phase: root.update-phase;
         error-message: root.update-error-message;
-        install-blocked: root.update-install-blocked;
-        install-block-reason: root.update-install-block-reason;
+        install-blocked: root.current-update-install-blocked;
+        install-block-reason: root.current-update-install-block-reason;
         download-requested => { root.update-download-requested(); }
         install-requested => { root.update-install-requested(); }
         open-release-requested => { root.update-open-release-requested(); }
