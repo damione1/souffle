@@ -75,6 +75,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2.9.1
         with:
           workspaces: app -> target
+          # Preserve the previous job's cache namespace after renaming it.
+          shared-key: rust
           save-if: ${{ github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/master' }}
 
       # Slint's build script no longer needs a prebuilt Tauri sidecar.

@@ -54,6 +54,10 @@ cargo test --locked --manifest-path app/Cargo.toml --workspace
 ./scripts/codeql-local.sh
 ```
 
+For a stack processed with `process-souffle-backlog`, defer CodeQL until
+review and corrections are complete, then run it once on the final stack tip.
+The skill's stack policy takes precedence over repeating that scan per PR.
+
 For changes confined to CI or documentation, validate the affected workflows
 with `actionlint` and run the commands changed by the diff. Rebuilding the
 native workspace is unnecessary when its source and build inputs are unchanged.
