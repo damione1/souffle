@@ -28,6 +28,7 @@ pub fn update_phase_to_slint(phase: LibUpdatePhase) -> UpdatePhase {
 
 pub fn install_block_reason_to_slint(reason: InstallBlockReason) -> SlintInstallBlockReason {
     match reason {
+        InstallBlockReason::Starting => SlintInstallBlockReason::Starting,
         InstallBlockReason::RecordingDictation => SlintInstallBlockReason::RecordingDictation,
         InstallBlockReason::RecordingMeeting => SlintInstallBlockReason::RecordingMeeting,
         InstallBlockReason::Stopping => SlintInstallBlockReason::Stopping,
@@ -354,6 +355,7 @@ mod tests {
     #[test]
     fn install_block_reason_maps_every_variant_distinctly() {
         let variants = [
+            InstallBlockReason::Starting,
             InstallBlockReason::RecordingDictation,
             InstallBlockReason::RecordingMeeting,
             InstallBlockReason::Stopping,

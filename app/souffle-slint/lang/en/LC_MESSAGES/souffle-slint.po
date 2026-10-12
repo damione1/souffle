@@ -3264,3 +3264,23 @@ msgstr "Audio capture error"
 msgctxt "ModelSection"
 msgid "Erreur de capture audio"
 msgstr "Audio capture error"
+
+msgctxt "UpdateCopy"
+msgid "Attendez la fin du démarrage de l'enregistrement."
+msgstr "Wait for the recording to finish starting."
+
+msgctxt "ShortcutRecorderButton"
+msgid "Enregistrer un raccourci"
+msgstr "Record a shortcut"
+
+msgctxt "InterfaceSection"
+msgid "Terminez l'enregistrement avant de modifier les raccourcis."
+msgstr "Finish the recording before changing shortcuts."
+
+msgctxt "MicrophoneSection"
+msgid "Terminez l'enregistrement avant de réinitialiser la fréquence du microphone."
+msgstr "Finish the recording before resetting the microphone sample rate."
+
+msgctxt "ModelSection"
+msgid "Terminez l'enregistrement avant de changer de modèle."
+msgstr "Finish the recording before changing models."

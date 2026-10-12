@@ -24,7 +24,7 @@ import { TimelineDayGroup, UpcomingEvent } from "components/timeline_section.sli
 import { TranscriptBlock } from "components/transcript_section.slint";
 import { TranscriptWord } from "components/transcript_words.slint";
 import { StructuredActionItem } from "components/summary_section.slint";
-import { RecordingMode, LiveSystemAudio, MicStall, MeetingIdleBanner, WakeResumeNotice,SpeakerRole, TimelineFilter, TimelineKind, NotesSaveState, ModelPhase, TranscriptionPhase, UpcomingPhase, SettingsTab, SettingsInteraction, AppTheme, AppLocale, PasteMethod, MeetingLanguage, LogLevel, AudioRetention, AccessState, PermissionKind, ShortcutField, ShortcutNotice, SummaryProvider, AppleIntelligenceUnavailableReason, OnboardingStep, UpdatePhase, InstallBlockReason, UpdateRowStatus, MeetingExportFormat, DictionaryLearningMode } from "types.slint";
+import { RecordingMode, LiveSystemAudio, MicStall, MeetingIdleBanner, WakeResumeNotice,SpeakerRole, TimelineFilter, TimelineKind, NotesSaveState, ModelPhase, TranscriptionPhase, UpcomingPhase, SettingsTab, SettingsInteraction, AppTheme, AppLocale, PasteMethod, MeetingLanguage, LogLevel, AudioRetention, AccessState, PermissionKind, ShortcutField, ShortcutNotice, SettingsCaptureError, SummaryProvider, AppleIntelligenceUnavailableReason, OnboardingStep, UpdatePhase, InstallBlockReason, UpdateRowStatus, MeetingExportFormat, DictionaryLearningMode } from "types.slint";
 export { SettingsTab, SettingsInteraction, AppTheme, AppLocale, PasteMethod, MeetingLanguage, LogLevel, AudioRetention, AccessState, PermissionKind, ShortcutField, SummaryProvider, AppleIntelligenceUnavailableReason, SpeakerRole }
 import { Theme } from "theme.slint";
 import { TranscriptionLabels } from "components/transcription_labels.slint";
@@ -234,6 +234,7 @@ export component MainWindow inherits Window {
     in property <bool> settings-native-tap-warning-visible;
     in-out property <ShortcutField> settings-recording-field: ShortcutField.none;
     in-out property <string> settings-shortcut-error: "";
+    in property <SettingsCaptureError> settings-shortcut-error-kind: SettingsCaptureError.operation-failed;
     in-out property <ShortcutNotice> settings-shortcut-notice: ShortcutNotice.none;
     in property <string> settings-save-error;
     in property <bool> settings-save-error-unavailable;
@@ -252,6 +253,7 @@ export component MainWindow inherits Window {
     in property <string> settings-sample-rate-label;
     in property <bool> settings-sample-rate-high;
     in property <bool> settings-resetting-sample-rate;
+    in property <bool> settings-backend-capture-busy: false;
     in property <bool> settings-allow-bluetooth-mic;
     in property <[MicrophoneRow]> settings-microphones;
     in property <bool> settings-has-disconnected-devices;
@@ -818,6 +820,7 @@ export component MainWindow inherits Window {
         log-scroll-top <=> root.settings-log-scroll-top;
         copying-diagnostics: root.settings-copying-diagnostics;
         theme: root.settings-theme;
+        capture-busy: root.settings-backend-capture-busy || root.recording-mode != RecordingMode.idle || root.recording-starting;
         locale: root.settings-locale;
         auto-paste: root.settings-auto-paste;
         paste-method: root.settings-paste-method;
@@ -835,6 +838,7 @@ export component MainWindow inherits Window {
         native-tap-warning-visible: root.settings-native-tap-warning-visible;
         recording-field <=> root.settings-recording-field;
         shortcut-error <=> root.settings-shortcut-error;
+        shortcut-error-kind: root.settings-shortcut-error-kind;
         shortcut-notice: root.settings-shortcut-notice;
         save-error: root.settings-save-error;
         save-error-unavailable: root.settings-save-error-unavailable;

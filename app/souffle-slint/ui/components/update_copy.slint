@@ -6,6 +6,7 @@ import { InstallBlockReason } from "../types.slint";
 // never the raw enum token.
 export global UpdateCopy {
     public pure function install-block-label(reason: InstallBlockReason) -> string {
+        if reason == InstallBlockReason.starting { return @tr("Attendez la fin du démarrage de l'enregistrement."); }
         if reason == InstallBlockReason.recording-dictation { return @tr("Terminez la dictée avant d'installer."); }
         if reason == InstallBlockReason.recording-meeting { return @tr("Arrêtez la réunion avant d'installer."); }
         if reason == InstallBlockReason.stopping { return @tr("Attendez la fin de l'arrêt de l'enregistrement."); }

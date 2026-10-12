@@ -11,6 +11,19 @@ use crate::{
     PermissionKind as SlintPermissionKind,
 };
 use souffle_lib::calendar::CalendarInfo;
+
+pub(crate) fn capture_error_to_slint(
+    error: &souffle_lib::commands::SettingsCaptureError,
+) -> crate::SettingsCaptureError {
+    match error {
+        souffle_lib::commands::SettingsCaptureError::CaptureBusy => {
+            crate::SettingsCaptureError::CaptureBusy
+        }
+        souffle_lib::commands::SettingsCaptureError::OperationFailed { .. } => {
+            crate::SettingsCaptureError::OperationFailed
+        }
+    }
+}
 use souffle_lib::logging::LogLevel;
 use souffle_lib::permissions::{PermState, PermissionKind};
 use souffle_lib::settings::{

@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
 
 use crate::app_events::UpdatePhase;
+use crate::lock_ext::MutexExt;
 use crate::native::updater::ReadyUpdate;
 use crate::state::AppState;
 use crate::state_machine::AppStateMachine;
@@ -19,6 +20,7 @@ use crate::state_machine::AppStateMachine;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum InstallBlockReason {
+    Starting,
     RecordingDictation,
     RecordingMeeting,
     Stopping,
@@ -30,6 +32,7 @@ pub enum InstallBlockReason {
 impl InstallBlockReason {
     pub fn as_str(self) -> &'static str {
         match self {
+            Self::Starting => "starting",
             Self::RecordingDictation => "recording_dictation",
             Self::RecordingMeeting => "recording_meeting",
             Self::Stopping => "stopping",
@@ -149,8 +152,14 @@ pub fn get_update_download_status() -> Result<UpdateDownloadStatus, String> {
 pub fn get_update_install_block(
     state: Arc<AppState>,
 ) -> Result<Option<InstallBlockReason>, String> {
-    let machine = state.current_machine_state()?;
-    Ok(install_blocked_reason(&machine))
+    state.capture_start.with_start_boundary(|starting| {
+        let machine = state.machine.acquire()?;
+        Ok(if starting {
+            Some(InstallBlockReason::Starting)
+        } else {
+            install_blocked_reason(&machine)
+        })
+    })
 }
 
 /// Start downloading the updater artifact. Detection has already happened via
@@ -234,40 +243,67 @@ pub fn cancel_update_download() -> Result<UpdateDownloadStatus, String> {
 /// marks the download failed: the package bytes are consumed by then, so the
 /// only way forward is a fresh download, which `download_update` allows.
 pub async fn install_update(state: Arc<AppState>) -> Result<(), String> {
-    let machine = state.current_machine_state()?;
-    if let Some(reason) = install_blocked_reason(&machine) {
-        return Err(format!(
-            "Cannot install update while {}",
-            reason.as_str().replace('_', " ")
-        ));
-    }
+    crate::async_runtime::spawn_blocking(move || install_update_blocking(state))
+        .await
+        .map_err(|error| format!("Could not join update installation: {error}"))?
+}
 
-    let package = with_state(|s| {
-        if s.phase != UpdatePhase::Ready {
-            return Err("No update package is ready to install".to_string());
+fn install_update_blocking(state: Arc<AppState>) -> Result<(), String> {
+    state.capture_start.with_start_boundary(|starting| {
+        // No window operation inside this capture-gate -> machine boundary.
+        // Release the machine before engine shutdown; keep capture reservations
+        // excluded until native relaunch exits this process.
+        let package = with_install_permission(&state.machine, starting, || {
+            let package = with_state(|s| {
+                if s.phase != UpdatePhase::Ready {
+                    return Err("No update package is ready to install".to_string());
+                }
+                s.ready
+                    .take()
+                    .ok_or_else(|| "No update package is ready to install".to_string())
+            })??;
+            info!(version = %package.version, "Installing update");
+            if let Err(e) = crate::native::updater::install_bundle(&package.bytes) {
+                let error = format!("Update install failed: {e}");
+                let _ = fail(error.clone(), true);
+                return Err(error);
+            }
+            Ok(package)
+        })?;
+
+        // Explicit shutdown only once the new bundle is in place: free Metal
+        // before the process exits as part of the relaunch, same requirement
+        // `RunEvent::ExitRequested` enforced before this ticket. A failed swap
+        // above returns with the engine still running.
+        if let Err(e) = state.engine_actor.shutdown() {
+            warn!("Engine shutdown before update restart: {e}");
         }
-        s.ready
-            .take()
-            .ok_or_else(|| "No update package is ready to install".to_string())
-    })??;
 
-    info!(version = %package.version, "Installing update");
-    if let Err(e) = crate::native::updater::install_bundle(&package.bytes) {
-        let error = format!("Update install failed: {e}");
-        let _ = fail(error.clone(), true);
-        return Err(error);
+        info!(version = %package.version, "Update installed; relaunching");
+        crate::native::updater::relaunch_and_exit()
+    })
+}
+
+fn with_install_permission<T>(
+    machine: &Mutex<AppStateMachine>,
+    starting: bool,
+    install: impl FnOnce() -> Result<T, String>,
+) -> Result<T, String> {
+    {
+        let machine = machine.acquire()?;
+        let reason = if starting {
+            Some(InstallBlockReason::Starting)
+        } else {
+            install_blocked_reason(&machine)
+        };
+        if let Some(reason) = reason {
+            return Err(format!(
+                "Cannot install update while {}",
+                reason.as_str().replace('_', " ")
+            ));
+        }
+        install()
     }
-
-    // Explicit shutdown only once the new bundle is in place: free Metal
-    // before the process exits as part of the relaunch, same requirement
-    // `RunEvent::ExitRequested` enforced before this ticket. A failed swap
-    // above returns with the engine still running.
-    if let Err(e) = state.engine_actor.shutdown() {
-        warn!("Engine shutdown before update restart: {e}");
-    }
-
-    info!(version = %package.version, "Update installed; relaunching");
-    crate::native::updater::relaunch_and_exit()
 }
 
 fn fail(error: String, manual_fallback: bool) -> Result<UpdateDownloadStatus, String> {
@@ -287,6 +323,57 @@ fn fail(error: String, manual_fallback: bool) -> Result<UpdateDownloadStatus, St
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn busy_install_refuses_before_consuming_package_or_swapping_bundle() {
+        use std::cell::Cell;
+        use std::sync::Mutex;
+        let profile = profile();
+        for (machine, starting) in [
+            (
+                AppStateMachine::Ready {
+                    profile: profile.clone(),
+                },
+                true,
+            ),
+            (
+                AppStateMachine::RecordingDictation {
+                    profile: profile.clone(),
+                    session_id: 1,
+                },
+                false,
+            ),
+            (
+                AppStateMachine::RecordingMeeting {
+                    profile: profile.clone(),
+                    session_id: 1,
+                    meeting_id: "fixture".into(),
+                },
+                false,
+            ),
+            (
+                AppStateMachine::Stopping {
+                    profile: profile.clone(),
+                    was_recording: crate::state_machine::RecordingKind::Dictation,
+                },
+                false,
+            ),
+            (
+                AppStateMachine::Downloading {
+                    profile: profile.clone(),
+                },
+                false,
+            ),
+            (AppStateMachine::Loading { profile }, false),
+        ] {
+            let consumed = Cell::new(false);
+            let result = super::with_install_permission(&Mutex::new(machine), starting, || {
+                consumed.set(true);
+                Ok(())
+            });
+            assert!(result.is_err());
+            assert!(!consumed.get());
+        }
+    }
     use super::*;
     use crate::engine::TranscriptionProfile;
     use crate::state_machine::{AppStateMachine, ErrorRecovery};
@@ -352,6 +439,7 @@ mod tests {
     #[test]
     fn install_block_reason_wire_encoding_matches_as_str() {
         for reason in [
+            InstallBlockReason::Starting,
             InstallBlockReason::RecordingDictation,
             InstallBlockReason::RecordingMeeting,
             InstallBlockReason::Stopping,

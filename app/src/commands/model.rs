@@ -8,6 +8,7 @@ use crate::engine::{
     TranscriptionCatalog, TranscriptionProfile, TranscriptionProfileSelection,
     TranscriptionRuntimeStatus, resolve_transcription_selection, transcription_engine_catalog,
 };
+use crate::lock_ext::MutexExt;
 use crate::models;
 use crate::settings::AppSettings;
 use crate::state::AppState;
@@ -310,19 +311,12 @@ pub fn delete_model(
         );
     }
 
-    let machine = state.current_machine_state()?;
-    if model_delete_blocked_by_transition(&machine) {
-        return Err(
-            "Cannot delete a model while it is downloading, loading, unloading, or recovering from a failed unload."
-                .into(),
-        );
-    }
-    if machine.is_model_ready() && machine.active_profile() == Some(&profile) {
-        return Err("Cannot delete the currently loaded model. Unload it first or switch to a different model.".into());
-    }
+    let machine = state.machine.acquire()?;
+    validate_model_deletion(&machine, &profile)?;
 
     let model_dir = models::model_dir(&profile);
     models::download::delete_model_files(&model_dir)?;
+    drop(machine);
 
     info!(
         engine = %profile.engine_id,
@@ -333,20 +327,61 @@ pub fn delete_model(
     Ok(())
 }
 
+/// Settings checks the same permission before invoking the destructive command.
+pub fn can_delete_model(
+    state: &AppState,
+    selection: &TranscriptionProfileSelection,
+) -> Result<(), String> {
+    let profile = resolve_transcription_selection(selection)?;
+    if !models::can_delete_model_files(&profile) {
+        return Err(
+            "Apple Speech assets are managed by macOS and cannot be deleted by Soufflé.".into(),
+        );
+    }
+    let machine = state.machine.acquire()?;
+    validate_model_deletion(&machine, &profile)
+}
+
+fn validate_model_deletion(
+    machine: &AppStateMachine,
+    profile: &TranscriptionProfile,
+) -> Result<(), String> {
+    if model_delete_blocked_by_transition(machine) {
+        return Err(
+            "Cannot delete a model while it is downloading, loading, unloading, or recovering from a failed unload."
+                .into(),
+        );
+    }
+    if machine.is_model_ready() && machine.active_profile() == Some(profile) {
+        return Err("Cannot delete the currently loaded model. Unload it first or switch to a different model.".into());
+    }
+
+    Ok(())
+}
+
 /// Downloading/loading/unloading all hold model files; Unloading and
 /// RetryFromReady are not `is_model_ready`, so they must be listed here or
 /// delete can race teardown (or delete files still held after a failed unload).
 fn model_delete_blocked_by_transition(machine: &AppStateMachine) -> bool {
-    matches!(
-        machine,
+    match machine {
         AppStateMachine::Downloading { .. }
-            | AppStateMachine::Loading { .. }
-            | AppStateMachine::Unloading { .. }
-            | AppStateMachine::Error {
-                recovery: ErrorRecovery::RetryFromReady { .. },
-                ..
-            }
-    )
+        | AppStateMachine::Loading { .. }
+        | AppStateMachine::Unloading { .. }
+        | AppStateMachine::Error {
+            recovery: ErrorRecovery::RetryFromReady { .. },
+            ..
+        } => true,
+        AppStateMachine::Idle
+        | AppStateMachine::Downloaded { .. }
+        | AppStateMachine::Ready { .. }
+        | AppStateMachine::RecordingDictation { .. }
+        | AppStateMachine::RecordingMeeting { .. }
+        | AppStateMachine::Stopping { .. }
+        | AppStateMachine::Error {
+            recovery: ErrorRecovery::RetryFromIdle | ErrorRecovery::RetryFromDownloaded { .. },
+            ..
+        } => false,
+    }
 }
 
 /// Debug: feed the debug WAV through the engine to test model in isolation.
@@ -456,6 +491,55 @@ mod tests {
         };
         assert!(model_delete_blocked_by_transition(&unloading));
         assert!(!unloading.is_model_ready());
+    }
+
+    #[test]
+    fn deletion_permission_rejects_transitions_and_active_profile_only() {
+        let active = profile();
+        let other = TranscriptionProfile {
+            model_id: "different-fixture-model".into(),
+            ..active.clone()
+        };
+        for machine in [
+            AppStateMachine::Ready {
+                profile: active.clone(),
+            },
+            AppStateMachine::RecordingDictation {
+                profile: active.clone(),
+                session_id: 1,
+            },
+            AppStateMachine::RecordingMeeting {
+                profile: active.clone(),
+                session_id: 1,
+                meeting_id: "fixture".into(),
+            },
+            AppStateMachine::Stopping {
+                profile: active.clone(),
+                was_recording: crate::state_machine::RecordingKind::Dictation,
+            },
+        ] {
+            assert!(super::validate_model_deletion(&machine, &active).is_err());
+            assert_eq!(super::validate_model_deletion(&machine, &other), Ok(()));
+        }
+        for machine in [
+            AppStateMachine::Downloading {
+                profile: active.clone(),
+            },
+            AppStateMachine::Loading {
+                profile: active.clone(),
+            },
+            AppStateMachine::Unloading {
+                profile: active.clone(),
+                next_profile: None,
+            },
+        ] {
+            assert!(super::validate_model_deletion(&machine, &active).is_err());
+            assert!(super::validate_model_deletion(&machine, &other).is_err());
+        }
+        assert_eq!(
+            super::validate_model_deletion(&AppStateMachine::Idle, &active),
+            Ok(())
+        );
     }
 
     #[test]

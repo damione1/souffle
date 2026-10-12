@@ -149,6 +149,57 @@ fn build_harness(mock: MockEngine) -> Harness {
     }
 }
 
+#[test]
+fn recording_settings_commands_refuse_reset_and_rebind_but_keep_hot_swap() {
+    let h = build_harness(MockEngine::new());
+    let profile = default_transcription_profile();
+    let before = h.db.get_all_settings().unwrap();
+    for machine in [
+        AppStateMachine::RecordingDictation {
+            profile: profile.clone(),
+            session_id: 1,
+        },
+        AppStateMachine::RecordingMeeting {
+            profile: profile.clone(),
+            session_id: 1,
+            meeting_id: "fixture".into(),
+        },
+        AppStateMachine::Stopping {
+            profile: profile.clone(),
+            was_recording: souffle_lib::state_machine::RecordingKind::Dictation,
+        },
+        AppStateMachine::Ready { profile },
+    ] {
+        let starting = !machine.is_recording();
+        *h.state.machine.lock().unwrap() = machine;
+        if starting {
+            h.state.capture_start.begin(1);
+        }
+        assert!(commands::settings_capture_busy(&h.state).unwrap());
+        assert!(
+            commands::save_shortcuts(
+                h.state.clone(),
+                commands::get_shortcuts(h.state.clone()).unwrap()
+            )
+            .is_err()
+        );
+        assert!(
+            souffle_lib::async_runtime::block_on(commands::reset_input_sample_rate(
+                h.state.clone(),
+                "fixture-mic".into()
+            ))
+            .is_err()
+        );
+        assert_eq!(h.db.get_all_settings().unwrap(), before);
+        commands::select_audio_device(h.state.clone(), "fixture-hot-swap".into()).unwrap();
+        assert!(
+            matches!(h.audio_cmd_rx.try_recv().unwrap(), AudioCommand::SelectDevice(uid) if uid == "fixture-hot-swap")
+        );
+        assert!(h.audio_cmd_rx.try_recv().is_err());
+        h.state.capture_start.abandon(1);
+    }
+}
+
 /// A non-silent chunk carrying exactly one engine frame's worth of samples,
 /// tagged for the given session (matches `pipeline::actor::tests::audio_chunk`).
 fn audio_chunk(session_id: u64) -> AudioMessage {

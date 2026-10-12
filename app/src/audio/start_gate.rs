@@ -129,6 +129,23 @@ impl CaptureStartGate {
     pub fn start_in_flight(&self) -> bool {
         self.with_state(|state| state.as_ref().is_some_and(|s| !s.settled))
     }
+
+    /// Nonblocking read for UI intent guards. A capture start or a settings
+    /// effect holding the boundary counts as busy, so the UI never waits on
+    /// CoreAudio while deciding whether to accept another destructive click.
+    pub fn start_in_flight_or_locked(&self) -> bool {
+        match self.state.try_lock() {
+            Ok(state) => state.as_ref().is_some_and(|session| !session.settled),
+            Err(std::sync::TryLockError::WouldBlock | std::sync::TryLockError::Poisoned(_)) => true,
+        }
+    }
+
+    /// Serializes a settings decision/effect with `begin` and `start_capture`.
+    /// Lock order is capture gate then machine; callers must not invoke window
+    /// operations or re-enter this gate in `operation`.
+    pub(crate) fn with_start_boundary<T>(&self, operation: impl FnOnce(bool) -> T) -> T {
+        self.with_state(|state| operation(state.as_ref().is_some_and(|s| !s.settled)))
+    }
 }
 
 #[cfg(test)]

@@ -98,6 +98,7 @@ export component MicrophoneSection inherits VerticalLayout {
     in property <string> sample-rate-label; // "" hides the row
     in property <bool> sample-rate-high;
     in property <bool> resetting-sample-rate;
+    in property <bool> capture-busy;
     in property <bool> allow-bluetooth-mic;
     in property <[MicrophoneRow]> microphones;
     in property <bool> has-disconnected;
@@ -192,9 +193,15 @@ export component MicrophoneSection inherits VerticalLayout {
 
             ThemedButton {
                 text: root.resetting-sample-rate ? @tr("Réinitialisation…") : @tr("Réinitialiser à 48 kHz");
-                enabled: !root.resetting-sample-rate;
+                enabled: !root.resetting-sample-rate && !root.capture-busy;
                 clicked => { root.reset-sample-rate-requested(); }
             }
+        }
+        if root.capture-busy: AppText {
+            text: @tr("Terminez l'enregistrement avant de réinitialiser la fréquence du microphone.");
+            color: Theme.text-muted;
+            typography: Typography.small;
+            wrap: word-wrap;
         }
     }
 
