@@ -83,6 +83,69 @@ impl ReadbackPhase {
         }
     }
 }
+
+fn validate_client_rate(rate: f64) -> Result<()> {
+    if !(8000.0..=192000.0).contains(&rate) || rate.fract() != 0.0 {
+        return Err(format!("Unsupported native input sample rate: {rate} Hz").into());
+    }
+    Ok(())
+}
+
+unsafe fn mono_client_format(input: &AVAudioInputNode) -> Result<Retained<AVAudioFormat>> {
+    // The device/VoiceProcessingIO format may expose additional channels.
+    // Request a mono client stream from Apple; never downmix those channels.
+    // AVAudioNode.installTapOnBus applies this format to its unconnected bus.
+    // Both voice-IO client sides must use the same format while stopped.
+    let hardware = unsafe { input.inputFormatForBus(0) };
+    let rate = unsafe { hardware.sampleRate() };
+    validate_client_rate(rate)?;
+    unsafe {
+        AVAudioFormat::initStandardFormatWithSampleRate_channels(AVAudioFormat::alloc(), rate, 1)
+    }
+    .ok_or_else(|| format!("Could not create mono planar f32 client format at {rate} Hz").into())
+}
+
+unsafe fn describe_format(format: &AVAudioFormat) -> String {
+    unsafe {
+        format!(
+            "{} Hz, {} channels, common format {}, interleaved={}",
+            format.sampleRate(),
+            format.channelCount(),
+            format.commonFormat().0,
+            format.isInterleaved(),
+        )
+    }
+}
+
+unsafe fn is_mono_client_buffer(format: &AVAudioFormat, rate: f64) -> bool {
+    unsafe {
+        format.channelCount() == 1
+            && format.isStandard()
+            && !format.isInterleaved()
+            && format.sampleRate() == rate
+    }
+}
+
+unsafe fn verify_client_formats(
+    input: &AVAudioInputNode,
+    output: &AVAudioOutputNode,
+    expected: &AVAudioFormat,
+) -> Result<()> {
+    unsafe {
+        let actual_input = input.outputFormatForBus(0);
+        let actual_output = output.inputFormatForBus(0);
+        if !actual_input.isEqual(expected) || !actual_output.isEqual(expected) {
+            return Err(format!(
+                "Native voice client format negotiation failed: requested {}; input {}; output {}",
+                describe_format(expected),
+                describe_format(&actual_input),
+                describe_format(&actual_output),
+            )
+            .into());
+        }
+    }
+    Ok(())
+}
 unsafe fn read_device(
     unit: AudioUnit,
     side: Side,
@@ -183,7 +246,8 @@ impl Native {
                 || !output.isVoiceProcessingEnabled()
                 || self.input.isVoiceProcessingBypassed()
                 || self.input.isVoiceProcessingAGCEnabled()
-                || self.input.outputFormatForBus(0).sampleRate() != self.rate as f64
+                || !is_mono_client_buffer(&self.input.outputFormatForBus(0), self.rate as f64)
+                || !is_mono_client_buffer(&output.inputFormatForBus(0), self.rate as f64)
             {
                 return Err("native running configuration changed".into());
             }
@@ -256,7 +320,8 @@ impl Native {
                     return Err("minimum ducking readback did not match request".into());
                 }
             }
-            let format = input.outputFormatForBus(0);
+            let initial_format = input.outputFormatForBus(0);
+            let format = mono_client_format(&input)?;
             let rate = format.sampleRate();
             let channels = format.channelCount();
             let output_format = output.inputFormatForBus(0);
@@ -268,6 +333,8 @@ impl Native {
                 "ducking": ducking, "input_rate": rate, "input_channels": channels,
                 "input_interleaved": format.isInterleaved(), "input_common_format": format.commonFormat().0,
                 "output_rate": output_rate, "output_channels": output_format.channelCount(),
+                "initial_input_format": describe_format(&initial_format),
+                "requested_client_format": describe_format(&format),
                 "input_presentation_latency_seconds": input.presentationLatency(),
                 "output_presentation_latency_seconds": output.presentationLatency(),
                 "output_content": if playback.is_some() { "positive-control fixture, once then silence" } else { "silence (external process supplies audible remote)" },
@@ -283,16 +350,6 @@ impl Native {
                         .into(),
                 );
             }
-            if !format.isStandard()
-                || format.isInterleaved()
-                || channels != 1
-                || !(8000.0..=192000.0).contains(&rate)
-                || !(8000.0..=192000.0).contains(&output_rate)
-            {
-                return Err(
-                    "unsupported negotiated native format (requires mono planar f32)".into(),
-                );
-            }
             let retained_telemetry = Arc::clone(&telemetry);
             let render_telemetry = Arc::clone(&telemetry);
             let producer = Mutex::new(producer);
@@ -302,6 +359,11 @@ impl Native {
                     let n = b.frameLength() as usize;
                     telemetry.callbacks.fetch_add(1, Ordering::Relaxed);
                     if !telemetry.accepting.load(Ordering::Relaxed) {
+                        return;
+                    }
+                    let callback_format = b.format();
+                    if !is_mono_client_buffer(&callback_format, rate) {
+                        telemetry.errors.fetch_add(1, Ordering::Relaxed);
                         return;
                     }
                     let t = time.as_ref();
@@ -319,13 +381,11 @@ impl Native {
                         telemetry.dropped.fetch_add(n as u64, Ordering::Relaxed);
                         return;
                     };
-                    // Format was fixed at install; channel pointers valid for frameLength.
+                    // Only Apple's negotiated mono client stream is accepted.
+                    // Never average native device/AEC reference channels.
                     for i in 0..n {
-                        let mut value = 0.0;
-                        for ch in 0..channels as usize {
-                            value += *(*data.add(ch)).as_ptr().add(i);
-                        }
-                        if !p.push(value / channels as f32, timestamp) {
+                        let value = *(*data).as_ptr().add(i);
+                        if !p.push(value, timestamp) {
                             telemetry.dropped.fetch_add(1, Ordering::Relaxed);
                         }
                     }
@@ -391,12 +451,13 @@ impl Native {
             engine.attachNode(&source);
             engine.connect_to_format(&source, &output, Some(&source_format));
             let connected_output = output.inputFormatForBus(0);
-            let formats_equal = format.isEqual(&connected_output);
+            let verified_formats = verify_client_formats(&input, &output, &format);
+            let formats_equal = verified_formats.is_ok();
             evidence["connected_output"] = json!({"rate": connected_output.sampleRate(), "channels": connected_output.channelCount(), "matches_input_format": formats_equal});
             log["configuration"] = evidence.clone();
-            if !formats_equal {
+            if let Err(error) = verified_formats {
                 input.removeTapOnBus(0);
-                return Err("voice-processing input/output formats differ after connection".into());
+                return Err(error);
             }
             engine.prepare();
 
@@ -409,6 +470,11 @@ impl Native {
                 engine.stop();
                 input.removeTapOnBus(0);
                 return Err(format!("startAndReturnError: {e:?}").into());
+            }
+            if let Err(error) = verify_client_formats(&input, &output, &format) {
+                engine.stop();
+                input.removeTapOnBus(0);
+                return Err(error);
             }
             log["running_readback"] = serde_json::json!({"running": engine.isRunning(), "input_voice_processing": input.isVoiceProcessingEnabled(), "output_voice_processing": output.isVoiceProcessingEnabled(), "agc": input.isVoiceProcessingAGCEnabled(), "bypassed": input.isVoiceProcessingBypassed()});
             if let Some(s) = selection {
@@ -478,6 +544,107 @@ mod tests {
         HeapRb,
         traits::{Consumer, Split},
     };
+
+    #[test]
+    fn rejects_invalid_native_sample_rates() {
+        for rate in [0.0, f64::NAN, f64::INFINITY, 48000.5, 192001.0] {
+            assert!(validate_client_rate(rate).is_err());
+        }
+        for rate in [8000.0, 16000.0, 44100.0, 48000.0, 192000.0] {
+            assert!(validate_client_rate(rate).is_ok());
+        }
+    }
+
+    #[test]
+    fn callback_rejects_multichannel_interleaved_or_changed_rate() {
+        objc2::rc::autoreleasepool(|_| unsafe {
+            for (channels, rate, interleaved, expected) in [
+                (1, 48000.0, false, true),
+                (2, 48000.0, false, false),
+                (1, 48000.0, true, false),
+                (1, 16000.0, false, false),
+            ] {
+                let format = AVAudioFormat::initWithCommonFormat_sampleRate_channels_interleaved(
+                    AVAudioFormat::alloc(),
+                    AVAudioCommonFormat::PCMFormatFloat32,
+                    rate,
+                    channels,
+                    interleaved,
+                )
+                .unwrap();
+                assert_eq!(is_mono_client_buffer(&format, 48000.0), expected);
+            }
+        });
+    }
+
+    /// Exercises Apple's real voice-IO client negotiation, without starting
+    /// the engine or installing a callback that reads microphone samples.
+    /// Set SOUFFLE_NATIVE_TEST_INPUT_UID to test a specific current input.
+    #[cfg(debug_assertions)]
+    #[test]
+    #[ignore = "explicit stopped voice-IO hardware graph; never starts capture"]
+    fn stopped_voice_io_negotiates_mono_client_graph() {
+        objc2::rc::autoreleasepool(|_| unsafe {
+            let engine = AVAudioEngine::new();
+            engine
+                .inputNode()
+                .setVoiceProcessingEnabled_error(true)
+                .unwrap();
+            let input = engine.inputNode();
+            let output = engine.outputNode();
+            if let Ok(uid) = std::env::var("SOUFFLE_NATIVE_TEST_INPUT_UID") {
+                let selection = Selection::for_input_uid(&uid).unwrap();
+                let mut log = json!({});
+                select_device(
+                    audio_unit(&input).unwrap(),
+                    Side::Input,
+                    &selection.input,
+                    &mut log,
+                )
+                .unwrap();
+                select_device(
+                    audio_unit(&output).unwrap(),
+                    Side::Output,
+                    &selection.output,
+                    &mut log,
+                )
+                .unwrap();
+            }
+            input.setVoiceProcessingBypassed(false);
+            input.setVoiceProcessingAGCEnabled(false);
+            let format = mono_client_format(&input).unwrap();
+            let tap = RcBlock::new(|_: NonNull<AVAudioPCMBuffer>, _: NonNull<AVAudioTime>| {});
+            input.installTapOnBus_bufferSize_format_block(
+                0,
+                1024,
+                Some(&format),
+                RcBlock::as_ptr(&tap),
+            );
+            let render = RcBlock::new(
+                |mut silence: NonNull<Bool>,
+                 _: NonNull<AudioTimeStamp>,
+                 _: u32,
+                 _: NonNull<AudioBufferList>|
+                 -> i32 {
+                    *silence.as_mut() = Bool::YES;
+                    0
+                },
+            );
+            let source = AVAudioSourceNode::initWithFormat_renderBlock(
+                AVAudioSourceNode::alloc(),
+                &format,
+                RcBlock::as_ptr(&render),
+            );
+            engine.attachNode(&source);
+            engine.connect_to_format(&source, &output, Some(&format));
+            let result = verify_client_formats(&input, &output, &format);
+            input.removeTapOnBus(0);
+            assert!(!engine.isRunning());
+            assert!(input.isVoiceProcessingEnabled());
+            assert!(output.isVoiceProcessingEnabled());
+            result.unwrap();
+        });
+    }
 
     #[test]
     fn native_destinations_preserve_me_samples_and_bound_overflow() {

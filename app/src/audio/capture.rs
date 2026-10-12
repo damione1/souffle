@@ -2695,7 +2695,7 @@ impl AudioCapture {
                                 warn!("Failed to start audio capture: {e}");
                                 capture.report_start_failure(capture_system_audio, &e);
                                 if capture_system_audio && MeetingBackend::selected().requires_microphone() {
-                                    capture.fail_session(session_id, format!("Apple meeting microphone failed: {e}"));
+                                    capture.fail_session(session_id, e);
                                     continue;
                                 }
                                 // Dictation has no second source. With the
@@ -3390,8 +3390,7 @@ impl AudioCapture {
             &mut log,
         );
         info!("Apple meeting microphone requested={selection:?} readbacks={log}");
-        let capture = result
-            .map_err(|e| format!("Apple meeting microphone failed (no CPAL fallback): {e}"))?;
+        let capture = result.map_err(|e| format!("Apple meeting microphone failed: {e}"))?;
         let rate = capture.rate;
         self.active_session_id.store(session_id, Ordering::Release);
         telemetry.accepting.store(true, Ordering::Release);
