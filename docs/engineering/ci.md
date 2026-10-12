@@ -38,6 +38,26 @@ run on `develop`, save the macOS cache for subsequent runs and promotion PRs.
 PRs restore caches but do not create large per-PR entries. CodeQL remains
 on pushes to `develop`, outside the PR workflow.
 
+## Local validation
+
+For Rust or Slint changes, run the full local gate before opening or updating
+the PR. A green Quick checks job does not replace native compilation and
+tests. Run these on an Apple Silicon Mac with the translation extractor
+matching `Cargo.lock`, GNU gettext and CodeQL installed:
+
+```bash
+./scripts/build-mcp-sidecar.test.sh
+cargo fmt --manifest-path app/Cargo.toml --all -- --check
+cargo clippy --locked --manifest-path app/Cargo.toml --workspace --all-targets -- -D warnings
+cargo test --locked --manifest-path app/Cargo.toml --workspace
+./scripts/check_slint_translations.sh
+./scripts/codeql-local.sh
+```
+
+For changes confined to CI or documentation, validate the affected workflows
+with `actionlint` and run the commands changed by the diff. Rebuilding the
+native workspace is unnecessary when its source and build inputs are unchanged.
+
 ## Baseline
 
 The [2026-10-12 develop run](https://github.com/damione1/souffle/actions/runs/38200872903)
