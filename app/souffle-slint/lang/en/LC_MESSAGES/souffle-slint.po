@@ -3256,3 +3256,11 @@ msgstr "Enable audio retention in Data first. Diagnostics are never recorded wit
 msgctxt "AudioSection"
 msgid "À partir de la prochaine réunion, conserve les voies brutes séparées : micro à gauche, audio système à droite. WAV sans perte : environ {} Mo/heure, {} minutes maximum. Même conservation que l'audio de réunion."
 msgstr "Starting with the next meeting, saves separate raw lanes: microphone on the left, system audio on the right. Lossless WAV: about {} MB/hour, up to {} minutes. Same retention as meeting audio."
+
+msgctxt "AppHeader"
+msgid "Erreur de capture audio"
+msgstr "Audio capture error"
+
+msgctxt "ModelSection"
+msgid "Erreur de capture audio"
+msgstr "Audio capture error"

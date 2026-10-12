@@ -27,7 +27,7 @@ const PUBKEY_B64: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6ID
 const MANIFEST_URL: &str =
     "https://github.com/damione1/souffle/releases/latest/download/latest.json";
 
-/// Only Apple Silicon macOS ships (see CLAUDE.md); this is the one platform
+/// Only Apple Silicon macOS ships; this is the one platform
 /// key the manifest needs to carry.
 const PLATFORM: &str = "darwin-aarch64";
 

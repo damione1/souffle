@@ -51,6 +51,7 @@ export component ModelSection inherits VerticalLayout {
                 : root.model-phase == TranscriptionPhase.ready ? @tr("Prêt")
                 : root.model-phase == TranscriptionPhase.unloading ? @tr("Déchargement…")
                 : root.model-phase == TranscriptionPhase.failed ? @tr("Erreur du modèle")
+                : root.model-phase == TranscriptionPhase.audio-failed ? @tr("Erreur de capture audio")
                 : "";
             indicator-color: root.ready ? Theme.accent : Theme.warning;
         }

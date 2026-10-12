@@ -15,4 +15,6 @@ pub mod notifications;
 pub mod relaunch;
 pub mod shortcuts;
 pub mod single_instance;
+#[cfg(target_os = "macos")]
+pub mod termination;
 pub mod updater;

@@ -2,7 +2,7 @@ name: CodeQL
 
 # Security scan on develop only. PRs do not run CodeQL on CI: agents run
 # `./scripts/codeql-local.sh` as part of the local gate before opening or
-# updating a PR (see CLAUDE.md).
+# updating a PR.
 on:
   push:
     branches:

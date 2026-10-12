@@ -3264,3 +3264,11 @@ msgstr "Activez d'abord la conservation de l'audio dans Données. Aucun diagnost
 msgctxt "AudioSection"
 msgid "À partir de la prochaine réunion, conserve les voies brutes séparées : micro à gauche, audio système à droite. WAV sans perte : environ {} Mo/heure, {} minutes maximum. Même conservation que l'audio de réunion."
 msgstr "À partir de la prochaine réunion, conserve les voies brutes séparées : micro à gauche, audio système à droite. WAV sans perte : environ {} Mo/heure, {} minutes maximum. Même conservation que l'audio de réunion."
+
+msgctxt "AppHeader"
+msgid "Erreur de capture audio"
+msgstr "Erreur de capture audio"
+
+msgctxt "ModelSection"
+msgid "Erreur de capture audio"
+msgstr "Erreur de capture audio"

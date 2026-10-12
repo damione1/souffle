@@ -21,7 +21,10 @@ fn unload_loaded_model(
 ) -> Result<(), String> {
     state.apply_transition(StateAction::Unload { next_profile })?;
     if let Err(e) = state.engine_actor.unload_model() {
-        state.apply_transition(StateAction::Fail { message: e.clone() })?;
+        state.apply_transition(StateAction::Fail {
+            source: crate::state_machine::FailureSource::Model,
+            message: e.clone(),
+        })?;
         return Err(e);
     }
     state.apply_transition(StateAction::UnloadComplete)?;
@@ -206,7 +209,10 @@ pub fn download_model(
                     channel_clone.send(progress);
                 }
                 Err(e) => {
-                    apply(StateAction::Fail { message: e.clone() });
+                    apply(StateAction::Fail {
+                        source: crate::state_machine::FailureSource::Model,
+                        message: e.clone(),
+                    });
                     let progress = models::DownloadProgress {
                         file: "error".into(),
                         downloaded_bytes: 0,
@@ -278,7 +284,10 @@ pub fn load_model(
 
     info!(location = ?model_dir, "Loading model");
     if let Err(e) = state.engine_actor.load_model(profile, model_dir) {
-        state.apply_transition(StateAction::Fail { message: e.clone() })?;
+        state.apply_transition(StateAction::Fail {
+            source: crate::state_machine::FailureSource::Model,
+            message: e.clone(),
+        })?;
         return Err(e);
     }
 
@@ -466,6 +475,7 @@ mod tests {
     #[test]
     fn delete_is_blocked_while_retry_from_ready() {
         let failed = AppStateMachine::Error {
+            source: crate::state_machine::FailureSource::Model,
             message: "Recording session active".into(),
             recovery: ErrorRecovery::RetryFromReady { profile: profile() },
         };
@@ -473,6 +483,7 @@ mod tests {
         assert!(!failed.is_model_ready());
         assert!(!model_delete_blocked_by_transition(
             &AppStateMachine::Error {
+                source: crate::state_machine::FailureSource::Model,
                 message: "download failed".into(),
                 recovery: ErrorRecovery::RetryFromIdle,
             }

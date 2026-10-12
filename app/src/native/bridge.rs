@@ -47,6 +47,9 @@ pub enum NativeAction {
     ShowMainWindow,
     /// Flush recoverable Settings drafts before terminating the process.
     Quit,
+    /// Engine cleanup failed or exceeded its wait budget. Restore the window
+    /// and display this diagnostic without exiting with live Metal resources.
+    QuitFailed(String),
     /// The capture thread recorded or cleared a stuck microphone (SOU-126
     /// AC5). The UI re-reads `commands::get_mic_stall_notice` once, instead
     /// of polling it (SOU-281).

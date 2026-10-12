@@ -22,6 +22,7 @@ mod model_ui;
 mod onboarding_flags;
 mod onboarding_ui;
 mod permissions_ui;
+mod quit_shutdown;
 mod settings_drafts;
 mod settings_instrumentation;
 mod settings_io;
@@ -469,7 +470,7 @@ fn meeting_meta(meeting: &MeetingTranscript) -> MeetingMeta {
 
 /// Mirrors `souffle_lib::export::ExportFormat` at the UI boundary
 /// (`types.slint`'s `MeetingExportFormat`) - exhaustive, no `_ =>` arm, per
-/// the contract in `docs/engineering/slint.md`. Only Slint -> Rust is ever
+/// the closed-set callback contract. Only Slint -> Rust is ever
 /// needed: the Export menu never displays a format read back from Rust.
 fn export_format_from_slint(format: MeetingExportFormat) -> souffle_lib::export::ExportFormat {
     match format {
@@ -1259,6 +1260,39 @@ fn refresh_summary_providers(
     .expect("slint event loop not running");
 }
 
+thread_local! {
+    // UI-owned shutdown failures outlive asynchronous model snapshots. Only
+    // another explicit Quit attempt clears this higher-priority diagnostic.
+    static QUIT_FAILURE: RefCell<Option<slint::SharedString>> = const { RefCell::new(None) };
+}
+
+fn project_model_error(window: &MainWindow, message: slint::SharedString) {
+    QUIT_FAILURE.with(|failure| {
+        window.set_settings_model_error_message(
+            failure.borrow().as_ref().unwrap_or(&message).clone(),
+        );
+    });
+}
+
+fn project_model_machine_error(
+    window: &MainWindow,
+    machine: Result<souffle_lib::state_machine::AppStateMachine, String>,
+) {
+    if let Ok(souffle_lib::state_machine::AppStateMachine::Error { message, .. }) = machine {
+        project_model_error(window, message.into());
+    }
+}
+
+fn retain_quit_failure(window: &MainWindow, message: String) {
+    QUIT_FAILURE.with(|failure| *failure.borrow_mut() = Some(message.into()));
+    project_model_error(window, "".into());
+}
+
+fn clear_quit_failure(window: &MainWindow) {
+    QUIT_FAILURE.with(|failure| *failure.borrow_mut() = None);
+    project_model_error(window, "".into());
+}
+
 /// Pushes the model picker's option list + current status - AC2's own
 /// state (download/load) is read via `get_model_status`, never
 /// reimplemented; this only formats what it returns.
@@ -1318,13 +1352,9 @@ fn load_transcription_model_state(
                 *model_options_state.borrow_mut() =
                     model_ui::list_available_model_options(&catalog);
                 model_ui::populate_runtime(&window, status.phase);
-                if let Ok(souffle_lib::state_machine::AppStateMachine::Error { message, .. }) =
-                    machine
-                {
-                    window.set_settings_model_error_message(message.into());
-                }
+                project_model_machine_error(&window, machine);
             }
-            Err(error) => window.set_settings_model_error_message(error.into()),
+            Err(error) => project_model_error(&window, error.into()),
         }
     })
     .expect("slint event loop not running");
@@ -1375,13 +1405,9 @@ fn refresh_model_runtime(weak: slint::Weak<MainWindow>, handle: AppHandle) {
                 window
                     .set_header_model_label(model_ui::selected_model_short_label(&catalog).into());
                 model_ui::populate_runtime(&window, status.phase);
-                if let Ok(souffle_lib::state_machine::AppStateMachine::Error { message, .. }) =
-                    machine
-                {
-                    window.set_settings_model_error_message(message.into());
-                }
+                project_model_machine_error(&window, machine);
             }
-            Err(error) => window.set_settings_model_error_message(error.into()),
+            Err(error) => project_model_error(&window, error.into()),
         }
     })
     .expect("slint event loop not running");
@@ -1864,6 +1890,21 @@ fn open_meeting_detail(
 async fn ensure_model_ready(handle: &AppHandle) -> Result<(), String> {
     let worker_handle = handle.clone();
     souffle_lib::async_runtime::spawn_blocking(move || {
+        if let failure @ souffle_lib::state_machine::AppStateMachine::Error {
+            source: souffle_lib::state_machine::FailureSource::AudioCapture,
+            ..
+        } = worker_handle.current_machine_state()?
+        {
+            // Probe the capture worker before recovering. A dead worker keeps
+            // its original diagnostic; a live one can start a new session.
+            worker_handle
+                .audio_cmd_sender
+                .send(souffle_lib::state::AudioCommand::Stop)
+                .map_err(|_| failure.inactive_recording_error())?;
+            souffle_lib::commands::recover_state(worker_handle.clone())?;
+        }
+        // Recompute after recovery: the selected profile may differ from the
+        // retained model, or recovery may require a download/load first.
         let catalog = souffle_lib::commands::get_transcription_catalog(worker_handle.clone())?;
         let selection = model_ui::selected_profile(&catalog);
         let status =
@@ -1883,6 +1924,12 @@ async fn ensure_model_ready(handle: &AppHandle) -> Result<(), String> {
             }
             TranscriptionRuntimePhase::Failed => {
                 Err("Le modèle est en erreur. Réessayez depuis Réglages.".into())
+            }
+            TranscriptionRuntimePhase::AudioFailed => {
+                // A concurrent new audio failure retains its own diagnostic.
+                Err(worker_handle
+                    .current_machine_state()?
+                    .inactive_recording_error())
             }
         }
     })
@@ -2364,11 +2411,11 @@ fn start_model_transition(
             Ok(Some(status)) => status,
             Ok(None) => return,
             Err(error) => {
-                window.set_settings_model_error_message(error.into());
+                project_model_error(&window, error.into());
                 return;
             }
         };
-        window.set_settings_model_error_message("".into());
+        project_model_error(&window, "".into());
         refresh_model_runtime(weak.clone(), handle.clone());
         match status.phase {
             TranscriptionRuntimePhase::Ready => {}
@@ -2401,7 +2448,7 @@ fn start_model_transition(
                     && let Err(error) = result
                     && let Some(window) = weak.upgrade()
                 {
-                    window.set_settings_model_error_message(error.into());
+                    project_model_error(&window, error.into());
                 }
             }
             // A startup load and a settings-open action can overlap. Observing an
@@ -2409,7 +2456,8 @@ fn start_model_transition(
             TranscriptionRuntimePhase::Downloading
             | TranscriptionRuntimePhase::Loading
             | TranscriptionRuntimePhase::Unloading
-            | TranscriptionRuntimePhase::Failed => {}
+            | TranscriptionRuntimePhase::Failed
+            | TranscriptionRuntimePhase::AudioFailed => {}
         }
     })
     .expect("slint event loop not running");
@@ -2457,7 +2505,7 @@ fn load_model_in_background(
         if let Some(window) = weak.upgrade() {
             refresh_model_runtime(weak.clone(), handle.clone());
             if let Err(e) = result {
-                window.set_settings_model_error_message(e.into());
+                project_model_error(&window, e.into());
             }
         }
     })
@@ -2514,7 +2562,7 @@ fn model_download_channel(
                 }
                 souffle_lib::models::DownloadStatus::Error(e) => {
                     refresh_model_runtime(weak.clone(), handle.clone());
-                    window.set_settings_model_error_message(e.as_str().into());
+                    project_model_error(&window, e.as_str().into());
                 }
             }
         });
@@ -3020,6 +3068,7 @@ fn show_onboarding_step(
                     Some(TranscriptionRuntimePhase::DownloadRequired)
                     | Some(TranscriptionRuntimePhase::LoadRequired)
                     | Some(TranscriptionRuntimePhase::Failed)
+                    | Some(TranscriptionRuntimePhase::AudioFailed)
                     | None => ModelPhase::Pick,
                 };
                 window.set_onboarding_model_phase(model_phase);
@@ -3610,6 +3659,13 @@ fn start_onboarding_model_transition(
                 window.set_onboarding_busy(false);
                 window.set_onboarding_continue_enabled(true);
                 window.set_onboarding_status_message("Le modèle est en erreur.".into());
+            }
+            TranscriptionRuntimePhase::AudioFailed => {
+                window.set_onboarding_busy(false);
+                window.set_onboarding_continue_enabled(true);
+                if let Ok(machine) = handle.current_machine_state() {
+                    window.set_onboarding_status_message(machine.inactive_recording_error().into());
+                }
             }
         }
     })
@@ -5003,6 +5059,7 @@ fn wire_callbacks(
     let io_quit = settings_io.clone();
     window.on_settings_quit_requested(move || {
         if let Some(w) = weak_quit.upgrade() {
+            clear_quit_failure(&w);
             capture_and_submit_window_geometry(&w, &io_quit);
         }
         settings_drafts_for_quit.request_quit();
@@ -6609,7 +6666,8 @@ fn wire_callbacks(
             return;
         };
         if window.get_recording_mode() != RecordingMode::Idle {
-            window.set_settings_model_error_message(
+            project_model_error(
+                &window,
                 "Impossible de changer de modèle pendant un enregistrement.".into(),
             );
             // Unlike the Svelte version's `finally { target.value =
@@ -6673,7 +6731,7 @@ fn wire_callbacks(
                         );
                     },
                 ) {
-                    window.set_settings_model_error_message(error.into());
+                    project_model_error(&window, error.into());
                 }
             },
         );
@@ -7283,6 +7341,15 @@ fn dispatch_native_action(
             let _ = show_main_window(window);
         }
         NativeAction::Quit => window.invoke_settings_quit_requested(),
+        NativeAction::QuitFailed(message) => {
+            retain_quit_failure(window, message);
+            if !window.get_settings_open() {
+                window.invoke_settings_requested();
+            }
+            window.set_settings_tab(SettingsTab::Transcription);
+            window.invoke_settings_tab_changed();
+            let _ = show_main_window(window);
+        }
         NativeAction::MicStallChanged => MIC_STALL_BANNER.with(|slot| {
             if let Some(banner) = slot.borrow().as_ref() {
                 banner.borrow_mut().project(
@@ -7421,6 +7488,12 @@ fn main() {
     let startup_gate = Arc::new(StartupPresentationGate::new());
     spawn_native_action_receiver(window.as_weak(), handle.clone(), Arc::clone(&startup_gate));
 
+    #[cfg(target_os = "macos")]
+    souffle_lib::native::termination::install(
+        objc2::MainThreadMarker::new().expect("UI must start on main"),
+    )
+    .expect("could not install safe native quit routing");
+
     window.set_settings_app_version(souffle_lib::commands::get_app_version().version.into());
 
     // Startup Settings are loaded through the same serialized worker as every
@@ -7553,7 +7626,7 @@ fn main() {
                     }
                     Err(error) => {
                         eprintln!("Startup runtime snapshot is unavailable: {error}");
-                        window.set_settings_model_error_message(error.into());
+                        project_model_error(&window, error.into());
                     }
                 }
                 finish_startup_presentation(&window, &startup_gate);
@@ -7807,6 +7880,10 @@ fn wire_mic_stall_banner(
 /// meeting's segments are saved as they come, so past this the next launch
 /// recovers it anyway; this only buys the complete, finalized save.
 const QUIT_FINALIZE_BUDGET: Duration = Duration::from_secs(20);
+const QUIT_ENGINE_SHUTDOWN_BUDGET: Duration = Duration::from_secs(20);
+static QUIT_FINALIZATION_STARTED: AtomicBool = AtomicBool::new(false);
+static QUIT_ENGINE_SHUTDOWN: Mutex<quit_shutdown::EngineShutdown> =
+    Mutex::new(quit_shutdown::EngineShutdown::new());
 
 /// Terminal action of the app's Quit (tray menu, Settings), SOU-260 AC4:
 /// stop and save whatever is recording, then exit. Runs on a worker while
@@ -7814,16 +7891,35 @@ const QUIT_FINALIZE_BUDGET: Duration = Duration::from_secs(20);
 /// synchronously (tray, pill), which would hang if the main thread waited
 /// here. The window is already hidden by the settings flush before this.
 fn quit_after_finalizing_recording(handle: &AppHandle) {
+    if QUIT_FINALIZATION_STARTED.swap(true, Ordering::AcqRel) {
+        return;
+    }
     let handle = handle.clone();
     let spawned = std::thread::Builder::new()
         .name("quit-finalize".into())
         .spawn(move || {
             souffle_lib::commands::finalize_recording_before_quit(&handle, QUIT_FINALIZE_BUDGET);
+            let actor = Arc::clone(&handle.engine_actor);
+            let cleanup = QUIT_ENGINE_SHUTDOWN
+                .lock()
+                .map_err(|error| format!("Engine shutdown coordinator lock failed: {error}"))
+                .and_then(|mut shutdown| {
+                    shutdown.wait(QUIT_ENGINE_SHUTDOWN_BUDGET, move || actor.shutdown())
+                });
+            if let Err(error) = cleanup {
+                eprintln!("Could not release the transcription engine before quit: {error}");
+                QUIT_FINALIZATION_STARTED.store(false, Ordering::Release);
+                souffle_lib::native::bridge::dispatch(NativeAction::QuitFailed(error));
+                return;
+            }
             std::process::exit(0);
         });
     if let Err(e) = spawned {
         eprintln!("Could not finalize the recording before quit: {e}");
-        std::process::exit(0);
+        QUIT_FINALIZATION_STARTED.store(false, Ordering::Release);
+        souffle_lib::native::bridge::dispatch(NativeAction::QuitFailed(format!(
+            "Could not finalize the recording before quit: {e}"
+        )));
     }
 }
 
@@ -7873,6 +7969,55 @@ mod tests {
     fn test_window() -> MainWindow {
         let _ = slint::platform::set_platform(Box::new(TestPlatform));
         MainWindow::new().unwrap()
+    }
+
+    #[test]
+    fn quit_failure_survives_late_model_error_projection_until_another_quit_attempt() {
+        use souffle_lib::state_machine::{AppStateMachine, ErrorRecovery, FailureSource};
+
+        let window = test_window();
+        super::clear_quit_failure(&window);
+        // A refresh worker has already read the former recording failure;
+        // its UI continuation will arrive after the Quit failure is shown.
+        let snapshot = std::thread::spawn(|| {
+            Ok(AppStateMachine::Error {
+                source: FailureSource::AudioCapture,
+                message: "Previous microphone failure".into(),
+                recovery: ErrorRecovery::RetryFromIdle,
+            })
+        })
+        .join()
+        .unwrap();
+        let shutdown_error = "Could not quit: the transcription engine is still shutting down";
+        super::retain_quit_failure(&window, shutdown_error.into());
+        super::project_model_machine_error(&window, snapshot);
+        assert_eq!(window.get_settings_model_error_message(), shutdown_error);
+
+        // Both failed worker results and successful model transitions use the
+        // same projection; neither an error nor a clear may erase QuitFailed.
+        super::project_model_error(&window, "Model refresh failed".into());
+        assert_eq!(window.get_settings_model_error_message(), shutdown_error);
+        super::project_model_error(&window, "".into());
+        model_ui::populate_runtime(&window, TranscriptionRuntimePhase::Ready);
+        super::project_model_machine_error(&window, Ok(AppStateMachine::Idle));
+        assert_eq!(window.get_settings_model_error_message(), shutdown_error);
+
+        // The explicit retry releases the priority; normal model errors are
+        // visible again and a later shutdown failure can replace them.
+        super::clear_quit_failure(&window);
+        assert!(window.get_settings_model_error_message().is_empty());
+        super::project_model_error(&window, "New model failure".into());
+        assert_eq!(
+            window.get_settings_model_error_message(),
+            "New model failure"
+        );
+        super::retain_quit_failure(&window, "Native cleanup failed".into());
+        super::project_model_error(&window, "".into());
+        assert_eq!(
+            window.get_settings_model_error_message(),
+            "Native cleanup failed"
+        );
+        super::clear_quit_failure(&window);
     }
 
     #[test]

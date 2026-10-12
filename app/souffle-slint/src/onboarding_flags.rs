@@ -110,7 +110,8 @@ pub fn decide_show_setup_wizard(phase: TranscriptionRuntimePhase, flags: SetupFl
         | TranscriptionRuntimePhase::LoadRequired
         | TranscriptionRuntimePhase::Loading
         | TranscriptionRuntimePhase::Ready
-        | TranscriptionRuntimePhase::Unloading => !flags.permissions_done,
+        | TranscriptionRuntimePhase::Unloading
+        | TranscriptionRuntimePhase::AudioFailed => !flags.permissions_done,
     }
 }
 

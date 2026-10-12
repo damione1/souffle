@@ -36,6 +36,39 @@ static SYSTEM_AUDIO_SIGNAL: AtomicU64 = AtomicU64::new(0);
 /// its totals would land on the new meeting and hide a silent leg.
 static SYSTEM_AUDIO_SESSION: AtomicU64 = AtomicU64::new(0);
 
+fn capture_panic_message(payload: &(dyn std::any::Any + Send)) -> String {
+    let detail = payload
+        .downcast_ref::<String>()
+        .map(String::as_str)
+        .or_else(|| payload.downcast_ref::<&str>().copied());
+    match detail {
+        Some(detail) => format!("Audio capture failed: {detail}"),
+        None => "Audio capture failed: capture worker panicked without a text diagnostic".into(),
+    }
+}
+
+#[cfg(test)]
+mod capture_failure_tests {
+    use super::capture_panic_message;
+
+    #[test]
+    fn panic_detail_survives_both_rust_text_payloads() {
+        let diagnostic = "invalid AVAudioInputNode audioUnit encoding";
+        assert_eq!(
+            capture_panic_message(&diagnostic),
+            format!("Audio capture failed: {diagnostic}")
+        );
+        assert_eq!(
+            capture_panic_message(&diagnostic.to_owned()),
+            format!("Audio capture failed: {diagnostic}")
+        );
+        assert_eq!(
+            capture_panic_message(&42_u32),
+            "Audio capture failed: capture worker panicked without a text diagnostic"
+        );
+    }
+}
+
 /// Snapshot of the system-audio leg for `commands::get_system_audio_status`.
 /// A read, never a rebuild: it does not touch the capture thread. The counts
 /// are refreshed on the way out, since the stored status only holds them as
@@ -1962,6 +1995,113 @@ struct StartParams {
     meeting_audio_diagnostic: bool,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum MeetingBackend {
+    Software,
+    #[cfg(all(target_os = "macos", feature = "experimental-native-aec"))]
+    Apple,
+}
+
+impl MeetingBackend {
+    fn selected() -> Self {
+        #[cfg(all(target_os = "macos", feature = "experimental-native-aec"))]
+        {
+            Self::Apple
+        }
+        #[cfg(not(all(target_os = "macos", feature = "experimental-native-aec")))]
+        {
+            Self::Software
+        }
+    }
+
+    fn uses_fdaf(self, can_leak: bool) -> bool {
+        match self {
+            Self::Software => can_leak,
+            #[cfg(all(target_os = "macos", feature = "experimental-native-aec"))]
+            Self::Apple => false,
+        }
+    }
+
+    fn requires_microphone(self) -> bool {
+        match self {
+            Self::Software => false,
+            #[cfg(all(target_os = "macos", feature = "experimental-native-aec"))]
+            Self::Apple => true,
+        }
+    }
+}
+
+#[cfg(all(target_os = "macos", feature = "experimental-native-aec"))]
+fn native_input_uid(
+    devices: &[AudioInputDevice],
+    explicit: Option<&str>,
+    resolved: Option<String>,
+) -> Result<String, String> {
+    match explicit {
+        Some(requested) => {
+            if let Some(device) = devices.iter().find(|device| device.uid == requested) {
+                return Ok(device.uid.clone());
+            }
+            let mut named = devices.iter().filter(|device| device.name == requested);
+            let device = named.next().ok_or_else(|| {
+                format!(
+                    "Apple microphone {requested:?} is unavailable; refusing another microphone"
+                )
+            })?;
+            if named.next().is_some() {
+                return Err(format!(
+                    "Apple microphone name {requested:?} is ambiguous; select its UID"
+                ));
+            }
+            Ok(device.uid.clone())
+        }
+        None => resolved
+            .ok_or_else(|| "Apple meeting capture: no input device resolved by Soufflé".into()),
+    }
+}
+
+enum CaptureStream {
+    Cpal(Stream),
+    #[cfg(all(target_os = "macos", feature = "experimental-native-aec"))]
+    Apple(Box<NativeMeeting>),
+}
+
+#[cfg(all(target_os = "macos", feature = "experimental-native-aec"))]
+struct NativeMeeting {
+    telemetry: Arc<super::native_voice::Telemetry>,
+    log: serde_json::Value,
+    callbacks: u64,
+    dropped: u64,
+}
+
+#[cfg(all(target_os = "macos", feature = "experimental-native-aec"))]
+impl NativeMeeting {
+    fn check(
+        &mut self,
+        owner: &mut super::native_voice::owner::Owner,
+        last_callback: &AtomicU64,
+    ) -> Result<(), String> {
+        let callbacks = self.telemetry.callbacks.load(Ordering::Relaxed);
+        if callbacks != self.callbacks {
+            self.callbacks = callbacks;
+            last_callback.store(unix_now_ms(), Ordering::Relaxed);
+        }
+        let dropped = self.telemetry.dropped.load(Ordering::Relaxed);
+        if dropped != self.dropped {
+            warn!(
+                "Apple microphone ring dropped {} samples (total {dropped})",
+                dropped - self.dropped
+            );
+            self.dropped = dropped;
+        }
+        if self.telemetry.errors.load(Ordering::Relaxed) != 0 {
+            return Err("Apple microphone callback reported an invalid buffer or timestamp".into());
+        }
+        self.log = owner.check(Duration::from_secs(1))?;
+        Ok(())
+    }
+}
+
 /// Per-session state for meeting mode (mic + system audio).
 struct MeetingState {
     session_id: u64,
@@ -1974,6 +2114,7 @@ struct MeetingState {
     tap: Option<super::system_tap::TapHandle>,
     /// Whether echo cancellation is currently engaged (speakers audible).
     aec_active: bool,
+    backend: MeetingBackend,
     /// Emit mic (Me) and system audio (Them) as two source-tagged streams
     /// instead of one mixed stream.
     diarize: bool,
@@ -1990,13 +2131,19 @@ impl MeetingState {
     /// route change — the mixer keeps the instance and bypasses output.
     #[cfg(target_os = "macos")]
     fn check_output_route(&mut self) {
-        use super::{aec, mixer, output_route};
+        use super::output_route;
 
         // HAL route only (speakers vs headphones / mute / volume). Tap
         // energy must not destroy the instance — a far-end pause would
         // wipe convergence and come back as raw echo (SOU-063). The mixer
         // keeps AEC fed and chooses cancelled vs raw mic per frame.
-        let can_leak = self.tap.is_some() && output_route::output_can_leak_into_mic();
+        self.apply_output_route(self.tap.is_some() && output_route::output_can_leak_into_mic());
+    }
+
+    #[cfg(target_os = "macos")]
+    fn apply_output_route(&mut self, can_leak: bool) {
+        use super::{aec, mixer};
+        let can_leak = self.backend.uses_fdaf(can_leak);
         if can_leak != self.aec_active {
             if can_leak {
                 info!("Speakers audible, echo cancellation engaged");
@@ -2012,6 +2159,112 @@ impl MeetingState {
 
     #[cfg(not(target_os = "macos"))]
     fn check_output_route(&mut self) {}
+}
+
+#[cfg(test)]
+mod meeting_backend_tests {
+    use super::*;
+
+    #[test]
+    fn build_opt_in_selects_only_the_meeting_backend() {
+        #[cfg(all(target_os = "macos", feature = "experimental-native-aec"))]
+        assert_eq!(MeetingBackend::selected(), MeetingBackend::Apple);
+        #[cfg(not(all(target_os = "macos", feature = "experimental-native-aec")))]
+        assert_eq!(MeetingBackend::selected(), MeetingBackend::Software);
+        assert!(MeetingBackend::Software.uses_fdaf(true));
+        assert!(!MeetingBackend::Software.uses_fdaf(false));
+        assert!(!MeetingBackend::Software.requires_microphone());
+        #[cfg(all(target_os = "macos", feature = "experimental-native-aec"))]
+        assert!(
+            MeetingBackend::Apple.requires_microphone(),
+            "an Apple startup/rebuild failure must end with a visible session error, even with a working tap"
+        );
+    }
+
+    #[cfg(all(target_os = "macos", feature = "experimental-native-aec"))]
+    #[test]
+    fn disappearing_explicit_webcam_cannot_be_replaced_by_auto_resolution() {
+        let internal = AudioInputDevice {
+            uid: "internal".into(),
+            name: "Internal microphone".into(),
+            transport: super::super::device::TransportType::BuiltIn,
+            is_default: true,
+        };
+        let webcam = AudioInputDevice {
+            uid: "webcam".into(),
+            name: "USB microphone".into(),
+            transport: super::super::device::TransportType::Usb,
+            is_default: false,
+        };
+        assert_eq!(
+            native_input_uid(
+                &[internal.clone(), webcam.clone()],
+                Some("webcam"),
+                Some("internal".into())
+            )
+            .unwrap(),
+            "webcam"
+        );
+        // The normal resolver deliberately falls back when a pin or clamshell
+        // preference disappears. Apple QA must reject that different input.
+        assert!(
+            native_input_uid(
+                std::slice::from_ref(&internal),
+                Some("webcam"),
+                Some("internal".into())
+            )
+            .is_err()
+        );
+        assert_eq!(
+            native_input_uid(
+                std::slice::from_ref(&internal),
+                None,
+                Some("internal".into())
+            )
+            .unwrap(),
+            "internal"
+        );
+        assert_eq!(
+            native_input_uid(&[webcam], Some("USB microphone"), None).unwrap(),
+            "webcam"
+        );
+    }
+
+    #[cfg(all(target_os = "macos", feature = "experimental-native-aec"))]
+    #[test]
+    fn apple_route_flips_and_mic_replacement_keep_fdaf_off_and_lanes_separate() {
+        let (mut mic, mic_cons) = HeapRb::<f32>::new(960).split();
+        let (mut tap, tap_cons) = HeapRb::<f32>::new(960).split();
+        let mixer = MeetingMixer::new(mic_cons, 48_000, 1, 1.0, tap_cons, 48_000, 48_000);
+        let mut meeting = MeetingState {
+            session_id: 1,
+            mixer,
+            tap: None,
+            aec_active: false,
+            backend: MeetingBackend::Apple,
+            diarize: true,
+            ticks: 0,
+            last_tap_attempt: Instant::now(),
+        };
+        for can_leak in [true, false, true] {
+            meeting.apply_output_route(can_leak);
+            assert!(!meeting.aec_active);
+            assert_eq!(mic.push_slice(&[0.25; 480]), 480);
+            assert_eq!(tap.push_slice(&[-0.5; 480]), 480);
+            let (me, them) = meeting.mixer.tick_split();
+            assert_eq!(me, vec![0.25; 480]);
+            assert_eq!(them, vec![-0.5; 480]);
+        }
+        let (mut replacement, consumer) = HeapRb::<f32>::new(960).split();
+        meeting.mixer.replace_mic(consumer, 48_000, 1, 1.0);
+        meeting.apply_output_route(true);
+        replacement.push_slice(&[0.125; 480]);
+        tap.push_slice(&[-0.25; 480]);
+        let (me, them) = meeting.mixer.tick_split();
+        assert!(!meeting.aec_active);
+        assert_eq!(me, vec![0.125; 480]);
+        assert_eq!(them, vec![-0.25; 480]);
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -2046,6 +2299,11 @@ pub enum AudioMessage {
     EndOfStream {
         session_id: u64,
     },
+    /// Capture for this session failed; the worker remains available for retry.
+    SessionFailed {
+        session_id: u64,
+        reason: String,
+    },
 }
 
 /// List all available input devices. Logged at info level (device count) so
@@ -2053,7 +2311,9 @@ impl AudioMessage {
     pub(crate) fn session_id(&self) -> u64 {
         match self {
             Self::Chunk(chunk) => chunk.session_id,
-            Self::DiarizedPair { session_id, .. } | Self::EndOfStream { session_id } => *session_id,
+            Self::DiarizedPair { session_id, .. }
+            | Self::EndOfStream { session_id }
+            | Self::SessionFailed { session_id, .. } => *session_id,
         }
     }
 }
@@ -2184,7 +2444,11 @@ fn mic_device_is_alive(id: u32) -> bool {
 /// off the UI / async runtime. (cpal 0.17's macOS Stream is Send; isolation
 /// is still the right ownership model.)
 pub struct AudioCapture {
-    stream: Option<Stream>,
+    stream: Option<CaptureStream>,
+    /// Retained across sessions so a stuck native start/check/Drop prevents
+    /// another owner from being stacked. Contains no thread-confined object.
+    #[cfg(all(target_os = "macos", feature = "experimental-native-aec"))]
+    native_owner: super::native_voice::owner::Owner,
     audio_sender: Sender<AudioMessage>,
     audio_budget: Arc<AudioQueueBudget>,
     /// Pinned input device UID (or legacy name during migration).
@@ -2315,6 +2579,8 @@ impl AudioCapture {
                 crate::thread_qos::set_current_thread_qos(crate::thread_qos::ThreadQos::UserInteractive);
                 let mut capture = AudioCapture {
                     stream: None,
+                    #[cfg(all(target_os = "macos", feature = "experimental-native-aec"))]
+                    native_owner: super::native_voice::owner::Owner::default(),
                     audio_sender: audio_tx,
                     audio_budget,
                     selected_device: None,
@@ -2353,6 +2619,7 @@ impl AudioCapture {
 
                 // Block on commands while idle; during sessions, wake
                 // periodically to run the meeting mixer and mic health checks.
+                let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 loop {
                     let timeout = if capture.meeting.is_some() {
                         Some(MEETING_TICK)
@@ -2374,10 +2641,13 @@ impl AudioCapture {
                                     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                                         capture.meeting_tick()
                                     }));
-                                if ticked.is_err() {
+                                if let Err(payload) = ticked {
                                     tracing::error!(
                                         "Audio mixer panicked; ending session to keep the app alive"
                                     );
+                                    if let Ok(mut reason) = capture.audio_gone_reason.lock() {
+                                        *reason = Some(capture_panic_message(payload.as_ref()));
+                                    }
                                     capture.abort_after_panic();
                                     break;
                                 }
@@ -2431,6 +2701,10 @@ impl AudioCapture {
                             ) {
                                 warn!("Failed to start audio capture: {e}");
                                 capture.report_start_failure(capture_system_audio, &e);
+                                if capture_system_audio && MeetingBackend::selected().requires_microphone() {
+                                    capture.fail_session(session_id, e);
+                                    continue;
+                                }
                                 // Dictation has no second source. With the
                                 // device not answering there is nothing to
                                 // wait for, and the rebuild ladder would
@@ -2495,6 +2769,15 @@ impl AudioCapture {
                     }
                 }
 
+                }));
+                if let Err(payload) = outcome {
+                    // Preserve the originating failure before dropping the last
+                    // sender; the actor then publishes it as an audio failure.
+                    if let Ok(mut reason) = capture.audio_gone_reason.lock() {
+                        *reason = Some(capture_panic_message(payload.as_ref()));
+                    }
+                    capture.abort_after_panic();
+                }
                 info!("Audio thread exiting");
             })
             .map_err(|e| format!("Failed to spawn audio thread: {e}"))?;
@@ -2784,6 +3067,33 @@ impl AudioCapture {
             .store(unix_now_ms(), Ordering::Relaxed);
 
         let known_devices = list_input_devices_impl();
+        if capture_system_audio {
+            match MeetingBackend::selected() {
+                MeetingBackend::Software => {}
+                #[cfg(all(target_os = "macos", feature = "experimental-native-aec"))]
+                MeetingBackend::Apple => {
+                    let explicit = self.selected_device.as_deref().or_else(|| {
+                        self.clamshell_device
+                            .as_deref()
+                            .filter(|_| crate::power::is_clamshell())
+                    });
+                    let uid = native_input_uid(
+                        &known_devices,
+                        explicit,
+                        self.resolved_input_uid(&known_devices),
+                    )?;
+                    return self.start_native_meeting(
+                        &uid,
+                        session_id,
+                        target_sample_rate,
+                        mic_gain,
+                        diarize,
+                        tap,
+                        tap_cons,
+                    );
+                }
+            }
+        }
         let device = self.find_device(&known_devices)?;
 
         // Track the UID cpal actually opened, not just what resolve_input
@@ -2955,7 +3265,7 @@ impl AudioCapture {
                 return Err(e.to_string());
             }
         };
-        self.stream = Some(stream);
+        self.stream = Some(CaptureStream::Cpal(stream));
 
         info!("Audio capture started on '{device_name}'");
         Ok(())
@@ -3056,6 +3366,57 @@ impl AudioCapture {
         recorder.push(&interleave_stereo(me, them));
     }
 
+    #[cfg(all(target_os = "macos", feature = "experimental-native-aec"))]
+    #[allow(clippy::too_many_arguments)]
+    fn start_native_meeting(
+        &mut self,
+        uid: &str,
+        session_id: u64,
+        target_sample_rate: u32,
+        mic_gain: f32,
+        diarize: bool,
+        tap: Option<super::system_tap::TapHandle>,
+        tap_cons: Option<ringbuf::HeapCons<f32>>,
+    ) -> Result<(), String> {
+        use super::native_voice::{Sink, Telemetry};
+        let (producer, consumer) = HeapRb::<f32>::new(192_000 * 2).split();
+        let telemetry = Arc::new(Telemetry::default());
+        let started = self.native_owner.start(
+            uid.to_owned(),
+            Sink::Mono(producer),
+            Arc::clone(&telemetry),
+            MIC_OPEN_TIMEOUT,
+        )?;
+        self.mic_device_uid = Some(started.selection.input.uid.clone());
+        self.mic_device_name = Some(started.selection.input.name.clone());
+        self.mic_device_object_id = Some(started.selection.input.id);
+        let rate = started.rate;
+        self.active_session_id.store(session_id, Ordering::Release);
+        telemetry.accepting.store(true, Ordering::Release);
+        self.stream = Some(CaptureStream::Apple(Box::new(NativeMeeting {
+            telemetry,
+            log: started.log,
+            callbacks: 0,
+            dropped: 0,
+        })));
+        self.install_meeting_mic(
+            consumer,
+            rate,
+            1,
+            session_id,
+            target_sample_rate,
+            mic_gain,
+            diarize,
+            MeetingBackend::Apple,
+            tap,
+            tap_cons,
+        );
+        info!(
+            "Meeting backend=Apple VoiceProcessingIO, FDAF=disabled, microphone_rate={rate}, channels=1"
+        );
+        Ok(())
+    }
+
     /// Meeting mode: the cpal callback only pushes raw samples into a ring
     /// buffer; a system-audio tap fills a second ring; `meeting_tick()` on
     /// this thread resamples, mixes, and forwards to the engine.
@@ -3136,7 +3497,7 @@ impl AudioCapture {
             .unwrap_or_else(|| "unknown".into());
         let (mic_cons, mic_unavailable) = match self.open_mic_stream(&device_name, build) {
             Ok(stream) => {
-                self.stream = Some(stream);
+                self.stream = Some(CaptureStream::Cpal(stream));
                 (mic_cons, None)
             }
             // cpal refused outright: nothing was left running, and the
@@ -3178,17 +3539,50 @@ impl AudioCapture {
             }
         };
 
+        self.install_meeting_mic(
+            mic_cons,
+            sample_rate,
+            channels,
+            session_id,
+            target_sample_rate,
+            mic_gain,
+            diarize,
+            MeetingBackend::Software,
+            #[cfg(target_os = "macos")]
+            pre_spawned_tap,
+            #[cfg(target_os = "macos")]
+            pre_spawned_tap_cons,
+        );
+        match mic_unavailable {
+            Some(error) => Err(error),
+            None => Ok(()),
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn install_meeting_mic(
+        &mut self,
+        mic_cons: ringbuf::HeapCons<f32>,
+        sample_rate: u32,
+        channels: u16,
+        session_id: u64,
+        target_sample_rate: u32,
+        mic_gain: f32,
+        diarize: bool,
+        backend: MeetingBackend,
+        #[cfg(target_os = "macos")] pre_spawned_tap: Option<super::system_tap::TapHandle>,
+        #[cfg(target_os = "macos")] pre_spawned_tap_cons: Option<ringbuf::HeapCons<f32>>,
+    ) {
         if let Some(meeting) = self.meeting.as_mut() {
             meeting
                 .mixer
                 .replace_mic(mic_cons, sample_rate, channels, mic_gain);
             meeting.session_id = session_id;
             meeting.diarize = diarize;
-            if let Some(error) = mic_unavailable {
-                return Err(error);
-            }
+            meeting.backend = backend;
+            meeting.check_output_route();
             info!("Meeting microphone rebuilt; system-audio tap kept");
-            return Ok(());
+            return;
         }
 
         #[cfg(target_os = "macos")]
@@ -3237,7 +3631,8 @@ impl AudioCapture {
         // system-audio reference signal to cancel against.
         #[cfg(target_os = "macos")]
         let aec_active = {
-            let can_leak = tap.is_some() && super::output_route::output_can_leak_into_mic();
+            let can_leak =
+                backend.uses_fdaf(tap.is_some() && super::output_route::output_can_leak_into_mic());
             if can_leak {
                 info!("Speakers audible, echo cancellation engaged");
                 mixer.set_aec(Some(super::aec::Aec::new_with_default_delay_hint(
@@ -3255,17 +3650,13 @@ impl AudioCapture {
             #[cfg(target_os = "macos")]
             tap,
             aec_active,
+            backend,
             diarize,
             ticks: 0,
             last_tap_attempt: Instant::now(),
         });
 
-        if let Some(error) = mic_unavailable {
-            return Err(error);
-        }
-
-        info!("Meeting audio capture started (mic + system audio)");
-        Ok(())
+        info!("Meeting audio capture started (mic + system audio), backend={backend:?}");
     }
 
     /// Rebuild the capture leg when the stream died, the HAL object behind
@@ -3284,6 +3675,17 @@ impl AudioCapture {
         let Some(params) = self.active_params.clone() else {
             return false;
         };
+
+        #[cfg(all(target_os = "macos", feature = "experimental-native-aec"))]
+        if let Some(CaptureStream::Apple(native)) = self.stream.as_mut()
+            && let Err(error) = native.check(&mut self.native_owner, &self.last_mic_callback_ms)
+        {
+            warn!(
+                "Apple microphone needs reconstruction: {error}; readbacks={}",
+                native.log
+            );
+            self.stream_failed.store(true, Ordering::Relaxed);
+        }
 
         // A device that answered late gets its leg back here, before the
         // rebuild decision: the session has a microphone again and there is
@@ -3392,6 +3794,10 @@ impl AudioCapture {
                 // mid-meeting mic reopen that took the tap with it left the
                 // snapshot saying the leg was still up.
                 self.report_start_failure(params.capture_system_audio, &e);
+                if params.capture_system_audio && MeetingBackend::selected().requires_microphone() {
+                    self.fail_session(params.session_id, format!("Apple microphone could not be rebuilt: {e}. The recording so far was saved."));
+                    return false;
+                }
                 let (n, counted_at) = count_rebuild_failure(
                     self.mic_rebuild_failures,
                     self.last_counted_failure,
@@ -3878,7 +4284,7 @@ impl AudioCapture {
             adoption.channels,
             adoption.mic_gain,
         );
-        self.stream = Some(stream);
+        self.stream = Some(CaptureStream::Cpal(stream));
         // The callback has been discarding everything until now; start the
         // staleness clock from the moment it is allowed to deliver.
         self.last_mic_callback_ms
@@ -3902,8 +4308,21 @@ impl AudioCapture {
         self.start_stall.is_some()
     }
 
-    /// End a session that never started, carrying the real reason. Unlike
-    /// `abort_after_mic_loss` this one has nothing saved to speak of.
+    /// End only this session, keeping the capture worker available for retry.
+    /// IO is stopped before the reliable send: this may wait for ASR setup to
+    /// drain the bounded queue, but never runs in a realtime callback.
+    fn fail_session(&mut self, session_id: u64, reason: String) {
+        self.teardown_session_state();
+        if self
+            .audio_sender
+            .send(AudioMessage::SessionFailed { session_id, reason })
+            .is_err()
+        {
+            debug!("Session failure recipient already closed");
+        }
+    }
+
+    /// End a dictation start that never captured audio, carrying its reason.
     fn abort_after_failed_start(&mut self, reason: String) {
         if let Ok(mut slot) = self.audio_gone_reason.lock() {
             *slot = Some(reason);
@@ -3976,8 +4395,23 @@ impl AudioCapture {
         let Some(stream) = self.stream.take() else {
             return false;
         };
-        if let Err(e) = stream.pause() {
-            debug!("Audio stream pause on release: {e}");
+        match &stream {
+            CaptureStream::Cpal(stream) => {
+                if let Err(e) = stream.pause() {
+                    debug!("Audio stream pause on release: {e}");
+                }
+            }
+            #[cfg(all(target_os = "macos", feature = "experimental-native-aec"))]
+            CaptureStream::Apple(native) => {
+                self.native_owner.stop();
+                native.telemetry.accepting.store(false, Ordering::Release);
+                info!(
+                    "Stopping Apple microphone: callbacks={}, dropped={}, errors={}",
+                    native.telemetry.callbacks.load(Ordering::Relaxed),
+                    native.telemetry.dropped.load(Ordering::Relaxed),
+                    native.telemetry.errors.load(Ordering::Relaxed)
+                );
+            }
         }
         drop(stream);
         true
@@ -4344,7 +4778,9 @@ mod backlog_cap_tests {
         drop(rx.recv().unwrap()); // Release the reservation after waiter entry.
         match rx.recv_timeout(Duration::from_secs(1)).unwrap() {
             super::AudioMessage::Chunk(tail) => assert_eq!(tail.samples, chunk(2.0).samples),
-            super::AudioMessage::DiarizedPair { .. } | super::AudioMessage::EndOfStream { .. } => {
+            super::AudioMessage::DiarizedPair { .. }
+            | super::AudioMessage::EndOfStream { .. }
+            | super::AudioMessage::SessionFailed { .. } => {
                 panic!("tail must precede EOS")
             }
         }
@@ -4376,7 +4812,7 @@ mod backlog_cap_tests {
             .map(|m| match m {
                 AudioMessage::Chunk(c) => c.samples[0],
                 AudioMessage::DiarizedPair { me, .. } => me[0],
-                AudioMessage::EndOfStream { .. } => f32::NAN,
+                AudioMessage::EndOfStream { .. } | AudioMessage::SessionFailed { .. } => f32::NAN,
             })
             .collect();
         assert_eq!(kept, vec![0.0, 1.0, 2.0]);
@@ -4422,7 +4858,7 @@ mod backlog_cap_tests {
             .try_iter()
             .map(|m| match m {
                 AudioMessage::Chunk(c) => c.samples[0],
-                AudioMessage::EndOfStream { .. } => f32::NAN,
+                AudioMessage::EndOfStream { .. } | AudioMessage::SessionFailed { .. } => f32::NAN,
                 AudioMessage::DiarizedPair { me, .. } => me[0],
             })
             .collect();

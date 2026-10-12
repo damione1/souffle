@@ -303,7 +303,11 @@ impl AppState {
     /// leaves the recording state. Called by the engine actor after it emits
     /// the PipelineError event (the pipeline layer owns that event; this is
     /// the app-level cleanup that follows it).
-    pub fn abort_active_session(&self, message: String) {
+    pub fn abort_active_session(
+        &self,
+        source: crate::state_machine::FailureSource,
+        message: String,
+    ) {
         // Read the verdict before discarding it. After AudioGone the capture
         // thread is already gone, so Stop is a no-op and would otherwise
         // leave this snapshot for the next meeting (SOU-119).
@@ -334,7 +338,7 @@ impl AppState {
             }
         }
 
-        if let Err(e) = self.apply_transition(StateAction::Fail { message }) {
+        if let Err(e) = self.apply_transition(StateAction::Fail { source, message }) {
             warn!("Failed to apply Fail transition after session abort: {e}");
         }
     }

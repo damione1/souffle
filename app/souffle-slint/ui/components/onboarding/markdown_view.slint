@@ -52,7 +52,7 @@ export component MarkdownView inherits VerticalLayout {
 // The scrollable notes box both update dialogs share - Tauri's
 // `.release-notes` (`rounded-default p-4 outline-1 outline-ghost-border`).
 // A stock `ScrollView` is acceptable here: the scrollbar is not the visual
-// identity, the bordered box around it is (docs/engineering/slint.md §2).
+// identity, the bordered box around it is.
 export component ReleaseNotesBox inherits Rectangle {
     in property <[MarkdownBlock]> blocks;
 

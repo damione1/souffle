@@ -7,6 +7,8 @@ pub(crate) mod diagnostic;
 pub mod feedback;
 pub mod mic_capture_probe;
 pub mod mixer;
+#[cfg(all(target_os = "macos", feature = "native-voice"))]
+pub mod native_voice;
 pub mod output_route;
 pub mod priority;
 pub mod recorder;
