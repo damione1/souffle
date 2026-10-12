@@ -72,8 +72,11 @@ flowchart LR
 The native engine is stopped while enabling processing. It explicitly disables
 AGC and bypass, checks input **and** output voice-processing readbacks, installs
 an input tap, and connects a mono source to the real output using the negotiated
-microphone format. It verifies exact input/output format equality before start;
-non-mono native input is rejected by this probe. Native output runs
+microphone rate. It negotiates a mono planar float32 client format while stopped
+and verifies both input/output client formats before start, after start and while
+running. The initial VoiceProcessingIO format can have multiple channels; it is
+never downmixed. Failed mono negotiation or incompatible callback buffers are
+rejected explicitly. Native output runs
 silence in the external-browser trials. For `--positive-control`, only the fixed
 fixture is played once through that source, after the countdown, then silence.
 The captured global tap is **never routed back to the speakers**. Input samples
