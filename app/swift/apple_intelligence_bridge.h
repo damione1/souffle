@@ -24,6 +24,7 @@ char* apple_intelligence_unavailable_reason(void);
 AppleLLMResponse* process_text_with_system_prompt_apple(
     const char* system_prompt,
     const char* user_content,
+    float temperature,
     int max_tokens
 );
 

@@ -74,10 +74,9 @@ pub struct AppleLLMResponse {
 const HELPER_ARG: &str = "--internal-apple-intelligence-helper";
 const MAX_HELPER_FIELD_BYTES: usize = 64 * 1024 * 1024;
 const MAX_HELPER_STDERR_BYTES: usize = 1024 * 1024;
-const HELPER_DEADLINE: Duration = Duration::from_secs(20);
 const HELPER_POLL_INTERVAL: Duration = Duration::from_millis(10);
 pub(crate) const HELPER_TIMEOUT_PREFIX: &str = "apple_intelligence_helper_timeout:";
-const HELPER_PROCESS_FAILURE_PREFIX: &str = "apple_intelligence_helper_process_failure:";
+pub(crate) const HELPER_PROCESS_FAILURE_PREFIX: &str = "apple_intelligence_helper_process_failure:";
 static APPLE_AI_BRIDGE_HEALTHY: AtomicBool = AtomicBool::new(true);
 
 #[derive(Debug)]
@@ -127,6 +126,7 @@ unsafe extern "C" {
     fn process_text_with_system_prompt_apple(
         system_prompt: *const c_char,
         user_content: *const c_char,
+        temperature: f32,
         max_tokens: i32,
     ) -> *mut AppleLLMResponse;
     fn free_apple_llm_response(response: *mut AppleLLMResponse);
@@ -187,11 +187,40 @@ pub fn unavailable_reason() -> Option<AppleIntelligenceUnavailableReason> {
     }
 }
 
+/// Only fatal helper crashes (abnormal signal termination such as `SIGABRT` /
+/// `SIGSEGV` / `SIGBUS` in the Swift bridge, or inability to spawn the helper
+/// binary) trip the process-wide circuit breaker. Request timeouts never
+/// disable the bridge for later calls.
+fn should_trip_bridge_circuit_breaker(status: Option<ExitStatus>, error: Option<&str>) -> bool {
+    if let Some(error) = error {
+        if error.starts_with(HELPER_TIMEOUT_PREFIX) {
+            return false;
+        }
+        return error.starts_with("Start Apple Intelligence helper:")
+            || error.starts_with("Resolve Apple Intelligence helper executable:");
+    }
+    if let Some(status) = status {
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::ExitStatusExt;
+            return status.signal().is_some();
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = status;
+            return false;
+        }
+    }
+    false
+}
+
 /// Run one on-device Foundation Models generation with separate system and user prompts.
 pub fn process_text_with_system_prompt(
     system_prompt: &str,
     user_content: &str,
+    temperature: f32,
     max_tokens: i32,
+    timeout: Duration,
 ) -> Result<String, String> {
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
     {
@@ -200,20 +229,29 @@ pub fn process_text_with_system_prompt(
                 "Apple Intelligence bridge disabled after a previous process failure".into(),
             );
         }
-        let executable = std::env::current_exe()
-            .map_err(|e| format!("Resolve Apple Intelligence helper executable: {e}"))?;
-        let request = encode_helper_request(system_prompt, user_content, max_tokens)?;
+        let executable = std::env::current_exe().map_err(|e| {
+            let err = format!("Resolve Apple Intelligence helper executable: {e}");
+            if should_trip_bridge_circuit_breaker(None, Some(&err)) {
+                APPLE_AI_BRIDGE_HEALTHY.store(false, Ordering::Release);
+            }
+            err
+        })?;
+        let request = encode_helper_request(system_prompt, user_content, temperature, max_tokens)?;
         let mut command = Command::new(executable);
         command.arg(HELPER_ARG);
-        let output = match run_helper_process(command, &request, HELPER_DEADLINE) {
+        let output = match run_helper_process(command, &request, timeout) {
             Ok(output) => output,
             Err(error) => {
-                APPLE_AI_BRIDGE_HEALTHY.store(false, Ordering::Release);
+                if should_trip_bridge_circuit_breaker(None, Some(&error)) {
+                    APPLE_AI_BRIDGE_HEALTHY.store(false, Ordering::Release);
+                }
                 return Err(error);
             }
         };
         if !output.status.success() {
-            APPLE_AI_BRIDGE_HEALTHY.store(false, Ordering::Release);
+            if should_trip_bridge_circuit_breaker(Some(output.status), None) {
+                APPLE_AI_BRIDGE_HEALTHY.store(false, Ordering::Release);
+            }
             let detail = String::from_utf8_lossy(&output.stderr);
             return Err(format!(
                 "{HELPER_PROCESS_FAILURE_PREFIX} helper exited unexpectedly{}",
@@ -229,29 +267,57 @@ pub fn process_text_with_system_prompt(
 
     #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
     {
-        let _ = (system_prompt, user_content, max_tokens);
+        let _ = (
+            system_prompt,
+            user_content,
+            temperature,
+            max_tokens,
+            timeout,
+        );
         Err("Apple Intelligence is only supported on Apple Silicon macOS".into())
     }
 }
 
 /// Whether a bridge error must stop `generate_guarded` without its usual
-/// retry. A deadline already killed and reaped the helper; launching the same
-/// fragile bridge a second time only repeats the failure and violates the
-/// request's wall-clock budget.
+/// retry. A crashed helper process (`HELPER_PROCESS_FAILURE_PREFIX`) is not
+/// retried, whereas a timeout (`HELPER_TIMEOUT_PREFIX`) is allowed one retry.
 pub(crate) fn is_terminal_helper_error(error: &str) -> bool {
-    error.starts_with(HELPER_TIMEOUT_PREFIX) || error.starts_with(HELPER_PROCESS_FAILURE_PREFIX)
+    error.starts_with(HELPER_PROCESS_FAILURE_PREFIX)
 }
 
 fn encode_helper_request(
     system_prompt: &str,
     user_content: &str,
+    temperature: f32,
     max_tokens: i32,
 ) -> Result<Vec<u8>, String> {
     let mut request = Vec::new();
     write_field(&mut request, system_prompt.as_bytes())?;
     write_field(&mut request, user_content.as_bytes())?;
+    request.extend_from_slice(&temperature.to_le_bytes());
     request.extend_from_slice(&max_tokens.to_le_bytes());
     Ok(request)
+}
+
+fn decode_helper_request(mut reader: impl Read) -> Result<(String, String, f32, i32), String> {
+    let system = String::from_utf8(read_field(&mut reader)?)
+        .map_err(|e| format!("Invalid helper system prompt: {e}"))?;
+    let user = String::from_utf8(read_field(&mut reader)?)
+        .map_err(|e| format!("Invalid helper user content: {e}"))?;
+    let mut temperature = [0u8; 4];
+    reader
+        .read_exact(&mut temperature)
+        .map_err(|e| format!("Read helper temperature: {e}"))?;
+    let mut max_tokens = [0u8; 4];
+    reader
+        .read_exact(&mut max_tokens)
+        .map_err(|e| format!("Read helper token limit: {e}"))?;
+    Ok((
+        system,
+        user,
+        f32::from_le_bytes(temperature),
+        i32::from_le_bytes(max_tokens),
+    ))
 }
 
 fn read_bounded(
@@ -468,13 +534,19 @@ fn run_helper_process(
 fn process_text_in_helper(
     system_prompt: &str,
     user_content: &str,
+    temperature: f32,
     max_tokens: i32,
 ) -> Result<String, String> {
     let system_cstr = CString::new(system_prompt).map_err(|e| e.to_string())?;
     let user_cstr = CString::new(user_content).map_err(|e| e.to_string())?;
 
     let response_ptr = unsafe {
-        process_text_with_system_prompt_apple(system_cstr.as_ptr(), user_cstr.as_ptr(), max_tokens)
+        process_text_with_system_prompt_apple(
+            system_cstr.as_ptr(),
+            user_cstr.as_ptr(),
+            temperature,
+            max_tokens,
+        )
     };
 
     if response_ptr.is_null() {
@@ -563,22 +635,15 @@ pub(crate) fn try_run_helper(args: &[String]) -> Option<i32> {
         return None;
     }
     let result = (|| -> Result<String, String> {
-        let mut stdin = std::io::stdin().lock();
-        let system = String::from_utf8(read_field(&mut stdin)?)
-            .map_err(|e| format!("Invalid helper system prompt: {e}"))?;
-        let user = String::from_utf8(read_field(&mut stdin)?)
-            .map_err(|e| format!("Invalid helper user content: {e}"))?;
-        let mut max_tokens = [0u8; 4];
-        stdin
-            .read_exact(&mut max_tokens)
-            .map_err(|e| format!("Read helper token limit: {e}"))?;
+        let stdin = std::io::stdin().lock();
+        let (system, user, temperature, max_tokens) = decode_helper_request(stdin)?;
         #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
         {
-            process_text_in_helper(&system, &user, i32::from_le_bytes(max_tokens))
+            process_text_in_helper(&system, &user, temperature, max_tokens)
         }
         #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
         {
-            let _ = (system, user, max_tokens);
+            let _ = (system, user, temperature, max_tokens);
             Err("Apple Intelligence helper is unavailable on this platform".into())
         }
     })();
@@ -602,8 +667,9 @@ pub(crate) fn try_run_helper(args: &[String]) -> Option<i32> {
 mod tests {
     use super::{
         AppleIntelligenceUnavailableReason, check_apple_intelligence_availability,
-        decode_helper_response, encode_helper_response, is_stub_linked, read_bounded,
-        run_helper_process, unavailable_reason,
+        decode_helper_request, decode_helper_response, encode_helper_request,
+        encode_helper_response, is_stub_linked, read_bounded, run_helper_process,
+        should_trip_bridge_circuit_breaker, unavailable_reason,
     };
     use std::io::Cursor;
     use std::process::Command;
@@ -654,7 +720,15 @@ mod tests {
     }
 
     #[test]
-    fn helper_protocol_round_trips_success_and_error() {
+    fn helper_protocol_round_trips_request_and_response() {
+        let req = encode_helper_request("sys", "user", 0.25, 700).unwrap();
+        let (system, user, temperature, max_tokens) =
+            decode_helper_request(Cursor::new(req)).unwrap();
+        assert_eq!(system, "sys");
+        assert_eq!(user, "user");
+        assert!((temperature - 0.25).abs() < f32::EPSILON);
+        assert_eq!(max_tokens, 700);
+
         let success = encode_helper_response(Ok("bonjour".into())).unwrap();
         assert_eq!(decode_helper_response(&success).as_deref(), Ok("bonjour"));
 
@@ -682,8 +756,22 @@ mod tests {
             .expect("helper signal is an exit status, not a parent abort");
         assert_eq!(output.status.signal(), Some(libc::SIGABRT));
         assert!(!output.status.success());
+        assert!(should_trip_bridge_circuit_breaker(
+            Some(output.status),
+            None
+        ));
+        assert!(!should_trip_bridge_circuit_breaker(
+            None,
+            Some(&format!(
+                "{} exceeded 20000 ms",
+                super::HELPER_TIMEOUT_PREFIX
+            ))
+        ));
         assert!(super::is_terminal_helper_error(
             super::HELPER_PROCESS_FAILURE_PREFIX
+        ));
+        assert!(!super::is_terminal_helper_error(
+            super::HELPER_TIMEOUT_PREFIX
         ));
     }
 

@@ -396,21 +396,23 @@ pub(crate) async fn generate_with_provider(
         }
         SummaryProviderKind::AppleIntelligence => {
             let system = system.to_string();
+            let timeout = apple::request_timeout_for(&system);
+            let max_tokens = apple::response_token_limit(budget);
             let measurement_context = metrics::context();
-            // Guarded call: dedicated thread per attempt, hard wall-clock
-            // timeout, one retry (see apple::generate_guarded). Without it a
-            // wedged FoundationModels request blocks this future forever and
-            // the summarize command never resolves.
+            // Guarded call: hard wall-clock timeout enforced by the helper
+            // process supervisor and one retry (see apple::generate_guarded).
             let full = tokio::task::spawn_blocking(move || {
                 apple::generate_guarded(
-                    || {
-                        let system = system.clone();
-                        let prompt = prompt.clone();
-                        move || {
-                            apple_intelligence::process_text_with_system_prompt(&system, &prompt, 0)
-                        }
+                    |attempt_timeout| {
+                        apple_intelligence::process_text_with_system_prompt(
+                            &system,
+                            &prompt,
+                            temperature,
+                            max_tokens,
+                            attempt_timeout,
+                        )
                     },
-                    apple::REQUEST_TIMEOUT,
+                    timeout,
                     apple::RETRY_BACKOFF,
                     measurement_context
                         .as_ref()
@@ -562,6 +564,7 @@ pub async fn summarize_stream(
             .try_collect()
             .await?;
     } else {
+        let mut last_guardrail_error = None;
         for (i, chunk) in chunks.into_iter().enumerate() {
             on_chunk(SummarizeProgress::stage_marker(
                 SummarizeStage::Map,
@@ -569,7 +572,7 @@ pub async fn summarize_stream(
                 Some(n as u32),
             ));
             let map_system_prompt = map_system_prompt.clone();
-            let part = metrics::phase(
+            let result = metrics::phase(
                 metrics::Phase::Map,
                 map::map_one_chunk(i + 1, n, &chunk, |user, temperature| {
                     let map_system_prompt = map_system_prompt.clone();
@@ -593,8 +596,25 @@ pub async fn summarize_stream(
                     }
                 }),
             )
-            .await?;
-            part_summaries.push(part);
+            .await;
+            match result {
+                Ok(part) => part_summaries.push(part),
+                Err(error) if n > 1 && apple::is_guardrail_violation(&error) => {
+                    tracing::warn!(
+                        chunk = i + 1,
+                        total = n,
+                        error = %error,
+                        "Skipping map chunk that triggered Apple Intelligence guardrails"
+                    );
+                    last_guardrail_error = Some(error);
+                }
+                Err(error) => return Err(error),
+            }
+        }
+        if part_summaries.is_empty()
+            && let Some(error) = last_guardrail_error
+        {
+            return Err(error);
         }
     }
 
@@ -1243,12 +1263,12 @@ mod tests {
 
     // --- Context-overflow recovery ---------------------------------------
 
-    /// Parts sized so the reduce prompt fits the full Apple budget (3200)
+    /// Parts sized so the reduce prompt fits the full Apple budget (2400)
     /// but not half of it: after one overflow shrink the tree must re-batch
     /// instead of retrying the same oversized final prompt.
     fn overflow_test_parts() -> Vec<String> {
         (1..=6)
-            .map(|i| format!("Part {i}: {}", "decision topic detail ".repeat(80)))
+            .map(|i| format!("Part {i}: {}", "decision topic detail ".repeat(55)))
             .collect()
     }
 

@@ -6,11 +6,6 @@ import FoundationModels
 
 private typealias ResponsePointer = UnsafeMutablePointer<AppleLLMResponse>
 
-/// Inner per-request timeout. The Rust caller (summary/apple.rs) enforces a
-/// 120s hard wall and abandons its waiting thread; resolving earlier on the
-/// Swift side lets that thread exit normally instead of leaking.
-private let requestTimeoutSeconds = 100
-
 private func duplicateCString(_ text: String) -> UnsafeMutablePointer<CChar>? {
     text.withCString { basePointer in
         guard let duplicated = strdup(basePointer) else {
@@ -20,19 +15,6 @@ private func duplicateCString(_ text: String) -> UnsafeMutablePointer<CChar>? {
     }
 }
 
-private func truncatedText(_ text: String, limit: Int) -> String {
-    guard limit > 0 else { return text }
-    let words = text.split(
-        maxSplits: .max,
-        omittingEmptySubsequences: true,
-        whereSeparator: { $0.isWhitespace || $0.isNewline }
-    )
-    if words.count <= limit {
-        return text
-    }
-    return words.prefix(limit).joined(separator: " ")
-}
-
 /// Stable machine-readable markers parsed by the Rust caller (summary/apple.rs)
 /// to decide between retry, structural re-batching, and clean failure.
 @available(macOS 26.0, *)
@@ -40,38 +22,50 @@ private func classifyGenerationError(_ error: LanguageModelSession.GenerationErr
     switch error {
     case .exceededContextWindowSize:
         return "exceeded_context_window: \(error.localizedDescription)"
-    case .guardrailViolation:
+    case .guardrailViolation, .refusal:
         return "guardrail_violation: \(error.localizedDescription)"
     case .rateLimited:
         return "rate_limited: \(error.localizedDescription)"
     case .unsupportedLanguageOrLocale:
         return "unsupported_language: \(error.localizedDescription)"
     default:
-        return error.localizedDescription
+        return classifyFallbackError(error)
     }
 }
 
+private func classifyFallbackError(_ error: any Error) -> String {
+    let description = error.localizedDescription
+    let reflected = String(describing: error)
+    let lower = (description + " " + reflected).lowercased()
+    if lower.contains("contextsizeexceeded") || lower.contains("exceededcontextwindowsize")
+        || lower.contains("context window")
+    {
+        return "exceeded_context_window: \(description)"
+    }
+    if lower.contains("guardrail") || lower.contains("refusal") {
+        return "guardrail_violation: \(description)"
+    }
+    if lower.contains("ratelimited") || lower.contains("rate limit") {
+        return "rate_limited: \(description)"
+    }
+    if lower.contains("unsupportedlanguage") || lower.contains("unsupported locale") {
+        return "unsupported_language: \(description)"
+    }
+    return description
+}
+
 /// Single-consumer outcome holder shared between the request task and the
-/// waiting FFI thread. Once the waiter times out and abandons the request,
-/// a late completion is dropped instead of racing the reader.
+/// waiting FFI thread inside the disposable helper subprocess.
 private final class ResultBox: @unchecked Sendable {
     private let lock = NSLock()
     private var response: String?
     private var error: String?
-    private var abandoned = false
 
     func complete(response: String?, error: String?) {
         lock.lock()
         defer { lock.unlock() }
-        guard !abandoned else { return }
         self.response = response
         self.error = error
-    }
-
-    func abandon() {
-        lock.lock()
-        defer { lock.unlock() }
-        abandoned = true
     }
 
     func take() -> (response: String?, error: String?) {
@@ -124,6 +118,7 @@ public func appleIntelligenceUnavailableReason() -> UnsafeMutablePointer<CChar>?
 public func processTextWithSystemPrompt(
     _ systemPrompt: UnsafePointer<CChar>,
     _ userContent: UnsafePointer<CChar>,
+    temperature: Float,
     maxTokens: Int32
 ) -> UnsafeMutablePointer<AppleLLMResponse> {
     let swiftSystemPrompt = String(cString: systemPrompt)
@@ -138,7 +133,13 @@ public func processTextWithSystemPrompt(
         return responsePtr
     }
 
-    let model = SystemLanguageModel.default
+    // Use `.permissiveContentTransformations` so summarizing, extracting, or
+    // polishing user-supplied meeting transcripts does not trip open-ended
+    // generative safety guardrails on sensitive discussion topics.
+    let model = SystemLanguageModel(
+        useCase: .general,
+        guardrails: .permissiveContentTransformations
+    )
     guard model.availability == .available else {
         responsePtr.pointee.error_message = duplicateCString(
             "Apple Intelligence is not currently available on this device."
@@ -147,10 +148,12 @@ public func processTextWithSystemPrompt(
     }
 
     let tokenLimit = max(0, Int(maxTokens))
+    let requestedTemperature: Double? =
+        temperature.isFinite && temperature >= 0 ? Double(temperature) : nil
     let semaphore = DispatchSemaphore(value: 0)
     let box = ResultBox()
 
-    let task = Task.detached(priority: .userInitiated) {
+    Task.detached(priority: .userInitiated) {
         defer { semaphore.signal() }
         do {
             // A fresh session per request keeps every call single-turn: no
@@ -161,31 +164,26 @@ public func processTextWithSystemPrompt(
                 model: model,
                 instructions: swiftSystemPrompt
             )
-            let generation = try await session.respond(to: swiftUserContent)
-            var output = generation.content
-            if tokenLimit > 0 {
-                output = truncatedText(output, limit: tokenLimit)
-            }
-            box.complete(response: output, error: nil)
+            let options = GenerationOptions(
+                temperature: requestedTemperature,
+                maximumResponseTokens: tokenLimit > 0 ? tokenLimit : nil
+            )
+            let generation = try await session.respond(
+                to: swiftUserContent,
+                options: options
+            )
+            box.complete(response: generation.content, error: nil)
         } catch let error as LanguageModelSession.GenerationError {
             box.complete(response: nil, error: classifyGenerationError(error))
         } catch {
-            box.complete(response: nil, error: error.localizedDescription)
+            box.complete(response: nil, error: classifyFallbackError(error))
         }
     }
 
-    let waitResult = semaphore.wait(timeout: .now() + .seconds(requestTimeoutSeconds))
-    if waitResult == .timedOut {
-        // Abandon the request: drop any late completion and ask the task to
-        // stop (respond may or may not honor cancellation). The Rust caller
-        // treats this marker as retryable.
-        box.abandon()
-        task.cancel()
-        responsePtr.pointee.error_message = duplicateCString(
-            "request_timeout: FoundationModels did not respond within \(requestTimeoutSeconds)s"
-        )
-        return responsePtr
-    }
+    // The parent Rust supervisor (`run_helper_process`) enforces the caller's
+    // wall-clock deadline and kills/reaps this disposable helper subprocess on
+    // timeout.
+    semaphore.wait()
 
     let outcome = box.take()
     if let response = outcome.response {
