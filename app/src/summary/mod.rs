@@ -487,6 +487,18 @@ pub async fn summarize_stream(
     let map_system_prompt = with_language_instruction(map_base, output_language);
     let merge_system_prompt = with_language_instruction(merge_base, output_language);
 
+    let chunks = match turn_units {
+        Some(turns) if !turns.is_empty() => chunk_turns(turns, config),
+        _ => chunk_transcript(transcript_text, config),
+    };
+    let n = chunks.len();
+    tracing::info!(
+        provider = ?provider,
+        chunks = n,
+        words = transcript_text.split_whitespace().count(),
+        "Starting meeting summary generation"
+    );
+
     if estimate_tokens(transcript_text) <= config.stuff_token_limit {
         // Single-call path: the whole transcript fits, so this one call IS
         // the final pass and uses the template prompt.
@@ -508,11 +520,6 @@ pub async fn summarize_stream(
     }
 
     let no_op = |_: SummarizeProgress| {};
-    let chunks = match turn_units {
-        Some(turns) if !turns.is_empty() => chunk_turns(turns, config),
-        _ => chunk_transcript(transcript_text, config),
-    };
-    let n = chunks.len();
     let mut part_summaries = Vec::with_capacity(n);
 
     if provider == SummaryProviderKind::Ollama {
@@ -571,6 +578,7 @@ pub async fn summarize_stream(
                 Some(i as u32 + 1),
                 Some(n as u32),
             ));
+            tracing::info!(chunk = i + 1, total = n, "Mapping transcript chunk");
             let map_system_prompt = map_system_prompt.clone();
             let result = metrics::phase(
                 metrics::Phase::Map,
@@ -599,14 +607,66 @@ pub async fn summarize_stream(
             .await;
             match result {
                 Ok(part) => part_summaries.push(part),
-                Err(error) if n > 1 && apple::is_guardrail_violation(&error) => {
-                    tracing::warn!(
-                        chunk = i + 1,
-                        total = n,
-                        error = %error,
-                        "Skipping map chunk that triggered Apple Intelligence guardrails"
-                    );
-                    last_guardrail_error = Some(error);
+                Err(error) if apple::is_guardrail_violation(&error) => {
+                    let mut recovered = None;
+                    if let Some((left, right)) = map::split_chunk_in_half(&chunk) {
+                        let mut surviving_halves = Vec::new();
+                        for half in [&left, &right] {
+                            let map_system_prompt = map_system_prompt.clone();
+                            let half_res = metrics::phase(
+                                metrics::Phase::Map,
+                                map::map_one_chunk(i + 1, n, half, |user, temperature| {
+                                    let map_system_prompt = map_system_prompt.clone();
+                                    async move {
+                                        generate_with_provider(
+                                            provider,
+                                            model,
+                                            ollama_url,
+                                            &map_system_prompt,
+                                            user,
+                                            temperature,
+                                            ollama::MAP_BUDGET,
+                                            &no_op,
+                                            false,
+                                        )
+                                        .await
+                                        .map(|text| {
+                                            map::MapOutput {
+                                                text,
+                                                eval_count: None,
+                                            }
+                                        })
+                                    }
+                                }),
+                            )
+                            .await;
+                            if let Ok(half_text) = half_res {
+                                surviving_halves.push(half_text);
+                            }
+                        }
+                        if !surviving_halves.is_empty() {
+                            recovered = Some(surviving_halves.join("\n"));
+                        }
+                    }
+
+                    if let Some(surviving) = recovered {
+                        part_summaries.push(surviving);
+                        tracing::warn!(
+                            chunk = i + 1,
+                            total = n,
+                            "Recovered partial map chunk after splitting around Apple Intelligence guardrail refusal"
+                        );
+                    } else if n > 1 {
+                        tracing::warn!(
+                            chunk = i + 1,
+                            total = n,
+                            error = %error,
+                            "Skipping map chunk that triggered Apple Intelligence guardrails"
+                        );
+                        last_guardrail_error = Some(error);
+                    } else {
+                        return Err(error);
+                    }
                 }
                 Err(error) => return Err(error),
             }
@@ -767,6 +827,13 @@ where
                     token_limit /= 2;
                     continue 'rounds;
                 }
+                Err(error) if !skip_initial_fit_check && apple::is_guardrail_violation(&error) => {
+                    tracing::warn!(
+                        error = %error,
+                        "Final reduce pass triggered Apple Intelligence guardrails; falling back to extracted bullet points"
+                    );
+                    return Ok(format!("## Summary\n{}\n", current.join("\n\n")));
+                }
                 Err(error) => return Err(error),
             }
         }
@@ -794,6 +861,31 @@ where
                     overflow_shrink_available = false;
                     token_limit /= 2;
                     continue 'rounds;
+                }
+                Err(error) if !skip_initial_fit_check && apple::is_guardrail_violation(&error) => {
+                    tracing::warn!(
+                        batch = i + 1,
+                        total_batches,
+                        error = %error,
+                        "Intermediate merge batch triggered Apple Intelligence guardrails; keeping unmerged bullet points"
+                    );
+                    if total_batches > 1 {
+                        let combined = batch.join("\n");
+                        if reduce::reduce_prompt_fits(&[combined.clone()], None, &[], token_limit) {
+                            next.push(combined);
+                        } else if !batch.is_empty()
+                            && reduce::reduce_prompt_fits(
+                                &[batch[0].clone()],
+                                None,
+                                &[],
+                                token_limit,
+                            )
+                        {
+                            next.push(batch[0].clone());
+                        }
+                    } else {
+                        return Err(error);
+                    }
                 }
                 Err(error) => return Err(error),
             }
@@ -1412,5 +1504,65 @@ mod tests {
             "the custom template must be used exactly once, on the final pass"
         );
         assert!(merge_prompt_calls.get() >= 1);
+    }
+
+    #[tokio::test]
+    async fn run_reduce_tree_recovers_from_guardrail_violation_in_final_pass() {
+        let parts = vec!["- Fact A".to_string(), "- Fact B".to_string()];
+        let limit = ChunkConfig::APPLE_INTELLIGENCE.reduce_token_limit;
+
+        let result = run_reduce_tree(
+            &parts,
+            None,
+            &[],
+            limit,
+            false,
+            &|_current, _total| {},
+            |is_final, _prompt| async move {
+                assert!(is_final);
+                Err::<String, _>("guardrail_violation: safety filter refusal".to_string())
+            },
+        )
+        .await
+        .expect("reduce tree should recover from guardrail violation in final pass");
+
+        assert_eq!(result, "## Summary\n- Fact A\n\n- Fact B\n");
+    }
+
+    #[tokio::test]
+    async fn run_reduce_tree_recovers_from_guardrail_violation_in_intermediate_merge() {
+        let parts: Vec<String> = (1..=6).map(simulated_part).collect();
+        let limit = ChunkConfig::APPLE_INTELLIGENCE.reduce_token_limit;
+
+        let intermediate_guardrail_triggered = std::cell::Cell::new(false);
+
+        let result = run_reduce_tree(
+            &parts,
+            None,
+            &[],
+            limit,
+            false,
+            &|_current, _total| {},
+            |is_final, _prompt| {
+                let hit_guardrail = !intermediate_guardrail_triggered.get() && !is_final;
+                if hit_guardrail {
+                    intermediate_guardrail_triggered.set(true);
+                }
+                async move {
+                    if is_final {
+                        Ok("## Summary\n- final summary\n".to_string())
+                    } else if hit_guardrail {
+                        Err("guardrail_violation: safety filter refusal".to_string())
+                    } else {
+                        Ok("- merged intermediate note\n".to_string())
+                    }
+                }
+            },
+        )
+        .await
+        .expect("reduce tree should recover from intermediate merge guardrail refusal");
+
+        assert!(intermediate_guardrail_triggered.get());
+        assert_eq!(result, "## Summary\n- final summary\n");
     }
 }

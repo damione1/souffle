@@ -127,6 +127,11 @@ where
             Ok(text) => return Ok(text),
             Err(error) => {
                 if !is_retryable(&error) {
+                    tracing::warn!(
+                        attempt,
+                        error = %error,
+                        "Apple Intelligence request failed with non-retryable error"
+                    );
                     return Err(error);
                 }
                 if is_timeout_error(&error) {
