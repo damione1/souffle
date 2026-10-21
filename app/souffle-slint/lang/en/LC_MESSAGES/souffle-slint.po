@@ -3264,3 +3264,43 @@ msgstr "Audio capture error"
 msgctxt "ModelSection"
 msgid "Erreur de capture audio"
 msgstr "Audio capture error"
+
+msgctxt "UpdateCopy"
+msgid "Attendez la fin du démarrage de l'enregistrement."
+msgstr "Wait for the recording to finish starting."
+
+msgctxt "UpdateCopy"
+msgid "Une opération est en cours. Réessayez dans un instant."
+msgstr "An operation is in progress. Try again in a moment."
+
+msgctxt "ShortcutRecorderButton"
+msgid "Enregistrer un raccourci"
+msgstr "Record a shortcut"
+
+msgctxt "InterfaceSection"
+msgid "Terminez l'enregistrement avant de modifier les raccourcis."
+msgstr "Finish the recording before changing shortcuts."
+
+msgctxt "MicrophoneSection"
+msgid "Terminez l'enregistrement avant de réinitialiser la fréquence du microphone."
+msgstr "Finish the recording before resetting the microphone sample rate."
+
+msgctxt "ModelSection"
+msgid "Terminez l'enregistrement avant de changer de modèle."
+msgstr "Finish the recording before changing models."
+
+msgctxt "ModelDeleteSection"
+msgid "Les ressources Apple Speech sont gérées par macOS et ne peuvent pas être supprimées par Soufflé."
+msgstr "Apple Speech assets are managed by macOS and cannot be deleted by Soufflé."
+
+msgctxt "ModelDeleteSection"
+msgid "Attendez la fin de l'opération sur le modèle avant de le supprimer."
+msgstr "Wait for the model operation to finish before deleting it."
+
+msgctxt "ModelDeleteSection"
+msgid "Déchargez le modèle actif ou choisissez un autre modèle avant de le supprimer."
+msgstr "Unload the active model or select another model before deleting it."
+
+msgctxt "InterfaceSection"
+msgid "Une opération est en cours. Réessayez dans un instant."
+msgstr "An operation is in progress. Try again in a moment."

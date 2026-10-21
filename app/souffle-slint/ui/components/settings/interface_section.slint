@@ -6,7 +6,7 @@ import { ThemedSwitch } from "../themed_switch.slint";
 import { ThemedButton, ThemedButtonKind } from "../themed_button.slint";
 import { ThemedComboBox } from "../themed_combo.slint";
 import { ThemedSpinBox } from "../themed_spin.slint";
-import { AppTheme, AppLocale, PasteMethod, ShortcutField, ShortcutNotice } from "../../types.slint";
+import { AppTheme, AppLocale, PasteMethod, ShortcutField, ShortcutNotice, SettingsCaptureError } from "../../types.slint";
 
 // The recorder's message for each `ShortcutNotice`, declared once for Settings
 // and onboarding (#360).
@@ -37,6 +37,11 @@ export component ShortcutRecorderButton inherits FocusScope {
     in property <string> shortcut-label;
     in property <bool> recording;
 
+    accessible-role: button;
+    accessible-label: root.shortcut-label == "" ? @tr("Enregistrer un raccourci") : root.shortcut-label;
+    accessible-enabled: root.enabled;
+    accessible-action-default => { if root.enabled { root.record-requested(); } }
+
     callback record-requested();
     callback captured(string, bool, bool, bool, bool);
     callback released(string, bool, bool, bool, bool);
@@ -65,6 +70,7 @@ export component ShortcutRecorderButton inherits FocusScope {
     }
 
     TouchArea {
+        enabled: root.enabled;
         clicked => {
             root.focus();
             root.record-requested();
@@ -72,7 +78,7 @@ export component ShortcutRecorderButton inherits FocusScope {
     }
 
     key-pressed(event) => {
-        if (!root.recording) {
+        if (!root.recording || !root.enabled) {
             return reject;
         }
         if (event.text == Key.Escape) {
@@ -88,7 +94,7 @@ export component ShortcutRecorderButton inherits FocusScope {
     }
 
     key-released(event) => {
-        if (!root.recording) {
+        if (!root.recording || !root.enabled) {
             return reject;
         }
         root.released(event.text, event.modifiers.control, event.modifiers.shift, event.modifiers.alt, event.modifiers.meta);
@@ -99,6 +105,7 @@ export component ShortcutRecorderButton inherits FocusScope {
 // Port of InterfaceSettingsSection.svelte. The locale is projected from the
 // same durable AppSettings value used by the onboarding selector.
 export component InterfaceSection inherits VerticalLayout {
+    in property <bool> capture-busy;
     in property <AppTheme> theme;
     in property <AppLocale> locale;
     in property <bool> auto-paste;
@@ -110,6 +117,7 @@ export component InterfaceSection inherits VerticalLayout {
     in property <string> ptt-shortcut-label;
     in property <ShortcutField> recording-field;
     in property <string> shortcut-error;
+    in property <SettingsCaptureError> shortcut-error-kind: SettingsCaptureError.operation-failed;
     in property <ShortcutNotice> shortcut-notice;
     in property <bool> native-tap-warning-visible;
     in property <bool> pill-hidden;
@@ -261,6 +269,7 @@ export component InterfaceSection inherits VerticalLayout {
 
                 ShortcutRecorderButton {
                     shortcut-label: root.toggle-shortcut-label;
+                    enabled: !root.capture-busy;
                     recording: root.recording-field == ShortcutField.toggle;
                     record-requested => { root.shortcut-record-requested(ShortcutField.toggle); }
                     captured(text, ctrl, shift, alt, meta) => { root.shortcut-captured(ShortcutField.toggle, text, ctrl, shift, alt, meta); }
@@ -270,6 +279,7 @@ export component InterfaceSection inherits VerticalLayout {
                 }
                 if root.toggle-shortcut-label != "": ThemedButton {
                     text: @tr("Effacer");
+                    enabled: !root.capture-busy;
                     kind: ThemedButtonKind.ghost;
                     clicked => { root.shortcut-cleared(ShortcutField.toggle); }
                 }
@@ -287,6 +297,7 @@ export component InterfaceSection inherits VerticalLayout {
 
                 ShortcutRecorderButton {
                     shortcut-label: root.ptt-shortcut-label;
+                    enabled: !root.capture-busy;
                     recording: root.recording-field == ShortcutField.ptt;
                     record-requested => { root.shortcut-record-requested(ShortcutField.ptt); }
                     captured(text, ctrl, shift, alt, meta) => { root.shortcut-captured(ShortcutField.ptt, text, ctrl, shift, alt, meta); }
@@ -296,10 +307,18 @@ export component InterfaceSection inherits VerticalLayout {
                 }
                 if root.ptt-shortcut-label != "": ThemedButton {
                     text: @tr("Effacer");
+                    enabled: !root.capture-busy;
                     kind: ThemedButtonKind.ghost;
                     clicked => { root.shortcut-cleared(ShortcutField.ptt); }
                 }
             }
+        }
+
+        if root.capture-busy: AppText {
+            text: @tr("Terminez l'enregistrement avant de modifier les raccourcis.");
+            color: Theme.text-muted;
+            typography: Typography.small;
+            wrap: word-wrap;
         }
 
         SettingsField {
@@ -357,7 +376,9 @@ export component InterfaceSection inherits VerticalLayout {
                 padding: 12px;
 
                 AppText {
-                    text: root.shortcut-error;
+                    text: root.shortcut-error-kind == SettingsCaptureError.capture-busy ? @tr("Terminez l'enregistrement avant de modifier les raccourcis.")
+                        : root.shortcut-error-kind == SettingsCaptureError.runtime-busy ? @tr("Une opération est en cours. Réessayez dans un instant.")
+                        : root.shortcut-error;
                     color: Theme.danger;
                     typography: Typography.secondary;
                     wrap: word-wrap;

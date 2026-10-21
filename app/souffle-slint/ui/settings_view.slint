@@ -19,10 +19,11 @@ import { ModelDeleteSection } from "components/settings/model_delete_section.sli
 import { DictionarySection, DictionaryRow, DictionarySuggestionRow, DictionaryLearningOption } from "components/settings/dictionary_section.slint";
 import { SnippetsSection, SnippetRow } from "components/settings/snippets_section.slint";
 import { Theme } from "theme.slint";
+import { ModelDeletionError } from "types.slint";
 import { TranscriptionUnavailableReason, SystemSettingsPane } from "types.slint";
 import { LucideIcon, IconSet } from "components/lucide_icon.slint";
 import { SettingsTabBar, SettingsTabPage } from "components/settings/settings_tabs.slint";
-import { TranscriptionPhase, AppTheme, AppLocale, PasteMethod, MeetingLanguage, LogLevel, AudioRetention, AccessState, ShortcutField, ShortcutNotice, SummaryProvider, AppleIntelligenceUnavailableReason, SettingsTab, InstallBlockReason, UpdateRowStatus, DictionaryLearningMode } from "types.slint";
+import { TranscriptionPhase, AppTheme, AppLocale, PasteMethod, MeetingLanguage, LogLevel, AudioRetention, AccessState, ShortcutField, ShortcutNotice, SettingsCaptureError, SummaryProvider, AppleIntelligenceUnavailableReason, SettingsTab, InstallBlockReason, UpdateRowStatus, DictionaryLearningMode } from "types.slint";
 
 // Port of components/SettingsView.svelte's tab shell (SOU-188). Svelte
 // groups its 17 sections into 6 tabs (Transcription / IA / Audio / Interface
@@ -45,6 +46,7 @@ export component SettingsView inherits Rectangle {
     in-out property <length> log-scroll-top: 0px;
     in property <bool> copying-diagnostics: false;
     in property <AppTheme> theme;
+    in property <bool> capture-busy;
     in property <AppLocale> locale;
     in property <bool> auto-paste;
     in property <PasteMethod> paste-method;
@@ -62,6 +64,7 @@ export component SettingsView inherits Rectangle {
     in property <bool> native-tap-warning-visible;
     in property <ShortcutField> recording-field: ShortcutField.none;
     in-out property <string> shortcut-error: "";
+    in property <SettingsCaptureError> shortcut-error-kind: SettingsCaptureError.operation-failed;
     in property <ShortcutNotice> shortcut-notice;
     in property <string> save-error;
     // True when `save-error` covers a `SettingsSaveOutcome::Unavailable`
@@ -187,6 +190,7 @@ export component SettingsView inherits Rectangle {
     in property <string> unload-timeout-label;
     in property <string> model-error-message;
     in property <string> model-delete-error;
+    in property <ModelDeletionError> model-delete-error-kind: ModelDeletionError.operation-failed;
     in property <bool> model-files-deletable;
 
     in property <DictionaryLearningMode> dictionary-learning-mode;
@@ -425,6 +429,7 @@ export component SettingsView inherits Rectangle {
                     active: root.tab == SettingsTab.transcription;
 
                         ModelSection {
+                            capture-busy: root.capture-busy;
                             model-phase: root.model-phase;
                             ready: root.model-ready;
                             model-labels: root.model-labels;
@@ -591,6 +596,7 @@ export component SettingsView inherits Rectangle {
                             sample-rate-label: root.sample-rate-label;
                             sample-rate-high: root.sample-rate-high;
                             resetting-sample-rate: root.resetting-sample-rate;
+                            capture-busy: root.capture-busy;
                             allow-bluetooth-mic: root.allow-bluetooth-mic;
                             microphones: root.microphones;
                             has-disconnected: root.has-disconnected-devices;
@@ -652,9 +658,11 @@ export component SettingsView inherits Rectangle {
                             paste-delay-min: root.paste-delay-min;
                             paste-delay-max: root.paste-delay-max;
                             toggle-shortcut-label: root.toggle-shortcut-label;
+                            capture-busy: root.capture-busy;
                             ptt-shortcut-label: root.ptt-shortcut-label;
                             recording-field: root.recording-field;
                             shortcut-error: root.shortcut-error;
+                            shortcut-error-kind: root.shortcut-error-kind;
                             shortcut-notice: root.shortcut-notice;
                             native-tap-warning-visible: root.native-tap-warning-visible;
                             pill-hidden: root.pill-hidden;
@@ -759,6 +767,7 @@ export component SettingsView inherits Rectangle {
                             model-phase: root.model-phase;
                             model-label: root.selected-model-label;
                             delete-error: root.model-delete-error;
+                            delete-error-kind: root.model-delete-error-kind;
                             delete-requested => { root.delete-model-requested(); }
                         }
 

@@ -66,7 +66,7 @@ export enum UpdatePhase { idle, downloading, ready, failed }
 // Mirrors souffle_lib::commands::updater::InstallBlockReason. Absence
 // ("install is allowed") is a separate `bool` on the Window, never a
 // variant here.
-export enum InstallBlockReason { recording-dictation, recording-meeting, stopping, downloading, loading, unloading }
+export enum InstallBlockReason { runtime-busy, starting, recording-dictation, recording-meeting, stopping, downloading, loading, unloading }
 
 // Where Settings > "Mises à jour" is in its check -> download -> install
 // flow. Mirrors `update_ui::UpdateRow` (which carries the version, error,
@@ -121,6 +121,10 @@ export enum ShortcutField { none, toggle, ptt }
 // `types-character` is a warning shown after a successful save, the others
 // are refusals.
 export enum ShortcutNotice { none, missing-modifier, unusable-key, types-character }
+// Mirrors the payload-bearing souffle_lib::commands::SettingsCaptureError.
+export enum SettingsCaptureError { capture-busy, runtime-busy, operation-failed }
+// Mirrors the payload-bearing souffle_lib::commands::ModelDeletionError.
+export enum ModelDeletionError { managed-asset, transition-busy, active-model, operation-failed }
 
 // Mirrors souffle_lib::export::ExportFormat at the UI boundary
 // (`export_format_from_slint` in main.rs, exhaustive match). Used by

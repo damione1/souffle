@@ -19,6 +19,8 @@ use chrono::{DateTime, Utc};
 #[derive(Default)]
 pub struct CaptureStartGate {
     state: Mutex<Option<StartingSession>>,
+    /// Long Settings effects exclude capture without blocking the UI's halt.
+    boundary: Mutex<()>,
 }
 
 #[derive(Debug)]
@@ -53,6 +55,10 @@ impl CaptureStartGate {
                 settled: false,
             });
         });
+        // Publish before waiting: Stop can remember its timestamp while a
+        // reset/rebind/install is finishing. Pipeline setup starts only after
+        // that effect releases the boundary, and start_capture observes halt.
+        let _boundary = self.boundary.lock().unwrap_or_else(|p| p.into_inner());
     }
 
     /// Start capture for `session_id` with `start`. If the user already
@@ -66,6 +72,7 @@ impl CaptureStartGate {
         start: impl FnOnce() -> Result<(), String>,
         stop: impl FnOnce(),
     ) -> Result<(), String> {
+        let _boundary = self.boundary.lock().unwrap_or_else(|p| p.into_inner());
         self.with_state(|state| {
             start()?;
             if let Some(session) = state.as_mut().filter(|s| s.session_id == session_id) {
@@ -129,6 +136,45 @@ impl CaptureStartGate {
     pub fn start_in_flight(&self) -> bool {
         self.with_state(|state| state.as_ref().is_some_and(|s| !s.settled))
     }
+
+    /// Nonblocking read for UI intent guards. A capture start or a settings
+    /// effect holding the boundary counts as busy, so the UI never waits on
+    /// CoreAudio while deciding whether to accept another destructive click.
+    pub fn start_in_flight_or_locked(&self) -> bool {
+        let Ok(_boundary) = self.boundary.try_lock() else {
+            return true;
+        };
+        match self.state.try_lock() {
+            Ok(state) => state.as_ref().is_some_and(|session| !session.settled),
+            Err(std::sync::TryLockError::WouldBlock | std::sync::TryLockError::Poisoned(_)) => true,
+        }
+    }
+
+    /// Serializes a settings decision/effect with pipeline setup and capture.
+    /// The session lock is only held for a snapshot, so the UI can still halt
+    /// a queued start. Lock order is boundary then machine; callers must not
+    /// invoke window operations or re-enter the boundary in `operation`.
+    pub(crate) fn with_start_boundary<T>(&self, operation: impl FnOnce(bool) -> T) -> T {
+        let _boundary = self.boundary.lock().unwrap_or_else(|p| p.into_inner());
+        let starting = self.start_in_flight();
+        operation(starting)
+    }
+
+    /// UI callers must refuse a competing effect instead of waiting for it.
+    /// `None` also fails closed after a poisoned boundary.
+    pub(crate) fn try_with_start_boundary<T>(
+        &self,
+        operation: impl FnOnce(bool) -> T,
+    ) -> Option<T> {
+        let _boundary = self.boundary.try_lock().ok()?;
+        let starting = self
+            .state
+            .try_lock()
+            .ok()?
+            .as_ref()
+            .is_some_and(|s| !s.settled);
+        Some(operation(starting))
+    }
 }
 
 #[cfg(test)]
@@ -152,6 +198,43 @@ mod tests {
             || log.borrow_mut().push(Sent::Stop),
         )
         .unwrap();
+    }
+
+    #[test]
+    fn stop_during_a_settings_effect_halts_the_waiting_start_without_blocking() {
+        use std::sync::{Arc, mpsc};
+        use std::time::{Duration, Instant};
+        let gate = Arc::new(CaptureStartGate::new());
+        let (stop_tx, stop_rx) = mpsc::channel();
+        let (starter, stopper, observed) = gate.with_start_boundary(|_| {
+            let worker_gate = gate.clone();
+            let starter = std::thread::spawn(move || {
+                worker_gate.begin(1);
+                let log = RefCell::new(Vec::new());
+                start_capture(&worker_gate, 1, &log);
+                log.into_inner()
+            });
+            let deadline = Instant::now() + Duration::from_secs(1);
+            while !gate.start_in_flight() && Instant::now() < deadline {
+                std::thread::yield_now();
+            }
+            let worker_gate = gate.clone();
+            let stopper = std::thread::spawn(move || {
+                let halted = worker_gate.halt(|| panic!("capture must still wait for the effect"));
+                let _ = stop_tx.send(halted);
+            });
+            let observed = stop_rx.recv_timeout(Duration::from_secs(1));
+            (starter, stopper, observed)
+        });
+        stopper.join().unwrap();
+        let sent = starter.join().unwrap();
+        assert_eq!(
+            observed,
+            Ok(true),
+            "Stop must finish before the Settings effect releases"
+        );
+        assert_eq!(sent, vec![Sent::Start, Sent::Stop]);
+        assert!(gate.take_halted_at().is_some());
     }
 
     #[test]

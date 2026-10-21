@@ -119,12 +119,12 @@ fn saved_notice(swallows_character: bool) -> ShortcutNotice {
 /// values through the cache. `save_shortcuts` writes both bindings together,
 /// so mutating the cache before it succeeds would let a later save commit a
 /// previously rejected value.
-fn persist_shortcut_candidate(
+fn persist_shortcut_candidate<E>(
     shortcuts_state: &Rc<RefCell<Option<ShortcutSettings>>>,
     field: ShortcutField,
     value: String,
-    persist: impl FnOnce(ShortcutSettings) -> Result<(), String>,
-) -> Result<Option<ShortcutSettings>, String> {
+    persist: impl FnOnce(ShortcutSettings) -> Result<(), E>,
+) -> Result<Option<ShortcutSettings>, E> {
     let Some(mut candidate) = shortcuts_state.borrow().clone() else {
         return Ok(None);
     };
@@ -1278,6 +1278,13 @@ fn project_model_machine_error(
     window: &MainWindow,
     machine: Result<souffle_lib::state_machine::AppStateMachine, String>,
 ) {
+    if let Ok(machine) = &machine {
+        window.set_settings_backend_capture_busy(machine.is_recording());
+        update_ui::refresh_install_block(
+            window,
+            souffle_lib::commands::install_blocked_reason(machine),
+        );
+    }
     if let Ok(souffle_lib::state_machine::AppStateMachine::Error { message, .. }) = machine {
         project_model_error(window, message.into());
     }
@@ -3530,7 +3537,7 @@ fn apply_onboarding_shortcut(
             true
         }
         Err(e) => {
-            window.set_onboarding_shortcut_error(e.into());
+            window.set_onboarding_shortcut_error(e.to_string().into());
             false
         }
     }
@@ -3775,6 +3782,17 @@ fn wire_update_dialogs(
         }
     });
 
+    let weak = window.as_weak();
+    let handle = tauri_handle.clone();
+    window.on_update_install_permission_refresh_requested(move || {
+        if let Some(window) = weak.upgrade() {
+            let blocked = update_ui::install_block_for_display(
+                souffle_lib::commands::get_update_install_block(handle.clone()),
+            );
+            update_ui::refresh_install_block(&window, blocked);
+        }
+    });
+
     // Settings > "Mises à jour": one button that walks check -> download ->
     // install and restart. Rust decides what the click means from the row
     // (`update_ui::update_row_click`); Slint only renders it.
@@ -3796,9 +3814,9 @@ fn wire_update_dialogs(
             update_ui::UpdateRowClick::Install { version } => {
                 // Re-read: a recording or model load may have started or
                 // ended since the package became ready.
-                let blocked = souffle_lib::commands::get_update_install_block(Arc::clone(&handle))
-                    .ok()
-                    .flatten();
+                let blocked = update_ui::install_block_for_display(
+                    souffle_lib::commands::get_update_install_block(Arc::clone(&handle)),
+                );
                 match blocked {
                     Some(reason) => update_ui::set_update_row(
                         &window,
@@ -3945,9 +3963,9 @@ fn start_update_download(
                 window.set_update_error_message(e.as_str().into());
             }
         }
-        let blocked = souffle_lib::commands::get_update_install_block(Arc::clone(&handle))
-            .ok()
-            .flatten();
+        let blocked = update_ui::install_block_for_display(
+            souffle_lib::commands::get_update_install_block(Arc::clone(&handle)),
+        );
         update_ui::project_install_block(&window, blocked);
         let row = update_ui::update_row_from_download(
             version,
@@ -3977,6 +3995,18 @@ fn request_update_install(
     handle: &AppHandle,
     settings_drafts: &Rc<settings_drafts::SettingsDraftController>,
 ) {
+    // Refuse before the draft flush, window hide or Installing projection.
+    match souffle_lib::commands::get_update_install_block(handle.clone()) {
+        Ok(None) => {}
+        Ok(Some(reason)) => {
+            update_ui::project_install_block(window, Some(reason));
+            return;
+        }
+        Err(error) => {
+            eprintln!("Cannot validate update installation: {error}");
+            return;
+        }
+    }
     let weak = window.as_weak();
     let handle = handle.clone();
     let install: Rc<dyn Fn()> = Rc::new(move || {
@@ -4007,9 +4037,9 @@ fn request_update_install(
             if let Ok(status) = &status {
                 window.set_update_phase(update_ui::update_phase_to_slint(status.phase));
             }
-            let blocked = souffle_lib::commands::get_update_install_block(Arc::clone(&handle))
-                .ok()
-                .flatten();
+            let blocked = update_ui::install_block_for_display(
+                souffle_lib::commands::get_update_install_block(Arc::clone(&handle)),
+            );
             update_ui::project_install_block(&window, blocked);
             // A refusal (still recording) leaves the package ready: the row
             // shows why. A failed swap marked the download failed: the row
@@ -4085,15 +4115,22 @@ fn apply_startup_update_dialogs(
                 window.set_update_release_url(result.release_url.unwrap_or_default().into());
                 window.set_update_phase(UpdatePhase::Idle);
                 let state = Arc::clone(&handle);
-                let blocked = souffle_lib::commands::get_update_install_block(state)
-                    .ok()
-                    .flatten();
+                let blocked = update_ui::install_block_for_display(
+                    souffle_lib::commands::get_update_install_block(state),
+                );
                 update_ui::project_install_block(&window, blocked);
                 window.set_update_available_open(true);
             }
         })
         .expect("slint event loop not running");
     }
+}
+
+fn settings_capture_action_allowed(state: &souffle_lib::state::AppState) -> bool {
+    matches!(
+        souffle_lib::commands::settings_capture_busy(state),
+        Ok(false)
+    )
 }
 
 /// Milestone 3 wires the real Timeline (this function); milestones 4-6 wire
@@ -5431,12 +5468,15 @@ fn wire_callbacks(
         field: ShortcutField,
         value: String,
     ) -> bool {
-        window.set_settings_recording_field(ShortcutField::None);
+        if !settings_capture_action_allowed(handle) {
+            return false;
+        }
         let state = Arc::clone(handle);
         match persist_shortcut_candidate(shortcuts_state, field, value, move |candidate| {
             souffle_lib::commands::save_shortcuts(state, candidate)
         }) {
             Ok(Some(shortcuts)) => {
+                window.set_settings_recording_field(ShortcutField::None);
                 window.set_settings_shortcut_error("".into());
                 window.set_settings_shortcut_notice(ShortcutNotice::None);
                 let natives = souffle_lib::commands::get_native_shortcuts();
@@ -5447,7 +5487,8 @@ fn wire_callbacks(
             }
             Ok(None) => false,
             Err(e) => {
-                window.set_settings_shortcut_error(e.into());
+                window.set_settings_shortcut_error_kind(settings_ui::capture_error_to_slint(&e));
+                window.set_settings_shortcut_error(e.to_string().into());
                 false
             }
         }
@@ -6131,10 +6172,14 @@ fn wire_callbacks(
     let settings_state_for_reset_rate = settings_state.clone();
     let audio_devices_state_for_reset_rate = audio_devices_state.clone();
     let audio_device_projection_for_reset_rate = audio_device_projection_state;
+    let handle_for_reset_rate = tauri_handle.clone();
     window.on_settings_reset_sample_rate_requested(move || {
         let Some(window) = weak.upgrade() else {
             return;
         };
+        if !settings_capture_action_allowed(&handle_for_reset_rate) {
+            return;
+        }
         let Some((generation, selected, _, _)) = audio_device_load_configuration(
             &settings_state_for_reset_rate,
             &audio_device_projection_for_reset_rate,
@@ -6150,8 +6195,9 @@ fn wire_callbacks(
         window.set_settings_resetting_sample_rate(true);
         let weak = weak.clone();
         let projection_state = audio_device_projection_for_reset_rate.clone();
+        let state = handle_for_reset_rate.clone();
         slint::spawn_local(async move {
-            let result = souffle_lib::commands::reset_input_sample_rate(uid).await;
+            let result = souffle_lib::commands::reset_input_sample_rate(state, uid).await;
             if projection_state.borrow().generation() != generation {
                 if let Some(window) = weak.upgrade() {
                     window.set_settings_resetting_sample_rate(false);
@@ -6662,21 +6708,10 @@ fn wire_callbacks(
     let model_selection_revision = Rc::new(Cell::new(0_u64));
     let revision_for_model = model_selection_revision.clone();
     window.on_settings_model_changed(move |label| {
-        let Some(window) = weak.upgrade() else {
+        let Some(_window) = weak.upgrade() else {
             return;
         };
-        if window.get_recording_mode() != RecordingMode::Idle {
-            project_model_error(
-                &window,
-                "Impossible de changer de modèle pendant un enregistrement.".into(),
-            );
-            // Unlike the Svelte version's `finally { target.value =
-            // selectedKey; }`, the combobox's own displayed value is not
-            // forced back here: Slint's binding only reasserts on a real
-            // value change, and the rejected pick never became the real
-            // selection. Documented known gap - the error message above is
-            // the source of truth, the visible combobox label may lag it
-            // until the next real selection.
+        if !settings_capture_action_allowed(&handle) {
             return;
         }
         let Some(option) = model_ui::find_option(&model_options_state_for_model.borrow(), &label)
@@ -6753,17 +6788,21 @@ fn wire_callbacks(
         let catalog = match souffle_lib::commands::get_transcription_catalog(handle.clone()) {
             Ok(catalog) => catalog,
             Err(e) => {
-                window.set_settings_model_delete_error(e.into());
+                settings_ui::project_model_deletion_error(&window, &e.into());
                 return;
             }
         };
         let selection = model_ui::selected_profile(&catalog);
+        if let Err(error) = souffle_lib::commands::can_delete_model(&handle, &selection) {
+            settings_ui::project_model_deletion_error(&window, &error);
+            return;
+        }
         match souffle_lib::commands::delete_model(handle.clone(), selection) {
             Ok(()) => {
                 window.set_settings_model_delete_error("".into());
                 refresh_model_runtime(weak_delete_model.clone(), handle);
             }
-            Err(e) => window.set_settings_model_delete_error(e.into()),
+            Err(e) => settings_ui::project_model_deletion_error(&window, &e),
         }
     });
 
@@ -7015,7 +7054,11 @@ fn wire_callbacks(
     });
 
     let weak = window.as_weak();
+    let handle_for_shortcut_record = tauri_handle.clone();
     window.on_settings_shortcut_record_requested(move |field| {
+        if !settings_capture_action_allowed(&handle_for_shortcut_record) {
+            return;
+        }
         if let Some(window) = weak.upgrade() {
             window.set_settings_recording_field(field);
             window.set_settings_shortcut_error("".into());
@@ -7031,6 +7074,9 @@ fn wire_callbacks(
         let Some(window) = weak.upgrade() else {
             return;
         };
+        if !settings_capture_action_allowed(&handle) {
+            return;
+        }
         let Some(key) = shortcut_capture::take_pressed_key() else {
             return;
         };
@@ -7074,6 +7120,9 @@ fn wire_callbacks(
         let Some(window) = weak.upgrade() else {
             return;
         };
+        if !settings_capture_action_allowed(&handle) {
+            return;
+        }
         let Some(name) =
             shortcut_capture::take_pressed_key().and_then(shortcut_capture::released_modifier)
         else {
@@ -7102,6 +7151,9 @@ fn wire_callbacks(
         let Some(window) = weak.upgrade() else {
             return;
         };
+        if !settings_capture_action_allowed(&handle) {
+            return;
+        }
         *pending_modifier_for_clear.borrow_mut() = None;
         apply_shortcut(
             &handle,
@@ -7377,9 +7429,9 @@ fn dispatch_native_action(
             );
             window.set_update_release_url(release_url.unwrap_or_default().into());
             window.set_update_phase(UpdatePhase::Idle);
-            let blocked = souffle_lib::commands::get_update_install_block(Arc::clone(handle))
-                .ok()
-                .flatten();
+            let blocked = update_ui::install_block_for_display(
+                souffle_lib::commands::get_update_install_block(Arc::clone(handle)),
+            );
             update_ui::project_install_block(window, blocked);
             window.set_update_available_open(true);
         }
@@ -7960,15 +8012,371 @@ mod tests {
 
     struct TestPlatform;
 
+    thread_local! {
+        static TEST_SOFTWARE_WINDOW: RefCell<Option<Rc<MinimalSoftwareWindow>>> = const { RefCell::new(None) };
+    }
+
     impl Platform for TestPlatform {
         fn create_window_adapter(&self) -> Result<Rc<dyn WindowAdapter>, slint::PlatformError> {
-            Ok(MinimalSoftwareWindow::new(Default::default()))
+            let window = MinimalSoftwareWindow::new(Default::default());
+            TEST_SOFTWARE_WINDOW.with(|slot| *slot.borrow_mut() = Some(window.clone()));
+            Ok(window)
         }
     }
 
     fn test_window() -> MainWindow {
         let _ = slint::platform::set_platform(Box::new(TestPlatform));
         MainWindow::new().unwrap()
+    }
+
+    #[test]
+    fn update_install_controls_follow_live_capture_and_model_transitions() {
+        use crate::update_ui::{self, UpdateRow};
+        use i_slint_backend_testing::ElementHandle;
+        use souffle_lib::engine::default_transcription_profile;
+        use souffle_lib::state_machine::AppStateMachine;
+        let window = test_window();
+        window.set_settings_open(true);
+        window.set_settings_tab(super::SettingsTab::System);
+        window
+            .window()
+            .set_size(slint::PhysicalSize::new(1200, 4000));
+        update_ui::set_update_row(
+            &window,
+            UpdateRow::Ready {
+                version: "fixture".into(),
+                blocked: None,
+            },
+        );
+        crate::typography::initialize(&window).unwrap();
+        let adapter = TEST_SOFTWARE_WINDOW
+            .with(|slot| slot.borrow().clone())
+            .unwrap();
+        let mut pixels =
+            vec![slint::platform::software_renderer::Rgb565Pixel::default(); 1200 * 4000];
+        for _ in 0..3 {
+            slint::platform::update_timers_and_animations();
+            adapter.request_redraw();
+            adapter.draw_if_needed(|renderer| {
+                renderer.render(&mut pixels, 1200);
+            });
+        }
+        let button = ElementHandle::find_by_element_id(&window, "AboutSection::update-action")
+            .next()
+            .expect("Settings update action");
+        assert_eq!(button.accessible_enabled(), Some(true));
+        for machine in [
+            AppStateMachine::RecordingDictation {
+                profile: default_transcription_profile(),
+                session_id: 1,
+            },
+            AppStateMachine::Loading {
+                profile: default_transcription_profile(),
+            },
+        ] {
+            super::project_model_machine_error(&window, Ok(machine));
+            assert_eq!(button.accessible_enabled(), Some(false));
+            assert!(window.get_current_update_install_blocked());
+        }
+        super::project_model_machine_error(
+            &window,
+            Ok(AppStateMachine::Ready {
+                profile: default_transcription_profile(),
+            }),
+        );
+        assert_eq!(button.accessible_enabled(), Some(true));
+        window.set_recording_starting(true);
+        assert_eq!(button.accessible_enabled(), Some(false));
+        assert_eq!(
+            window.get_current_update_install_block_reason(),
+            super::InstallBlockReason::Starting
+        );
+        window.set_recording_starting(false);
+        window.set_recording_mode(RecordingMode::Meeting);
+        assert_eq!(button.accessible_enabled(), Some(false));
+        assert_eq!(
+            window.get_current_update_install_block_reason(),
+            super::InstallBlockReason::RecordingMeeting
+        );
+        window.set_recording_mode(RecordingMode::Idle);
+        assert_eq!(button.accessible_enabled(), Some(true));
+        update_ui::set_update_row(&window, UpdateRow::Unchecked);
+    }
+
+    #[test]
+    fn transient_install_permission_refresh_runs_only_for_a_visible_refusal() {
+        std::thread::spawn(|| {
+            i_slint_backend_testing::init_no_event_loop();
+            let window = MainWindow::new().unwrap();
+            let reads = Rc::new(Cell::new(0));
+            let count = reads.clone();
+            window.on_update_install_permission_refresh_requested(move || {
+                count.set(count.get() + 1);
+            });
+            let tick = || {
+                slint::platform::update_timers_and_animations();
+                i_slint_backend_testing::mock_elapsed_time(Duration::from_secs(1));
+            };
+            window.set_update_phase(super::UpdatePhase::Ready);
+            crate::update_ui::project_install_block(
+                &window,
+                Some(souffle_lib::commands::InstallBlockReason::RuntimeBusy),
+            );
+            tick();
+            assert_eq!(reads.get(), 0, "closed surfaces do not poll");
+            window.set_update_available_open(true);
+            tick();
+            assert_eq!(reads.get(), 1, "visible dialog retries its refusal");
+            window.set_window_visible(false);
+            tick();
+            assert_eq!(reads.get(), 1, "hidden window does not poll");
+            window.set_window_visible(true);
+            window.set_update_phase(super::UpdatePhase::Downloading);
+            tick();
+            assert_eq!(reads.get(), 1, "download has no install control to retry");
+            window.set_update_available_open(false);
+            window.set_settings_open(true);
+            window.set_settings_tab(super::SettingsTab::System);
+            crate::update_ui::set_update_row(
+                &window,
+                crate::update_ui::UpdateRow::Ready {
+                    version: "fixture".into(),
+                    blocked: Some(souffle_lib::commands::InstallBlockReason::RuntimeBusy),
+                },
+            );
+            tick();
+            assert_eq!(reads.get(), 2, "visible Settings row retries its refusal");
+            window.set_settings_tab(super::SettingsTab::Audio);
+            tick();
+            assert_eq!(reads.get(), 2, "other Settings tabs do not poll");
+            window.set_settings_tab(super::SettingsTab::System);
+            crate::update_ui::refresh_install_block(&window, None);
+            tick();
+            assert_eq!(reads.get(), 2, "permission recovery stops polling");
+        })
+        .join()
+        .unwrap();
+    }
+
+    #[test]
+    fn settings_callbacks_refuse_against_authority_with_stale_idle_projection() {
+        use crate::update_ui;
+        use souffle_lib::engine::default_transcription_profile;
+        use souffle_lib::state::AppState;
+        use souffle_lib::state_machine::{AppStateMachine, RecordingKind};
+        let window = test_window();
+        let dir = tempfile::tempdir().unwrap();
+        let db = Arc::new(souffle_lib::db::Database::open(&dir.path().join("fixture.db")).unwrap());
+        let initial = AppSettings::default();
+        initial.save(&db).unwrap();
+        ShortcutSettings::default().save(&db).unwrap();
+        let before = db.get_all_settings().unwrap();
+        let (audio_tx, audio_rx) = crossbeam_channel::unbounded();
+        let actor = souffle_lib::pipeline::EngineActorHandle::spawn(
+            audio_rx,
+            Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            Arc::new(Mutex::new(None)),
+            Box::new(|_| Err("No engine needed by guard fixture".into())),
+        )
+        .unwrap();
+        let (command_tx, command_rx) = crossbeam_channel::unbounded();
+        let state = Arc::new(AppState::new(
+            command_tx,
+            Arc::new(actor),
+            db.clone(),
+            Arc::new(std::sync::atomic::AtomicU32::new(0)),
+        ));
+        let cache = SettingsCache::with_observed(&window, initial.clone());
+        let saves = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let saves_worker = saves.clone();
+        let io = SettingsIoCoordinator::with_functions(
+            cache.clone(),
+            || Ok(AppSettings::default()),
+            || Ok(AppSettings::default()),
+            move |settings| {
+                saves_worker.fetch_add(1, Ordering::SeqCst);
+                SettingsSaveOutcome::Observed {
+                    settings: Box::new(settings),
+                    result: Ok(()),
+                }
+            },
+            |_| panic!("guarded action must not save autostart"),
+        );
+        let drafts = SettingsDraftController::new(&window, io.clone());
+        let permissions =
+            crate::permissions_ui::PermissionController::new(&window, Rc::new(Cell::new(false)));
+        super::wire_callbacks(
+            &window,
+            state.clone(),
+            permissions,
+            cache.clone(),
+            io.clone(),
+            drafts.clone(),
+            Arc::new(Mutex::new(LiveTranscript::new())),
+        );
+        super::wire_update_dialogs(&window, state.clone(), io.clone(), drafts);
+        let profile = default_transcription_profile();
+        for machine in [
+            AppStateMachine::RecordingDictation {
+                profile: profile.clone(),
+                session_id: 1,
+            },
+            AppStateMachine::RecordingMeeting {
+                profile: profile.clone(),
+                session_id: 1,
+                meeting_id: "fixture".into(),
+            },
+            AppStateMachine::Stopping {
+                profile: profile.clone(),
+                was_recording: RecordingKind::Dictation,
+            },
+            AppStateMachine::Ready { profile },
+        ] {
+            let starting = !machine.is_recording();
+            *state.machine.lock().unwrap() = machine;
+            if starting {
+                state.capture_start.begin(1);
+            }
+            window.set_recording_mode(RecordingMode::Idle);
+            window.set_settings_backend_capture_busy(false);
+            window.set_settings_recording_field(ShortcutField::Toggle);
+            window.set_settings_shortcut_error("retained error".into());
+            window.set_settings_shortcut_notice(super::ShortcutNotice::TypesCharacter);
+            window.set_settings_selected_model_label("retained selection".into());
+            window.invoke_settings_shortcut_record_requested(ShortcutField::Ptt);
+            window.invoke_settings_shortcut_captured(
+                ShortcutField::Toggle,
+                "x".into(),
+                false,
+                false,
+                false,
+                false,
+            );
+            window.invoke_settings_shortcut_released(
+                ShortcutField::Toggle,
+                "x".into(),
+                false,
+                false,
+                false,
+                false,
+            );
+            window.invoke_settings_shortcut_cleared(ShortcutField::Toggle);
+            window.invoke_settings_reset_sample_rate_requested();
+            window.invoke_settings_model_changed("rejected model".into());
+            window.invoke_update_install_requested();
+            window.invoke_settings_delete_model_requested();
+            assert!(
+                !window.get_settings_model_delete_error().is_empty(),
+                "deletion refusal stays visible"
+            );
+            assert_eq!(
+                window.get_settings_model_delete_error_kind(),
+                super::ModelDeletionError::ActiveModel
+            );
+            assert_eq!(window.get_settings_recording_field(), ShortcutField::Toggle);
+            assert_eq!(window.get_settings_shortcut_error(), "retained error");
+            assert_eq!(
+                window.get_settings_shortcut_notice(),
+                super::ShortcutNotice::TypesCharacter
+            );
+            assert_eq!(
+                window.get_settings_selected_model_label(),
+                "retained selection"
+            );
+            assert!(!window.get_settings_resetting_sample_rate());
+            assert!(io.is_idle_for_test(), "no save/exit flush was queued");
+            assert_eq!(saves.load(Ordering::SeqCst), 0);
+            assert_eq!(db.get_all_settings().unwrap(), before);
+            assert!(
+                command_rx.try_recv().is_err(),
+                "no audio command on refusal"
+            );
+            assert_eq!(cache.borrow().as_ref().unwrap(), &initial);
+            state.capture_start.abandon(1);
+        }
+        for machine in [
+            AppStateMachine::Downloading {
+                profile: default_transcription_profile(),
+            },
+            AppStateMachine::Loading {
+                profile: default_transcription_profile(),
+            },
+            AppStateMachine::Unloading {
+                profile: default_transcription_profile(),
+                next_profile: None,
+            },
+        ] {
+            *state.machine.lock().unwrap() = machine;
+            window.invoke_settings_delete_model_requested();
+            assert_eq!(
+                window.get_settings_model_delete_error_kind(),
+                super::ModelDeletionError::TransitionBusy
+            );
+            assert_eq!(db.get_all_settings().unwrap(), before);
+        }
+
+        // Exercise real UI callbacks with the authority held by another
+        // thread. The bounded release makes a regression fail, never hang.
+        let (held_tx, held_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let worker_state = state.clone();
+        let worker = std::thread::spawn(move || {
+            let mut machine = worker_state.machine.lock().unwrap();
+            *machine = AppStateMachine::Idle;
+            held_tx.send(()).unwrap();
+            release_rx.recv_timeout(Duration::from_secs(1)).is_ok()
+        });
+        held_rx.recv().unwrap();
+        window.invoke_settings_shortcut_record_requested(ShortcutField::Ptt);
+        window.invoke_settings_shortcut_cleared(ShortcutField::Toggle);
+        window.invoke_settings_reset_sample_rate_requested();
+        window.invoke_settings_model_changed("rejected model".into());
+        window.invoke_update_install_requested();
+        window.invoke_settings_delete_model_requested();
+        update_ui::set_update_row(
+            &window,
+            update_ui::UpdateRow::Ready {
+                version: "fixture".into(),
+                blocked: None,
+            },
+        );
+        window.set_settings_open(true);
+        window.set_settings_tab(super::SettingsTab::System);
+        window.invoke_settings_update_action_requested();
+        assert_eq!(
+            window.get_settings_update_block_reason(),
+            super::InstallBlockReason::RuntimeBusy
+        );
+        assert!(window.get_settings_update_blocked());
+        let _ = release_tx.send(());
+        assert!(
+            worker.join().unwrap(),
+            "UI callbacks must finish while the machine is locked"
+        );
+        assert_eq!(window.get_settings_recording_field(), ShortcutField::Toggle);
+        assert_eq!(
+            window.get_settings_model_delete_error_kind(),
+            super::ModelDeletionError::TransitionBusy
+        );
+        assert!(!window.get_settings_resetting_sample_rate());
+        assert!(io.is_idle_for_test());
+        assert_eq!(db.get_all_settings().unwrap(), before);
+        assert!(command_rx.try_recv().is_err());
+
+        // Releasing a transient lock emits no machine transition. The visible
+        // refusal must clear itself, without a second click or Settings reopen.
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        while (window.get_settings_update_blocked() || window.get_update_install_blocked())
+            && std::time::Instant::now() < deadline
+        {
+            slint::platform::update_timers_and_animations();
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(!window.get_settings_update_blocked());
+        assert!(!window.get_update_install_blocked());
+        assert_eq!(db.get_all_settings().unwrap(), before);
+        assert!(command_rx.try_recv().is_err());
+        drop(audio_tx);
     }
 
     #[test]
@@ -8071,7 +8479,7 @@ mod tests {
             "Alt+Space".into(),
             move |candidate| {
                 *persisted_sink.borrow_mut() = Some(candidate);
-                Ok(())
+                Ok::<(), String>(())
             },
         )
         .unwrap()
