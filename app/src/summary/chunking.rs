@@ -42,10 +42,10 @@ impl ChunkConfig {
     /// stub) is exercised in this build.
     pub const APPLE_INTELLIGENCE: Self = Self {
         stuff_token_limit: 1500,
-        // ~4096 FM context minus system prompt and generation headroom.
-        reduce_token_limit: 3_200,
-        chunk_words: 450,
-        chunk_overlap_words: 40,
+        // ~4096 FM context minus system prompt (~400-600 tokens) and generation headroom (~1000 tokens).
+        reduce_token_limit: 2_400,
+        chunk_words: 800,
+        chunk_overlap_words: 60,
         map_concurrency: 1,
     };
 }
