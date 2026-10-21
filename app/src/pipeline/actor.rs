@@ -1215,6 +1215,10 @@ trait SessionMode {
     fn stall_abort_message(&self) -> String {
         "The transcription engine stopped responding; the recording so far was saved.".to_string()
     }
+
+    /// Suppress cross-lane echo duplicates in a batch of normalized segments.
+    /// Default no-op: `SingleMode` has only one speaker lane.
+    fn filter_cross_lane_echo(&mut self, _segments: &mut [TranscriptionSegment]) {}
 }
 
 /// How much recently gated audio `SingleMode` keeps on hand so it can be
@@ -1511,6 +1515,147 @@ impl SessionMode for SingleMode {
 /// lane (and the stall watchdog) for tens of seconds.
 const DIARIZE_LAG_TOLERANCE_FRAMES: usize = 6;
 
+/// How long recent `Speaker::Them` segments stay in the sliding window used to
+/// detect cross-lane acoustic echo leaked onto `Speaker::Me`.
+const CROSS_LANE_ECHO_RETENTION_SECS: f64 = 15.0;
+/// Maximum timestamp tolerance (seconds) when matching a `Speaker::Me` segment
+/// against concurrent/recent `Speaker::Them` segments. Covers acoustic/VAD/batch
+/// boundary skew across streaming (Kyutai) and windowed (Whisper/Parakeet) lanes.
+const CROSS_LANE_ECHO_TIME_SLOP_SECS: f64 = 3.5;
+/// Minimum fraction of normalized words in a multi-word `Speaker::Me` segment
+/// that must appear in concurrent `Speaker::Them` segments to classify the `Me`
+/// segment as leaked speaker echo.
+const CROSS_LANE_ECHO_WORD_OVERLAP_RATIO: f32 = 0.65;
+
+#[derive(Debug, Clone)]
+struct RecentThemUtterance {
+    start_time: f64,
+    end_time: f64,
+    words: Vec<String>,
+    joined: String,
+    is_final: bool,
+}
+
+/// Transcript-level safety net for diarized meetings: suppresses `Speaker::Me`
+/// segments whose words duplicate concurrent `Speaker::Them` segments within a
+/// short time window (e.g. during initial AEC convergence or non-linear room
+/// reflections).
+#[derive(Debug, Default)]
+struct CrossLaneEchoFilter {
+    recent_them: Vec<RecentThemUtterance>,
+}
+
+impl CrossLaneEchoFilter {
+    fn normalize_words(text: &str) -> Vec<String> {
+        text.split(|c: char| !c.is_alphanumeric())
+            .filter(|w| !w.is_empty())
+            .map(str::to_lowercase)
+            .collect()
+    }
+
+    fn record_them(&mut self, segment: &TranscriptionSegment) {
+        let words = Self::normalize_words(&segment.text);
+        if words.is_empty() {
+            return;
+        }
+        let end_time = segment.end_time.max(segment.start_time);
+        let cutoff = end_time - CROSS_LANE_ECHO_RETENTION_SECS;
+        self.recent_them.retain(|u| u.end_time >= cutoff);
+
+        let joined = words.join(" ");
+        // Replace an earlier live preview at the same start_time so preview
+        // revisions don't accumulate stale entries.
+        if let Some(existing) = self
+            .recent_them
+            .iter_mut()
+            .find(|u| !u.is_final && (u.start_time - segment.start_time).abs() < 0.05)
+        {
+            existing.end_time = end_time;
+            existing.words = words;
+            existing.joined = joined;
+            existing.is_final = segment.is_final;
+            return;
+        }
+
+        self.recent_them.push(RecentThemUtterance {
+            start_time: segment.start_time,
+            end_time,
+            words,
+            joined,
+            is_final: segment.is_final,
+        });
+    }
+
+    fn is_echo_of_them(&self, segment: &TranscriptionSegment) -> bool {
+        let me_words = Self::normalize_words(&segment.text);
+        if me_words.is_empty() {
+            return false;
+        }
+        let me_start = segment.start_time;
+        let me_end = segment.end_time.max(me_start);
+
+        let concurrent: Vec<&RecentThemUtterance> = self
+            .recent_them
+            .iter()
+            .filter(|u| {
+                u.start_time <= me_end + CROSS_LANE_ECHO_TIME_SLOP_SECS
+                    && u.end_time + CROSS_LANE_ECHO_TIME_SLOP_SECS >= me_start
+            })
+            .collect();
+
+        if concurrent.is_empty() {
+            return false;
+        }
+
+        let me_joined = me_words.join(" ");
+        if me_words.len() == 1 {
+            let word = &me_words[0];
+            // Single-word segments: suppress if `Them` said the exact same
+            // single-word utterance, or if a distinctive word (>= 4 chars)
+            // appears inside a concurrent `Them` utterance. Short 1-word
+            // backchannels ("ok", "yes", "oui") while `Them` speaks a different
+            // sentence are preserved.
+            return concurrent.iter().any(|u| {
+                u.joined == *word
+                    || (word.chars().count() >= 4 && u.words.iter().any(|w| w == word))
+            });
+        }
+
+        if concurrent.iter().any(|u| u.joined.contains(&me_joined)) {
+            return true;
+        }
+
+        let matched = me_words
+            .iter()
+            .filter(|w| concurrent.iter().any(|u| u.words.contains(w)))
+            .count();
+        (matched as f32 / me_words.len() as f32) >= CROSS_LANE_ECHO_WORD_OVERLAP_RATIO
+    }
+
+    fn filter_batch(&mut self, segments: &mut [TranscriptionSegment]) {
+        for segment in segments.iter() {
+            if segment.speaker == Some(Speaker::Them) && !segment.text.is_empty() {
+                self.record_them(segment);
+            }
+        }
+        for segment in segments.iter_mut() {
+            if segment.speaker == Some(Speaker::Me)
+                && !segment.text.is_empty()
+                && self.is_echo_of_them(segment)
+            {
+                debug!(
+                    target: crate::logging::TRANSCRIPT_TARGET,
+                    start_time = segment.start_time,
+                    end_time = segment.end_time,
+                    text = %segment.text,
+                    "Suppressed cross-lane echo segment on Me lane"
+                );
+                segment.text.clear();
+            }
+        }
+    }
+}
+
 /// Diarized session: mic (Me) and system audio (Them) buffered separately and
 /// stepped together into one batched `transcribe_dual` call, so the two lanes
 /// stay frame-aligned. No Silero VAD: a silent frame can't be dropped from
@@ -1526,6 +1671,7 @@ struct DiarizedMode {
     /// keep padding it with silence until it receives audio again.
     pad_me: bool,
     pad_them: bool,
+    echo_filter: CrossLaneEchoFilter,
 }
 
 impl DiarizedMode {
@@ -1538,6 +1684,7 @@ impl DiarizedMode {
             them_samples_received: 0,
             pad_me: false,
             pad_them: false,
+            echo_filter: CrossLaneEchoFilter::default(),
         }
     }
 
@@ -1703,6 +1850,10 @@ impl SessionMode for DiarizedMode {
             "The transcription engine stopped responding; the recording so far was saved."
                 .to_string()
         }
+    }
+
+    fn filter_cross_lane_echo(&mut self, segments: &mut [TranscriptionSegment]) {
+        self.echo_filter.filter_batch(segments);
     }
 }
 
@@ -1995,15 +2146,30 @@ fn run_session_loop(
                         }
                         Ok(Some(segments)) => {
                             consecutive_errors = 0;
-                            for seg in segments {
-                                if crate::debug::transcription_debug_enabled() {
+                            if crate::debug::transcription_debug_enabled() {
+                                for seg in &segments {
                                     debug!(target: crate::logging::TRANSCRIPT_TARGET, "Segment: {:?} final={}", seg.text, seg.is_final);
                                 }
-                                segments_emitted += 1;
-                                if emit_filtered(engine, text_filters, seg, on_segment)
-                                    && let Some(monitor) = idle_monitor.as_mut()
-                                    && monitor.note_segment(Instant::now())
-                                {
+                            }
+                            segments_emitted += segments.len() as u64;
+                            let speech_emitted = emit_filtered_batch(
+                                engine,
+                                text_filters,
+                                mode,
+                                segments,
+                                on_segment,
+                            );
+                            if speech_emitted > 0
+                                && let Some(monitor) = idle_monitor.as_mut()
+                            {
+                                let now = Instant::now();
+                                let mut triggered = false;
+                                for _ in 0..speech_emitted {
+                                    if monitor.note_segment(now) {
+                                        triggered = true;
+                                    }
+                                }
+                                if triggered {
                                     publish_meeting_speech();
                                 }
                             }
@@ -2057,7 +2223,7 @@ fn run_session_loop(
 
 /// Drain remaining audio, run every buffered frame through the engine (no VAD
 /// gating: everything already captured must reach the engine), feed the
-/// tail(s), and flush. Every stage's segments go through `emit_filtered`.
+/// tail(s), and flush. Every stage's segments go through `emit_filtered_batch`.
 fn finish_session(
     audio: &mut SessionAudio<'_>,
     engine: &mut dyn TranscriptionEngine,
@@ -2105,9 +2271,7 @@ fn finish_session(
     // withheld audio doesn't land behind newer audio in the engine's stream.
     match mode.drain_withheld(engine) {
         Ok(segments) => {
-            for seg in segments {
-                emit_filtered(engine, text_filters, seg, on_segment);
-            }
+            emit_filtered_batch(engine, text_filters, mode, segments, on_segment);
         }
         Err(e) => error!("Transcribe error draining withheld audio: {e}"),
     }
@@ -2116,12 +2280,12 @@ fn finish_session(
     while mode.frame_ready(chunk_size) {
         match mode.finish_frame(engine, chunk_size) {
             Ok(segments) => {
-                for seg in segments {
-                    if crate::debug::transcription_debug_enabled() {
+                if crate::debug::transcription_debug_enabled() {
+                    for seg in &segments {
                         debug!(target: crate::logging::TRANSCRIPT_TARGET, "Drain segment: {:?} final={}", seg.text, seg.is_final);
                     }
-                    emit_filtered(engine, text_filters, seg, on_segment);
                 }
+                emit_filtered_batch(engine, text_filters, mode, segments, on_segment);
             }
             Err(e) => {
                 error!("Transcribe error during drain: {e}");
@@ -2133,9 +2297,7 @@ fn finish_session(
     // Process any remaining partial tail(s).
     match mode.finish_tail(engine) {
         Ok(segments) => {
-            for seg in segments {
-                emit_filtered(engine, text_filters, seg, on_segment);
-            }
+            emit_filtered_batch(engine, text_filters, mode, segments, on_segment);
         }
         Err(e) => error!("Transcribe error on partial frame: {e}"),
     }
@@ -2146,9 +2308,7 @@ fn finish_session(
             if crate::debug::transcription_debug_enabled() {
                 debug!("Flush: {} segments", segments.len());
             }
-            for seg in segments {
-                emit_filtered(engine, text_filters, seg, on_segment);
-            }
+            emit_filtered_batch(engine, text_filters, mode, segments, on_segment);
             match capture_failure {
                 Some(reason) => Err((crate::state_machine::FailureSource::AudioCapture, reason)),
                 None => Ok(()),
@@ -2162,9 +2322,7 @@ fn finish_session(
                 Ok::<_, crate::engine::EngineError>(engine.salvage_pending_after_flush_error())
             }) {
                 Ok(segments) => {
-                    for seg in segments {
-                        emit_filtered(engine, text_filters, seg, on_segment);
-                    }
+                    emit_filtered_batch(engine, text_filters, mode, segments, on_segment);
                 }
                 Err(salvage_error) => {
                     error!("Pending-word salvage error after flush failed: {salvage_error}")
@@ -2212,20 +2370,18 @@ fn catch_engine<T, E: std::string::ToString>(
     }
 }
 
-/// Normalize engine-specific tokens, then apply text filter chain before
-/// emitting. Returns whether the filtered text was non-empty (i.e. an actual
-/// segment reached `on_segment`), which the meeting idle monitor uses as its
-/// speech-activity signal.
-fn emit_filtered(
+fn normalize_segment_text(
     engine: &dyn TranscriptionEngine,
     text_filters: &Rc<RefCell<TextFilterChain>>,
-    mut segment: TranscriptionSegment,
-    on_segment: &SegmentCallback,
-) -> bool {
+    segment: &mut TranscriptionSegment,
+) {
     // Step 1: engine-specific normalization (strip [_TT_], ▁, etc.)
     segment.text = engine.normalize_text(&segment.text);
     // Step 2: shared text filter chain (filler, stutter, dictionary, whitespace)
     segment.text = text_filters.borrow().apply(&segment.text);
+}
+
+fn emit_normalized_segment(segment: TranscriptionSegment, on_segment: &SegmentCallback) -> bool {
     if segment.text.is_empty() {
         // An empty revisable hypothesis retracts the previous preview. It
         // is live-only and must not count as speech for idle monitoring.
@@ -2236,6 +2392,44 @@ fn emit_filtered(
     }
     on_segment(segment);
     true
+}
+
+/// Normalize engine-specific tokens, then apply text filter chain before
+/// emitting. Returns whether the filtered text was non-empty (i.e. an actual
+/// segment reached `on_segment`), which the meeting idle monitor uses as its
+/// speech-activity signal.
+#[cfg(test)]
+fn emit_filtered(
+    engine: &dyn TranscriptionEngine,
+    text_filters: &Rc<RefCell<TextFilterChain>>,
+    mut segment: TranscriptionSegment,
+    on_segment: &SegmentCallback,
+) -> bool {
+    normalize_segment_text(engine, text_filters, &mut segment);
+    emit_normalized_segment(segment, on_segment)
+}
+
+/// Normalize a batch of segments, apply mode-specific cross-lane echo
+/// deduplication, and emit each segment. Returns how many non-empty speech
+/// segments were emitted.
+fn emit_filtered_batch(
+    engine: &dyn TranscriptionEngine,
+    text_filters: &Rc<RefCell<TextFilterChain>>,
+    mode: &mut dyn SessionMode,
+    mut segments: Vec<TranscriptionSegment>,
+    on_segment: &SegmentCallback,
+) -> usize {
+    for segment in &mut segments {
+        normalize_segment_text(engine, text_filters, segment);
+    }
+    mode.filter_cross_lane_echo(&mut segments);
+    let mut speech_emitted = 0usize;
+    for segment in segments {
+        if emit_normalized_segment(segment, on_segment) {
+            speech_emitted += 1;
+        }
+    }
+    speech_emitted
 }
 
 /// System notification for the first crossing of an idle signal only;
@@ -5116,5 +5310,128 @@ mod tests {
         assert_eq!(info.audio.sample_rate_hz, crate::constants::SAMPLE_RATE);
         actor.unload_model().expect("unload");
         assert!(actor.loaded_engine_info().is_none());
+    }
+
+    #[test]
+    fn cross_lane_echo_filter_suppresses_me_duplicate_even_when_sorted_before_them() {
+        let engine = MockEngine::new();
+        let filters = Rc::new(RefCell::new(TextFilterChain::new(vec![])));
+        let mut mode = super::DiarizedMode::new();
+        let (collected, cb) = collecting_callback();
+
+        // Simulate a batch (e.g. from BatchSession::dual_at) where Me's start_time
+        // slightly precedes Them's start_time in the same 5s window.
+        let batch = vec![
+            TranscriptionSegment {
+                text: "Let us review the quarterly roadmap".into(),
+                start_time: 1.0,
+                end_time: 4.2,
+                confidence: None,
+                language: None,
+                is_final: true,
+                speaker: Some(Speaker::Me),
+            },
+            TranscriptionSegment {
+                text: "Let us review the quarterly roadmap today".into(),
+                start_time: 1.1,
+                end_time: 4.5,
+                confidence: None,
+                language: None,
+                is_final: true,
+                speaker: Some(Speaker::Them),
+            },
+        ];
+
+        let emitted = super::emit_filtered_batch(&engine, &filters, &mut mode, batch, &cb);
+        assert_eq!(emitted, 1, "only Them segment should be emitted");
+        let segments = collected.lock().unwrap();
+        assert_eq!(segments.len(), 1);
+        assert_eq!(segments[0].speaker, Some(Speaker::Them));
+        assert_eq!(
+            segments[0].text,
+            "Let us review the quarterly roadmap today"
+        );
+    }
+
+    #[test]
+    fn cross_lane_echo_filter_preserves_distinct_me_speech_and_short_backchannels() {
+        let engine = MockEngine::new();
+        let filters = Rc::new(RefCell::new(TextFilterChain::new(vec![])));
+        let mut mode = super::DiarizedMode::new();
+        let (collected, cb) = collecting_callback();
+
+        let batch = vec![
+            TranscriptionSegment {
+                text: "Can everyone see the architecture diagram on screen?".into(),
+                start_time: 10.0,
+                end_time: 13.5,
+                confidence: None,
+                language: None,
+                is_final: true,
+                speaker: Some(Speaker::Them),
+            },
+            TranscriptionSegment {
+                text: "Yes".into(),
+                start_time: 12.8,
+                end_time: 13.2,
+                confidence: None,
+                language: None,
+                is_final: true,
+                speaker: Some(Speaker::Me),
+            },
+            TranscriptionSegment {
+                text: "I can see it clearly from my side".into(),
+                start_time: 13.6,
+                end_time: 15.8,
+                confidence: None,
+                language: None,
+                is_final: true,
+                speaker: Some(Speaker::Me),
+            },
+        ];
+
+        let emitted = super::emit_filtered_batch(&engine, &filters, &mut mode, batch, &cb);
+        assert_eq!(emitted, 3, "genuine Me responses must be preserved");
+        let segments = collected.lock().unwrap();
+        assert_eq!(segments.len(), 3);
+    }
+
+    #[test]
+    fn cross_lane_echo_filter_retracts_suppressed_live_preview_on_me_lane() {
+        let engine = MockEngine::new();
+        let filters = Rc::new(RefCell::new(TextFilterChain::new(vec![])));
+        let mut mode = super::DiarizedMode::new();
+        let (collected, cb) = collecting_callback();
+
+        let batch = vec![
+            TranscriptionSegment {
+                text: "deployment pipeline finished".into(),
+                start_time: 20.0,
+                end_time: 22.0,
+                confidence: None,
+                language: None,
+                is_final: false,
+                speaker: Some(Speaker::Them),
+            },
+            TranscriptionSegment {
+                text: "deployment pipeline".into(),
+                start_time: 20.1,
+                end_time: 21.8,
+                confidence: None,
+                language: None,
+                is_final: false,
+                speaker: Some(Speaker::Me),
+            },
+        ];
+
+        let emitted = super::emit_filtered_batch(&engine, &filters, &mut mode, batch, &cb);
+        assert_eq!(emitted, 1, "only Them counts as emitted speech");
+        let segments = collected.lock().unwrap();
+        assert_eq!(segments.len(), 2, "Me preview emits empty retraction");
+        assert_eq!(segments[0].speaker, Some(Speaker::Them));
+        assert_eq!(segments[0].text, "deployment pipeline finished");
+        assert_eq!(segments[1].speaker, Some(Speaker::Me));
+        assert_eq!(segments[1].text, "");
+        assert!(!segments[1].is_final);
     }
 }

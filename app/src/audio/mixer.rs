@@ -38,6 +38,17 @@ const TAP_SIGNAL_RMS_FLOOR: f32 = 0.0005;
 const TAP_AEC_RMS_THRESHOLD: f32 = 0.008;
 const TAP_RMS_ATTACK: f32 = 0.3;
 const TAP_RMS_DECAY: f32 = 0.9;
+/// Pre-gain RMS ceiling below which post-AEC residual signal can be gated as
+/// single-talk echo tail before engine `mic_gain` (e.g. 3.0x) amplifies it.
+const RESIDUAL_ECHO_GATE_MAX_RMS: f32 = 0.018;
+/// Maximum ratio of post-AEC RMS to `tap_rms_ema` for residual echo gating.
+const RESIDUAL_ECHO_GATE_TAP_RATIO: f32 = 0.15;
+/// Maximum ratio of post-AEC RMS to pre-AEC `raw` mic RMS indicating that the
+/// linear FDAF actively cancelled correlated far-end echo (single-talk) rather
+/// than passing through uncorrelated near-end speech.
+const RESIDUAL_ECHO_MAX_RETENTION: f32 = 0.55;
+/// Pre-AEC mic RMS floor below which capture is effectively ambient silence.
+const RESIDUAL_ECHO_SILENCE_RMS: f32 = 0.003;
 
 pub struct MeetingMixer {
     mic: HeapCons<f32>,
@@ -48,11 +59,14 @@ pub struct MeetingMixer {
     /// Second engine-rate resampler used only in diarized (split) mode, so the
     /// system-audio leg has its own resampler state independent of the mic leg.
     tap_to_engine: Resampler,
+    /// Engine-specific voice amplification applied to the mic leg *after* AEC
+    /// so pre-AEC capture stays linear and unclipped against the 1.0x tap leg.
+    mic_gain: f32,
     mic_fifo: Vec<f32>,
     tap_fifo: Vec<f32>,
     scratch: Vec<f32>,
-    /// Echo cancellation, active only when the output routes to the
-    /// built-in speakers (headphones can't leak into the mic).
+    /// Echo cancellation, active only when the output routes to speakers
+    /// (headphones can't leak into the mic).
     aec: Option<Aec>,
     /// Tap samples discarded to bound drift; logged at session end.
     tap_discarded: u64,
@@ -93,12 +107,14 @@ impl MeetingMixer {
         Self {
             mic,
             tap,
-            // The mic gain is engine-specific amplification for voice input;
-            // the system-audio leg is already line-level, so it stays at 1.0.
-            mic_to_mix: Resampler::new(mic_rate, mic_channels, MIX_RATE, mic_gain),
+            // Resample both legs at unity gain (1.0) so `fdaf-aec` cancels
+            // unclipped linear mic samples against the 1.0x tap reference;
+            // `mic_gain` is applied post-AEC in `split_frame`.
+            mic_to_mix: Resampler::new(mic_rate, mic_channels, MIX_RATE, 1.0),
             tap_to_mix: Resampler::new(tap_rate, 1, MIX_RATE, 1.0),
             to_engine: Resampler::new(MIX_RATE, 1, engine_rate, 1.0),
             tap_to_engine: Resampler::new(MIX_RATE, 1, engine_rate, 1.0),
+            mic_gain,
             mic_fifo: Vec::new(),
             tap_fifo: Vec::new(),
             scratch: vec![0.0; 4096],
@@ -188,7 +204,8 @@ impl MeetingMixer {
         let tail = self.mic_to_mix.flush();
         self.mic_fifo.extend(tail);
         self.mic = mic;
-        self.mic_to_mix = Resampler::new(mic_rate, mic_channels, MIX_RATE, mic_gain);
+        self.mic_to_mix = Resampler::new(mic_rate, mic_channels, MIX_RATE, 1.0);
+        self.mic_gain = mic_gain;
 
         // During a rebuild, the `meeting_tick` is not pumping the mixer, so the
         // tap leg (which survived the mic rebuild) accumulates system audio.
@@ -393,6 +410,26 @@ impl MeetingMixer {
         tap
     }
 
+    fn frame_rms(samples: &[f32]) -> f32 {
+        if samples.is_empty() {
+            return 0.0;
+        }
+        let mean_sq = samples.iter().map(|s| s * s).sum::<f32>() / samples.len() as f32;
+        mean_sq.sqrt()
+    }
+
+    /// True when the post-AEC capture frame is small residual far-end echo
+    /// left behind during single-talk (FDAF cancelled the majority of the raw
+    /// capture energy, or raw capture is already below ambient silence).
+    /// Double-talk and quiet uncorrelated near-end speech are preserved.
+    fn is_single_talk_residual_echo(&self, raw_rms: f32, cancelled_rms: f32) -> bool {
+        let within_residual_floor = cancelled_rms <= RESIDUAL_ECHO_GATE_MAX_RMS
+            && cancelled_rms <= self.tap_rms_ema * RESIDUAL_ECHO_GATE_TAP_RATIO;
+        let correlated_cancellation = raw_rms <= RESIDUAL_ECHO_SILENCE_RMS
+            || cancelled_rms <= raw_rms * RESIDUAL_ECHO_MAX_RETENTION;
+        within_residual_floor && correlated_cancellation
+    }
+
     /// Drain one frame from each leg and echo-cancel the mic, but return the
     /// two legs separately (mic, tap) rather than summed. `tap` is zero-padded
     /// to `n` so the two are always the same length.
@@ -423,6 +460,14 @@ impl MeetingMixer {
             let mut cancelled = mic;
             aec.process_capture(&mut cancelled);
 
+            if target > 0.5 {
+                let raw_rms = Self::frame_rms(&raw);
+                let cancelled_rms = Self::frame_rms(&cancelled);
+                if self.is_single_talk_residual_echo(raw_rms, cancelled_rms) {
+                    cancelled.fill(0.0);
+                }
+            }
+
             if (self.aec_apply_mix - target).abs() < f32::EPSILON {
                 mic = if target > 0.5 { cancelled } else { raw };
             } else {
@@ -435,6 +480,12 @@ impl MeetingMixer {
                     })
                     .collect();
                 self.aec_apply_mix = target;
+            }
+        }
+
+        if (self.mic_gain - 1.0).abs() > f32::EPSILON {
+            for sample in &mut mic {
+                *sample = (*sample * self.mic_gain).clamp(-1.0, 1.0);
             }
         }
 
@@ -1081,6 +1132,39 @@ mod tests {
             "expected ~24000 samples, got {}",
             out.len()
         );
+    }
+
+    #[test]
+    fn mic_gain_scales_post_aec_and_preserves_near_end_speech() {
+        let (mut mic_prod, mic_cons) = HeapRb::<f32>::new(48_000 * 2).split();
+        let (_tap_prod, tap_cons) = HeapRb::<f32>::new(48_000 * 2).split();
+        let mut mixer = MeetingMixer::new(mic_cons, 48_000, 1, 3.0, tap_cons, 48_000, 48_000);
+        mixer.set_aec(Some(Aec::new(MIX_RATE)));
+
+        mic_prod.push_slice(&vec![0.2f32; FRAME_SAMPLES * 4]);
+        let (me, _them) = mixer.tick_split();
+        let mid = me[me.len() / 2];
+        assert!(
+            (mid - 0.6).abs() < 0.05,
+            "expected 3.0x post-AEC gain (~0.6), got {mid}"
+        );
+    }
+
+    #[test]
+    fn single_talk_residual_echo_gate_distinguishes_echo_from_near_end_speech() {
+        let (_mic_prod, mic_cons) = HeapRb::<f32>::new(48_000).split();
+        let (_tap_prod, tap_cons) = HeapRb::<f32>::new(48_000).split();
+        let mut mixer = MeetingMixer::new(mic_cons, 48_000, 1, 3.0, tap_cons, 48_000, 48_000);
+        mixer.tap_rms_ema = 0.20;
+
+        // Correlated single-talk echo: raw RMS 0.072 cancelled down to 0.008 -> gated.
+        assert!(mixer.is_single_talk_residual_echo(0.072, 0.008));
+
+        // Uncorrelated quiet near-end speech: raw RMS 0.012, post-AEC RMS 0.011 -> preserved.
+        assert!(!mixer.is_single_talk_residual_echo(0.012, 0.011));
+
+        // Double-talk: post-AEC RMS 0.14 exceeds residual floor -> preserved.
+        assert!(!mixer.is_single_talk_residual_echo(0.16, 0.14));
     }
 }
 
