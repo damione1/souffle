@@ -4,7 +4,7 @@
 //! TranscriptionUnavailableReason) injects an explicitly synthetic failure.
 //! SPEECH_SETTINGS_LOCALE=fr/en controls only the UI language.
 
-slint::include_modules!();
+use souffle_slint::*;
 
 #[allow(dead_code)]
 #[path = "../src/audio_ui.rs"]

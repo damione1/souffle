@@ -2,17 +2,9 @@
 include!("support/summary_bench.rs");
 
 fn benchmark_command() -> std::process::Command {
-    let mut command =
-        std::process::Command::new(std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into()));
-    command.args([
-        "run",
-        "--quiet",
-        "--manifest-path",
-        concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml"),
-        "--example",
-        "summary_bench",
-    ]);
-    command
+    // Cargo provides the exact artifact path, including custom target dirs and
+    // profiles. Never start another build (or change the feature graph) in a test.
+    std::process::Command::new(env!("CARGO_BIN_EXE_souffle-summary-bench"))
 }
 
 #[test]
@@ -53,7 +45,9 @@ fn summary_bench() {
 #[test]
 fn benchmark_entry_dispatches_apple_helper_before_reading_private_corpus() {
     let output = benchmark_command()
-        .args(["--", "--internal-apple-intelligence-helper"])
+        .arg("--internal-apple-intelligence-helper")
+        // The entry must work without invoking Cargo during test execution.
+        .env("CARGO", "souffle-test-must-not-invoke-cargo")
         .stdin(std::process::Stdio::null())
         .output()
         .expect("run benchmark helper entry");

@@ -27,7 +27,14 @@ edition = "2024"
 
 [lib]
 name = "souffle_lib"
-crate-type = ["staticlib", "cdylib", "rlib"]
+# Every consumer (including the native bundle) links this as a Rust library.
+# Native Swift/Objective-C archives are linked through it, not a C ABI product.
+crate-type = ["rlib"]
+
+[[bin]]
+# Cargo builds this helper before integration tests, which run it directly.
+name = "souffle-summary-bench"
+path = "tools/summary_bench.rs"
 
 [[test]]
 name = "native_paste_main_thread"
