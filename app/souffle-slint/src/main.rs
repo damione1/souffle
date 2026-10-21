@@ -3,7 +3,7 @@
 // no webview, no Tauri runtime. AC5 pattern: state and actions cross the
 // Rust<->UI boundary as plain Slint properties and callbacks - direct
 // in-process function calls, no IPC, no serialization.
-slint::include_modules!();
+use souffle_slint::*;
 
 mod app_branch_ui;
 mod audio_player;
