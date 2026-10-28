@@ -3,21 +3,23 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{{ pageTitle or t.meta.title }}</title>
-  <meta name="description" content="{{ t.meta.description }}">
+  <title>{{ pageTitle | escape }}</title>
+  <meta name="description" content="{{ pageDescription | escape }}">
+  {% if isNotFound %}<meta name="robots" content="noindex">{% endif %}
   <link rel="icon" href="/favicon.ico" sizes="48x48">
   <link rel="icon" href="/souffle-logo.svg" type="image/svg+xml" sizes="any">
   <link rel="apple-touch-icon" href="/apple-touch-icon.png">
   <link rel="stylesheet" href="{{ '/css/site.css' | bust }}">
-  <link rel="stylesheet" href="{{ '/css/mocks.css' | bust }}">
-  {% set altEn = "/docs/" if isDocs else "/" %}
-  {% set altFr = "/fr/docs/" if isDocs else "/fr/" %}
+  {% if isHome %}<link rel="stylesheet" href="{{ '/css/mocks.css' | bust }}">{% endif %}
+  {% if not isNotFound %}
   <link rel="canonical" href="{{ site.url }}{{ page.url }}">
-  <link rel="alternate" hreflang="en" href="{{ site.url }}{{ altEn }}">
-  <link rel="alternate" hreflang="fr" href="{{ site.url }}{{ altFr }}">
-  <link rel="alternate" hreflang="x-default" href="{{ site.url }}{{ altEn }}">
-  <meta property="og:title" content="{{ pageTitle or t.meta.title }}">
-  <meta property="og:description" content="{{ t.meta.ogDescription }}">
+  {% for language in locales %}
+  <link rel="alternate" hreflang="{{ language.code }}" href="{{ site.url }}/{{ language.dir }}{{ translationPath }}">
+  {% endfor %}
+  <link rel="alternate" hreflang="x-default" href="{{ site.url }}/{{ translationPath }}">
+  {% endif %}
+  <meta property="og:title" content="{{ pageTitle | escape }}">
+  <meta property="og:description" content="{{ pageDescription | escape }}">
   <meta property="og:type" content="website">
   <meta property="og:url" content="{{ site.url }}{{ page.url }}">
   <meta property="og:image" content="{{ site.url }}/og-{{ t.htmlLang }}.png">
@@ -29,23 +31,27 @@
   <meta property="og:locale" content="{{ 'fr_CA' if t.htmlLang == 'fr' else 'en_US' }}">
   <meta property="og:locale:alternate" content="{{ 'en_US' if t.htmlLang == 'fr' else 'fr_CA' }}">
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="{{ pageTitle or t.meta.title }}">
-  <meta name="twitter:description" content="{{ t.meta.ogDescription }}">
+  <meta name="twitter:title" content="{{ pageTitle | escape }}">
+  <meta name="twitter:description" content="{{ pageDescription | escape }}">
   <meta name="twitter:image" content="{{ site.url }}/og-{{ t.htmlLang }}.png">
   <meta name="twitter:image:alt" content="{{ t.meta.imageAlt }}">
-  {%- if not isDocs %}
+  {%- if isHome %}
   {% set app = {
     "@context": "https://schema.org",
     "@type": "SoftwareApplication",
+    "@id": site.url + "/#software",
     "name": site.name,
     "description": t.meta.description,
     "url": site.url + page.url,
     "image": site.url + "/og-" + t.htmlLang + ".png",
     "operatingSystem": "macOS 13.0 or later",
     "processorRequirements": "Apple Silicon (ARM64)",
+    "applicationCategory": "BusinessApplication",
+    "offers": { "@type": "Offer", "price": 0 },
+    "sameAs": [site.repo],
     "license": site.license,
     "downloadUrl": site.latest,
-    "author": { "@type": "Person", "name": site.author },
+    "author": { "@type": "Person", "name": site.author, "url": site.authorUrl },
     "inLanguage": t.htmlLang
   } %}
   <script type="application/ld+json">{{ app | jsonld | safe }}</script>
@@ -56,6 +62,6 @@
   <main>{{ content | safe }}</main>
   {% include "partials/footer.njk" %}
   <script src="{{ '/js/site.js' | bust }}" defer></script>
-  <script src="{{ '/js/mocks.js' | bust }}" defer></script>
+  {% if isHome %}<script src="{{ '/js/mocks.js' | bust }}" defer></script>{% endif %}
 </body>
 </html>

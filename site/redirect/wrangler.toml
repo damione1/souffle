@@ -1,0 +1,7 @@
+name = "souffle-www-redirect"
+main = "worker.js"
+compatibility_date = "2026-10-01"
+account_id = "38a68fae0765d8ec046acaaed0cbf111"
+workers_dev = false
+preview_urls = false
+routes = [{ pattern = "www.usesouffle.app/*", zone_name = "usesouffle.app" }]

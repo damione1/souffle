@@ -1,11 +1,13 @@
 ---
-pagination: { data: locales, size: 1, alias: loc }
+pagination: { data: locales, size: 1, alias: loc, addAllPagesToCollections: true }
 permalink: "{{ loc.dir }}index.html"
 layout: layouts/base.njk
+isHome: true
+tags: sitemap
 ---
 {% from "icons.njk" import icon %}
 {% from "mocks/mocks.njk" import meeting, dictation, home, outcomes, overlay %}
-{% set docs = "/docs/" if loc.code == "en" else "/fr/docs/" %}
+{% set docs = "/" + locale.dir + "docs/" %}
 
 {#
   One sheet. Hierarchy is size and line breaks; there are no cards, no
@@ -35,7 +37,7 @@ layout: layouts/base.njk
     </h1>
 
     <div class="hero-under">
-      <p class="t-s measure">{{ t.hero.sub }}</p>
+      <div class="hero-copy"><p class="t-2xs hero-category">{{ t.hero.category }}</p><p class="t-s measure">{{ t.hero.sub }}</p></div>
       <div class="hero-do">
         <a class="act-solid" href="{{ site.latest }}">{{ t.hero.cta }}{{ icon("arrow", 22) }}</a>
         {{ copyline(site.brew, t.nav.copy) }}
@@ -48,6 +50,7 @@ layout: layouts/base.njk
       <figcaption class="plate-note">
         <span class="t-3xs">{{ t.mock.liveMeeting }}</span>
         <span class="t-2xs dim">{{ t.hero.caption }}</span>
+        <span class="t-3xs dim">{{ t.mock.demoLabel }}</span>
       </figcaption>
     </figure>
   </div>
@@ -68,7 +71,9 @@ layout: layouts/base.njk
           {%- for b in f.bullets %}<li>{{ b }}</li>{% endfor %}
         </ul>
       </div>
-      <figure class="act-plate">{{ plate(f.mock, t) }}</figure>
+      {% set featureGuide = guides | guideForSection(f.id) %}
+      <a class="more-link t-2xs" href="{{ docs }}{{ featureGuide.slug }}/">{{ t.docs.readGuide }} {{ featureGuide[locale.code].title }}{{ icon("arrow", 14) }}</a>
+      <figure class="act-plate">{{ plate(f.mock, t) }}<figcaption class="t-3xs dim demo-label">{{ t.mock.demoLabel }}</figcaption></figure>
       {%- if f.overlayAfter %}{% include "partials/overlay-section.njk" %}{% endif %}
     </article>
     {%- endfor %}
@@ -92,6 +97,8 @@ layout: layouts/base.njk
       </div>
       {%- endfor %}
     </div>
+    {% set modelGuide = guides | guideForSection("models") %}
+    <a class="more-link t-2xs" href="{{ docs }}{{ modelGuide.slug }}/">{{ t.docs.readGuide }} {{ modelGuide[locale.code].title }}{{ icon("arrow", 14) }}</a>
   </div>
 </section>
 
@@ -107,7 +114,8 @@ layout: layouts/base.njk
       </div>
       {%- endfor %}
     </div>
-    <a class="more-link t-2xs" href="{{ docs }}#privacy">{{ t.privacy.more }}{{ icon("arrow", 14) }}</a>
+    {% set privacyGuide = guides | guideForSection("privacy") %}
+    <a class="more-link t-2xs" href="{{ docs }}{{ privacyGuide.slug }}/#privacy">{{ t.privacy.more }}{{ icon("arrow", 14) }}</a>
   </div>
 </section>
 
@@ -123,7 +131,8 @@ layout: layouts/base.njk
       </div>
       {%- endfor %}
     </div>
-    <a class="more-link t-2xs" href="{{ docs }}#export">{{ t.owndata.more }}{{ icon("arrow", 14) }}</a>
+    {% set exportGuide = guides | guideForSection("export") %}
+    <a class="more-link t-2xs" href="{{ docs }}{{ exportGuide.slug }}/#export">{{ t.owndata.more }}{{ icon("arrow", 14) }}</a>
   </div>
 </section>
 
@@ -156,7 +165,7 @@ layout: layouts/base.njk
 {# ── THE CLOSE ── #}
 <section id="download" class="band drenched">
   <div class="sheet close">
-    <h2 class="t-xl" data-fit><span class="hl">{{ t.cta.title }}</span></h2>
+    <h2 class="t-xl close-title">{{ t.cta.title }}</h2>
     <div class="close-under">
       <p class="t-s measure">{{ t.cta.sub | safe }}</p>
       <div class="close-do">
