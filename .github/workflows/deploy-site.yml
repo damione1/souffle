@@ -51,7 +51,9 @@ jobs:
         working-directory: site
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          GA_MEASUREMENT_ID: ${{ vars.GA_MEASUREMENT_ID }}
         run: |
+          test -n "$GA_MEASUREMENT_ID"
           npm ci
           npm run build
 

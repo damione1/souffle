@@ -1,3 +1,4 @@
+{% if analytics.measurementId %}
 <script>
   window.dataLayer = window.dataLayer || [];
   function gtag(){dataLayer.push(arguments);}
@@ -18,3 +19,4 @@
   }
 </script>
 <script src="{{ '/js/analytics.js' | bust }}" data-web-vitals="{{ webVitalsUrl }}" defer></script>
+{% endif %}
