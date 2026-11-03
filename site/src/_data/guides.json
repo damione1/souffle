@@ -1,0 +1,114 @@
+[
+  {
+    "slug": "getting-started",
+    "sections": ["install", "requirements", "permissions", "first-run", "settings"],
+    "en": {
+      "title": "Get started with Soufflé on Mac",
+      "description": "Install Soufflé on an Apple Silicon Mac, grant the permissions you need, download a local speech model and make your first dictation.",
+      "intro": "Start with a supported Mac, install the app, then download one speech model. Dictation needs no account or AI provider. Add meeting audio and summaries when you need them.",
+      "steps": ["Install Soufflé with Homebrew or the signed DMG from GitHub, then open it from Applications.", "Grant Microphone access, choose a speech model and wait for its first download. Keep the default Kyutai 1B model for streaming French and English.", "Record a short dictation and check the text. Enable auto-paste and grant Accessibility access if you want the text inserted into the app you were using."]
+    },
+    "fr": {
+      "title": "Premiers pas avec Soufflé sur Mac",
+      "description": "Installez Soufflé sur un Mac Apple Silicon, accordez les permissions utiles, téléchargez un modèle local et réussissez votre première dictée.",
+      "intro": "Installez l'app sur un Mac compatible, puis téléchargez un modèle vocal. La dictée ne demande ni compte ni fournisseur d'IA. Ajoutez l'audio des réunions et les résumés selon vos besoins.",
+      "steps": ["Installez Soufflé avec Homebrew ou le DMG signé disponible sur GitHub, puis ouvrez l'app depuis Applications.", "Autorisez le microphone, choisissez un modèle vocal et attendez son premier téléchargement. Kyutai 1B, le modèle par défaut, traite le français et l'anglais en continu.", "Enregistrez une courte dictée et vérifiez le texte. Activez le collage automatique et autorisez l'Accessibilité si vous souhaitez insérer le texte dans l'app utilisée."]
+    }
+  },
+  {
+    "slug": "dictation",
+    "sections": ["dictation", "shortcuts", "overlay"],
+    "en": {
+      "title": "Dictate into your Mac apps with Soufflé",
+      "description": "Use Soufflé for local dictation in Mac apps: configure shortcuts, push-to-talk, the recording overlay, text insertion and optional wording polish.",
+      "intro": "Soufflé records your voice from a global shortcut and turns it into text on your Mac. You can copy the result or insert it into the app you were using, without switching to a separate editor.",
+      "steps": ["Put the cursor where you want the text, then press your dictation shortcut. Choose toggle or push-to-talk in Settings → Interface.", "Speak, then stop the recording. Kyutai streams text while you speak; Whisper and Parakeet produce the result once you stop.", "Paste the copied text, or enable auto-paste. If an app rejects insertion, check Accessibility access or choose simulated typing in Settings → Interface."]
+    },
+    "fr": {
+      "title": "Dicter dans les apps Mac avec Soufflé",
+      "description": "Configurez la dictée locale sur Mac avec Soufflé : raccourcis, appui maintenu, pastille d'enregistrement, insertion du texte et reformulation facultative.",
+      "intro": "Un raccourci global lance l'enregistrement et Soufflé transforme votre voix en texte sur votre Mac. Copiez le résultat ou insérez-le dans l'app utilisée, sans passer par un éditeur séparé.",
+      "steps": ["Placez le curseur à l'endroit voulu, puis utilisez le raccourci de dictée. Choisissez le mode bascule ou l'appui maintenu dans Paramètres → Interface.", "Parlez, puis arrêtez l'enregistrement. Kyutai affiche le texte en continu ; Whisper et Parakeet produisent le résultat à l'arrêt.", "Collez le texte copié ou activez le collage automatique. Si une app refuse l'insertion, vérifiez l'Accessibilité ou choisissez la frappe simulée dans Paramètres → Interface."]
+    }
+  },
+  {
+    "slug": "meetings",
+    "sections": ["meetings"],
+    "en": {
+      "title": "Transcribe meetings locally on Mac",
+      "description": "Record meeting transcripts with Soufflé on Mac, capture system audio, separate Me from Them with Kyutai, resume sessions and manage optional audio recordings.",
+      "intro": "A meeting combines your microphone with the audio playing on your Mac. With a Kyutai model, the transcript separates your voice from everyone else's. It does not identify each remote participant by name.",
+      "steps": ["Use macOS 14.4 or later for system-audio capture, grant the relevant permission and select a Kyutai model if you need Me/Them separation.", "Start a meeting from Home or a calendar event. Check that system audio is active; Mic only means the other participants are not being captured.", "Stop the meeting and review the transcript. Resume recording to add another session, export the result, or generate a summary with a configured AI provider."]
+    },
+    "fr": {
+      "title": "Transcrire une réunion en local sur Mac",
+      "description": "Transcrivez vos réunions avec Soufflé : audio système sur Mac, séparation Moi/Eux avec Kyutai, reprise de session et conservation facultative de l'audio.",
+      "intro": "Une réunion combine votre microphone et le son joué sur le Mac. Avec un modèle Kyutai, la transcription sépare votre voix de celle des autres. Elle n'identifie pas chaque participant distant par son nom.",
+      "steps": ["Utilisez macOS 14.4 ou plus récent pour capturer l'audio système, accordez la permission correspondante et choisissez Kyutai pour la séparation Moi/Eux.", "Lancez une réunion depuis l'accueil ou un événement du calendrier. Vérifiez que l'audio système est actif : Micro seul signifie que les autres participants ne sont pas capturés.", "Arrêtez la réunion et relisez la transcription. Reprenez l'enregistrement pour ajouter une session, exportez le résultat ou générez un résumé avec un fournisseur d'IA configuré."]
+    }
+  },
+  {
+    "slug": "models",
+    "sections": ["models"],
+    "en": {
+      "title": "Choose a local speech model for Soufflé",
+      "description": "Compare Soufflé's Kyutai, Whisper and Parakeet models by language, streaming, disk space and meeting speaker separation on an Apple Silicon Mac.",
+      "intro": "Every speech model runs on your Mac. Choose by language first, then by whether you want text during recording or once it ends. The model download is separate from the app and is kept for later use.",
+      "steps": ["For streaming dictation in French and English, start with Kyutai STT 1B. It is also suitable for Me/Them separation in meetings.", "For other languages, compare Whisper and Parakeet. Both transcribe once recording stops, and neither separates the microphone from the other meeting voices.", "Choose the model in Settings → Transcription and download it before going offline. Check the disk requirements below; unused models can be removed in Settings → System."]
+    },
+    "fr": {
+      "title": "Choisir un modèle vocal local pour Soufflé",
+      "description": "Comparez Kyutai, Whisper et Parakeet dans Soufflé : langues, transcription en continu, espace disque et séparation des voix en réunion sur Mac Apple Silicon.",
+      "intro": "Chaque modèle vocal s'exécute sur votre Mac. Choisissez d'abord selon la langue, puis selon que vous voulez le texte pendant l'enregistrement ou à l'arrêt. Le modèle est téléchargé séparément de l'app et conservé pour la suite.",
+      "steps": ["Pour dicter en français et en anglais avec du texte en continu, commencez par Kyutai STT 1B. Il permet aussi la séparation Moi/Eux en réunion.", "Pour d'autres langues, comparez Whisper et Parakeet. Ils transcrivent à l'arrêt et ne séparent pas le microphone des autres voix de la réunion.", "Choisissez le modèle dans Paramètres → Transcription et téléchargez-le avant de passer hors ligne. Vérifiez l'espace disque ci-dessous ; les modèles inutilisés se suppriment dans Paramètres → Système."]
+    }
+  },
+  {
+    "slug": "summaries",
+    "sections": ["summaries"],
+    "en": {
+      "title": "Set up local meeting summaries in Soufflé",
+      "description": "Generate meeting summaries, decisions and action items with Apple Intelligence or Ollama in Soufflé. Check macOS requirements and local versus remote server settings.",
+      "intro": "Summaries are an optional step after transcription. A supported Apple Intelligence configuration or an Ollama instance can turn the transcript into a summary, decisions, action items and open questions.",
+      "steps": ["Open Settings → AI and check which provider is available. Apple Intelligence requires macOS 26 or later and availability on your Mac; transcription does not require it.", "For Ollama, install the server and a chat model, then select that model in Soufflé. Keep the server URL on localhost to process the transcript on this Mac.", "Open a recorded meeting and generate its summary. Review decisions and action items before using them; you can edit the summary templates in Settings → AI."]
+    },
+    "fr": {
+      "title": "Configurer les résumés locaux dans Soufflé",
+      "description": "Générez résumés de réunion, décisions et tâches avec Apple Intelligence ou Ollama dans Soufflé. Vérifiez les prérequis macOS et la configuration du serveur.",
+      "intro": "Le résumé est une étape facultative après la transcription. Apple Intelligence, quand il est disponible, ou une instance Ollama extrait un résumé, des décisions, des tâches et les questions ouvertes.",
+      "steps": ["Ouvrez Paramètres → IA et vérifiez le fournisseur disponible. Apple Intelligence demande macOS 26 ou plus récent et doit être disponible sur votre Mac ; la transcription n'en dépend pas.", "Pour Ollama, installez le serveur et un modèle de conversation, puis sélectionnez ce modèle dans Soufflé. Gardez l'adresse du serveur sur localhost pour traiter le texte sur ce Mac.", "Ouvrez une réunion enregistrée et générez son résumé. Relisez décisions et tâches avant de les utiliser ; les modèles de résumé se modifient dans Paramètres → IA."]
+    }
+  },
+  {
+    "slug": "privacy-and-data",
+    "sections": ["privacy", "data-location", "export", "mcp", "cli"],
+    "en": {
+      "title": "Privacy, local data and exports in Soufflé",
+      "description": "See Soufflé's network connections, local data folder, export and deletion options, plus MCP and command-line access. Understand the remote Ollama exception.",
+      "intro": "Speech recognition runs locally and your archive lives in a folder you control. This guide lists network connections, explains exports and deletion, and shows how MCP clients or the command line can use your transcripts.",
+      "steps": ["Leave Ollama on localhost if you want summary and dictation-polish requests to remain on this Mac. A remote server you choose receives the text sent for those tasks.", "Use Settings → System → Data to reveal or export your archive. Back up the data folder before moving or deleting it.", "Choose a meeting export for a single transcript, or use the archive export for everything. Connect an MCP client only when you want it to have access to your local transcripts."]
+    },
+    "fr": {
+      "title": "Confidentialité, données et exports de Soufflé",
+      "description": "Consultez les connexions réseau de Soufflé, le stockage local, l'export et la suppression, ainsi que MCP et le CLI. Comprenez l'exception d'un Ollama distant.",
+      "intro": "La reconnaissance vocale est locale et votre archive reste dans un dossier que vous contrôlez. Ce guide liste les connexions réseau, explique l'export et la suppression, et présente l'accès aux transcriptions par MCP ou en ligne de commande.",
+      "steps": ["Gardez Ollama sur localhost pour que les requêtes de résumé et de reformulation restent sur ce Mac. Un serveur distant que vous choisissez reçoit le texte envoyé pour ces tâches.", "Dans Paramètres → Système → Données, révélez ou exportez votre archive. Sauvegardez le dossier de données avant de le déplacer ou de le supprimer.", "Exportez une réunion pour une transcription précise, ou l'archive entière pour l'ensemble. Connectez un client MCP seulement si vous souhaitez lui donner accès à vos transcriptions locales."]
+    }
+  },
+  {
+    "slug": "troubleshooting",
+    "sections": ["troubleshooting", "uninstall", "build", "issues", "license"],
+    "en": {
+      "title": "Troubleshoot Soufflé on Mac",
+      "description": "Fix missing meeting audio, dictation insertion, microphone selection, model downloads and summaries in Soufflé. Find logs, report an issue or uninstall safely.",
+      "intro": "Start with the symptom and check the permission, model or provider it depends on. Most recording and insertion problems can be narrowed down without deleting your data.",
+      "steps": ["Open Settings → System → Permissions and check Microphone, System Audio and Accessibility as needed. Use the repair option if an Accessibility entry became stale after an update.", "Check the selected microphone, speech model and AI provider. Missing system audio, a mixed transcript and an unavailable summary each have different requirements.", "If the problem remains, collect recent logs and describe your macOS version, Mac model and audio devices in a GitHub issue. Keep a backup before removing application data."]
+    },
+    "fr": {
+      "title": "Résoudre un problème avec Soufflé sur Mac",
+      "description": "Dépannez l'audio des réunions, le collage de dictée, le microphone, les modèles et les résumés dans Soufflé. Retrouvez les journaux et désinstallez sans surprise.",
+      "intro": "Partez du symptôme, puis vérifiez la permission, le modèle ou le fournisseur concerné. La plupart des problèmes d'enregistrement ou d'insertion se diagnostiquent sans effacer vos données.",
+      "steps": ["Ouvrez Paramètres → Système → Permissions et vérifiez Microphone, Audio système et Accessibilité selon le besoin. Utilisez la réparation si l'entrée Accessibilité est devenue obsolète après une mise à jour.", "Vérifiez le microphone, le modèle vocal et le fournisseur d'IA sélectionnés. L'absence d'audio système, une transcription mélangée et un résumé indisponible n'ont pas les mêmes prérequis.", "Si le problème persiste, joignez les journaux récents et indiquez votre version de macOS, votre Mac et vos appareils audio dans un ticket GitHub. Sauvegardez avant de supprimer les données de l'app."]
+    }
+  }
+]

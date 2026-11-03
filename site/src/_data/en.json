@@ -2,10 +2,11 @@
   "htmlLang": "en",
   "meta": {
     "title": "Soufflé: private speech-to-text for macOS",
-    "description": "Dictate into any app, transcribe meetings that tell your voice from everyone else's, and get on-device summaries. No cloud, no accounts, no API keys.",
-    "docsTitle": "Soufflé documentation",
+    "description": "Free, open-source dictation and meeting transcription for Mac. Local speech models, French and English, and summaries without a required cloud service.",
+    "docsTitle": "Soufflé documentation: Mac setup and guides",
     "imageAlt": "Soufflé on macOS: a live meeting window with a running transcript, beside the tagline “Your voice never leaves your Mac.”",
-    "ogDescription": "Dictation, live meeting transcripts and on-device summaries for macOS. No cloud, no account, no API key."
+    "ogDescription": "Free, open-source dictation and meeting transcription for Mac. Local speech models, French and English, and summaries without a required cloud service.",
+    "docsDescription": "Install Soufflé, set up dictation and meetings on Mac, choose a local speech model and find privacy, export and troubleshooting guides."
   },
   "nav": {
     "features": "Features",
@@ -17,7 +18,8 @@
     "releases": "Releases",
     "download": "Download",
     "menu": "Menu",
-    "copy": "Copy"
+    "copy": "Copy",
+    "downloadGithub": "Download on GitHub"
   },
   "hero": {
     "badge": "macOS 13+ · APPLE SILICON",
@@ -25,10 +27,11 @@
       "Your voice never",
       "leaves your Mac."
     ],
-    "sub": "Soufflé dictates into any app, transcribes meetings that tell your voice from everyone else's, and writes the summary, all of it on-device. No cloud, no account, no API key.",
-    "cta": "Download for macOS",
+    "sub": "Soufflé dictates into your apps, transcribes meetings and prepares their summaries on your Mac. Free and open source, with no account or API key. Text stays local with the default settings.",
+    "cta": "Download on GitHub",
     "note": "Free and open source",
-    "caption": "A live meeting transcript, separating you from everyone else. No virtual audio device, nothing uploaded."
+    "caption": "A live meeting transcript, separating you from everyone else. No virtual audio device, nothing uploaded.",
+    "category": "Offline dictation and meeting transcription for Mac"
   },
   "features": [
     {
@@ -38,7 +41,7 @@
       "icon": "users",
       "mock": "home",
       "flip": false,
-      "title": "Meetings that know who is talking.",
+      "title": "Meeting transcripts: your voice, separated from the others.",
       "body": "System-audio capture separates <em class=\"me\">Me</em> from <em class=\"them\">Them</em> in the live transcript on a Kyutai model, with no virtual audio device to install. Recording stays hands-off: it notifies you when a calendar meeting begins, notices when the meeting seems over, and picks back up where it left off when your Mac wakes.",
       "bullets": [
         "Optional Opus audio with a retention policy, replayable by clicking the transcript",
@@ -54,7 +57,7 @@
       "icon": "mic",
       "mock": "dictation",
       "flip": true,
-      "title": "Speak a paragraph, get a paragraph.",
+      "title": "Local dictation in your Mac apps.",
       "body": "With the default model the text streams in while you are still talking, punctuated and capitalised. A local pass can tidy the phrasing before you use it, and that same model handles French and English without you switching anything.",
       "bullets": [
         "Text appears as you speak, not once you stop",
@@ -73,7 +76,7 @@
       "icon": "bulb",
       "mock": "outcomes",
       "flip": false,
-      "title": "The summary is written on your machine too.",
+      "title": "Meeting summaries on your Mac.",
       "body": "Decisions, action items with owners, and the questions nobody answered, extracted alongside the summary by Apple Intelligence, or by a local Ollama when your Mac does not offer it. Transcription itself needs neither.",
       "bullets": [
         "Editable notes, and calendar participants, next to the transcript",
@@ -98,7 +101,7 @@
     "caption": "Press the shortcut anywhere, talk, and the tidied text lands where your cursor already was."
   },
   "models": {
-    "title": "Pick the trade-off you want.",
+    "title": "Choose your local speech model.",
     "sub": "All four run locally, downloaded on first use. The two Kyutai models stream text as you speak; the other two transcribe once you stop.",
     "cards": [
       {
@@ -218,7 +221,7 @@
   "cta": {
     "title": "Try it on your next meeting.",
     "sub": "Download the <code>.dmg</code>, pick a model once, and the rest happens on your Mac.",
-    "primary": "Download for macOS",
+    "primary": "Download on GitHub",
     "secondary": "Source on GitHub"
   },
   "footer": {
@@ -417,117 +420,12 @@
       "Space"
     ],
     "shortcutCaption": "Press the shortcut",
-    "meetingElapsed": "12:40"
+    "meetingElapsed": "12:40",
+    "demoLabel": "Demonstration — fictional data"
   },
   "docs": {
-    "title": "Everything Soufflé does, and what it needs.",
-    "intro": "What Soufflé does, what it needs, and where it keeps things. Nothing here requires an account, an API key, or a network connection beyond the first model download.",
-    "groups": [
-      {
-        "label": "Getting started",
-        "items": [
-          [
-            "install",
-            "Install"
-          ],
-          [
-            "requirements",
-            "Requirements"
-          ],
-          [
-            "permissions",
-            "Permissions"
-          ],
-          [
-            "first-run",
-            "First run"
-          ]
-        ]
-      },
-      {
-        "label": "Using it",
-        "items": [
-          [
-            "dictation",
-            "Dictation"
-          ],
-          [
-            "shortcuts",
-            "Shortcuts"
-          ],
-          [
-            "overlay",
-            "The overlay"
-          ],
-          [
-            "meetings",
-            "Meetings"
-          ],
-          [
-            "summaries",
-            "Summaries"
-          ],
-          [
-            "models",
-            "Speech models"
-          ],
-          [
-            "settings",
-            "Settings reference"
-          ]
-        ]
-      },
-      {
-        "label": "Your data",
-        "items": [
-          [
-            "privacy",
-            "What touches the network"
-          ],
-          [
-            "data-location",
-            "Where your data lives"
-          ],
-          [
-            "export",
-            "Export"
-          ],
-          [
-            "mcp",
-            "MCP server"
-          ],
-          [
-            "cli",
-            "Headless CLI"
-          ]
-        ]
-      },
-      {
-        "label": "Help",
-        "items": [
-          [
-            "troubleshooting",
-            "Troubleshooting"
-          ],
-          [
-            "uninstall",
-            "Uninstall"
-          ],
-          [
-            "build",
-            "Build from source"
-          ],
-          [
-            "issues",
-            "Reporting a problem"
-          ],
-          [
-            "license",
-            "License"
-          ]
-        ]
-      }
-    ],
+    "title": "Soufflé guides for Mac.",
+    "intro": "Install the app, set up dictation and meetings, then choose the features you need. Each guide covers requirements and settings, including limitations and troubleshooting.",
     "sections": [
       {
         "id": "install",
@@ -715,16 +613,16 @@
             "p": "Summaries are generated on-device: by Apple Intelligence on macOS 26 or newer, with nothing to install, and otherwise by a local Ollama. Alongside the prose summary, Soufflé extracts decisions, action items with owners, and open questions."
           },
           {
-            "p": "Setting up Ollama takes two commands:"
+            "p": "Install and start Ollama, then download a model:"
           },
           {
-            "code": "brew install ollama\nollama pull qwen2.5:7b"
+            "code": "brew install ollama\nbrew services start ollama\nollama pull qwen2.5:7b"
           },
           {
             "p": "Then, in Settings → AI, leave the server at <code>http://localhost:11434</code> and pick the model. Any general-purpose chat model works; <code>qwen2.5:7b</code> is the one Soufflé recommends. The same provider is what dictation polish uses."
           },
           {
-            "p": "Nothing about a summary is sent anywhere. With Ollama the only request is to your own instance."
+            "p": "With Apple Intelligence or Ollama on <code>localhost</code>, text is processed on your Mac. If you change the address to a remote Ollama server, Soufflé sends it the text needed for summaries or dictation polish. Choose that server accordingly."
           }
         ]
       },
@@ -863,7 +761,7 @@
             "table": [
               [
                 "huggingface.co",
-                "Downloads a speech model the first time you select it. Nothing is sent, and once the model is on disk transcription works offline forever."
+                "Downloads your selected speech model on first use. No audio or transcript is sent with that request. Once the model is installed, transcription works offline."
               ],
               [
                 "api.github.com",
@@ -875,12 +773,12 @@
               ],
               [
                 "localhost:11434",
-                "Your Ollama instance, only if you enable summaries with Ollama. It is your machine unless you point it elsewhere. A model you download from Settings → AI is pulled by that instance, not by Soufflé."
+                "Your Ollama instance for summaries and dictation polish. The server receives the text to process. With localhost it stays on this Mac; with a remote address selected in Settings → AI, it goes to that server. Ollama models are downloaded by that instance."
               ]
             ]
           },
           {
-            "p": "Your audio, transcripts, notes and summaries are never sent anywhere. They live in a local SQLite database: Settings → System → Data exports the lot, and deleting the data folder removes it."
+            "p": "Audio stays on your Mac. Transcripts, notes and summaries are stored in a local SQLite database: Settings → System → Data exports them. Text processing is also local with the default settings. If you configure a remote Ollama instance, that server receives the text used for summaries or dictation polish."
           }
         ]
       },
@@ -946,6 +844,9 @@
           },
           {
             "p": "Five tools are exposed: <code>list_meetings</code>, <code>get_meeting</code>, <code>search_meetings</code>, <code>get_latest_meeting</code> and <code>list_dictations</code>. Settings → System → Data carries the same snippets with the path already filled in, plus a button that tests the connection."
+          },
+          {
+            "p": "Soufflé's MCP server is local and read-only. A client you connect can then use the transcripts with its own AI provider; that client's privacy settings apply to that use."
           }
         ]
       },
@@ -1091,16 +992,26 @@
           }
         ]
       }
-    ]
+    ],
+    "startHere": "New to Soufflé?",
+    "breadcrumb": "Breadcrumb",
+    "navigation": "Contents and other guides",
+    "onThisPage": "In this guide",
+    "allGuides": "All guides",
+    "quickStart": "Start here",
+    "nextSteps": "Next steps",
+    "updated": "Updated",
+    "updatedDate": "October 27, 2026",
+    "readGuide": "Guide:"
   },
   "privacy": {
     "title": "Private by design, not by promise.",
-    "sub": "Transcription, summaries and audio all happen on your Mac. There is no server to send them to.",
+    "sub": "Speech recognition runs on your Mac. Apple Intelligence or a local Ollama also keep summary and dictation-polish text on the machine. A remote Ollama server you choose receives the text sent to it.",
     "points": [
       {
         "icon": "shield",
-        "h": "Nothing is uploaded",
-        "d": "Your audio, transcripts, notes and summaries stay on your Mac, in one local database you can export or delete whenever you like."
+        "h": "A local archive",
+        "d": "Your audio, transcripts, notes and summaries are stored in a local database you can export or delete. You decide whether a remote Ollama server processes the text."
       },
       {
         "icon": "cloudoff",

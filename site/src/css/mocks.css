@@ -68,7 +68,7 @@
 /* ─── Live transcript ─── */
 .tr-card { display: flex; flex-direction: column; gap: 16px; padding: 16px 18px; }
 .tr-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.tr-head h3 {
+.tr-head .mock-title {
   font-family: var(--font-body); font-size: 11px; font-weight: 600;
   letter-spacing: 0.1em; text-transform: uppercase; color: var(--m-t4);
   font-variation-settings: "wdth" 88;
@@ -92,12 +92,12 @@
 .tr-who.them { color: var(--m-secondary); }
 .tr-at { font-size: 10.5px; color: var(--m-t5); }
 .tr-text { font-size: 15px; line-height: 1.75; color: var(--m-t2); }
-.tr-tentative { opacity: 0.5; }
+.tr-tentative { color: var(--m-t4); }
 
 /* ─── Notes (MeetingNotesSection, compact variant) ─── */
 .notes { display: flex; flex-direction: column; gap: 10px; padding: 16px 0 0; }
 .notes-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.notes-head h3 {
+.notes-head .mock-title {
   display: flex; align-items: center; gap: 8px;
   font-family: var(--font-body); font-size: 11px; font-weight: 600;
   letter-spacing: 0.1em; text-transform: uppercase; color: var(--m-t4);
@@ -153,7 +153,7 @@
   font-size: 13.5px; color: var(--m-t4);
 }
 .m-section { display: flex; flex-direction: column; gap: 6px; }
-.m-section h4 {
+.m-section .mock-subtitle {
   padding: 0; font-family: var(--font-body); font-size: 11px; font-weight: 600;
   letter-spacing: 0.1em; text-transform: uppercase; color: var(--m-t4);
   font-variation-settings: "wdth" 88;
@@ -197,11 +197,11 @@
 
 /* ─── Outcomes (MeetingStructuredSummarySection) ─── */
 .out { display: flex; flex-direction: column; gap: 14px; padding: 16px 0 0; }
-.out h3 {
+.out .mock-title {
   display: flex; align-items: center; gap: 8px;
   font-family: var(--font-body); font-size: 14px; font-weight: 600; color: var(--m-t1);
 }
-.out h4 {
+.out .mock-subtitle {
   display: flex; align-items: center; gap: 6px;
   font-family: var(--font-body); font-size: 12.5px; font-weight: 600; color: var(--m-t3);
 }
@@ -240,7 +240,7 @@
   --c-bg: #fdfdfe;
   --c-border: #e4e6ec;
   --c-text: #1e222b;
-  --c-dim: #6a7081;
+  --c-dim: #5d6373;
   --c-accent: #5b6b8c;
   --c-input: #f1f2f6;
   --c-badge: #7a89a8;
@@ -250,7 +250,7 @@
 }
 .chat-win { outline-color: #dcdfe7; }
 .chat-bar { background: #eceef3; border-bottom-color: var(--c-border, #e4e6ec); }
-.chat-bar .win-title { color: #6a7081; font-weight: 500; font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif; }
+.chat-bar .win-title { color: #5d6373; font-weight: 500; font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif; }
 
 .chat-side { background: var(--c-side); padding: 0 8px 14px; display: flex; flex-direction: column; gap: 16px; }
 .chat-ws {
@@ -269,7 +269,7 @@
 .chat-group { display: flex; flex-direction: column; gap: 1px; }
 .chat-group-h {
   padding: 2px 8px 6px; font-size: 10.5px; font-weight: 600;
-  letter-spacing: 0.1em; text-transform: uppercase; color: rgba(255, 255, 255, 0.4);
+  letter-spacing: 0.1em; text-transform: uppercase; color: rgba(255, 255, 255, 0.65);
 }
 .chat-item {
   display: flex; align-items: center; gap: 8px;

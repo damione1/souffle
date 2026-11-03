@@ -35,11 +35,11 @@
     {{ liveHead(t.mock.liveMeeting, t.mock.stop, t.mock.meetingElapsed) }}
     <div class="m-card tr-card">
       <div class="tr-head">
-        <h3>{{ t.mock.liveTranscript }}</h3>
+        <p class="mock-title">{{ t.mock.liveTranscript }}</p>
         <span class="tr-audio"><i></i>{{ t.mock.systemAudio }}</span>
       </div>
       <p class="tr-hint">{{ t.mock.editHint }}</p>
-      <div class="tr-body" data-transcript>
+      <div class="tr-body" data-nosnippet data-transcript>
         {%- for p in t.mock.transcript %}
         <template data-para data-who="{{ p.who }}" data-at="{{ p.at }}"
                   data-label="{{ t.mock.me if p.who == 'me' else t.mock.them }}">{{ p.text }}</template>
@@ -48,10 +48,10 @@
     </div>
     <section class="m-card-sm notes">
       <div class="notes-head">
-        <h3>{{ icon("pencil", 14) }}{{ t.mock.notesTitle }}</h3>
+        <p class="mock-title">{{ icon("pencil", 14) }}{{ t.mock.notesTitle }}</p>
         <span class="notes-state">{{ t.mock.notesSaved }}</span>
       </div>
-      <div class="notes-field">{{ t.mock.notesText }}</div>
+      <div class="notes-field" data-nosnippet>{{ t.mock.notesText }}</div>
     </section>
   </div>
 {% endcall %}
@@ -63,7 +63,7 @@
   <div class="m-stack">
     {{ liveHead(t.mock.liveDictation, t.mock.stop, "0:00") }}
     <div class="m-card dict-card">
-      <p class="dict-text"><span data-typed data-text="{{ t.mock.dictationText }}"></span><span class="caret"></span></p>
+      <p class="dict-text" data-nosnippet><span data-typed data-text="{{ t.mock.dictationText }}"></span><span class="caret"></span></p>
       <div style="flex:1"></div>
       <div class="dict-foot">{{ icon("clipboard", 15) }}{{ t.mock.autopaste }}</div>
     </div>
@@ -95,8 +95,8 @@
     <div class="m-search">{{ icon("search", 16) }}{{ t.mock.search }}</div>
 
     <section class="m-section">
-      <h4>{{ t.mock.upcoming }}</h4>
-      <div class="m-list">
+      <p class="mock-subtitle">{{ t.mock.upcoming }}</p>
+      <div class="m-list" data-nosnippet>
         {%- for e in t.mock.events %}
         <div class="m-row{% if e.now %} is-now{% endif %}">
           <span class="m-row-icon secondary">{{ icon("calendar", 15) }}</span>
@@ -113,8 +113,8 @@
     </section>
 
     <section class="m-section">
-      <h4>{{ t.mock.today }}</h4>
-      <div class="m-list">
+      <p class="mock-subtitle">{{ t.mock.today }}</p>
+      <div class="m-list" data-nosnippet>
         {%- for i in t.mock.timeline %}
         <div class="m-row">
           <span class="m-row-icon {{ 'accent' if i.kind == 'meeting' else 'muted' }}">
@@ -137,16 +137,16 @@
 {# ── Outcomes ── #}
 {% macro outcomes(t) %}
 {% call win(t.mock.winOutcomes, t) %}
-  <div class="m-card-sm out">
-    <h3>{{ icon("checks", 15) }}{{ t.mock.outcomes }}</h3>
+  <div class="m-card-sm out" data-nosnippet>
+    <p class="mock-title">{{ icon("checks", 15) }}{{ t.mock.outcomes }}</p>
     <div class="out-group">
-      <h4>{{ icon("target", 13) }}{{ t.mock.decisions }}</h4>
+      <p class="mock-subtitle">{{ icon("target", 13) }}{{ t.mock.decisions }}</p>
       <div class="out-wrap">
         {%- for d in t.mock.outcomeDecisions %}<span class="out-chip decision">{{ d }}</span>{% endfor %}
       </div>
     </div>
     <div class="out-group">
-      <h4>{{ t.mock.actionItems }}</h4>
+      <p class="mock-subtitle">{{ t.mock.actionItems }}</p>
       <div class="out-grid">
         {%- for a in t.mock.outcomeActions %}
         <div class="out-item"><p>{{ a.text }}</p><span class="out-owner mono">{{ t.mock.owner }}: {{ a.owner }}</span></div>
@@ -154,7 +154,7 @@
       </div>
     </div>
     <div class="out-group">
-      <h4>{{ icon("help", 13) }}{{ t.mock.openQuestions }}</h4>
+      <p class="mock-subtitle">{{ icon("help", 13) }}{{ t.mock.openQuestions }}</p>
       <div class="out-wrap">
         {%- for q in t.mock.outcomeQuestions %}<span class="out-chip question">{{ q }}</span>{% endfor %}
       </div>
@@ -177,7 +177,7 @@
       <span class="win-dot red"></span><span class="win-dot amber"></span><span class="win-dot green"></span>
       <span class="win-title">{{ c.app }}</span>
     </div>
-    <div class="chat">
+    <div class="chat" data-nosnippet>
       <aside class="chat-side">
         <div class="chat-ws">
           <span class="chat-ws-mark" aria-hidden="true">

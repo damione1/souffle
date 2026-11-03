@@ -182,10 +182,21 @@
   if (document.fonts && document.fonts.ready) document.fonts.ready.then(onResize);
 })();
 
-/* Docs sidebar: highlight the section you are reading. */
+/* Guide navigation stays compact on mobile; its title precedes the menu. */
 (function () {
   "use strict";
-  var links = Array.prototype.slice.call(document.querySelectorAll(".docs-group a"));
+  var navigation = document.querySelector(".docs-navigation");
+  if (!navigation) return;
+  var wide = window.matchMedia("(min-width: 1081px)");
+  var sync = function () { navigation.open = wide.matches; };
+  sync();
+  wide.addEventListener("change", sync);
+})();
+
+/* Docs sidebar: highlight local sections, leaving guide links alone. */
+(function () {
+  "use strict";
+  var links = Array.prototype.slice.call(document.querySelectorAll('.docs-group a[href^="#"]'));
   if (!links.length || !("IntersectionObserver" in window)) return;
   var byId = {};
   links.forEach(function (a) { byId[a.getAttribute("href").slice(1)] = a; });
