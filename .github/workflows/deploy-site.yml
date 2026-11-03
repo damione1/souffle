@@ -13,6 +13,8 @@ on:
       - "site/**"
       - ".github/workflows/deploy-site.yml"
   workflow_dispatch:
+  release:
+    types: [published]
 
 # Two pushes in a row would otherwise race to publish, and the loser could
 # land last and serve the older build. Never cancel in flight: a half-finished
@@ -41,6 +43,8 @@ jobs:
 
       - name: Build
         working-directory: site
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           npm ci
           npm run build
