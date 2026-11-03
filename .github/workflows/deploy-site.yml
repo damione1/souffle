@@ -13,6 +13,9 @@ on:
       - "site/**"
       - ".github/workflows/deploy-site.yml"
   workflow_dispatch:
+  workflow_run:
+    workflows: [Release]
+    types: [completed]
   release:
     types: [published]
 
@@ -28,11 +31,14 @@ permissions:
 
 jobs:
   deploy:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
     steps:
       - uses: actions/checkout@v6.0.1
+        with:
+          ref: master
 
       - uses: actions/setup-node@v6.1.0
         with:
