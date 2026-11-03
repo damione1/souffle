@@ -39,7 +39,7 @@ tags: sitemap
     <div class="hero-under">
       <div class="hero-copy"><p class="t-2xs hero-category">{{ t.hero.category }}</p><p class="t-s measure">{{ t.hero.sub }}</p></div>
       <div class="hero-do">
-        <a class="act-solid" href="{{ site.latest }}">{{ t.hero.cta }}{{ icon("arrow", 22) }}</a>
+        <a class="act-solid" href="{{ release.url }}" {% include "partials/download-attributes.njk" %}>{{ t.hero.cta }}{{ icon("arrow", 22) }}</a>
         {{ copyline(site.brew, t.nav.copy) }}
         <p class="t-3xs dim" style="padding-top:10px;border-top:1px solid var(--rule)">{{ t.hero.note }} · {{ t.hero.badge }}</p>
       </div>
@@ -169,7 +169,7 @@ tags: sitemap
     <div class="close-under">
       <p class="t-s measure">{{ t.cta.sub | safe }}</p>
       <div class="close-do">
-        <a class="act-solid" href="{{ site.latest }}">{{ t.cta.primary }}{{ icon("arrow", 22) }}</a>
+        <a class="act-solid" href="{{ release.url }}" {% include "partials/download-attributes.njk" %}>{{ t.cta.primary }}{{ icon("arrow", 22) }}</a>
         <a class="act-ruled" href="{{ site.repo }}">{{ t.cta.secondary }}{{ icon("arrow", 22) }}</a>
         {{ copyline(site.brew, t.nav.copy) }}
       </div>

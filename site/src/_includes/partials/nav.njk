@@ -28,7 +28,7 @@
     <a href="/{{ language.dir }}{{ translationPath }}" lang="{{ language.code }}" hreflang="{{ language.code }}"{% if locale.code == language.code %} aria-current="true"{% endif %}>{{ language.label }}</a>
     {% endfor %}
   </div>
-  <a class="run-word" href="{{ "#download" if isHome else site.latest }}">{{ t.nav.download if isHome else t.nav.downloadGithub }}</a>
+  <a class="run-word" href="{{ "#download" if isHome else release.url }}" {% if not isHome %}{% include "partials/download-attributes.njk" %}{% endif %}>{{ t.nav.download if isHome else t.nav.downloadGithub }}</a>
   <button class="run-toggle t-3xs" type="button" aria-controls="run-acts" aria-expanded="false" aria-label="{{ t.nav.menu }}">
     <span class="run-toggle-open">{{ icon("menu", 15) }}</span>
     <span class="run-toggle-close" hidden>{{ icon("close", 15) }}</span>

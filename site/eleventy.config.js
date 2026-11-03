@@ -47,6 +47,12 @@ const guidePages = () => {
 };
 
 export default function (eleventyConfig) {
+  const webVitals = readFileSync(join(srcDir, '..', 'node_modules/web-vitals/dist/web-vitals.js'));
+  const webVitalsHash = createHash('sha256').update(webVitals).digest('hex').slice(0, 16);
+  const webVitalsUrl = `/js/vendor/web-vitals.${webVitalsHash}.js`;
+  eleventyConfig.addGlobalData('webVitalsUrl', webVitalsUrl);
+  eleventyConfig.addPassthroughCopy({'node_modules/web-vitals/dist/web-vitals.js':webVitalsUrl.slice(1)});
+  eleventyConfig.addPassthroughCopy({'node_modules/web-vitals/LICENSE':'js/vendor/web-vitals-LICENSE.txt'});
   eleventyConfig.addGlobalData("guidePages", guidePages);
   eleventyConfig.addPassthroughCopy({ "src/css": "css" });
   eleventyConfig.addPassthroughCopy({ "src/js": "js" });
