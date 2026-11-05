@@ -8461,6 +8461,24 @@ mod tests {
         use souffle_lib::native::bridge::{NativeAction, set_sink};
 
         let window = test_window();
+        window
+            .window()
+            .set_size(slint::PhysicalSize::new(1040, 1280));
+        crate::typography::initialize(&window).unwrap();
+        let adapter = TEST_SOFTWARE_WINDOW
+            .with(|slot| slot.borrow().clone())
+            .unwrap();
+        let mut pixels =
+            vec![slint::platform::software_renderer::Rgb565Pixel::default(); 1040 * 1280];
+        let mut settle = || {
+            for _ in 0..3 {
+                slint::platform::update_timers_and_animations();
+                adapter.request_redraw();
+                adapter.draw_if_needed(|renderer| {
+                    renderer.render(&mut pixels, 1040);
+                });
+            }
+        };
         let directory = tempfile::tempdir().unwrap();
         let db = Arc::new(
             souffle_lib::db::Database::open(&directory.path().join("fixture.db")).unwrap(),
@@ -8525,6 +8543,7 @@ mod tests {
 
         window.set_active_meeting_id(meeting_id.into());
         super::action_guards::refresh(&window);
+        settle();
         let delete = window
             .root_element()
             .query_descendants()
@@ -8551,6 +8570,7 @@ mod tests {
             &StartupPresentationGate::new(),
             notification,
         );
+        settle();
         assert_eq!(delete.accessible_enabled(), Some(true));
     }
 
