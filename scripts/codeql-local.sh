@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Local CodeQL gate (replaces PR CI). Same languages / build-mode as
-# .github/workflows/codeql.yml. Requires the CodeQL CLI on PATH:
+# Manual local CodeQL analysis for Rust, JavaScript/TypeScript and Actions.
+# Requires the CodeQL CLI on PATH:
 #   brew install --cask codeql
 set -euo pipefail
 
@@ -21,7 +21,7 @@ mkdir -p "$out"
 codeql_threads="${CODEQL_THREADS:-0}"
 echo "CodeQL threads: $codeql_threads (0 = every logical core)"
 
-# Match CI: build-mode none (no cargo build) for rust; extractors for js/actions.
+# Build-mode none (no cargo build) for Rust; extractors for JS/Actions.
 codeql database create "$out/rust" \
   --language=rust --build-mode=none --source-root=. --threads="$codeql_threads"
 codeql database create "$out/js" \

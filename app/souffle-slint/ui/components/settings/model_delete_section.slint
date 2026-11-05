@@ -2,7 +2,7 @@ import { AppText, AppTextInput, Typography, TypographyStyle } from "@typography"
 import { SettingsField } from "settings_field.slint";
 import { SettingsGroup } from "settings_group.slint";
 import { Theme } from "../../theme.slint";
-import { TranscriptionPhase } from "../../types.slint";
+import { TranscriptionPhase, ModelDeletionError } from "../../types.slint";
 import { ThemedButton, ThemedButtonKind } from "../themed_button.slint";
 
 // Destructive "delete the downloaded model" action for Settings > Système
@@ -15,13 +15,14 @@ import { ThemedButton, ThemedButtonKind } from "../themed_button.slint";
 // The state machine (whether delete is even legal right now) is not
 // reimplemented here: `commands::model::delete_model` in Rust is the single
 // source of truth and refuses a currently-loaded or mid-transition model
-// with a clear error string that `delete-error` surfaces verbatim.
+// with a typed refusal localized here; operational failures keep their detail.
 // `can-delete` below only decides whether to invite the click - it narrows
 // to the one phase (downloaded, not loaded) that can never race that guard.
 export component ModelDeleteSection inherits VerticalLayout {
     in property <TranscriptionPhase> model-phase;
     in property <string> model-label;
     in property <string> delete-error;
+    in property <ModelDeletionError> delete-error-kind: ModelDeletionError.operation-failed;
     in property <bool> files-deletable;
 
     callback delete-requested();
@@ -78,7 +79,10 @@ export component ModelDeleteSection inherits VerticalLayout {
             padding-right: Theme.settings-inset;
             padding-bottom: 12px;
             AppText {
-                text: root.delete-error;
+                text: root.delete-error-kind == ModelDeletionError.managed-asset ? @tr("Les ressources Apple Speech sont gérées par macOS et ne peuvent pas être supprimées par Soufflé.")
+                    : root.delete-error-kind == ModelDeletionError.transition-busy ? @tr("Attendez la fin de l'opération sur le modèle avant de le supprimer.")
+                    : root.delete-error-kind == ModelDeletionError.active-model ? @tr("Déchargez le modèle actif ou choisissez un autre modèle avant de le supprimer.")
+                    : root.delete-error;
                 color: Theme.danger;
                 typography: Typography.small;
                 wrap: word-wrap;

@@ -2,7 +2,7 @@
 //! only. Recording/Stopping are simulated; no microphone, TCC or user profile.
 //! GUARD_SCENE=detail selects the finalizing detail; otherwise the timeline.
 //! GUARD_LOCALE selects a bundled translation (for example fr or en).
-slint::include_modules!();
+use souffle_slint::*;
 #[allow(dead_code)]
 #[path = "../src/action_guards.rs"]
 mod action_guards;

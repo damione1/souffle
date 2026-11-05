@@ -170,6 +170,9 @@ make nightly
 
 `make nightly` builds and opens **Soufflé Nightly**, which has its own data and permissions and can run alongside the installed app.
 
+Daily PRs run quick formatting, lint and contract tests. Full native validation
+runs when promoting to `master` or launching it manually; see the [CI policy](docs/engineering/ci.md).
+
 ## Audio diagnostics
 
 If you need to investigate speaker audio leaking into the microphone, enable **Pre-AEC diagnostic capture** in Settings > Audio > Advanced Audio. Meeting-audio retention must also be enabled in Settings > Data. The setting applies to the next recording.

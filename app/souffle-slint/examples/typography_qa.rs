@@ -6,7 +6,7 @@
 //! |empty|error|loading|detail-{empty,error,loading}
 //! |live-editor[-error|-loading]|settings-suggestions[-empty|-error|-loading]
 //! SOU276_LANG=fr|en, SOU276_DARK=0|1, SOU276_WIDTH=680|1040.
-slint::include_modules!();
+use souffle_slint::*;
 #[path = "../src/typography.rs"]
 mod typography;
 use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};

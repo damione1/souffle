@@ -1,11 +1,11 @@
-{% set docs = "/docs/" if loc.code == "en" else "/fr/docs/" %}
+{% set docs = "/" + locale.dir + "docs/" %}
 {#
   The strip along the bottom edge of the sheet: imprint left, the rest of
   the bill right, one hairline above it.
 #}
 <footer class="band">
   <div class="foot t-3xs">
-    <span class="dim">{{ site.name }} · © 2026 {{ site.author }} · {{ site.license }}</span>
+    <span class="dim">{{ site.name }} · © 2026 <a href="{{ site.authorUrl }}">{{ site.author }}</a> · {{ site.license }}</span>
     <div class="foot-links">
       <a href="{{ docs }}">{{ t.footer.docs }}</a>
       <a href="{{ site.releases }}">{{ t.footer.releases }}</a>

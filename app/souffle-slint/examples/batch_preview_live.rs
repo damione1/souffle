@@ -8,7 +8,7 @@
 //! profile's assets (needed for system Speech in this separate test process).
 //! Run from app/ so the bundled VAD/ORT resources resolve.
 
-slint::include_modules!();
+use souffle_slint::*;
 #[allow(dead_code)]
 #[path = "../src/live_transcript.rs"]
 mod live_transcript;

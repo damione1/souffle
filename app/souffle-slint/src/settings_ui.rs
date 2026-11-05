@@ -11,32 +11,43 @@ use crate::{
     PermissionKind as SlintPermissionKind,
 };
 use souffle_lib::calendar::CalendarInfo;
+
+pub(crate) fn project_model_deletion_error(
+    window: &crate::MainWindow,
+    error: &souffle_lib::commands::ModelDeletionError,
+) {
+    use souffle_lib::commands::ModelDeletionError as LibError;
+    let kind = match error {
+        LibError::ManagedAsset => crate::ModelDeletionError::ManagedAsset,
+        LibError::TransitionBusy => crate::ModelDeletionError::TransitionBusy,
+        LibError::ActiveModel => crate::ModelDeletionError::ActiveModel,
+        LibError::OperationFailed { .. } => crate::ModelDeletionError::OperationFailed,
+    };
+    window.set_settings_model_delete_error_kind(kind);
+    window.set_settings_model_delete_error(error.to_string().into());
+}
+
+pub(crate) fn capture_error_to_slint(
+    error: &souffle_lib::commands::SettingsCaptureError,
+) -> crate::SettingsCaptureError {
+    match error {
+        souffle_lib::commands::SettingsCaptureError::CaptureBusy => {
+            crate::SettingsCaptureError::CaptureBusy
+        }
+        souffle_lib::commands::SettingsCaptureError::RuntimeBusy => {
+            crate::SettingsCaptureError::RuntimeBusy
+        }
+        souffle_lib::commands::SettingsCaptureError::OperationFailed { .. } => {
+            crate::SettingsCaptureError::OperationFailed
+        }
+    }
+}
 use souffle_lib::logging::LogLevel;
 use souffle_lib::permissions::{PermState, PermissionKind};
 use souffle_lib::settings::{
     AppSettings, DictionaryLearningMode, MeetingAudioRetention, MeetingTranscriptionLanguage,
     PasteMethod, SettingsOptions, ShortcutSettings, Theme,
 };
-
-impl From<crate::SystemSettingsPane> for souffle_lib::commands::SystemSettingsPane {
-    fn from(pane: crate::SystemSettingsPane) -> Self {
-        match pane {
-            crate::SystemSettingsPane::AppleIntelligence => Self::AppleIntelligence,
-            crate::SystemSettingsPane::LanguageAndRegion => Self::LanguageAndRegion,
-            crate::SystemSettingsPane::SoftwareUpdate => Self::SoftwareUpdate,
-        }
-    }
-}
-
-impl From<souffle_lib::commands::SystemSettingsPane> for crate::SystemSettingsPane {
-    fn from(pane: souffle_lib::commands::SystemSettingsPane) -> Self {
-        match pane {
-            souffle_lib::commands::SystemSettingsPane::AppleIntelligence => Self::AppleIntelligence,
-            souffle_lib::commands::SystemSettingsPane::LanguageAndRegion => Self::LanguageAndRegion,
-            souffle_lib::commands::SystemSettingsPane::SoftwareUpdate => Self::SoftwareUpdate,
-        }
-    }
-}
 
 /// Pushes `settings` into the Slint properties this shell currently wires.
 /// Mirrors `controller.svelte.ts` setting `app.settings` after

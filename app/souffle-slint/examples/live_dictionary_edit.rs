@@ -5,7 +5,7 @@
 //! SOU166_LOCALE=en for the English surface. Correct Kubernetis to Kubernetes,
 //! then open Settings / Transcription to accept or dismiss the suggestion.
 
-slint::include_modules!();
+use souffle_slint::*;
 #[allow(dead_code)]
 #[path = "../src/lists_ui.rs"]
 mod lists_ui;
