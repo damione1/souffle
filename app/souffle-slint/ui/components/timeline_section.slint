@@ -328,7 +328,6 @@ export component TimelineSection inherits VerticalLayout {
                         root.item-opened(entry.kind, entry.id);
                     }
                     removed => {
-                        root.confirming-delete-id = "";
                         root.item-removed(entry.kind, entry.id);
                     }
                     copy-requested => {

@@ -310,10 +310,9 @@ impl Database {
     /// orphaned `.ogg` no `meetings` row points to. Everything else gets its
     /// crashed session closed off and `ended_at`/`duration_seconds`
     /// recomputed from the full session list, then is rewritten (which also
-    /// rebuilds FTS). Returns the number of meetings salvaged. Safe to call
-    /// whenever no recording is live: at startup, and also from the
-    /// failed-start path in `launch_meeting`, since the accumulator guard
-    /// there guarantees no other meeting is mid-recording when it runs.
+    /// rebuilds FTS). Returns the number of meetings salvaged. This global
+    /// recovery runs at startup before runtime actions are available. Runtime
+    /// recovery must target only the ID whose writer reservation it owns.
     pub fn recover_unfinished_meetings(&self) -> Result<usize, String> {
         self.recover_unfinished_meetings_with(&|id| {
             crate::audio::recorder::list_session_files(id)
@@ -344,62 +343,75 @@ impl Database {
 
         let mut recovered = 0;
         for id in ids {
-            let mut meeting = self.load_meeting(&id)?;
-            if meeting.segments.is_empty() {
-                if !has_recorded_audio(&id)? {
-                    self.delete_meeting(&id)?;
-                } else {
-                    meeting.ended_at = Some(meeting.started_at);
-                    self.save_meeting(&meeting)?;
-                    recovered += 1;
-                }
-                continue;
-            }
-
-            let closed_segment_count = meeting
-                .recording_sessions
-                .last()
-                .map(|s| s.end_segment_index)
-                .unwrap_or(0);
-            let total_segment_count = meeting.segments.len() as u64;
-            if total_segment_count > closed_segment_count {
-                let crashed_segments = &meeting.segments[closed_segment_count as usize..];
-                let crashed_duration = crashed_segments
-                    .iter()
-                    .map(|s| s.end_time)
-                    .fold(0.0_f64, f64::max);
-                // The gap between sessions (time spent stopped before the
-                // resume that crashed) isn't recorded anywhere, so the best
-                // available start is where the previous session left off.
-                let crashed_started_at = meeting
-                    .recording_sessions
-                    .last()
-                    .map(|s| s.ended_at)
-                    .unwrap_or(meeting.started_at);
-                let crashed_ended_at = crashed_started_at
-                    + chrono::Duration::milliseconds((crashed_duration * 1000.0) as i64);
-                meeting
-                    .recording_sessions
-                    .push(MeetingRecordingSession::completed(
-                        format!("{id}-recovered"),
-                        crashed_started_at,
-                        crashed_ended_at,
-                        closed_segment_count,
-                        total_segment_count,
-                    ));
-            }
-
-            meeting.duration_seconds = meeting
-                .recording_sessions
-                .iter()
-                .map(|s| s.duration_seconds)
-                .sum();
-            meeting.ended_at = meeting.recording_sessions.last().map(|s| s.ended_at);
-
-            self.save_meeting(&meeting)?;
-            recovered += 1;
+            recovered += self.recover_unfinished_meeting_with(&id, has_recorded_audio)?;
         }
         Ok(recovered)
+    }
+
+    /// Recover one ID. Runtime callers must own its writer reservation before
+    /// this load and retain it through the final save/delete. Audio lookup is
+    /// injected so runtime uses its AppState root and startup keeps its root.
+    pub(crate) fn recover_unfinished_meeting_with(
+        &self,
+        id: &str,
+        has_recorded_audio: &dyn Fn(&str) -> Result<bool, String>,
+    ) -> Result<usize, String> {
+        let mut meeting = self.load_meeting(id)?;
+        if meeting.ended_at.is_some() {
+            return Ok(0);
+        }
+        if meeting.segments.is_empty() {
+            if !has_recorded_audio(id)? {
+                self.delete_meeting(id)?;
+                return Ok(0);
+            }
+            meeting.ended_at = Some(meeting.started_at);
+            self.save_meeting(&meeting)?;
+            return Ok(1);
+        }
+
+        let closed_segment_count = meeting
+            .recording_sessions
+            .last()
+            .map(|s| s.end_segment_index)
+            .unwrap_or(0);
+        let total_segment_count = meeting.segments.len() as u64;
+        if total_segment_count > closed_segment_count {
+            let crashed_segments = &meeting.segments[closed_segment_count as usize..];
+            let crashed_duration = crashed_segments
+                .iter()
+                .map(|s| s.end_time)
+                .fold(0.0_f64, f64::max);
+            // The gap between sessions (time spent stopped before the
+            // resume that crashed) isn't recorded anywhere, so the best
+            // available start is where the previous session left off.
+            let crashed_started_at = meeting
+                .recording_sessions
+                .last()
+                .map(|s| s.ended_at)
+                .unwrap_or(meeting.started_at);
+            let crashed_ended_at = crashed_started_at
+                + chrono::Duration::milliseconds((crashed_duration * 1000.0) as i64);
+            meeting
+                .recording_sessions
+                .push(MeetingRecordingSession::completed(
+                    format!("{id}-recovered"),
+                    crashed_started_at,
+                    crashed_ended_at,
+                    closed_segment_count,
+                    total_segment_count,
+                ));
+        }
+
+        meeting.duration_seconds = meeting
+            .recording_sessions
+            .iter()
+            .map(|s| s.duration_seconds)
+            .sum();
+        meeting.ended_at = meeting.recording_sessions.last().map(|s| s.ended_at);
+
+        self.save_meeting(&meeting)?;
+        Ok(1)
     }
 
     /// Load a full meeting with segments by ID.

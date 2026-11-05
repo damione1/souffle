@@ -190,6 +190,7 @@ mod tests {
         let db = Arc::new(Database::open(&directory.path().join("meeting.db")).unwrap());
         let started = chrono::Utc::now();
         let acc = Arc::new(Mutex::new(Some(MeetingAccumulator {
+            write_lease: None,
             id: "two-sources".into(),
             title: "Two sources".into(),
             existing_segments: vec![],

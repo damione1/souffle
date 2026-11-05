@@ -18,6 +18,9 @@
 //! `MOCK_HEIGHT` the window's logical size.
 
 slint::include_modules!();
+#[allow(dead_code)]
+#[path = "../src/action_guards.rs"]
+mod action_guards;
 
 #[path = "../src/typography.rs"]
 mod typography;

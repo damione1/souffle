@@ -4,6 +4,9 @@ export { TypographySpecimen }
 import { TypefaceWeight } from "types.slint";
 export { TypefaceWeight }
 import { IdleView } from "idle_view.slint";
+import { ActionGuards, MeetingDeletePermission } from "action_guards.slint";
+import { MeetingDeleteBlockReason } from "types.slint";
+export { ActionGuards, MeetingDeletePermission, MeetingDeleteBlockReason }
 import { RecordingView } from "recording_view.slint";
 import { MeetingDetail, MeetingParticipantChip, MeetingMeta } from "meeting_detail.slint";
 import { SettingsView } from "settings_view.slint";
@@ -745,6 +748,7 @@ export component MainWindow inherits Window {
         wake-resume-notice: root.wake-resume-notice;
         wake-resume-notice-dismissed => { root.wake-resume-notice-dismissed(); }
         delete-error: root.meeting-detail-delete-error;
+        delete-permission: ActionGuards.meeting-delete(root.active-meeting-id, ActionGuards.revision);
         export-error: root.meeting-detail-export-error;
         audio-export-error: root.meeting-detail-audio-export-error;
         back-requested => { root.meeting-detail-back(); }
