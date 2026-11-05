@@ -32,6 +32,178 @@ fn default_template() -> String {
     summary::TEMPLATE_SUMMARY_DEFAULT.into()
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum BenchmarkMode {
+    Prepare,
+    ExportTurns,
+    Run,
+    Score,
+}
+
+impl BenchmarkMode {
+    fn parse(value: &str) -> Self {
+        match value {
+            "prepare" => Self::Prepare,
+            "export-turns" => Self::ExportTurns,
+            "run" => Self::Run,
+            "score" => Self::Score,
+            _ => panic!("unknown benchmark mode"),
+        }
+    }
+}
+
+/// Exact production input, exported without editing the approved corpus/gold.
+#[derive(Serialize, Deserialize)]
+struct TurnSource {
+    meeting_id: String,
+    corpus_sha256: String,
+    gold_sha256: String,
+    source_text_sha256: String,
+    turns: Vec<String>,
+    participant_names: Vec<String>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum CompressionDevice {
+    Cpu,
+    Mps,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum CompressionMethod {
+    Llmlingua2 {
+        checkpoint: String,
+        revision: String,
+        package_version: String,
+        device: CompressionDevice,
+        force_tokens: Vec<String>,
+        force_reserve_digit: bool,
+        chunk_end_tokens: Vec<String>,
+        classifier_elapsed_ms: u128,
+        peak_rss_bytes: u64,
+    },
+    RandomWords {
+        seed: u64,
+    },
+}
+
+impl CompressionMethod {
+    fn label(&self) -> &'static str {
+        match self {
+            Self::Llmlingua2 { .. } => "LLMLingua-2",
+            Self::RandomWords { .. } => "random words",
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+struct InputVariant {
+    meeting_id: String,
+    corpus_sha256: String,
+    gold_sha256: String,
+    source_text_sha256: String,
+    rate: f64,
+    method: CompressionMethod,
+    turns: Vec<String>,
+}
+
+fn turn_source(input: &Input, corpus_hash: &str, gold_hash: &str) -> TurnSource {
+    assert!(
+        input
+            .edited_transcript
+            .as_ref()
+            .is_none_or(|s| s.is_empty()),
+        "turn compression requires original production turns; edited transcripts are unsupported"
+    );
+    let turns = summary::turns_from_segments(&input.segments);
+    assert!(!turns.is_empty(), "compression source must contain turns");
+    TurnSource {
+        meeting_id: input.id.clone(),
+        corpus_sha256: corpus_hash.into(),
+        gold_sha256: gold_hash.into(),
+        source_text_sha256: hash(turns.join("\n").as_bytes()),
+        turns,
+        participant_names: input.participants.iter().map(|p| p.name.clone()).collect(),
+    }
+}
+
+fn turn_label(turn: &str) -> &str {
+    assert!(
+        turn.starts_with('['),
+        "production turn must have a timestamp"
+    );
+    let end = turn.find("] ").expect("production timestamp terminator") + 2;
+    let suffix = &turn[end..];
+    let speaker_len = suffix
+        .split_once(' ')
+        .and_then(|(label, _)| {
+            label
+                .strip_suffix(':')
+                .and_then(|s| Speaker::parse(&s.to_ascii_lowercase()))
+                .map(|_| label.len() + 1)
+        })
+        .unwrap_or(0);
+    &turn[..end + speaker_len]
+}
+
+fn validate_variant(variant: &InputVariant, source: &TurnSource) {
+    assert_eq!(variant.meeting_id, source.meeting_id);
+    assert_eq!(variant.corpus_sha256, source.corpus_sha256);
+    assert_eq!(variant.gold_sha256, source.gold_sha256);
+    assert_eq!(variant.source_text_sha256, source.source_text_sha256);
+    assert!(variant.rate.is_finite() && variant.rate > 0.0 && variant.rate < 1.0);
+    match &variant.method {
+        CompressionMethod::Llmlingua2 {
+            checkpoint,
+            revision,
+            package_version,
+            ..
+        } => {
+            assert!(!checkpoint.trim().is_empty() && !package_version.trim().is_empty());
+            assert!(
+                revision.len() == 40 && revision.chars().all(|c| c.is_ascii_hexdigit()),
+                "pin the exact checkpoint commit"
+            );
+        }
+        CompressionMethod::RandomWords { seed: _ } => {}
+    }
+    assert_eq!(
+        variant.turns.len(),
+        source.turns.len(),
+        "one compressed turn per original turn"
+    );
+    for (original, compressed) in source.turns.iter().zip(&variant.turns) {
+        let label = turn_label(original);
+        assert!(
+            compressed.starts_with(label),
+            "compression must preserve timestamp and speaker labels exactly"
+        );
+        assert!(
+            !compressed[label.len()..].contains('\n'),
+            "compression must preserve turn boundaries"
+        );
+    }
+}
+
+fn archive_variant(
+    input: &Input,
+    corpus_hash: &str,
+    gold_hash: &str,
+    variant_dir: &Path,
+    output_dir: &Path,
+) -> (InputVariant, String) {
+    let filename = format!("{}.variant.json", input.id);
+    let bytes = std::fs::read(variant_dir.join(&filename)).expect("read frozen input variant");
+    let variant: InputVariant = serde_json::from_slice(&bytes).expect("valid input variant");
+    validate_variant(&variant, &turn_source(input, corpus_hash, gold_hash));
+    let path = output_dir.join(filename);
+    assert!(!path.exists(), "variant artifacts are immutable");
+    std::fs::write(path, &bytes).expect("archive frozen input variant");
+    (variant, hash(&bytes))
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(rename_all = "snake_case")]
 enum Third {
@@ -274,12 +446,9 @@ pub(crate) async fn run_bench() {
     let output_dir = outside_repo(&PathBuf::from(
         std::env::var("SOUFFLE_BENCH_OUTPUT_DIR").expect("SOUFFLE_BENCH_OUTPUT_DIR"),
     ));
-    let mode = std::env::var("SOUFFLE_BENCH_MODE").unwrap_or_else(|_| "run".into());
-    assert!(
-        matches!(mode.as_str(), "prepare" | "run" | "score"),
-        "unknown benchmark mode"
-    );
-    if mode == "prepare" {
+    let mode =
+        BenchmarkMode::parse(&std::env::var("SOUFFLE_BENCH_MODE").unwrap_or_else(|_| "run".into()));
+    if mode == BenchmarkMode::Prepare {
         let ids: Vec<String> = std::env::var("SOUFFLE_BENCH_MEETING_IDS")
             .expect("explicit meeting IDs")
             .split(',')
@@ -385,8 +554,26 @@ pub(crate) async fn run_bench() {
             "corpus must include representative 30/45/75 minute meetings"
         );
     }
+    if mode == BenchmarkMode::ExportTurns {
+        for (input, _, gold_hash, corpus_hash) in &corpus {
+            let path = output_dir.join(format!("{}.source.json", input.id));
+            assert!(!path.exists(), "source exports are immutable");
+            write_json(&path, &turn_source(input, corpus_hash, gold_hash));
+        }
+        return;
+    }
+    let variant_dir = std::env::var_os("SOUFFLE_BENCH_VARIANTS_DIR").map(|value| {
+        assert!(
+            mode == BenchmarkMode::Run,
+            "variant directory is only supported in run mode; scoring uses archived variants"
+        );
+        outside_repo(Path::new(&value))
+    });
     let selected_case = std::env::var_os("SOUFFLE_BENCH_CASE").map(|value| {
-        assert_eq!(mode, "run", "case selection is only supported in run mode");
+        assert!(
+            mode == BenchmarkMode::Run,
+            "case selection is only supported in run mode"
+        );
         let case = BenchmarkCase::parse(value.to_str().expect("UTF-8 benchmark case"))
             .expect("valid benchmark case");
         assert!(
@@ -409,7 +596,7 @@ pub(crate) async fn run_bench() {
     );
     let os = command("sw_vers", &[]);
     let client = reqwest::Client::new();
-    let version = if mode == "run" {
+    let version = if mode == BenchmarkMode::Run {
         client
             .get(format!("{url}/api/version"))
             .send()
@@ -423,7 +610,7 @@ pub(crate) async fn run_bench() {
         Some(r) => r.json::<serde_json::Value>().await.ok(),
         None => None,
     };
-    let tags = if mode == "run" {
+    let tags = if mode == BenchmarkMode::Run {
         client
             .get(format!("{url}/api/tags"))
             .send()
@@ -439,7 +626,7 @@ pub(crate) async fn run_bench() {
     };
     let mut run_models = vec!["qwen2.5:7b".to_string(), "qwen3:4b".to_string()];
     let availability_path = output_dir.join("provider-availability.json");
-    if mode == "run" {
+    if mode == BenchmarkMode::Run {
         let apple_available = summary::apple_intelligence_available();
         if apple_available {
             run_models.push(summary::APPLE_INTELLIGENCE_MODEL_ID.to_string());
@@ -472,6 +659,7 @@ pub(crate) async fn run_bench() {
         table.push_str("\nProvider availability was not recorded in these saved artifacts. Only saved models are rescored.\n\n");
     }
     let mut aggregates: BTreeMap<(String, String), Vec<AggregateSample>> = BTreeMap::new();
+    let mut input_provenance = std::collections::BTreeSet::new();
     // Runs/configurations are sequential; map concurrency stays in production.
     for (input, gold, gold_hash, corpus_hash) in corpus {
         if selected_case
@@ -480,12 +668,15 @@ pub(crate) async fn run_bench() {
         {
             continue;
         }
-        let models = if mode == "score" {
+        let variant = variant_dir.as_ref().map(|directory| {
+            archive_variant(&input, &corpus_hash, &gold_hash, directory, &output_dir)
+        });
+        let models = if mode == BenchmarkMode::Score {
             saved_models(&output_dir, &input.id)
         } else {
             run_models.clone()
         };
-        if mode == "score" && models.is_empty() {
+        if mode == BenchmarkMode::Score && models.is_empty() {
             table.push_str(&format!("| {} | — | — | MISSING (no saved runs) | — | — | — | — | — | — | — | NOT REVIEWED |\n", input.id));
         }
         for model in &models {
@@ -498,7 +689,7 @@ pub(crate) async fn run_bench() {
                 }
                 let stem = format!("{}-{}-{repetition}", input.id, model.replace(':', "-"));
                 let path = output_dir.join(format!("{stem}.run.json"));
-                if mode == "run" {
+                if mode == BenchmarkMode::Run {
                     assert!(
                         !path.exists(),
                         "run files are immutable; choose a new output directory"
@@ -506,7 +697,10 @@ pub(crate) async fn run_bench() {
                     let settings = souffle_lib::settings::AppSettings::default();
                     let system =
                         summary::resolve_summary_template_prompt(&settings, Some(&input.template));
-                    let turns = summary::turns_from_segments(&input.segments);
+                    let turns = match &variant {
+                        Some((variant, _)) => variant.turns.clone(),
+                        None => summary::turns_from_segments(&input.segments),
+                    };
                     let edited = input.edited_transcript.as_ref().filter(|s| !s.is_empty());
                     let text = edited.cloned().unwrap_or_else(|| turns.join("\n"));
                     let start = Instant::now();
@@ -546,7 +740,7 @@ pub(crate) async fn run_bench() {
                             meeting_id: input.id.clone(),
                             model: model.to_string(),
                             repetition,
-                            metadata: serde_json::json!({"commit":commit,"machine":machine,"os":os,"corpus_sha256":corpus_hash,"gold_sha256":gold_hash,"gold_validated_by":gold.validated_by,"gold_validated_at":gold.validated_at,"template":input.template,"system_prompt":system,"language":input.language,"ollama_version":version,"ollama_models":tags,"ollama_url":url,"apple_stub":souffle_lib::apple_intelligence::is_stub_linked(),"parameters":"production: map=0.2/retry=0.7 merge=0.2 final=0.3 stuff=0.2 extract=0.1; Apple bridge defaults","selected_case":selected_case}),
+                            metadata: serde_json::json!({"commit":commit,"machine":machine,"os":os,"corpus_sha256":corpus_hash,"gold_sha256":gold_hash,"gold_validated_by":gold.validated_by,"gold_validated_at":gold.validated_at,"template":input.template,"system_prompt":system,"language":input.language,"ollama_version":version,"ollama_models":tags,"ollama_url":url,"apple_stub":souffle_lib::apple_intelligence::is_stub_linked(),"parameters":"production: map=0.2/retry=0.7 merge=0.2 final=0.3 stuff=0.2 extract=0.1; Apple bridge defaults","selected_case":selected_case,"input_variant": variant.as_ref().map(|(v, digest)| serde_json::json!({"sha256":digest,"method":v.method,"rate":v.rate,"source_text_sha256":v.source_text_sha256}))}),
                             prose,
                             structured,
                             error,
@@ -555,7 +749,7 @@ pub(crate) async fn run_bench() {
                         },
                     );
                 }
-                if mode == "score" && !path.exists() {
+                if mode == BenchmarkMode::Score && !path.exists() {
                     table.push_str(&format!(
                         "| {} | {} | {} | MISSING | — | — | — | — | — | — | — | NOT REVIEWED |\n",
                         input.id, model, repetition
@@ -571,6 +765,20 @@ pub(crate) async fn run_bench() {
                     "score the exact validated gold used by this run"
                 );
                 assert_eq!(run.metadata["corpus_sha256"], corpus_hash);
+                if !run.metadata["input_variant"].is_null() {
+                    let bytes =
+                        std::fs::read(output_dir.join(format!("{}.variant.json", input.id)))
+                            .expect("read archived input variant");
+                    assert_eq!(
+                        run.metadata["input_variant"]["sha256"],
+                        hash(&bytes),
+                        "score the exact compressed input used by this run"
+                    );
+                    let archived: InputVariant =
+                        serde_json::from_slice(&bytes).expect("valid archived input variant");
+                    validate_variant(&archived, &turn_source(&input, &corpus_hash, &gold_hash));
+                    input_provenance.insert(format!("- {}: {}, requested rate {}, artifact SHA-256 `{}`. Classifier timing is recorded separately from pipeline timing.\n", input.id, archived.method.label(), archived.rate, hash(&bytes)));
+                }
                 let review_path = output_dir.join(format!("{stem}.review.json"));
                 if !review_path.exists() {
                     write_json(
@@ -629,6 +837,12 @@ pub(crate) async fn run_bench() {
             values.iter().map(|v| v.elapsed_ms as f64).sum::<f64>() / n,
             values.iter().map(|v| v.calls as f64).sum::<f64>() / n
         ));
+    }
+    if !input_provenance.is_empty() {
+        table.push_str("\n## Frozen input variants\n\n");
+        for provenance in input_provenance {
+            table.push_str(&provenance);
+        }
     }
     let date = chrono::Local::now().format("%Y-%m-%d");
     std::fs::write(output_dir.join(format!("bench-resumes-{date}.md")), table).unwrap();

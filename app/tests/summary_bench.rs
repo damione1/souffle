@@ -7,6 +7,151 @@ fn benchmark_command() -> std::process::Command {
     std::process::Command::new(env!("CARGO_BIN_EXE_souffle-summary-bench"))
 }
 
+fn compression_source() -> TurnSource {
+    let turns = vec![
+        "[0:00] Me: Ne pas supprimer 42 euros.".into(),
+        "[0:05] Them: Alice garde le dossier.".into(),
+        "[0:10] Autre texte sans locuteur.".into(),
+    ];
+    TurnSource {
+        meeting_id: "synthetic".into(),
+        corpus_sha256: "approved-corpus".into(),
+        gold_sha256: "approved-gold".into(),
+        source_text_sha256: hash(turns.join("\n").as_bytes()),
+        turns,
+        participant_names: vec!["Alice".into()],
+    }
+}
+
+fn random_variant(source: &TurnSource) -> InputVariant {
+    InputVariant {
+        meeting_id: source.meeting_id.clone(),
+        corpus_sha256: source.corpus_sha256.clone(),
+        gold_sha256: source.gold_sha256.clone(),
+        source_text_sha256: source.source_text_sha256.clone(),
+        rate: 0.5,
+        method: CompressionMethod::RandomWords { seed: 42 },
+        turns: vec![
+            "[0:00] Me: pas 42 euros.".into(),
+            "[0:05] Them: Alice dossier.".into(),
+            "[0:10] texte.".into(),
+        ],
+    }
+}
+
+#[test]
+fn compression_variants_preserve_approved_source_and_exact_turn_boundaries() {
+    let source = compression_source();
+    validate_variant(&random_variant(&source), &source);
+    for field in [
+        "meeting", "corpus", "gold", "source", "count", "label", "newline", "rate",
+    ] {
+        let mut variant = random_variant(&source);
+        match field {
+            "meeting" => variant.meeting_id.push('x'),
+            "corpus" => variant.corpus_sha256.push('x'),
+            "gold" => variant.gold_sha256.push('x'),
+            "source" => variant.source_text_sha256.push('x'),
+            "count" => {
+                variant.turns.pop();
+            }
+            "label" => variant.turns[0] = "[0:00] Them: pas 42 euros.".into(),
+            "newline" => variant.turns[0].push_str("\n[0:01] Me: another turn"),
+            "rate" => variant.rate = f64::NAN,
+            _ => unreachable!("fixture fields"),
+        }
+        assert!(
+            std::panic::catch_unwind(|| validate_variant(&variant, &source)).is_err(),
+            "{field}"
+        );
+    }
+}
+
+#[test]
+fn learned_variant_requires_a_frozen_checkpoint_and_closed_method_device() {
+    let source = compression_source();
+    let mut value = serde_json::to_value(random_variant(&source)).unwrap();
+    value["method"] = serde_json::json!({
+        "kind":"llmlingua2", "checkpoint":"synthetic/model", "revision":"a".repeat(40),
+        "package_version":"synthetic", "device":"cpu", "force_tokens":["[", "]", ":"],
+        "force_reserve_digit":true, "chunk_end_tokens":[".", "\n"],
+        "classifier_elapsed_ms":42, "peak_rss_bytes":1024,
+    });
+    let variant = serde_json::from_value(value.clone()).unwrap();
+    validate_variant(&variant, &source);
+    value["method"]["revision"] = "main".into();
+    let variant = serde_json::from_value(value.clone()).unwrap();
+    assert!(std::panic::catch_unwind(|| validate_variant(&variant, &source)).is_err());
+    value["method"]["device"] = "automatic".into();
+    assert!(serde_json::from_value::<InputVariant>(value.clone()).is_err());
+    value["method"]["kind"] = "invented_compressor".into();
+    assert!(serde_json::from_value::<InputVariant>(value).is_err());
+}
+
+#[test]
+fn turn_export_and_variant_archive_leave_original_input_unchanged() {
+    let input = Input {
+        id: "synthetic".into(),
+        title: "Synthetic".into(),
+        duration_seconds: 1800.0,
+        segments: vec![TranscriptionSegment {
+            text: "Ne pas perdre 42 euros.".into(),
+            start_time: 0.0,
+            end_time: 2.0,
+            is_final: true,
+            language: Some("fr".into()),
+            confidence: None,
+            speaker: Some(Speaker::Me),
+        }],
+        edited_transcript: None,
+        notes: Some("Independent notes".into()),
+        participants: vec![],
+        language: french(),
+        template: default_template(),
+    };
+    let original = serde_json::to_vec(&input).unwrap();
+    let source = turn_source(&input, "corpus", "gold");
+    assert_eq!(source.turns, vec!["[0:00] Me: Ne pas perdre 42 euros."]);
+    let variant = InputVariant {
+        meeting_id: source.meeting_id.clone(),
+        corpus_sha256: source.corpus_sha256.clone(),
+        gold_sha256: source.gold_sha256.clone(),
+        source_text_sha256: source.source_text_sha256.clone(),
+        rate: 0.5,
+        method: CompressionMethod::RandomWords { seed: 42 },
+        turns: vec!["[0:00] Me: pas 42 euros.".into()],
+    };
+    let directory = tempfile::tempdir().unwrap();
+    let archive = tempfile::tempdir().unwrap();
+    let path = directory.path().join("synthetic.variant.json");
+    write_json(&path, &variant);
+    let bytes = std::fs::read(&path).unwrap();
+    let (saved, digest) =
+        archive_variant(&input, "corpus", "gold", directory.path(), archive.path());
+    assert_eq!(saved.turns, variant.turns);
+    assert_eq!(digest, hash(&bytes));
+    assert_eq!(
+        std::fs::read(archive.path().join("synthetic.variant.json")).unwrap(),
+        bytes
+    );
+    assert_eq!(serde_json::to_vec(&input).unwrap(), original);
+    assert!(
+        std::panic::catch_unwind(|| archive_variant(
+            &input,
+            "corpus",
+            "gold",
+            directory.path(),
+            archive.path()
+        ))
+        .is_err()
+    );
+    let edited = Input {
+        edited_transcript: Some("Edited text must retain its baseline path".into()),
+        ..input
+    };
+    assert!(std::panic::catch_unwind(|| turn_source(&edited, "corpus", "gold")).is_err());
+}
+
 #[test]
 fn isolated_case_selects_one_run_and_rejects_malformed_repetitions() {
     let case = BenchmarkCase::parse("synthetic,apple-intelligence,2").unwrap();
