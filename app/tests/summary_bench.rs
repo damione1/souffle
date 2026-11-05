@@ -79,6 +79,10 @@ fn learned_variant_requires_a_frozen_checkpoint_and_closed_method_device() {
     });
     let variant = serde_json::from_value(value.clone()).unwrap();
     validate_variant(&variant, &source);
+    let bytes = serde_json::to_vec(&variant).unwrap();
+    let ingested: InputVariant = serde_json::from_slice(&bytes).unwrap();
+    validate_variant(&ingested, &source);
+    assert_eq!(serde_json::to_value(&ingested).unwrap(), value);
     value["method"]["revision"] = "main".into();
     let variant = serde_json::from_value(value.clone()).unwrap();
     assert!(std::panic::catch_unwind(|| validate_variant(&variant, &source)).is_err());

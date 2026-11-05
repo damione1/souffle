@@ -81,7 +81,7 @@ enum CompressionMethod {
         force_tokens: Vec<String>,
         force_reserve_digit: bool,
         chunk_end_tokens: Vec<String>,
-        classifier_elapsed_ms: u128,
+        classifier_elapsed_ms: u64,
         peak_rss_bytes: u64,
     },
     RandomWords {
