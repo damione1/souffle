@@ -8457,7 +8457,7 @@ mod tests {
 
     #[test]
     fn final_meeting_writer_release_reenables_delete_without_user_input() {
-        use i_slint_backend_testing::{ElementHandle, ElementRoot};
+        use i_slint_backend_testing::ElementRoot;
         use souffle_lib::native::bridge::{NativeAction, set_sink};
 
         let window = test_window();
@@ -8482,7 +8482,7 @@ mod tests {
         );
         let profile = souffle_lib::engine::default_transcription_profile();
         actor
-            .load_model(profile.clone(), directory.path().into())
+            .load_model(profile.clone(), directory.path().to_path_buf())
             .unwrap();
         let (commands_tx, commands_rx) = crossbeam_channel::unbounded();
         let mut state = AppState::new(
