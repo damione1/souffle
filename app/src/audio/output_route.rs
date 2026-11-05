@@ -17,14 +17,19 @@ use objc2_core_audio::{
     AudioObjectGetPropertyData, AudioObjectID, AudioObjectPropertyAddress,
     kAudioDevicePropertyDataSource, kAudioDevicePropertyDeviceUID, kAudioDevicePropertyMute,
     kAudioDevicePropertyTransportType, kAudioDevicePropertyVolumeScalar,
-    kAudioDeviceTransportTypeBuiltIn, kAudioHardwarePropertyDefaultOutputDevice,
-    kAudioObjectPropertyElementMain, kAudioObjectPropertyScopeGlobal,
-    kAudioObjectPropertyScopeOutput, kAudioObjectSystemObject,
+    kAudioDeviceTransportTypeAggregate, kAudioDeviceTransportTypeAirPlay,
+    kAudioDeviceTransportTypeBluetooth, kAudioDeviceTransportTypeBluetoothLE,
+    kAudioDeviceTransportTypeBuiltIn, kAudioDeviceTransportTypeVirtual,
+    kAudioHardwarePropertyDefaultOutputDevice, kAudioObjectPropertyElementMain,
+    kAudioObjectPropertyName, kAudioObjectPropertyScopeGlobal, kAudioObjectPropertyScopeOutput,
+    kAudioObjectSystemObject,
 };
 use objc2_core_foundation::{CFRetained, CFString};
 
 /// Built-in output data source: internal speaker ('ispk').
 const DATA_SOURCE_INTERNAL_SPEAKER: u32 = u32::from_be_bytes(*b"ispk");
+/// Output data source: headphones ('hdpn').
+const DATA_SOURCE_HEADPHONES: u32 = u32::from_be_bytes(*b"hdpn");
 
 fn global_address(selector: u32) -> AudioObjectPropertyAddress {
     AudioObjectPropertyAddress {
@@ -87,6 +92,14 @@ pub fn device_uid(device: AudioObjectID) -> Result<String, String> {
     Ok(uid.to_string())
 }
 
+fn device_name(device: AudioObjectID) -> Option<String> {
+    let mut name: *const CFString = std::ptr::null();
+    get_property(device, global_address(kAudioObjectPropertyName), &mut name).ok()?;
+    let ptr = NonNull::new(name.cast_mut())?;
+    let name = unsafe { CFRetained::from_raw(ptr) };
+    Some(name.to_string())
+}
+
 fn output_address(selector: u32) -> AudioObjectPropertyAddress {
     AudioObjectPropertyAddress {
         mSelector: selector,
@@ -95,11 +108,60 @@ fn output_address(selector: u32) -> AudioObjectPropertyAddress {
     }
 }
 
-/// Whether the default output device routes to the built-in speakers rather
-/// than headphones or an external device. Built-in transport covers both
-/// the speakers and the headphone jack; the data source ('ispk' vs 'hdpn')
-/// tells them apart. If the device doesn't report one, assume speakers.
-fn output_is_builtin_speakers(device: AudioObjectID) -> bool {
+fn name_looks_like_headphones(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    lower.contains("headphone")
+        || lower.contains("headset")
+        || lower.contains("airpod")
+        || lower.contains("earbud")
+        || lower.contains("earphone")
+        || lower.contains("écouteur")
+        || lower.contains("casque")
+}
+
+/// Pure decision on whether an output route with the given transport, optional
+/// data-source FourCC, and optional device name can acoustically bleed into
+/// the microphone.
+///
+/// - Built-in transport covers both internal speakers (`'ispk'`) and the 3.5mm
+///   headphone jack (`'hdpn'`); only `'ispk'` (or no reported source when the
+///   device name is not headphones) is treated as speakers.
+/// - Bluetooth, Virtual, Aggregate, and AirPlay transports are excluded.
+/// - External wired/digital transports (DisplayPort, HDMI, Thunderbolt, USB,
+///   etc.) are treated as speaker-capable unless their data source is `'hdpn'`
+///   or their device name indicates headphones/headset.
+fn route_is_speakers(transport: u32, data_source: Option<u32>, name: Option<&str>) -> bool {
+    if transport == 0
+        || transport == kAudioDeviceTransportTypeBluetooth
+        || transport == kAudioDeviceTransportTypeBluetoothLE
+        || transport == kAudioDeviceTransportTypeVirtual
+        || transport == kAudioDeviceTransportTypeAggregate
+        || transport == kAudioDeviceTransportTypeAirPlay
+    {
+        return false;
+    }
+
+    if data_source == Some(DATA_SOURCE_HEADPHONES) {
+        return false;
+    }
+
+    if name.is_some_and(name_looks_like_headphones) {
+        return false;
+    }
+
+    if transport == kAudioDeviceTransportTypeBuiltIn {
+        return match data_source {
+            Some(source) => source == DATA_SOURCE_INTERNAL_SPEAKER,
+            None => true,
+        };
+    }
+
+    true
+}
+
+/// Whether the default output device routes to speakers (built-in or external
+/// monitor/USB/dock speakers) rather than headphones or a non-speaker transport.
+fn output_is_speakers(device: AudioObjectID) -> bool {
     let mut transport: u32 = 0;
     if get_property(
         device,
@@ -107,20 +169,21 @@ fn output_is_builtin_speakers(device: AudioObjectID) -> bool {
         &mut transport,
     )
     .is_err()
-        || transport != kAudioDeviceTransportTypeBuiltIn
     {
         return false;
     }
 
     let mut source: u32 = 0;
-    match get_property(
+    let data_source = get_property(
         device,
         output_address(kAudioDevicePropertyDataSource),
         &mut source,
-    ) {
-        Ok(()) => source == DATA_SOURCE_INTERNAL_SPEAKER,
-        Err(_) => true,
-    }
+    )
+    .ok()
+    .map(|()| source);
+
+    let name = device_name(device);
+    route_is_speakers(transport, data_source, name.as_deref())
 }
 
 /// Whether the default output device is muted. Treated as not muted if the
@@ -164,14 +227,14 @@ fn output_volume(device: AudioObjectID) -> f32 {
 const AUDIBLE_VOLUME_THRESHOLD: f32 = 0.01;
 
 /// Pure decision: can output audio acoustically leak back into the mic?
-/// Only true for unmuted, audible built-in speakers, headphones and
-/// external devices can't leak regardless of volume or mute state.
+/// Only true for unmuted, audible speaker routes; headphones and non-acoustic
+/// transports can't leak regardless of volume or mute state.
 fn can_leak(is_speakers: bool, muted: bool, volume: f32) -> bool {
     is_speakers && !muted && volume > AUDIBLE_VOLUME_THRESHOLD
 }
 
 /// Whether the default output can acoustically leak into the microphone
-/// right now: built-in speakers, unmuted, and at an audible volume. This is
+/// right now: speaker route, unmuted, and at an audible volume. This is
 /// the only case where echo cancellation does useful work; running it
 /// against a muted or silenced output starves the canceller of any real
 /// echo to converge on and it ends up suppressing the mic instead.
@@ -180,7 +243,7 @@ pub fn output_can_leak_into_mic() -> bool {
         return false;
     };
 
-    let is_speakers = output_is_builtin_speakers(device);
+    let is_speakers = output_is_speakers(device);
     if !is_speakers {
         return false;
     }
@@ -190,7 +253,17 @@ pub fn output_can_leak_into_mic() -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::can_leak;
+    use objc2_core_audio::{
+        kAudioDeviceTransportTypeAggregate, kAudioDeviceTransportTypeAirPlay,
+        kAudioDeviceTransportTypeBluetooth, kAudioDeviceTransportTypeBluetoothLE,
+        kAudioDeviceTransportTypeBuiltIn, kAudioDeviceTransportTypeDisplayPort,
+        kAudioDeviceTransportTypeHDMI, kAudioDeviceTransportTypeThunderbolt,
+        kAudioDeviceTransportTypeUSB, kAudioDeviceTransportTypeVirtual,
+    };
+
+    use super::{
+        DATA_SOURCE_HEADPHONES, DATA_SOURCE_INTERNAL_SPEAKER, can_leak, route_is_speakers,
+    };
 
     #[test]
     fn speakers_unmuted_audible_can_leak() {
@@ -210,5 +283,91 @@ mod tests {
     #[test]
     fn headphones_cannot_leak() {
         assert!(!can_leak(false, false, 1.0));
+    }
+
+    #[test]
+    fn builtin_internal_speaker_is_speakers() {
+        assert!(route_is_speakers(
+            kAudioDeviceTransportTypeBuiltIn,
+            Some(DATA_SOURCE_INTERNAL_SPEAKER),
+            Some("MacBook Pro Speakers"),
+        ));
+        assert!(route_is_speakers(
+            kAudioDeviceTransportTypeBuiltIn,
+            None,
+            Some("MacBook Pro Speakers"),
+        ));
+    }
+
+    #[test]
+    fn builtin_headphone_jack_is_not_speakers() {
+        assert!(!route_is_speakers(
+            kAudioDeviceTransportTypeBuiltIn,
+            Some(DATA_SOURCE_HEADPHONES),
+            Some("External Headphones"),
+        ));
+    }
+
+    #[test]
+    fn external_monitor_and_usb_speakers_are_speakers() {
+        assert!(route_is_speakers(
+            kAudioDeviceTransportTypeDisplayPort,
+            None,
+            Some("Studio Display Speakers"),
+        ));
+        assert!(route_is_speakers(
+            kAudioDeviceTransportTypeHDMI,
+            None,
+            Some("LG UltraFine"),
+        ));
+        assert!(route_is_speakers(
+            kAudioDeviceTransportTypeThunderbolt,
+            None,
+            Some("Apple Thunderbolt Display"),
+        ));
+        assert!(route_is_speakers(
+            kAudioDeviceTransportTypeUSB,
+            None,
+            Some("Jabra Speak 710"),
+        ));
+    }
+
+    #[test]
+    fn usb_headphones_and_non_speaker_transports_are_excluded() {
+        assert!(!route_is_speakers(
+            kAudioDeviceTransportTypeUSB,
+            Some(DATA_SOURCE_HEADPHONES),
+            Some("USB Audio"),
+        ));
+        assert!(!route_is_speakers(
+            kAudioDeviceTransportTypeUSB,
+            None,
+            Some("Logitech USB Headset"),
+        ));
+        assert!(!route_is_speakers(
+            kAudioDeviceTransportTypeBluetooth,
+            None,
+            Some("AirPods Pro"),
+        ));
+        assert!(!route_is_speakers(
+            kAudioDeviceTransportTypeBluetoothLE,
+            None,
+            Some("LE Audio"),
+        ));
+        assert!(!route_is_speakers(
+            kAudioDeviceTransportTypeVirtual,
+            None,
+            Some("BlackHole 2ch"),
+        ));
+        assert!(!route_is_speakers(
+            kAudioDeviceTransportTypeAggregate,
+            None,
+            Some("Multi-Output Device"),
+        ));
+        assert!(!route_is_speakers(
+            kAudioDeviceTransportTypeAirPlay,
+            None,
+            Some("Living Room HomePod"),
+        ));
     }
 }
