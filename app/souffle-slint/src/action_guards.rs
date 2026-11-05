@@ -31,7 +31,7 @@ pub fn permission(block: Option<Reason>) -> MeetingDeletePermission {
     }
 }
 
-pub fn install(window: &MainWindow, state: &Arc<AppState>) -> slint::Timer {
+pub fn install(window: &MainWindow, state: &Arc<AppState>) {
     let handle = Arc::clone(state);
     window
         .global::<ActionGuards>()
@@ -48,30 +48,12 @@ pub fn install(window: &MainWindow, state: &Arc<AppState>) -> slint::Timer {
                 }
             }
         });
-    let weak = window.as_weak();
-    let handle = Arc::clone(state);
-    let previous = std::cell::RefCell::new(None);
-    let timer = slint::Timer::default();
-    timer.start(
-        slint::TimerMode::Repeated,
-        std::time::Duration::from_millis(100),
-        move || {
-            let Some(window) = weak.upgrade() else {
-                return;
-            };
-            if !window.window().is_visible() {
-                return;
-            }
-            let current = souffle_lib::commands::get_meeting_delete_blocks(&handle);
-            if *previous.borrow() == Some(current.clone()) {
-                return;
-            }
-            *previous.borrow_mut() = Some(current);
-            let guards = window.global::<ActionGuards>();
-            guards.set_revision(guards.get_revision().wrapping_add(1));
-        },
-    );
-    timer
+    refresh(window);
+}
+
+pub fn refresh(window: &MainWindow) {
+    let guards = window.global::<ActionGuards>();
+    guards.set_revision(guards.get_revision().wrapping_add(1));
 }
 
 /// Refused handlers return before even invoking the backend command. A state

@@ -94,7 +94,38 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     window
         .window()
         .set_size(slint::LogicalSize::new(860.0, 780.0));
-    let _permissions = action_guards::install(&window, &state);
+    action_guards::install(&window, &state);
+    let (events_tx, events_rx) = crossbeam_channel::unbounded();
+    souffle_lib::native::bridge::set_sink(events_tx);
+    let weak = window.as_weak();
+    std::thread::spawn(move || {
+        use souffle_lib::native::bridge::NativeAction;
+        for action in events_rx {
+            match action {
+                NativeAction::MeetingDeletePermissionsChanged | NativeAction::RefreshRuntime => {
+                    let weak = weak.clone();
+                    let _ = slint::invoke_from_event_loop(move || {
+                        if let Some(window) = weak.upgrade() {
+                            action_guards::refresh(&window);
+                        }
+                    });
+                }
+                NativeAction::ToggleDictation
+                | NativeAction::PttStart
+                | NativeAction::PttStop
+                | NativeAction::StopMeeting
+                | NativeAction::StopDictation
+                | NativeAction::CancelDictation
+                | NativeAction::Navigate(_)
+                | NativeAction::ShowMainWindow
+                | NativeAction::Quit
+                | NativeAction::QuitFailed(_)
+                | NativeAction::MicStallChanged
+                | NativeAction::SystemWokeUp
+                | NativeAction::UpdateAvailable { .. } => {}
+            }
+        }
+    });
     window.set_onboarding_open(false);
     window.set_settings_calendar_enabled(false);
     window.set_live_meeting_id("active".into());

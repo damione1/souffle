@@ -7353,9 +7353,11 @@ fn dispatch_native_action(
 ) {
     match action {
         NativeAction::RefreshRuntime => {
+            action_guards::refresh(window);
             refresh_model_runtime(window.as_weak(), handle.clone());
             wake_resume_ui::state_changed(window, handle);
         }
+        NativeAction::MeetingDeletePermissionsChanged => action_guards::refresh(window),
         NativeAction::SystemWokeUp => wake_resume_ui::system_woke(window, handle),
         NativeAction::ToggleDictation => match window.get_recording_mode() {
             RecordingMode::Idle => window.invoke_dictate_requested(),
@@ -7550,7 +7552,7 @@ fn main() {
 
     let window = MainWindow::new().expect("failed to create Slint window");
     typography::initialize(&window).expect("Inter renderer font resolution failed");
-    let _meeting_delete_permissions = action_guards::install(&window, &handle);
+    action_guards::install(&window, &handle);
     settings_instrumentation::install(&window);
 
     // Close hides; it must not destroy. The pill + tray keep the process
@@ -7872,6 +7874,7 @@ fn wire_unusable_key_monitor(window: &MainWindow) {
 /// `Occluded(false)` when a hidden window comes back. Every `window.show()`
 /// goes through here.
 pub(crate) fn show_main_window(window: &MainWindow) -> Result<(), slint::PlatformError> {
+    action_guards::refresh(window);
     let shown = window.show();
     if shown.is_ok() {
         set_main_window_visible(true);
@@ -8450,6 +8453,105 @@ mod tests {
             "Native cleanup failed"
         );
         super::clear_quit_failure(&window);
+    }
+
+    #[test]
+    fn final_meeting_writer_release_reenables_delete_without_user_input() {
+        use i_slint_backend_testing::{ElementHandle, ElementRoot};
+        use souffle_lib::native::bridge::{NativeAction, set_sink};
+
+        let window = test_window();
+        let directory = tempfile::tempdir().unwrap();
+        let db = Arc::new(
+            souffle_lib::db::Database::open(&directory.path().join("fixture.db")).unwrap(),
+        );
+        let (audio_tx, audio_rx) = crossbeam_channel::unbounded();
+        let mock = Mutex::new(Some(souffle_lib::engine::mock::MockEngine::new()));
+        let actor = Arc::new(
+            souffle_lib::pipeline::EngineActorHandle::spawn(
+                audio_rx,
+                Arc::new(AtomicU64::new(0)),
+                Arc::new(Mutex::new(None)),
+                Box::new(move |_| {
+                    let engine: Box<dyn souffle_lib::engine::TranscriptionEngine> =
+                        Box::new(mock.lock().unwrap().take().unwrap());
+                    Ok(engine)
+                }),
+            )
+            .unwrap(),
+        );
+        let profile = souffle_lib::engine::default_transcription_profile();
+        actor
+            .load_model(profile.clone(), directory.path().into())
+            .unwrap();
+        let (commands_tx, commands_rx) = crossbeam_channel::unbounded();
+        let mut state = AppState::new(
+            commands_tx,
+            Arc::clone(&actor),
+            db,
+            Arc::new(std::sync::atomic::AtomicU32::new(0)),
+        );
+        state.recordings_root = directory.path().join("recordings");
+        *state.machine.lock().unwrap() = souffle_lib::state_machine::AppStateMachine::Ready {
+            profile: profile.clone(),
+        };
+        let state = Arc::new(state);
+        super::action_guards::install(&window, &state);
+        souffle_lib::async_runtime::block_on(souffle_lib::commands::start_meeting_recording(
+            Arc::clone(&state),
+            "Last writer fixture".into(),
+            None,
+            souffle_lib::progress::ProgressChannel::new(|_| {}),
+        ))
+        .unwrap();
+        let (meeting_id, last_writer) = {
+            let accumulator = state.meeting_accumulator.lock().unwrap();
+            let meeting = accumulator.as_ref().unwrap();
+            (meeting.id.clone(), meeting.write_lease.clone().unwrap())
+        };
+        let souffle_lib::state_machine::AppStateMachine::RecordingMeeting { session_id, .. } =
+            state.current_machine_state().unwrap()
+        else {
+            panic!("fixture must be recording");
+        };
+        audio_tx
+            .send(souffle_lib::audio::AudioMessage::EndOfStream { session_id })
+            .unwrap();
+        actor.stop_session(Duration::from_secs(5)).unwrap();
+        state.meeting_accumulator.lock().unwrap().take();
+        commands_rx.try_iter().for_each(drop);
+        *state.machine.lock().unwrap() =
+            souffle_lib::state_machine::AppStateMachine::Ready { profile };
+
+        window.set_active_meeting_id(meeting_id.into());
+        super::action_guards::refresh(&window);
+        let delete = window
+            .root_element()
+            .query_descendants()
+            .match_predicate(|element| {
+                element.accessible_label().is_some_and(|label| {
+                    label == "Supprimer la réunion" || label == "Delete meeting"
+                })
+            })
+            .find_first()
+            .expect("detail delete action");
+        assert_eq!(delete.accessible_enabled(), Some(false));
+        let (events_tx, events_rx) = crossbeam_channel::unbounded();
+        set_sink(events_tx);
+        std::thread::spawn(move || drop(last_writer))
+            .join()
+            .unwrap();
+        let notification =
+            std::iter::from_fn(|| events_rx.recv_timeout(Duration::from_secs(5)).ok())
+                .find(|action| *action == NativeAction::MeetingDeletePermissionsChanged)
+                .expect("final writer release must notify the UI");
+        super::dispatch_native_action(
+            &window,
+            &state,
+            &StartupPresentationGate::new(),
+            notification,
+        );
+        assert_eq!(delete.accessible_enabled(), Some(true));
     }
 
     #[test]

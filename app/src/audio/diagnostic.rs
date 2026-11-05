@@ -204,7 +204,7 @@ pub(crate) struct DiagnosticSession {
 }
 
 impl DiagnosticSession {
-    #[cfg(any(test, feature = "experimental-native-aec"))]
+    #[cfg(test)]
     pub(crate) fn sync(&mut self, session_id: u64, primary: Option<&Path>, enabled: bool) {
         self.sync_guarded(session_id, primary, enabled, None);
     }

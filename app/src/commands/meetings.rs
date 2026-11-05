@@ -68,12 +68,6 @@ pub fn get_meeting_delete_block(
     state.meeting_access.block(&state.machine, id)
 }
 
-pub fn get_meeting_delete_blocks(
-    state: &AppState,
-) -> Result<Vec<(String, crate::meeting_access::MeetingDeleteBlockReason)>, String> {
-    state.meeting_access.blocks(&state.machine)
-}
-
 #[cfg(test)]
 mod delete_guard {
     use super::*;

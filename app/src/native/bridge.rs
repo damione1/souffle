@@ -29,6 +29,9 @@ pub enum NativeAction {
     /// The canonical state machine changed. The UI re-reads its snapshot;
     /// no second state or potentially stale event payload is maintained.
     RefreshRuntime,
+    /// A meeting writer reserved, changed phase, or released its final owner.
+    /// Re-read delete permissions without refreshing engine/model catalogues.
+    MeetingDeletePermissionsChanged,
     /// Global shortcut / tray menu: start dictation if idle, stop if
     /// recording a dictation. A no-op while a meeting is recording (SOU-044:
     /// a meeting owns the session).

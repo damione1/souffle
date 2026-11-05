@@ -35,7 +35,13 @@ impl MeetingDeleteBlockReason {
 
 #[derive(Debug)]
 struct LeaseInner {
-    phase: Mutex<MeetingDeleteBlockReason>,
+    phase: Arc<Mutex<MeetingDeleteBlockReason>>,
+}
+
+impl Drop for LeaseInner {
+    fn drop(&mut self) {
+        permissions_changed();
+    }
 }
 
 /// Clone only when handing ownership to an actual writer. The registry holds
@@ -46,26 +52,49 @@ pub struct MeetingLease(Arc<LeaseInner>);
 
 impl MeetingLease {
     pub(crate) fn set_phase(&self, phase: MeetingDeleteBlockReason) {
-        *self.0.phase.lock().unwrap_or_else(|p| p.into_inner()) = phase;
+        {
+            let mut current = self.0.phase.lock().unwrap_or_else(|p| p.into_inner());
+            if *current == phase {
+                return;
+            }
+            *current = phase;
+        }
+        permissions_changed();
     }
+}
+
+struct MeetingWriter {
+    owner: Weak<LeaseInner>,
+    // Read the phase without upgrading ownership: a permission read must
+    // never become the final owner and emit its drop event under our locks.
+    phase: Arc<Mutex<MeetingDeleteBlockReason>>,
 }
 
 #[derive(Default)]
 pub(crate) struct MeetingAccess {
-    writers: Mutex<HashMap<String, Weak<LeaseInner>>>,
+    writers: Mutex<HashMap<String, MeetingWriter>>,
 }
 
 impl MeetingAccess {
     pub(crate) fn reserve(&self, id: &str) -> Result<MeetingLease, String> {
         let mut writers = self.writers.acquire()?;
-        writers.retain(|_, lease| lease.strong_count() != 0);
-        if writers.get(id).and_then(Weak::upgrade).is_some() {
+        writers.retain(|_, writer| writer.owner.strong_count() != 0);
+        if writers.contains_key(id) {
             return Err("This meeting already has an active writer".into());
         }
+        let phase = Arc::new(Mutex::new(MeetingDeleteBlockReason::Starting));
         let lease = MeetingLease(Arc::new(LeaseInner {
-            phase: Mutex::new(MeetingDeleteBlockReason::Starting),
+            phase: Arc::clone(&phase),
         }));
-        writers.insert(id.to_string(), Arc::downgrade(&lease.0));
+        writers.insert(
+            id.to_string(),
+            MeetingWriter {
+                owner: Arc::downgrade(&lease.0),
+                phase,
+            },
+        );
+        drop(writers);
+        permissions_changed();
         Ok(lease)
     }
 
@@ -77,43 +106,6 @@ impl MeetingAccess {
         let writers = self.writers.acquire()?;
         let machine = machine.acquire()?;
         blocked_reason(&writers, &machine, id)
-    }
-
-    pub(crate) fn blocks(
-        &self,
-        machine: &Mutex<AppStateMachine>,
-    ) -> Result<Vec<(String, MeetingDeleteBlockReason)>, String> {
-        let writers = self.writers.acquire()?;
-        let machine = machine.acquire()?;
-        let mut ids: Vec<String> = writers.keys().cloned().collect();
-        match &*machine {
-            AppStateMachine::RecordingMeeting { meeting_id, .. }
-            | AppStateMachine::Stopping {
-                was_recording: RecordingKind::Meeting { meeting_id },
-                ..
-            } => ids.push(meeting_id.clone()),
-            AppStateMachine::Idle
-            | AppStateMachine::Downloading { .. }
-            | AppStateMachine::Downloaded { .. }
-            | AppStateMachine::Loading { .. }
-            | AppStateMachine::Ready { .. }
-            | AppStateMachine::RecordingDictation { .. }
-            | AppStateMachine::Stopping {
-                was_recording: RecordingKind::Dictation,
-                ..
-            }
-            | AppStateMachine::Unloading { .. }
-            | AppStateMachine::Error { .. } => {}
-        }
-        ids.sort();
-        ids.dedup();
-        ids.into_iter()
-            .filter_map(|id| match blocked_reason(&writers, &machine, &id) {
-                Ok(Some(reason)) => Some(Ok((id, reason))),
-                Ok(None) => None,
-                Err(error) => Some(Err(error)),
-            })
-            .collect()
     }
 
     pub(crate) fn delete<T>(
@@ -146,7 +138,7 @@ pub fn guard_action<T>(
 }
 
 fn blocked_reason(
-    writers: &HashMap<String, Weak<LeaseInner>>,
+    writers: &HashMap<String, MeetingWriter>,
     machine: &AppStateMachine,
     id: &str,
 ) -> Result<Option<MeetingDeleteBlockReason>, String> {
@@ -175,9 +167,15 @@ fn blocked_reason(
     }
     writers
         .get(id)
-        .and_then(Weak::upgrade)
-        .map(|lease| lease.phase.acquire().map(|phase| *phase))
+        .filter(|writer| writer.owner.strong_count() != 0)
+        .map(|writer| writer.phase.acquire().map(|phase| *phase))
         .transpose()
+}
+
+fn permissions_changed() {
+    crate::native::bridge::dispatch(
+        crate::native::bridge::NativeAction::MeetingDeletePermissionsChanged,
+    );
 }
 
 #[cfg(test)]
@@ -234,7 +232,6 @@ mod tests {
             let access = MeetingAccess::default();
             let machine = Mutex::new(machine);
             assert_eq!(access.block(&machine, "old").unwrap(), None);
-            assert!(access.blocks(&machine).unwrap().is_empty());
         }
     }
 
