@@ -34,6 +34,17 @@ the harness rejects removed/reordered turns, changed labels and inserted line
 boundaries. Use the ticket's forced tokens/digits and chunk-end tokens. Do not
 silently repair classifier output before claiming it passed these checks.
 
+The reference experiment uses the recorded **`protected-turn-prefix-v1`**
+policy: split each exported turn's exact timestamp/speaker prefix, including
+its following space; classify only the body; then reattach the original prefix
+verbatim. Each body still receives participant/digit protections and is kept
+exactly as returned by the official package, without restoring deleted words
+or negations. The initial full-turn pilot normalized all 16 label spacings;
+retain that rejected pilot separately. Record the policy, runner hash, model
+revision/options and source/candidate hashes with the private artifacts. Compute
+diagnostic token/word ratios over the reconstructed complete input, including
+unchanged prefixes. The harness's exact-label checks remain unchanged.
+
 Write `<meeting-id>.variant.json` with this shape (synthetic example):
 
 ```json
