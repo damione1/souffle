@@ -29,6 +29,9 @@ concurrency:
   # Both events mutate the same labels, including across different head SHAs.
   group: coderabbit-gate-labels-${{ github.repository }}
   cancel-in-progress: false
+  # Preserve queued park events across PRs. GitHub allows at most 100 pending;
+  # queue saturation still requires a fresh event to reconcile a missed park.
+  queue: max
 
 env:
   GH_TOKEN: ${{ github.token }}
