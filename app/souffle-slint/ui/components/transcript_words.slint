@@ -47,6 +47,10 @@ export component TranscriptWordFlow inherits FlexboxLayout {
         height: max(word-label.preferred-height, trailing-label.preferred-height);
 
         word-area := TouchArea {
+            // The item also reserves the trailing text's width. Slint
+            // would otherwise center the word in that wider item, making
+            // it overlap the punctuation drawn at word-area.width.
+            x: 0px;
             width: word-label.preferred-width;
             enabled: word.clickable;
             mouse-cursor: word.clickable ? pointer : default;
