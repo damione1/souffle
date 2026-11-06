@@ -808,7 +808,7 @@ mod tests {
         let failure = encode_helper_response(Err("provider failed".into())).unwrap();
         assert_eq!(
             decode_helper_response(&failure).unwrap_err(),
-            "provider failed"
+            super::AppleIntelligenceError::Provider("provider failed".into())
         );
     }
 
