@@ -156,6 +156,21 @@ msgstr "Code"
 msgctxt "ThemedComboBox"
 msgid "Modèle introuvable"
 msgstr "Modèle introuvable"
+msgctxt "ActionGuards"
+msgid "Cette réunion est en cours de démarrage."
+msgstr "Cette réunion est en cours de démarrage."
+
+msgctxt "ActionGuards"
+msgid "Cette réunion est en cours d'enregistrement."
+msgstr "Cette réunion est en cours d'enregistrement."
+
+msgctxt "ActionGuards"
+msgid "Cette réunion est en cours de finalisation."
+msgstr "Cette réunion est en cours de finalisation."
+
+msgctxt "ActionGuards"
+msgid "Impossible de vérifier si cette réunion peut être supprimée."
+msgstr "Impossible de vérifier si cette réunion peut être supprimée."
 
 #: app/souffle-slint/ui/meeting_detail.slint:90
 msgctxt "MeetingDetail"

@@ -19,6 +19,10 @@
 
 use souffle_slint::*;
 
+#[allow(dead_code)]
+#[path = "../src/action_guards.rs"]
+mod action_guards;
+
 #[path = "../src/typography.rs"]
 mod typography;
 

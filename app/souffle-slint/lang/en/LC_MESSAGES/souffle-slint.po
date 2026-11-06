@@ -164,6 +164,21 @@ msgstr "Code editor"
 msgctxt "ThemedComboBox"
 msgid "Modèle introuvable"
 msgstr "Missing template"
+msgctxt "ActionGuards"
+msgid "Cette réunion est en cours de démarrage."
+msgstr "This meeting is starting."
+
+msgctxt "ActionGuards"
+msgid "Cette réunion est en cours d'enregistrement."
+msgstr "This meeting is recording."
+
+msgctxt "ActionGuards"
+msgid "Cette réunion est en cours de finalisation."
+msgstr "This meeting is finalizing."
+
+msgctxt "ActionGuards"
+msgid "Impossible de vérifier si cette réunion peut être supprimée."
+msgstr "Cannot check whether this meeting can be deleted."
 
 #: app/souffle-slint/ui/meeting_detail.slint:90
 msgctxt "MeetingDetail"

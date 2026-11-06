@@ -1,5 +1,6 @@
 import { AppText, AppTextInput, Typography, TypographyStyle } from "@typography";
 import { NotesSaveState, MeetingExportFormat, WakeResumeNotice } from "types.slint";
+import { ActionGuards, MeetingDeletePermission } from "action_guards.slint";
 import { StatusBanner } from "components/status_banner.slint";
 import { ThemedLineEdit } from "components/themed_line_edit.slint";
 import { AudioPlayerSection } from "components/audio_player_section.slint";
@@ -131,6 +132,7 @@ export component MeetingDetail inherits Rectangle {
     // Why the last delete failed; empty otherwise. On success Rust closes
     // the view, so there is no success state to show here.
     in property <string> delete-error;
+    in property <MeetingDeletePermission> delete-permission;
     in property <string> export-error;
     in property <string> audio-export-error;
 
@@ -162,7 +164,7 @@ export component MeetingDetail inherits Rectangle {
     property <bool> confirming-delete: false;
 
     function confirm-delete() {
-        root.confirming-delete = false;
+        if root.delete-permission.blocked { return; }
         root.delete-requested();
     }
     property <bool> is-empty-meeting: !root.has-audio && root.transcript-segment-count == 0 && root.summary == "";
@@ -847,7 +849,7 @@ export component MeetingDetail inherits Rectangle {
                 alignment: start;
                 vertical-stretch: 0;
 
-                if !root.confirming-delete: delete-link := Rectangle {
+                if !root.confirming-delete || root.delete-permission.blocked: delete-link := Rectangle {
                     width: delete-content.preferred-width + 20px;
                     height: 30px;
                     horizontal-stretch: 0;
@@ -859,13 +861,15 @@ export component MeetingDetail inherits Rectangle {
 
                     accessible-role: button;
                     accessible-label: @tr("Supprimer la réunion");
-                    accessible-action-default => { root.confirming-delete = true; }
+                    accessible-enabled: !root.delete-permission.blocked;
+                    opacity: root.delete-permission.blocked ? 0.5 : 1;
+                    accessible-action-default => { if !root.delete-permission.blocked { root.confirming-delete = true; } }
 
                     forward-focus: delete-focus;
                     delete-focus := FocusScope {
                         key-pressed(event) => {
                             if event.text == Key.Return || event.text == Key.Space {
-                                root.confirming-delete = true;
+                                if !root.delete-permission.blocked { root.confirming-delete = true; }
                                 return accept;
                             }
                             return reject;
@@ -873,7 +877,8 @@ export component MeetingDetail inherits Rectangle {
                     }
 
                     delete-area := TouchArea {
-                        mouse-cursor: pointer;
+                        enabled: !root.delete-permission.blocked;
+                        mouse-cursor: root.delete-permission.blocked ? default : pointer;
                         clicked => { root.confirming-delete = true; }
                     }
 
@@ -903,7 +908,7 @@ export component MeetingDetail inherits Rectangle {
                     }
                 }
 
-                if root.confirming-delete: HorizontalLayout {
+                if root.confirming-delete && !root.delete-permission.blocked: HorizontalLayout {
                     spacing: 8px;
                     alignment: start;
                     vertical-stretch: 0;
@@ -968,6 +973,12 @@ export component MeetingDetail inherits Rectangle {
                 }
                 }
 
+                if root.delete-permission.blocked: AppText {
+                    text: ActionGuards.reason(root.delete-permission);
+                    typography: Typography.secondary;
+                    color: Theme.text-muted;
+                    wrap: word-wrap;
+                }
                 if root.delete-error != "": AppText {
                     text: @tr("Impossible de supprimer la réunion : {}", root.delete-error);
                     typography: Typography.secondary;

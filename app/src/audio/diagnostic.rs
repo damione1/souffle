@@ -204,7 +204,18 @@ pub(crate) struct DiagnosticSession {
 }
 
 impl DiagnosticSession {
+    #[cfg(test)]
     pub(crate) fn sync(&mut self, session_id: u64, primary: Option<&Path>, enabled: bool) {
+        self.sync_guarded(session_id, primary, enabled, None);
+    }
+
+    pub(crate) fn sync_guarded(
+        &mut self,
+        session_id: u64,
+        primary: Option<&Path>,
+        enabled: bool,
+        write_lease: Option<crate::meeting_access::MeetingLease>,
+    ) {
         if self.session_id == Some(session_id) {
             return;
         }
@@ -213,7 +224,7 @@ impl DiagnosticSession {
         self.recorder.take();
         self.session_id = Some(session_id);
         if enabled && let Some(primary) = primary {
-            match start_writer(primary, QUEUE_BLOCKS, MAX_FRAMES, || {}) {
+            match start_writer_guarded(primary, QUEUE_BLOCKS, MAX_FRAMES, || {}, write_lease) {
                 Ok(recorder) => self.recorder = Some(recorder),
                 Err(e) => tracing::warn!("Pre-AEC diagnostic could not start: {e}"),
             }
@@ -278,24 +289,52 @@ impl Drop for DiagnosticSession {
     }
 }
 
+#[cfg(test)]
 fn start_writer(
     primary: &Path,
     capacity: usize,
     max_frames: u64,
     before_open: impl FnOnce() + Send + 'static,
 ) -> Result<Recorder, String> {
-    let directory = primary.parent().unwrap_or(Path::new(".")).to_path_buf();
-    start_writer_with_headroom(primary, capacity, max_frames, before_open, move || {
-        disk_has_headroom(&directory)
-    })
+    start_writer_guarded(primary, capacity, max_frames, before_open, None)
 }
 
+fn start_writer_guarded(
+    primary: &Path,
+    capacity: usize,
+    max_frames: u64,
+    before_open: impl FnOnce() + Send + 'static,
+    write_lease: Option<crate::meeting_access::MeetingLease>,
+) -> Result<Recorder, String> {
+    let directory = primary.parent().unwrap_or(Path::new(".")).to_path_buf();
+    start_writer_with_headroom_guarded(
+        primary,
+        capacity,
+        max_frames,
+        before_open,
+        move || disk_has_headroom(&directory),
+        write_lease,
+    )
+}
+
+#[cfg(test)]
 fn start_writer_with_headroom(
     primary: &Path,
     capacity: usize,
     max_frames: u64,
     before_open: impl FnOnce() + Send + 'static,
+    headroom: impl FnMut() -> Result<bool, String> + Send + 'static,
+) -> Result<Recorder, String> {
+    start_writer_with_headroom_guarded(primary, capacity, max_frames, before_open, headroom, None)
+}
+
+fn start_writer_with_headroom_guarded(
+    primary: &Path,
+    capacity: usize,
+    max_frames: u64,
+    before_open: impl FnOnce() + Send + 'static,
     mut headroom: impl FnMut() -> Result<bool, String> + Send + 'static,
+    write_lease: Option<crate::meeting_access::MeetingLease>,
 ) -> Result<Recorder, String> {
     let path = session_path(primary);
     let partial = partial_path(primary);
@@ -357,6 +396,9 @@ fn start_writer_with_headroom(
                     let _ = std::fs::remove_file(&partial);
                 }
             }
+            // Detached diagnostics can finish after Stop and the primary Ogg.
+            // Release ownership only after publication or partial-file cleanup.
+            drop(write_lease);
             #[cfg(test)]
             let _ = completed_tx.try_send(());
         })
@@ -509,6 +551,68 @@ mod tests {
     use ringbuf::HeapRb;
     use ringbuf::traits::{Producer, Split};
     use std::time::Instant;
+
+    #[test]
+    fn detached_diagnostic_owns_meeting_until_publication_or_cleanup_finishes() {
+        use crate::meeting_access::{MeetingAccess, MeetingDeleteBlockReason};
+        use crate::state_machine::AppStateMachine;
+
+        for discard in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let directory = dir.path().join("active");
+            std::fs::create_dir(&directory).unwrap();
+            let primary = directory.join("0.ogg");
+            let access = MeetingAccess::default();
+            let machine = Mutex::new(AppStateMachine::Idle);
+            let lease = access.reserve("active").unwrap();
+            lease.set_phase(MeetingDeleteBlockReason::Finalizing);
+            let (entered_tx, entered_rx) = bounded(1);
+            let (release_tx, release_rx) = bounded(1);
+            let recorder = start_writer_guarded(
+                &primary,
+                8,
+                MAX_FRAMES,
+                move || {
+                    entered_tx.send(()).unwrap();
+                    release_rx.recv().unwrap();
+                },
+                Some(lease),
+            )
+            .unwrap();
+            entered_rx.recv_timeout(Duration::from_secs(3)).unwrap();
+            recorder
+                .push
+                .push(&[0.1; FRAME_SAMPLES], &[0.0; FRAME_SAMPLES]);
+            recorder.push.start_confirmed.store(true, Ordering::Release);
+            if discard {
+                recorder.push.invalidate();
+            }
+            let completed = recorder.completed.clone();
+            drop(recorder); // Stop does not wait for the detached disk writer.
+            assert_eq!(
+                access.block(&machine, "active").unwrap(),
+                Some(MeetingDeleteBlockReason::Finalizing)
+            );
+            assert!(
+                access
+                    .delete(&machine, "active", || {
+                        std::fs::remove_dir_all(&directory).map_err(|error| error.to_string())
+                    })
+                    .is_err()
+            );
+            assert!(directory.exists());
+            release_tx.send(()).unwrap();
+            completed.recv_timeout(Duration::from_secs(3)).unwrap();
+            assert_eq!(session_path(&primary).exists(), !discard);
+            assert_eq!(access.block(&machine, "active").unwrap(), None);
+            access
+                .delete(&machine, "active", || {
+                    std::fs::remove_dir_all(&directory).map_err(|error| error.to_string())
+                })
+                .unwrap();
+            assert!(!directory.exists());
+        }
+    }
 
     fn wait_stopped(push: &DiagnosticPush) {
         let deadline = Instant::now() + Duration::from_secs(3);

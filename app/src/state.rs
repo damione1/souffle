@@ -30,6 +30,8 @@ pub enum AudioCommand {
         record_path: Option<std::path::PathBuf>,
         /// Capture a separate raw mic/tap artifact, only with `record_path`.
         meeting_audio_diagnostic: bool,
+        /// Keeps deletion refused through queued capture start and Ogg finish.
+        meeting_lease: Option<crate::meeting_access::MeetingLease>,
         /// The pre-spawned system audio tap, if any (macOS only).
         #[cfg(target_os = "macos")]
         tap: Option<crate::audio::system_tap::TapHandle>,
@@ -68,6 +70,7 @@ pub enum AudioCommand {
 
 /// Accumulated meeting segments while recording
 pub struct MeetingAccumulator {
+    pub write_lease: Option<crate::meeting_access::MeetingLease>,
     pub id: String,
     pub title: String,
     pub existing_segments: Vec<TranscriptionSegment>,
@@ -158,6 +161,7 @@ impl MeetingAccumulator {
 /// async runtime, and the transcription engine lives on the engine actor
 /// thread — both are driven via command channels.
 pub struct AppState {
+    pub(crate) meeting_access: crate::meeting_access::MeetingAccess,
     pub audio_cmd_sender: Sender<AudioCommand>,
     /// Wrapped in Arc so async commands can clone a handle into a blocking
     /// task (`spawn_blocking`) and keep the long crossbeam reply waits off the
@@ -166,6 +170,9 @@ pub struct AppState {
     pub next_audio_session_id: Mutex<u64>,
     pub meeting_accumulator: Arc<Mutex<Option<MeetingAccumulator>>>,
     pub db: Arc<Database>,
+    /// Recording storage for this state/profile. Fixtures set it to their
+    /// temporary directory before sharing AppState; production uses its bundle.
+    pub recordings_root: std::path::PathBuf,
     /// Latest audio RMS level (0.0-1.0), stored as f32 bits in AtomicU32
     pub audio_rms: Arc<AtomicU32>,
     /// Unified state machine — the source of truth for app lifecycle
@@ -208,11 +215,13 @@ impl AppState {
         audio_rms: Arc<AtomicU32>,
     ) -> Self {
         Self {
+            meeting_access: crate::meeting_access::MeetingAccess::default(),
             audio_cmd_sender,
             engine_actor,
             next_audio_session_id: Mutex::new(0),
             meeting_accumulator: Arc::new(Mutex::new(None)),
             db,
+            recordings_root: crate::audio::recorder::recordings_root(),
             audio_rms,
             machine: Mutex::new(AppStateMachine::Idle),
             sleep_paused_meeting_id: Mutex::new(None),
@@ -324,6 +333,10 @@ impl AppState {
             .ok()
             .and_then(|mut guard| guard.take());
         if let Some(meeting) = accumulator {
+            let write_lease = meeting.write_lease.clone();
+            if let Some(lease) = &write_lease {
+                lease.set_phase(crate::meeting_access::MeetingDeleteBlockReason::Finalizing);
+            }
             let mut transcript = meeting.into_transcript(chrono::Utc::now());
             transcript.system_audio = crate::app_events::worse_system_audio(
                 self.db.meeting_system_audio(&transcript.id).unwrap_or(None),
@@ -336,6 +349,7 @@ impl AppState {
                 ),
                 Err(e) => error!("Failed to salvage meeting after session abort: {e}"),
             }
+            drop(write_lease);
         }
 
         if let Err(e) = self.apply_transition(StateAction::Fail { source, message }) {
@@ -401,6 +415,7 @@ mod tests {
         let second_end = second_start + Duration::seconds(45);
 
         let accumulator = MeetingAccumulator {
+            write_lease: None,
             id: "meeting-1".to_string(),
             title: "Roadmap".to_string(),
             existing_segments: vec![TranscriptionSegment {
@@ -465,6 +480,7 @@ mod tests {
         let ended_at = started_at + Duration::seconds(10);
 
         let accumulator = MeetingAccumulator {
+            write_lease: None,
             id: "meeting-2".to_string(),
             title: "Silent Resume".to_string(),
             existing_segments: Vec::new(),

@@ -1,5 +1,6 @@
 import { AppText, AppTextInput, AppNumericText, Typography, TypographyStyle } from "@typography";
 import { TimelineKind } from "../types.slint";
+import { ActionGuards, MeetingDeletePermission } from "../action_guards.slint";
 import { Theme } from "../theme.slint";
 import { LucideIcon, IconSet } from "lucide_icon.slint";
 
@@ -21,6 +22,8 @@ export component TimelineItemRow inherits Rectangle {
     in property <TimelineEntry> entry;
     in property <bool> is-live: false;
     in property <bool> expanded: false;
+    property <MeetingDeletePermission> delete-permission: ActionGuards.meeting-delete(root.entry.id, ActionGuards.revision);
+    property <bool> delete-blocked: root.entry.kind == TimelineKind.meeting && root.delete-permission.blocked;
 
     // Driven by the parent list (`TimelineSection`), not owned locally: a
     // plain `TouchArea` click doesn't grab keyboard focus in Slint, so a
@@ -51,6 +54,17 @@ export component TimelineItemRow inherits Rectangle {
 
     VerticalLayout {
         alignment: start;
+
+        if root.delete-blocked: HorizontalLayout {
+            padding-left: 48px;
+            padding-right: 16px;
+            AppText {
+                text: ActionGuards.reason(root.delete-permission);
+                typography: Typography.caption;
+                color: Theme.text-muted;
+                wrap: word-wrap;
+            }
+        }
 
         Rectangle {
             height: 1px;
@@ -238,12 +252,15 @@ export component TimelineItemRow inherits Rectangle {
                             // request, confirming delete must not linger
                             // once you've clicked away from it.
                             delete-area := TouchArea {
-                                width: root.is-live ? 0px : (root.confirming-delete ? 72px : Theme.row-action-width);
+                                width: root.confirming-delete && !root.delete-blocked ? 72px : Theme.row-action-width;
                                 height: 28px;
-                                mouse-cursor: pointer;
+                                enabled: !root.delete-blocked;
+                                mouse-cursor: root.delete-blocked ? default : pointer;
                                 accessible-role: button;
-                                accessible-label: root.confirming-delete ? @tr("Confirmer la suppression") : @tr("Supprimer");
+                                accessible-enabled: !root.delete-blocked;
+                                accessible-label: root.delete-blocked ? ActionGuards.reason(root.delete-permission) : root.confirming-delete ? @tr("Confirmer la suppression") : @tr("Supprimer");
                                 accessible-action-default => {
+                                    if root.delete-blocked { return; }
                                     if root.confirming-delete {
                                         root.removed();
                                     } else {
@@ -251,6 +268,7 @@ export component TimelineItemRow inherits Rectangle {
                                     }
                                 }
                                 clicked => {
+                                    if root.delete-blocked { return; }
                                     if root.confirming-delete {
                                         root.removed();
                                     } else {
@@ -264,7 +282,7 @@ export component TimelineItemRow inherits Rectangle {
                                         ? (delete-area.has-hover ? Theme.danger.with-alpha(0.15) : transparent)
                                         : (delete-area.has-hover ? Theme.surface-3 : transparent);
 
-                                    if root.confirming-delete: AppText {
+                                    if root.confirming-delete && !root.delete-blocked: AppText {
                                         text: @tr("Confirmer");
                                         color: Theme.danger-soft;
                                         typography: Typography.secondary-emphasis;
@@ -274,7 +292,7 @@ export component TimelineItemRow inherits Rectangle {
                                         horizontal-alignment: center;
                                         vertical-alignment: center;
                                     }
-                                    if !root.confirming-delete && root.actions-visible: LucideIcon {
+                                    if (!root.confirming-delete || root.delete-blocked) && root.actions-visible: LucideIcon {
                                         icon: IconSet.Trash2;
                                         icon-color: delete-area.has-hover ? Theme.danger-soft : Theme.text-muted;
                                         size: 14px;

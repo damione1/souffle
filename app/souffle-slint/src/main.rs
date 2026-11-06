@@ -5,6 +5,7 @@
 // in-process function calls, no IPC, no serialization.
 use souffle_slint::*;
 
+mod action_guards;
 mod app_branch_ui;
 mod audio_player;
 mod audio_ui;
@@ -710,6 +711,68 @@ fn stop_audio_player(
     AUDIO_LOAD_GENERATION.fetch_add(1, Ordering::Relaxed);
     *progress_timer.borrow_mut() = None;
     *player.borrow_mut() = None;
+}
+
+fn wire_meeting_detail_delete(
+    window: &MainWindow,
+    handle: AppHandle,
+    player: Rc<RefCell<Option<audio_player::AudioPlayer>>>,
+    progress_timer: Rc<RefCell<Option<slint::Timer>>>,
+    transcript_state: Rc<RefCell<Option<TranscriptState>>>,
+) {
+    let weak = window.as_weak();
+    window.on_meeting_detail_delete(move || {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        let id = window.get_active_meeting_id().to_string();
+        if id.is_empty() {
+            return;
+        }
+        match action_guards::delete_from_handler(&handle, &id) {
+            Ok(()) => {
+                stop_audio_player(&player, &progress_timer);
+                wake_resume_ui::detail_closed(&window, &handle, &id);
+                if stopped_by_sleep(&handle, &id) {
+                    handle.clear_sleep_paused_meeting();
+                }
+                stop_transcript_window(&transcript_state);
+                window.set_meeting_detail_delete_error("".into());
+                window.set_active_meeting_id("".into());
+                refresh_timeline(&window, &handle);
+            }
+            Err(souffle_lib::meeting_access::MeetingDeleteError::Blocked(_)) => {}
+            Err(souffle_lib::meeting_access::MeetingDeleteError::Failed(error)) => {
+                window.set_meeting_detail_delete_error(error.into())
+            }
+        }
+    });
+}
+
+fn wire_timeline_item_removed(window: &MainWindow, handle: AppHandle) {
+    let weak = window.as_weak();
+    window.on_timeline_item_removed(move |kind, id| {
+        let result = match kind {
+            TimelineKind::Dictation => {
+                souffle_lib::commands::delete_dictation_entry(Arc::clone(&handle), id.to_string())
+            }
+            TimelineKind::Meeting => match action_guards::delete_from_handler(&handle, &id) {
+                Ok(()) => Ok(()),
+                Err(souffle_lib::meeting_access::MeetingDeleteError::Blocked(_)) => return,
+                Err(souffle_lib::meeting_access::MeetingDeleteError::Failed(error)) => Err(error),
+            },
+        };
+        if let Err(error) = result {
+            eprintln!("Failed to delete {kind:?} {id}: {error}");
+            return;
+        }
+        if let Some(window) = weak.upgrade() {
+            if kind == TimelineKind::Dictation && window.get_expanded_dictation_id() == id {
+                window.set_expanded_dictation_id("".into());
+            }
+            refresh_timeline(&window, &handle);
+        }
+    });
 }
 
 /// SOU-284: the open meeting's player, released while the window is closed
@@ -4546,38 +4609,13 @@ fn wire_callbacks(
         stop_transcript_window(&transcript_state_for_back);
     });
 
-    // MeetingDetail.svelte's "Delete meeting" (controller `deleteMeeting`):
-    // delete, then leave the view exactly like Back does. The detail view
-    // is only mounted while idle, so no recording can own this meeting.
-    let weak = window.as_weak();
-    let handle = tauri_handle.clone();
-    let player_for_delete = player.clone();
-    let progress_timer_for_delete = progress_timer.clone();
-    let transcript_state_for_delete = transcript_state.clone();
-    window.on_meeting_detail_delete(move || {
-        let Some(window) = weak.upgrade() else {
-            return;
-        };
-        let id = window.get_active_meeting_id().to_string();
-        if id.is_empty() {
-            return;
-        }
-        // Release the decoded audio before the files go away.
-        stop_audio_player(&player_for_delete, &progress_timer_for_delete);
-        match souffle_lib::commands::delete_meeting(Arc::clone(&handle), id.clone()) {
-            Ok(()) => {
-                wake_resume_ui::detail_closed(&window, &handle, &id);
-                if stopped_by_sleep(&handle, &id) {
-                    handle.clear_sleep_paused_meeting();
-                }
-                stop_transcript_window(&transcript_state_for_delete);
-                window.set_meeting_detail_delete_error("".into());
-                window.set_active_meeting_id("".into());
-                refresh_timeline(&window, &handle);
-            }
-            Err(e) => window.set_meeting_detail_delete_error(e.into()),
-        }
-    });
+    wire_meeting_detail_delete(
+        window,
+        tauri_handle.clone(),
+        player.clone(),
+        progress_timer.clone(),
+        transcript_state.clone(),
+    );
 
     let weak = window.as_weak();
     window.on_meeting_detail_copy_summary(move || {
@@ -4968,25 +5006,7 @@ fn wire_callbacks(
         *notes_timer.borrow_mut() = Some(timer);
     });
 
-    let weak = window.as_weak();
-    let handle = tauri_handle.clone();
-    window.on_timeline_item_removed(move |kind, id| {
-        let state = Arc::clone(&handle);
-        let result = if kind == TimelineKind::Dictation {
-            souffle_lib::commands::delete_dictation_entry(state, id.to_string())
-        } else {
-            souffle_lib::commands::delete_meeting(state, id.to_string())
-        };
-        if let Err(e) = result {
-            eprintln!("Failed to delete {kind:?} {id}: {e}");
-        }
-        if let Some(window) = weak.upgrade() {
-            if kind == TimelineKind::Dictation && window.get_expanded_dictation_id() == id {
-                window.set_expanded_dictation_id("".into());
-            }
-            refresh_timeline(&window, &handle);
-        }
-    });
+    wire_timeline_item_removed(window, tauri_handle.clone());
 
     window.on_timeline_item_copy_requested(move |text| {
         if let Err(e) = souffle_lib::commands::copy_text(text.to_string()) {
@@ -7333,9 +7353,11 @@ fn dispatch_native_action(
 ) {
     match action {
         NativeAction::RefreshRuntime => {
+            action_guards::refresh(window);
             refresh_model_runtime(window.as_weak(), handle.clone());
             wake_resume_ui::state_changed(window, handle);
         }
+        NativeAction::MeetingDeletePermissionsChanged => action_guards::refresh(window),
         NativeAction::SystemWokeUp => wake_resume_ui::system_woke(window, handle),
         NativeAction::ToggleDictation => match window.get_recording_mode() {
             RecordingMode::Idle => window.invoke_dictate_requested(),
@@ -7530,6 +7552,7 @@ fn main() {
 
     let window = MainWindow::new().expect("failed to create Slint window");
     typography::initialize(&window).expect("Inter renderer font resolution failed");
+    action_guards::install(&window, &handle);
     settings_instrumentation::install(&window);
 
     // Close hides; it must not destroy. The pill + tray keep the process
@@ -7851,6 +7874,7 @@ fn wire_unusable_key_monitor(window: &MainWindow) {
 /// `Occluded(false)` when a hidden window comes back. Every `window.show()`
 /// goes through here.
 pub(crate) fn show_main_window(window: &MainWindow) -> Result<(), slint::PlatformError> {
+    action_guards::refresh(window);
     let shown = window.show();
     if shown.is_ok() {
         set_main_window_visible(true);
@@ -7980,15 +8004,17 @@ mod tests {
     use super::{
         AudioDeviceProjectionState, AudioDeviceSaveSettlement, DictationEndIntent,
         DictationTextBuffers, DictationTranscriptDisposition, MainWindow, OnboardingState,
-        SettingsCache, StartupPresentationGate, SummaryRefreshState, Theme,
-        apply_audio_device_projection_settlement, audio_device_load_configuration,
-        capture_and_submit_window_geometry, clear_committed_summary_add_draft,
-        dictation_transcript_disposition, finish_startup_presentation, merge_recovery_text,
-        model_selection_matches_settings, persist_shortcut_candidate,
-        prime_summary_template_editor, project_model_selection_snapshot, project_startup_settings,
-        reset_live_buffers, reset_stale_save_error, run_current_model_task,
-        settle_audio_device_save, settle_model_selection_save, settle_onboarding_completion,
-        should_clear_committed_summary_add_draft, wire_summary_template_edit_callbacks,
+        SettingsCache, StartupPresentationGate, SummaryRefreshState, Theme, TimelineDayGroup,
+        TimelineKind, TranscriptState, apply_audio_device_projection_settlement,
+        audio_device_load_configuration, capture_and_submit_window_geometry,
+        clear_committed_summary_add_draft, dictation_transcript_disposition,
+        finish_startup_presentation, merge_recovery_text, model_selection_matches_settings,
+        persist_shortcut_candidate, prime_summary_template_editor,
+        project_model_selection_snapshot, project_startup_settings, reset_live_buffers,
+        reset_stale_save_error, run_current_model_task, settle_audio_device_save,
+        settle_model_selection_save, settle_onboarding_completion,
+        should_clear_committed_summary_add_draft, wire_meeting_detail_delete,
+        wire_summary_template_edit_callbacks, wire_timeline_item_removed,
     };
     use super::{
         DICTATIONS_FINALIZING, LiveNotesAutosave, LiveSystemAudio, LiveTranscript,
@@ -8000,13 +8026,14 @@ mod tests {
     use crate::model_ui;
     use crate::settings_drafts::SettingsDraftController;
     use crate::settings_io::SettingsIoCoordinator;
-    use slint::ComponentHandle;
     use slint::platform::{Platform, WindowAdapter, software_renderer::MinimalSoftwareWindow};
+    use slint::{ComponentHandle, Model};
     use souffle_lib::commands::{SettingsSaveError, SettingsSaveOutcome};
     use souffle_lib::settings::{AppSettings, ShortcutSettings};
+    use souffle_lib::state::AppState;
     use std::cell::{Cell, RefCell};
     use std::rc::Rc;
-    use std::sync::atomic::Ordering;
+    use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::{Arc, Mutex};
     use std::time::{Duration, Instant};
 
@@ -8426,6 +8453,209 @@ mod tests {
             "Native cleanup failed"
         );
         super::clear_quit_failure(&window);
+    }
+
+    #[test]
+    fn final_meeting_writer_release_reenables_delete_without_user_input() {
+        use i_slint_backend_testing::ElementRoot;
+        use souffle_lib::native::bridge::{NativeAction, set_sink};
+
+        let window = test_window();
+        window
+            .window()
+            .set_size(slint::PhysicalSize::new(1040, 1280));
+        crate::typography::initialize(&window).unwrap();
+        let adapter = TEST_SOFTWARE_WINDOW
+            .with(|slot| slot.borrow().clone())
+            .unwrap();
+        let mut pixels =
+            vec![slint::platform::software_renderer::Rgb565Pixel::default(); 1040 * 1280];
+        let mut settle = || {
+            for _ in 0..3 {
+                slint::platform::update_timers_and_animations();
+                adapter.request_redraw();
+                adapter.draw_if_needed(|renderer| {
+                    renderer.render(&mut pixels, 1040);
+                });
+            }
+        };
+        let directory = tempfile::tempdir().unwrap();
+        let db = Arc::new(
+            souffle_lib::db::Database::open(&directory.path().join("fixture.db")).unwrap(),
+        );
+        let (audio_tx, audio_rx) = crossbeam_channel::unbounded();
+        let mock = Mutex::new(Some(souffle_lib::engine::mock::MockEngine::new()));
+        let actor = Arc::new(
+            souffle_lib::pipeline::EngineActorHandle::spawn(
+                audio_rx,
+                Arc::new(AtomicU64::new(0)),
+                Arc::new(Mutex::new(None)),
+                Box::new(move |_| {
+                    let engine: Box<dyn souffle_lib::engine::TranscriptionEngine> =
+                        Box::new(mock.lock().unwrap().take().unwrap());
+                    Ok(engine)
+                }),
+            )
+            .unwrap(),
+        );
+        let profile = souffle_lib::engine::default_transcription_profile();
+        actor
+            .load_model(profile.clone(), directory.path().to_path_buf())
+            .unwrap();
+        let (commands_tx, commands_rx) = crossbeam_channel::unbounded();
+        let mut state = AppState::new(
+            commands_tx,
+            Arc::clone(&actor),
+            db,
+            Arc::new(std::sync::atomic::AtomicU32::new(0)),
+        );
+        state.recordings_root = directory.path().join("recordings");
+        *state.machine.lock().unwrap() = souffle_lib::state_machine::AppStateMachine::Ready {
+            profile: profile.clone(),
+        };
+        let state = Arc::new(state);
+        super::action_guards::install(&window, &state);
+        souffle_lib::async_runtime::block_on(souffle_lib::commands::start_meeting_recording(
+            Arc::clone(&state),
+            "Last writer fixture".into(),
+            None,
+            souffle_lib::progress::ProgressChannel::new(|_| {}),
+        ))
+        .unwrap();
+        let (meeting_id, last_writer) = {
+            let accumulator = state.meeting_accumulator.lock().unwrap();
+            let meeting = accumulator.as_ref().unwrap();
+            (meeting.id.clone(), meeting.write_lease.clone().unwrap())
+        };
+        let souffle_lib::state_machine::AppStateMachine::RecordingMeeting { session_id, .. } =
+            state.current_machine_state().unwrap()
+        else {
+            panic!("fixture must be recording");
+        };
+        audio_tx
+            .send(souffle_lib::audio::AudioMessage::EndOfStream { session_id })
+            .unwrap();
+        actor.stop_session(Duration::from_secs(5)).unwrap();
+        state.meeting_accumulator.lock().unwrap().take();
+        commands_rx.try_iter().for_each(drop);
+        *state.machine.lock().unwrap() =
+            souffle_lib::state_machine::AppStateMachine::Ready { profile };
+
+        window.set_active_meeting_id(meeting_id.into());
+        super::action_guards::refresh(&window);
+        settle();
+        let delete = window
+            .root_element()
+            .query_descendants()
+            .match_predicate(|element| {
+                element.accessible_label().is_some_and(|label| {
+                    label == "Supprimer la réunion" || label == "Delete meeting"
+                })
+            })
+            .find_first()
+            .expect("detail delete action");
+        assert_eq!(delete.accessible_enabled(), Some(false));
+        let (events_tx, events_rx) = crossbeam_channel::unbounded();
+        set_sink(events_tx);
+        std::thread::spawn(move || drop(last_writer))
+            .join()
+            .unwrap();
+        let notification =
+            std::iter::from_fn(|| events_rx.recv_timeout(Duration::from_secs(5)).ok())
+                .find(|action| *action == NativeAction::MeetingDeletePermissionsChanged)
+                .expect("final writer release must notify the UI");
+        super::dispatch_native_action(
+            &window,
+            &state,
+            &StartupPresentationGate::new(),
+            notification,
+        );
+        settle();
+        assert_eq!(delete.accessible_enabled(), Some(true));
+    }
+
+    #[test]
+    fn forbidden_delete_callbacks_preserve_player_timer_model_and_navigation() {
+        let window = test_window();
+        let directory = tempfile::tempdir().unwrap();
+        let db = Arc::new(
+            souffle_lib::db::Database::open(&directory.path().join("fixture.db")).unwrap(),
+        );
+        let (_audio_tx, audio_rx) = crossbeam_channel::unbounded();
+        let actor = souffle_lib::pipeline::EngineActorHandle::spawn(
+            audio_rx,
+            Arc::new(AtomicU64::new(0)),
+            Arc::new(Mutex::new(None)),
+            Box::new(|_| Err("No engine in delete handler fixture".into())),
+        )
+        .unwrap();
+        let (cmd_tx, _cmd_rx) = crossbeam_channel::unbounded();
+        let mut state = AppState::new(
+            cmd_tx,
+            Arc::new(actor),
+            db,
+            Arc::new(std::sync::atomic::AtomicU32::new(0)),
+        );
+        state.recordings_root = directory.path().join("recordings");
+        let state = Arc::new(state);
+        let player = Rc::new(RefCell::new(None));
+        let timer = Rc::new(RefCell::new(Some(slint::Timer::default())));
+        let transcript = Rc::new(RefCell::new(Some(TranscriptState {
+            blocks: vec![],
+            offsets: vec![],
+            mounted_start: 0,
+            mounted_end: 0,
+        })));
+        wire_meeting_detail_delete(
+            &window,
+            Arc::clone(&state),
+            player.clone(),
+            timer.clone(),
+            transcript.clone(),
+        );
+        wire_timeline_item_removed(&window, Arc::clone(&state));
+        let model = Rc::new(slint::VecModel::from(vec![TimelineDayGroup::default()]));
+        window.set_timeline_groups(slint::ModelRc::from(model.clone()));
+        window.set_active_meeting_id("active".into());
+        window.set_meeting_detail_title("Existing title".into());
+        window.set_meeting_detail_delete_error("Existing error".into());
+        window.set_expanded_dictation_id("existing-dictation".into());
+        // Borrowing these cells makes an attempted stop/drop fail immediately,
+        // even with no hardware-backed AudioPlayer loaded in this fixture.
+        let _player_borrow = player.borrow();
+        let _timer_borrow = timer.borrow();
+        let _transcript_borrow = transcript.borrow();
+        for machine in [
+            souffle_lib::state_machine::AppStateMachine::RecordingMeeting {
+                profile: souffle_lib::engine::default_transcription_profile(),
+                session_id: 1,
+                meeting_id: "active".into(),
+            },
+            souffle_lib::state_machine::AppStateMachine::Stopping {
+                profile: souffle_lib::engine::default_transcription_profile(),
+                was_recording: souffle_lib::state_machine::RecordingKind::Meeting {
+                    meeting_id: "active".into(),
+                },
+            },
+        ] {
+            *state.machine.lock().unwrap() = machine;
+            window.invoke_meeting_detail_delete();
+            window.invoke_timeline_item_removed(TimelineKind::Meeting, "active".into());
+            assert_eq!(window.get_active_meeting_id(), "active");
+            assert_eq!(window.get_meeting_detail_title(), "Existing title");
+            assert_eq!(window.get_meeting_detail_delete_error(), "Existing error");
+            assert_eq!(window.get_expanded_dictation_id(), "existing-dictation");
+            let actual = window.get_timeline_groups();
+            assert!(std::ptr::eq(
+                model.as_ref(),
+                actual
+                    .as_any()
+                    .downcast_ref::<slint::VecModel<TimelineDayGroup>>()
+                    .unwrap()
+            ));
+            assert!(timer.borrow().is_some());
+            assert!(transcript.borrow().is_some());
+        }
     }
 
     #[test]

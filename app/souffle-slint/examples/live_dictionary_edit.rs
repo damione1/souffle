@@ -89,6 +89,7 @@ fn main() {
         confidence: None,
     }];
     *state.meeting_accumulator.lock().unwrap() = Some(MeetingAccumulator {
+        write_lease: None,
         id: "dictionary-qa".into(),
         title: "Dictionary QA".into(),
         existing_segments: vec![],
