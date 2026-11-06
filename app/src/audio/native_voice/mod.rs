@@ -114,7 +114,7 @@ impl ConfigurationObserver {
     fn remove(&mut self) {
         if let Some(token) = self.token.take() {
             // Always called on the engine owner, including failed starts.
-            unsafe { self.center.removeObserver(&token) };
+            unsafe { self.center.removeObserver(token.as_ref()) };
         }
     }
 }

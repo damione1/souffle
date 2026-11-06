@@ -134,6 +134,49 @@ pub(super) fn wait_for_configuration(
     }
 }
 
+enum ReadbackState {
+    Running,
+    Stopped,
+}
+
+/// A notification can land while HAL getters are being read. Re-read the
+/// complete contract once across the whole startup, without starting again.
+fn validated_readback(
+    stage: usize,
+    reread_used: &mut bool,
+    check: &mut impl FnMut() -> Result<(), Failure>,
+    readback: &mut impl FnMut(usize) -> Snapshot,
+) -> Result<ReadbackState, Failure> {
+    let snapshot = readback(stage);
+    check()?;
+    let result = match snapshot.validate() {
+        Err(ReadbackFailure::ConfigurationChangedDuringReadback) if !*reread_used => {
+            check()?;
+            *reread_used = true;
+            let snapshot = readback(stage);
+            check()?;
+            snapshot.validate()
+        }
+        result => result,
+    };
+    match result {
+        Ok(()) => Ok(ReadbackState::Running),
+        Err(ReadbackFailure::EngineStoppedAfterStart) => Ok(ReadbackState::Stopped),
+        Err(
+            reason @ (ReadbackFailure::InputVoiceProcessingDisabled
+            | ReadbackFailure::OutputVoiceProcessingDisabled
+            | ReadbackFailure::AgcEnabled
+            | ReadbackFailure::VoiceProcessingBypassed
+            | ReadbackFailure::ClientFormatChanged(_)
+            | ReadbackFailure::DeviceChanged(_)
+            | ReadbackFailure::NominalRateChanged(_)
+            | ReadbackFailure::DefaultOutputChanged
+            | ReadbackFailure::DuckingChanged
+            | ReadbackFailure::ConfigurationChangedDuringReadback),
+        ) => Err(Failure::Readback(reason)),
+    }
+}
+
 /// Inject the OS calls and bounded wait so tests never capture microphone PCM.
 /// `wait` also checks the original cancellation/deadline before returning.
 pub(super) fn run(
@@ -143,57 +186,31 @@ pub(super) fn run(
     mut readback: impl FnMut(usize) -> Snapshot,
     mut wait: impl FnMut() -> Result<(), Failure>,
 ) -> Result<(), Failure> {
+    let mut reread_used = false;
     check()?;
     start(0)?;
-    let first = readback(0);
-    check()?;
-    match first.validate() {
-        Ok(()) => return Ok(()),
-        Err(ReadbackFailure::EngineStoppedAfterStart) => {
+    match validated_readback(0, &mut reread_used, &mut check, &mut readback)? {
+        ReadbackState::Running => return Ok(()),
+        ReadbackState::Stopped => {
             if !recover {
                 return Err(Failure::Readback(ReadbackFailure::EngineStoppedAfterStart));
             }
         }
-        Err(
-            reason @ (ReadbackFailure::InputVoiceProcessingDisabled
-            | ReadbackFailure::OutputVoiceProcessingDisabled
-            | ReadbackFailure::AgcEnabled
-            | ReadbackFailure::VoiceProcessingBypassed
-            | ReadbackFailure::ClientFormatChanged(_)
-            | ReadbackFailure::DeviceChanged(_)
-            | ReadbackFailure::NominalRateChanged(_)
-            | ReadbackFailure::DefaultOutputChanged
-            | ReadbackFailure::DuckingChanged
-            | ReadbackFailure::ConfigurationChangedDuringReadback),
-        ) => return Err(Failure::Readback(reason)),
     }
     wait()?;
     check()?;
     // The notification is evidence of a reconfiguration, not permission to
     // restart a changed route. Re-read the entire contract before restarting.
-    let before_restart = readback(1);
-    check()?;
-    match before_restart.validate() {
-        Ok(()) => return Ok(()),
-        Err(ReadbackFailure::EngineStoppedAfterStart) => {}
-        Err(
-            reason @ (ReadbackFailure::InputVoiceProcessingDisabled
-            | ReadbackFailure::OutputVoiceProcessingDisabled
-            | ReadbackFailure::AgcEnabled
-            | ReadbackFailure::VoiceProcessingBypassed
-            | ReadbackFailure::ClientFormatChanged(_)
-            | ReadbackFailure::DeviceChanged(_)
-            | ReadbackFailure::NominalRateChanged(_)
-            | ReadbackFailure::DefaultOutputChanged
-            | ReadbackFailure::DuckingChanged
-            | ReadbackFailure::ConfigurationChangedDuringReadback),
-        ) => return Err(Failure::Readback(reason)),
+    match validated_readback(1, &mut reread_used, &mut check, &mut readback)? {
+        ReadbackState::Running => return Ok(()),
+        ReadbackState::Stopped => {}
     }
     check()?;
     start(1)?;
-    let restarted = readback(2);
-    check()?;
-    restarted.validate().map_err(Failure::Readback)
+    match validated_readback(2, &mut reread_used, &mut check, &mut readback)? {
+        ReadbackState::Running => Ok(()),
+        ReadbackState::Stopped => Err(Failure::Readback(ReadbackFailure::EngineStoppedAfterStart)),
+    }
 }
 
 #[cfg(test)]
@@ -214,6 +231,190 @@ mod tests {
             configuration_before: 0,
             configuration_after: 0,
         }
+    }
+
+    fn changed_during_readback(running: bool) -> Snapshot {
+        let mut result = snapshot(running);
+        result.configuration_after = 1;
+        result
+    }
+
+    #[test]
+    fn configuration_change_during_readback_gets_one_full_reread_then_one_restart() {
+        let begun = Instant::now();
+        let clock = Cell::new(begun);
+        let cancelled = AtomicBool::new(false);
+        let control = Control {
+            cancelled: &cancelled,
+            deadline: begun + Duration::from_secs(8),
+        };
+        let starts = Cell::new(0);
+        let reads = Cell::new(0);
+        let waits = Cell::new(0);
+        run(
+            true,
+            || control.check_at(clock.get()),
+            |_| {
+                starts.set(starts.get() + 1);
+                Ok(())
+            },
+            |stage| {
+                reads.set(reads.get() + 1);
+                clock.set(clock.get() + Duration::from_millis(1));
+                match (reads.get(), stage) {
+                    (1, 0) => changed_during_readback(false),
+                    (2, 0) | (3, 1) => snapshot(false),
+                    (4, 2) => snapshot(true),
+                    _ => panic!("unexpected readback stage"),
+                }
+            },
+            || {
+                waits.set(waits.get() + 1);
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(starts.get(), 2);
+        assert_eq!(reads.get(), 4);
+        assert_eq!(waits.get(), 1);
+    }
+
+    #[test]
+    fn second_inconsistent_readback_fails_without_restart() {
+        let starts = Cell::new(0);
+        let reads = Cell::new(0);
+        let result = run(
+            true,
+            || Ok(()),
+            |_| {
+                starts.set(starts.get() + 1);
+                Ok(())
+            },
+            |stage| {
+                assert_eq!(stage, 0);
+                reads.set(reads.get() + 1);
+                changed_during_readback(false)
+            },
+            || panic!("inconsistent readback must not wait"),
+        );
+        assert_eq!(
+            result,
+            Err(Failure::Readback(
+                ReadbackFailure::ConfigurationChangedDuringReadback
+            ))
+        );
+        assert_eq!(starts.get(), 1);
+        assert_eq!(reads.get(), 2);
+    }
+
+    #[test]
+    fn changed_device_on_second_readback_fails_without_restart() {
+        let starts = Cell::new(0);
+        let reads = Cell::new(0);
+        let result = run(
+            true,
+            || Ok(()),
+            |_| {
+                starts.set(starts.get() + 1);
+                Ok(())
+            },
+            |_| {
+                reads.set(reads.get() + 1);
+                if reads.get() == 1 {
+                    changed_during_readback(false)
+                } else {
+                    let mut changed = snapshot(false);
+                    changed.devices = Err(ReadbackFailure::DefaultOutputChanged);
+                    changed
+                }
+            },
+            || panic!("changed device must not wait"),
+        );
+        assert_eq!(
+            result,
+            Err(Failure::Readback(ReadbackFailure::DefaultOutputChanged))
+        );
+        assert_eq!(starts.get(), 1);
+        assert_eq!(reads.get(), 2);
+    }
+
+    #[test]
+    fn cancellation_or_deadline_during_reread_prevents_restart() {
+        for cancel in [true, false] {
+            let begun = Instant::now();
+            let clock = Cell::new(begun);
+            let cancelled = AtomicBool::new(false);
+            let control = Control {
+                cancelled: &cancelled,
+                deadline: begun + Duration::from_secs(8),
+            };
+            let starts = Cell::new(0);
+            let reads = Cell::new(0);
+            let result = run(
+                true,
+                || control.check_at(clock.get()),
+                |_| {
+                    starts.set(starts.get() + 1);
+                    Ok(())
+                },
+                |_| {
+                    reads.set(reads.get() + 1);
+                    if reads.get() == 1 {
+                        changed_during_readback(false)
+                    } else {
+                        if cancel {
+                            cancelled.store(true, Ordering::Release);
+                        } else {
+                            clock.set(control.deadline);
+                        }
+                        snapshot(false)
+                    }
+                },
+                || panic!("cancelled reread must not wait"),
+            );
+            assert_eq!(
+                result,
+                Err(if cancel {
+                    Failure::Cancelled
+                } else {
+                    Failure::DeadlineElapsed
+                })
+            );
+            assert_eq!(starts.get(), 1);
+            assert_eq!(reads.get(), 2);
+        }
+    }
+
+    #[test]
+    fn reread_budget_is_shared_across_startup_phases() {
+        let starts = Cell::new(0);
+        let reads = Cell::new(0);
+        let result = run(
+            true,
+            || Ok(()),
+            |_| {
+                starts.set(starts.get() + 1);
+                Ok(())
+            },
+            |stage| {
+                reads.set(reads.get() + 1);
+                match (stage, reads.get()) {
+                    (0, 1) => changed_during_readback(false),
+                    (0, 2) => snapshot(false),
+                    (1, 3) => changed_during_readback(false),
+                    _ => panic!("readback budget exceeded"),
+                }
+            },
+            || Ok(()),
+        );
+        assert_eq!(
+            result,
+            Err(Failure::Readback(
+                ReadbackFailure::ConfigurationChangedDuringReadback
+            ))
+        );
+        assert_eq!(starts.get(), 1);
+        assert_eq!(reads.get(), 3);
     }
 
     #[test]
