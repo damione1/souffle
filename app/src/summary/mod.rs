@@ -365,9 +365,41 @@ pub fn pick_summary_model(
     choose_summary_model(settings, models).ok()
 }
 
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum GenerationError {
+    #[error(transparent)]
+    Apple(#[from] apple_intelligence::AppleIntelligenceError),
+    #[error("{0}")]
+    Provider(String),
+}
+
+impl From<String> for GenerationError {
+    fn from(detail: String) -> Self {
+        Self::Provider(detail)
+    }
+}
+
+impl GenerationError {
+    fn is_context_overflow(&self) -> bool {
+        match self {
+            Self::Apple(error) => match error {
+                apple_intelligence::AppleIntelligenceError::ContextOverflow(_) => true,
+                apple_intelligence::AppleIntelligenceError::Timeout(_)
+                | apple_intelligence::AppleIntelligenceError::ProcessFailure(_)
+                | apple_intelligence::AppleIntelligenceError::FatalBridge(_)
+                | apple_intelligence::AppleIntelligenceError::GuardrailViolation(_)
+                | apple_intelligence::AppleIntelligenceError::UnsupportedLanguage(_)
+                | apple_intelligence::AppleIntelligenceError::Provider(_) => false,
+            },
+            Self::Provider(_) => false,
+        }
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn generate_with_provider(
     provider: SummaryProviderKind,
+    purpose: apple::RequestPurpose,
     ollama_model: &str,
     ollama_url: &str,
     system: &str,
@@ -376,7 +408,7 @@ pub(crate) async fn generate_with_provider(
     budget: ollama::GenerationBudget,
     on_chunk: &impl Fn(SummarizeProgress),
     json_format: bool,
-) -> Result<String, String> {
+) -> Result<String, GenerationError> {
     match provider {
         SummaryProviderKind::Ollama => {
             let client = ollama::http_client()?;
@@ -393,24 +425,26 @@ pub(crate) async fn generate_with_provider(
             )
             .await
             .map(|output| output.text)
+            .map_err(Into::into)
         }
         SummaryProviderKind::AppleIntelligence => {
             let system = system.to_string();
             let measurement_context = metrics::context();
-            // Guarded call: dedicated thread per attempt, hard wall-clock
-            // timeout, one retry (see apple::generate_guarded). Without it a
-            // wedged FoundationModels request blocks this future forever and
-            // the summarize command never resolves.
+            // One supervisor owns the helper deadline, termination and reaping.
+            let timeout = purpose.timeout();
+            let max_tokens = apple::response_token_limit(budget);
             let full = tokio::task::spawn_blocking(move || {
                 apple::generate_guarded(
-                    || {
-                        let system = system.clone();
-                        let prompt = prompt.clone();
-                        move || {
-                            apple_intelligence::process_text_with_system_prompt(&system, &prompt, 0)
-                        }
+                    |attempt_timeout| {
+                        apple_intelligence::process_text_with_system_prompt(
+                            &system,
+                            &prompt,
+                            temperature,
+                            max_tokens,
+                            attempt_timeout,
+                        )
                     },
-                    apple::REQUEST_TIMEOUT,
+                    timeout,
                     apple::RETRY_BACKOFF,
                     measurement_context
                         .as_ref()
@@ -490,6 +524,7 @@ pub async fn summarize_stream(
         // the final pass and uses the template prompt.
         let full = generate_with_provider(
             provider,
+            apple::RequestPurpose::MeetingSummary,
             model,
             ollama_url,
             &final_system_prompt,
@@ -499,7 +534,8 @@ pub async fn summarize_stream(
             &on_chunk,
             false,
         )
-        .await?;
+        .await
+        .map_err(|e| e.to_string())?;
         let summary = sanitize_summary(&full);
         warn_if_final_summary_is_truncated(&summary, &final_system_prompt);
         return Ok(summary);
@@ -576,6 +612,7 @@ pub async fn summarize_stream(
                     async move {
                         generate_with_provider(
                             provider,
+                            apple::RequestPurpose::MeetingSummary,
                             model,
                             ollama_url,
                             &map_system_prompt,
@@ -586,6 +623,7 @@ pub async fn summarize_stream(
                             false,
                         )
                         .await
+                        .map_err(|e| e.to_string())
                         .map(|text| map::MapOutput {
                             text,
                             eval_count: None,
@@ -672,14 +710,32 @@ async fn reduce_part_summaries(
                 reduce_call_system_prompt(is_final, final_system_prompt, merge_system_prompt);
             if is_final {
                 generate_with_provider(
-                    provider, model, ollama_url, system, prompt, 0.3, budget, on_chunk, false,
+                    provider,
+                    apple::RequestPurpose::MeetingSummary,
+                    model,
+                    ollama_url,
+                    system,
+                    prompt,
+                    0.3,
+                    budget,
+                    on_chunk,
+                    false,
                 )
                 .await
             } else {
                 metrics::phase(
                     metrics::Phase::Merge,
                     generate_with_provider(
-                        provider, model, ollama_url, system, prompt, 0.2, budget, &no_op, false,
+                        provider,
+                        apple::RequestPurpose::MeetingSummary,
+                        model,
+                        ollama_url,
+                        system,
+                        prompt,
+                        0.2,
+                        budget,
+                        &no_op,
+                        false,
                     ),
                 )
                 .await
@@ -687,6 +743,7 @@ async fn reduce_part_summaries(
         },
     )
     .await
+    .map_err(|e| e.to_string())
 }
 
 /// System prompt for one reduce-tree call: the user's summary template
@@ -718,10 +775,10 @@ async fn run_reduce_tree<G, Fut>(
     skip_initial_fit_check: bool,
     on_batch_start: &impl Fn(u32, u32),
     mut generate: G,
-) -> Result<String, String>
+) -> Result<String, GenerationError>
 where
     G: FnMut(bool, String) -> Fut,
-    Fut: std::future::Future<Output = Result<String, String>>,
+    Fut: std::future::Future<Output = Result<String, GenerationError>>,
 {
     let mut token_limit = reduce_token_limit;
     // The token budget is an ESTIMATE (estimate_tokens); the real
@@ -741,7 +798,7 @@ where
                 Err(error)
                     if overflow_shrink_available
                         && current.len() > 1
-                        && apple::is_context_overflow(&error) =>
+                        && error.is_context_overflow() =>
                 {
                     overflow_shrink_available = false;
                     token_limit /= 2;
@@ -757,7 +814,7 @@ where
             return Err(format!(
                 "Meeting summary is too large for Apple Intelligence after batching \
                  ({tokens} estimated tokens, limit {token_limit}). Use Ollama for very long meetings."
-            ));
+            ).into());
         }
 
         let total_batches = batches.len() as u32;
@@ -767,7 +824,7 @@ where
             on_batch_start(i as u32 + 1, total_batches);
             match generate(false, build_reduce_prompt(&batch, None, &[])).await {
                 Ok(merged) => next.push(merged),
-                Err(error) if overflow_shrink_available && apple::is_context_overflow(&error) => {
+                Err(error) if overflow_shrink_available && error.is_context_overflow() => {
                     // Redo the whole round with the tighter budget; merges
                     // already done this round are discarded, which is the
                     // price of a one-time recovery.
@@ -1285,7 +1342,11 @@ mod tests {
                 async move {
                     if first_final {
                         // The estimate said it fits; the real tokenizer says no.
-                        Err("exceeded_context_window: prompt exceeds 4096 tokens".to_string())
+                        Err(super::GenerationError::Apple(
+                            crate::apple_intelligence::AppleIntelligenceError::ContextOverflow(
+                                "prompt exceeds 4096 tokens".into(),
+                            ),
+                        ))
                     } else if is_final {
                         Ok("## Summary\n- recovered\n".to_string())
                     } else {
@@ -1316,12 +1377,16 @@ mod tests {
             false,
             &|_current, _total| {},
             |_is_final, _prompt| async move {
-                Err::<String, _>("exceeded_context_window: still too large".to_string())
+                Err::<String, _>(super::GenerationError::Apple(
+                    crate::apple_intelligence::AppleIntelligenceError::ContextOverflow(
+                        "still too large".into(),
+                    ),
+                ))
             },
         )
         .await
         .unwrap_err();
-        assert!(error.contains("exceeded_context_window"), "got: {error}");
+        assert!(error.is_context_overflow(), "got: {error}");
     }
 
     #[tokio::test]
@@ -1339,13 +1404,19 @@ mod tests {
             &|_current, _total| {},
             |_is_final, _prompt| {
                 final_calls.set(final_calls.get() + 1);
-                async move { Err::<String, _>("exceeded_context_window: whatever".to_string()) }
+                async move {
+                    Err::<String, _>(super::GenerationError::Apple(
+                        crate::apple_intelligence::AppleIntelligenceError::ContextOverflow(
+                            "whatever".into(),
+                        ),
+                    ))
+                }
             },
         )
         .await
         .unwrap_err();
         assert_eq!(final_calls.get(), 1);
-        assert!(error.contains("exceeded_context_window"));
+        assert!(error.is_context_overflow());
     }
 
     /// A user-selected summary template must reach ONLY the terminal
@@ -1392,5 +1463,88 @@ mod tests {
             "the custom template must be used exactly once, on the final pass"
         );
         assert!(merge_prompt_calls.get() >= 1);
+    }
+    #[tokio::test]
+    async fn map_refusal_fails_without_splitting_or_returning_partial_facts() {
+        let excerpt = "First half discusses a decision. Second half discusses a sensitive topic.";
+        let calls = std::cell::Cell::new(0);
+        let error = super::map::map_one_chunk(2, 3, excerpt, |prompt, _| {
+            calls.set(calls.get() + 1);
+            assert!(prompt.contains(excerpt));
+            async { Err::<super::map::MapOutput, _>("guardrail_violation: refused".into()) }
+        })
+        .await
+        .unwrap_err();
+        assert_eq!(error, "guardrail_violation: refused");
+        assert_eq!(
+            calls.get(),
+            1,
+            "a refusal must not salvage only half the excerpt"
+        );
+    }
+
+    #[tokio::test]
+    async fn final_reduce_refusal_preserves_error_instead_of_fabricating_template() {
+        let parts = vec!["- Fact A".to_string(), "- Fact B".to_string()];
+        let original = parts.clone();
+        let result = run_reduce_tree(
+            &parts,
+            Some("User note must be included"),
+            &[],
+            ChunkConfig::APPLE_INTELLIGENCE.reduce_token_limit,
+            false,
+            &|_, _| {},
+            |is_final, prompt| async move {
+                assert!(is_final);
+                assert!(prompt.contains("User note must be included"));
+                Err::<String, _>(super::GenerationError::Apple(
+                    crate::apple_intelligence::AppleIntelligenceError::GuardrailViolation(
+                        "refused".into(),
+                    ),
+                ))
+            },
+        )
+        .await;
+        let error = result.unwrap_err();
+        assert_eq!(error.to_string(), "guardrail_violation: refused");
+        assert_eq!(parts, original);
+    }
+
+    #[tokio::test]
+    async fn intermediate_refusal_aborts_instead_of_dropping_or_looping_batches() {
+        let parts: Vec<String> = (1..=40).map(simulated_part).collect();
+        let original = parts.clone();
+        let calls = std::cell::Cell::new(0);
+        let result = run_reduce_tree(
+            &parts,
+            None,
+            &[],
+            ChunkConfig::APPLE_INTELLIGENCE.reduce_token_limit,
+            false,
+            &|_, _| {},
+            |is_final, _| {
+                assert!(!is_final);
+                calls.set(calls.get() + 1);
+                let call = calls.get();
+                async move {
+                    if call == 1 {
+                        Ok("- merged first batch".into())
+                    } else {
+                        Err(super::GenerationError::Apple(
+                            crate::apple_intelligence::AppleIntelligenceError::GuardrailViolation(
+                                "refused".into(),
+                            ),
+                        ))
+                    }
+                }
+            },
+        )
+        .await;
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            "guardrail_violation: refused"
+        );
+        assert_eq!(calls.get(), 2);
+        assert_eq!(parts, original);
     }
 }

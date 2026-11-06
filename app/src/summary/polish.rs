@@ -1083,6 +1083,7 @@ pub async fn polish_dictation_text(
     let no_op = |_: SummarizeProgress| {};
     let raw = match generate_with_provider(
         provider,
+        super::apple::RequestPurpose::DictationPolish,
         &model,
         &settings.ollama_url,
         polish_system_prompt(provider),
@@ -1100,7 +1101,7 @@ pub async fn polish_dictation_text(
             return DictationPolishResult {
                 text: stripped.trim().to_string(),
                 skipped: false,
-                warning: Some(err),
+                warning: Some(err.to_string()),
             };
         }
     };

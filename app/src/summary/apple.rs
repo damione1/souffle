@@ -1,4 +1,3 @@
-use std::sync::mpsc;
 use std::time::Duration;
 
 use crate::apple_intelligence;
@@ -12,26 +11,38 @@ pub const MERGE_SYSTEM_PROMPT: &str = OLLAMA_MERGE_PROMPT;
 pub const STRUCTURED_EXTRACT_SYSTEM_PROMPT: &str = OLLAMA_STRUCTURED_EXTRACT_PROMPT;
 pub const DICTATION_POLISH_SYSTEM_PROMPT: &str = OLLAMA_DICTATION_POLISH_PROMPT;
 
-/// Hard wall-clock budget for ONE FoundationModels request. The FFI call is
-/// blocking and non-cancellable from Rust, so each request runs on its own
-/// thread and the caller stops waiting after this long. The Swift bridge
-/// enforces its own shorter timeout (see swift/apple_intelligence.swift) so
-/// the request thread normally exits on its own; this is the backstop for a
-/// bridge that wedges before even reaching its semaphore wait.
+/// Hard wall-clock budget for ONE FoundationModels meeting summary / map /
+/// reduce / extract request. Enforced directly by `run_helper_process` in
+/// `apple_intelligence.rs`, which kills and reaps the helper subprocess on
+/// expiry without leaking threads or orphaned processes.
 pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
 
-/// Pause before the single retry of a failed (non-timeout) request, so a
+/// Shorter wall-clock budget for latency-sensitive dictation polish requests.
+pub const POLISH_TIMEOUT: Duration = Duration::from_secs(20);
+
+/// Pause before retrying a transient failure other than a timeout, so a
 /// transient condition such as `rate_limited` has a chance to clear.
 pub const RETRY_BACKOFF: Duration = Duration::from_secs(2);
 
 /// Attempts per request: the original call plus one retry.
 pub const MAX_ATTEMPTS: u32 = 2;
 
-// Stable machine-readable markers produced by the Swift bridge
-// (classifyGenerationError in swift/apple_intelligence.swift).
-const CONTEXT_OVERFLOW_MARKER: &str = "exceeded_context_window";
-const GUARDRAIL_MARKER: &str = "guardrail_violation";
-const UNSUPPORTED_LANGUAGE_MARKER: &str = "unsupported_language";
+/// The caller declares the purpose; prompt wording and translations cannot
+/// change the wall-clock budget.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RequestPurpose {
+    DictationPolish,
+    MeetingSummary,
+}
+
+impl RequestPurpose {
+    pub(crate) fn timeout(self) -> Duration {
+        match self {
+            Self::DictationPolish => POLISH_TIMEOUT,
+            Self::MeetingSummary => REQUEST_TIMEOUT,
+        }
+    }
+}
 
 pub fn validate_availability() -> Result<(), String> {
     if apple_intelligence::check_apple_intelligence_availability() {
@@ -41,281 +52,176 @@ pub fn validate_availability() -> Result<(), String> {
     }
 }
 
-/// True when the provider rejected the request because the prompt exceeded
-/// the FoundationModels context window. The reduce tree treats this as a
-/// signal that the token estimate undershot the real tokenizer and re-batches
-/// with a smaller budget instead of retrying the same oversized prompt.
-pub(crate) fn is_context_overflow(error: &str) -> bool {
-    error.contains(CONTEXT_OVERFLOW_MARKER)
-}
-
-/// Deterministic failures repeat on an identical retry; everything else
-/// (timeouts, rate limiting, transient model/asset hiccups) gets one retry.
-fn is_retryable(error: &str) -> bool {
-    !(apple_intelligence::is_terminal_helper_error(error)
-        || error.contains(GUARDRAIL_MARKER)
-        || error.contains(UNSUPPORTED_LANGUAGE_MARKER)
-        || is_context_overflow(error))
-}
-
-enum AttemptOutcome {
-    Completed(Result<String, String>),
-    TimedOut,
-}
-
-/// Run one blocking call on a dedicated thread and wait at most `timeout`.
-///
-/// On timeout the thread is abandoned: it keeps running (one leaked thread
-/// plus one in-flight FoundationModels request) until the call returns, then
-/// its `send` fails against the dropped receiver and it exits. The handoff is
-/// channel-owned and the closure captures only its own data, so an abandoned
-/// call can never touch shared state.
-fn run_attempt<F>(call: F, timeout: Duration) -> AttemptOutcome
-where
-    F: FnOnce() -> Result<String, String> + Send + 'static,
-{
-    let (tx, rx) = mpsc::channel();
-    let spawned = std::thread::Builder::new()
-        .name("apple-ai-request".into())
-        .spawn(move || {
-            let _ = tx.send(call());
-        });
-    if spawned.is_err() {
-        return AttemptOutcome::Completed(Err(
-            "Failed to spawn Apple Intelligence request thread".into()
-        ));
-    }
-    match rx.recv_timeout(timeout) {
-        Ok(result) => AttemptOutcome::Completed(result),
-        Err(_) => AttemptOutcome::TimedOut,
+/// `0` maps to `maximumResponseTokens: nil` in Swift. The final summary
+/// retains the full remaining context, while bounded stages use their budget.
+pub(crate) fn response_token_limit(budget: super::ollama::GenerationBudget) -> i32 {
+    if budget.num_predict >= super::ollama::REDUCE_BUDGET.num_predict {
+        0
+    } else {
+        budget.num_predict as i32
     }
 }
 
 /// Run one FoundationModels request with a hard timeout and a single retry.
 ///
-/// `make_attempt` builds a fresh blocking call per attempt (the closure moves
-/// onto the attempt thread, so a retry needs its own copy). Retryable
-/// failures and timeouts are attempted `MAX_ATTEMPTS` times in total; the
-/// last error is returned so the pipeline fails cleanly instead of hanging.
-pub(crate) fn generate_guarded<C, F>(
+/// `make_attempt` receives `timeout` and delegates to `apple_intelligence::process_text_with_system_prompt`,
+/// whose subprocess supervisor enforces the wall-clock deadline and reaps the
+/// child process on timeout. Retryable failures and timeouts are attempted
+/// `MAX_ATTEMPTS` times in total; the last error is returned so the pipeline
+/// fails cleanly instead of hanging.
+pub(crate) fn generate_guarded<C>(
     mut make_attempt: C,
     timeout: Duration,
     retry_backoff: Duration,
     measurement: Option<(&super::metrics::Context, f32)>,
-) -> Result<String, String>
+) -> Result<String, apple_intelligence::AppleIntelligenceError>
 where
-    C: FnMut() -> F,
-    F: FnOnce() -> Result<String, String> + Send + 'static,
+    C: FnMut(Duration) -> Result<String, apple_intelligence::AppleIntelligenceError>,
 {
-    let mut last_error = String::new();
+    let mut last_error = None;
     for attempt in 1..=MAX_ATTEMPTS {
-        // The waiter owns diagnostics, not the abandoned request thread. A
-        // timeout is finalized here and a late result cannot overwrite it.
         let guard = measurement.map(|(context, temperature)| {
             context.start("apple_intelligence", temperature, None, None)
         });
-        let outcome = run_attempt(make_attempt(), timeout);
+        let result = make_attempt(timeout);
         if let Some(guard) = guard {
-            match &outcome {
-                AttemptOutcome::Completed(result) => guard.finish(result),
-                AttemptOutcome::TimedOut => guard.finish(&Err::<(), _>(format!(
-                    "Apple Intelligence request timed out after {}s",
-                    timeout.as_secs_f64()
-                ))),
-            }
+            guard.finish(&result.as_ref().map(|_| ()).map_err(ToString::to_string));
         }
-        match outcome {
-            AttemptOutcome::Completed(Ok(text)) => return Ok(text),
-            AttemptOutcome::Completed(Err(error)) => {
-                if !is_retryable(&error) {
+        match result {
+            Ok(text) => return Ok(text),
+            Err(error) => {
+                if !error.is_retryable() {
+                    tracing::warn!(
+                        attempt,
+                        error = %error,
+                        "Apple Intelligence request failed with non-retryable error"
+                    );
                     return Err(error);
                 }
-                tracing::warn!(attempt, error = %error, "Apple Intelligence request failed");
-                last_error = error;
-                if attempt < MAX_ATTEMPTS && !retry_backoff.is_zero() {
-                    std::thread::sleep(retry_backoff);
+                match &error {
+                    apple_intelligence::AppleIntelligenceError::Timeout(_) => {
+                        tracing::warn!(
+                            attempt,
+                            timeout_secs = timeout.as_secs(),
+                            error = %error,
+                            "Apple Intelligence request timed out"
+                        );
+                        last_error = Some(error);
+                        // No backoff after a timeout: the attempt's wall-clock budget is spent.
+                    }
+                    apple_intelligence::AppleIntelligenceError::ProcessFailure(_)
+                    | apple_intelligence::AppleIntelligenceError::FatalBridge(_)
+                    | apple_intelligence::AppleIntelligenceError::ContextOverflow(_)
+                    | apple_intelligence::AppleIntelligenceError::GuardrailViolation(_)
+                    | apple_intelligence::AppleIntelligenceError::UnsupportedLanguage(_)
+                    | apple_intelligence::AppleIntelligenceError::Provider(_) => {
+                        tracing::warn!(attempt, error = %error, "Apple Intelligence request failed");
+                        last_error = Some(error);
+                        if attempt < MAX_ATTEMPTS && !retry_backoff.is_zero() {
+                            std::thread::sleep(retry_backoff);
+                        }
+                    }
                 }
-            }
-            AttemptOutcome::TimedOut => {
-                tracing::warn!(
-                    attempt,
-                    timeout_secs = timeout.as_secs(),
-                    "Apple Intelligence request timed out; request thread abandoned"
-                );
-                last_error = format!(
-                    "Apple Intelligence request timed out after {}s",
-                    timeout.as_secs()
-                );
-                // No backoff after a timeout: the wall-clock budget is spent.
             }
         }
     }
-    Err(last_error)
+    Err(last_error.expect("at least one generation attempt is configured"))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{generate_guarded, is_context_overflow, is_retryable};
-    use std::sync::Arc;
-    use std::sync::atomic::{AtomicU32, Ordering};
-    use std::time::Duration;
+    use super::*;
+    use apple_intelligence::AppleIntelligenceError as Error;
 
-    const SHORT_TIMEOUT: Duration = Duration::from_millis(50);
-    const NO_BACKOFF: Duration = Duration::ZERO;
+    #[test]
+    fn budgets_are_explicit_by_purpose() {
+        assert_eq!(
+            RequestPurpose::DictationPolish.timeout(),
+            Duration::from_secs(20)
+        );
+        assert_eq!(
+            RequestPurpose::MeetingSummary.timeout(),
+            Duration::from_secs(120)
+        );
+        assert_eq!(response_token_limit(super::super::ollama::MAP_BUDGET), 700);
+        assert_eq!(response_token_limit(super::super::ollama::REDUCE_BUDGET), 0);
+        assert_eq!(
+            response_token_limit(super::super::ollama::GenerationBudget {
+                num_ctx: 4096,
+                num_predict: 0,
+            }),
+            0
+        );
+    }
 
     #[tokio::test]
-    async fn diagnostics_finalize_timeout_before_successful_retry() {
-        let (result, metrics) = crate::summary::metrics::measure(async {
-            let context = crate::summary::metrics::context().unwrap();
-            let mut attempt = 0;
+    async fn timeout_retry_records_failure_then_success() {
+        let (result, metrics) = super::super::metrics::measure(async {
+            let context = super::super::metrics::context().unwrap();
+            let mut calls = 0;
             generate_guarded(
-                || {
-                    attempt += 1;
-                    let current = attempt;
-                    move || {
-                        if current == 1 {
-                            std::thread::sleep(Duration::from_millis(200));
-                        }
+                |timeout| {
+                    assert_eq!(timeout, RequestPurpose::MeetingSummary.timeout());
+                    calls += 1;
+                    if calls == 1 {
+                        Err(Error::Timeout("expired".into()))
+                    } else {
                         Ok("summary".into())
                     }
                 },
-                SHORT_TIMEOUT,
-                NO_BACKOFF,
+                RequestPurpose::MeetingSummary.timeout(),
+                Duration::ZERO,
                 Some((&context, 0.2)),
             )
         })
         .await;
         assert_eq!(result.as_deref(), Ok("summary"));
         assert_eq!(metrics.calls.len(), 2);
-        let timeout = &metrics.calls[0];
-        assert!(timeout.completed);
-        assert!(timeout.error.as_ref().unwrap().contains("timed out"));
-        assert!(timeout.elapsed_ms >= SHORT_TIMEOUT.as_millis());
-        assert_eq!(timeout.prompt_tokens, None);
-        assert!(metrics.calls[1].completed);
+        assert!(metrics.calls.iter().all(|call| call.completed));
+        assert!(metrics.calls[0].error.is_some());
         assert!(metrics.calls[1].error.is_none());
     }
 
     #[test]
-    fn success_propagates_on_first_attempt() {
-        let attempts = Arc::new(AtomicU32::new(0));
-        let counter = attempts.clone();
-        let result = generate_guarded(
-            move || {
-                counter.fetch_add(1, Ordering::SeqCst);
-                || Ok("summary".to_string())
-            },
-            SHORT_TIMEOUT,
-            NO_BACKOFF,
-            None,
-        );
-        assert_eq!(result.as_deref(), Ok("summary"));
-        assert_eq!(attempts.load(Ordering::SeqCst), 1);
-    }
-
-    #[test]
-    fn timeout_then_success_retries_once_and_discards_late_result() {
-        let attempts = Arc::new(AtomicU32::new(0));
-        let counter = attempts.clone();
-        let result = generate_guarded(
-            move || {
-                let attempt = counter.fetch_add(1, Ordering::SeqCst) + 1;
-                move || {
-                    if attempt == 1 {
-                        // Outlives the timeout: the late Ok must be discarded
-                        // (its channel receiver is gone) and never returned.
-                        std::thread::sleep(Duration::from_millis(200));
-                        Ok("late result from abandoned thread".to_string())
-                    } else {
-                        Ok("fresh result".to_string())
-                    }
-                }
-            },
-            SHORT_TIMEOUT,
-            NO_BACKOFF,
-            None,
-        );
-        assert_eq!(result.as_deref(), Ok("fresh result"));
-        assert_eq!(attempts.load(Ordering::SeqCst), 2);
-        // Let the abandoned thread finish its doomed send; nothing to assert
-        // beyond not panicking or corrupting the returned value.
-        std::thread::sleep(Duration::from_millis(250));
-    }
-
-    #[test]
-    fn two_timeouts_fail_with_timeout_error() {
-        let attempts = Arc::new(AtomicU32::new(0));
-        let counter = attempts.clone();
-        let result = generate_guarded(
-            move || {
-                counter.fetch_add(1, Ordering::SeqCst);
-                || {
-                    std::thread::sleep(Duration::from_millis(200));
-                    Ok("never delivered".to_string())
-                }
-            },
-            SHORT_TIMEOUT,
-            NO_BACKOFF,
-            None,
-        );
-        let error = result.unwrap_err();
-        assert!(error.contains("timed out"), "unexpected error: {error}");
-        assert_eq!(attempts.load(Ordering::SeqCst), 2);
-        std::thread::sleep(Duration::from_millis(400));
-    }
-
-    #[test]
-    fn transient_error_retries_then_fails_with_last_error() {
-        let attempts = Arc::new(AtomicU32::new(0));
-        let counter = attempts.clone();
-        let result = generate_guarded(
-            move || {
-                counter.fetch_add(1, Ordering::SeqCst);
-                || Err("rate_limited: system is busy".to_string())
-            },
-            SHORT_TIMEOUT,
-            NO_BACKOFF,
-            None,
-        );
-        assert_eq!(result.unwrap_err(), "rate_limited: system is busy");
-        assert_eq!(attempts.load(Ordering::SeqCst), 2);
-    }
-
-    #[test]
-    fn non_retryable_error_fails_on_first_attempt() {
-        for marker in [
-            "guardrail_violation: safety filter",
-            "unsupported_language: locale",
-            "exceeded_context_window: 4096 tokens",
-            crate::apple_intelligence::HELPER_TIMEOUT_PREFIX,
+    fn deterministic_errors_are_not_retried() {
+        for error in [
+            Error::GuardrailViolation("refused".into()),
+            Error::UnsupportedLanguage("locale".into()),
+            Error::ContextOverflow("full".into()),
+            Error::ProcessFailure("exit".into()),
+            Error::FatalBridge("spawn".into()),
         ] {
-            let attempts = Arc::new(AtomicU32::new(0));
-            let counter = attempts.clone();
+            let mut calls = 0;
             let result = generate_guarded(
-                move || {
-                    counter.fetch_add(1, Ordering::SeqCst);
-                    move || Err(marker.to_string())
+                |_| {
+                    calls += 1;
+                    Err(error.clone())
                 },
-                SHORT_TIMEOUT,
-                NO_BACKOFF,
+                Duration::from_millis(40),
+                Duration::ZERO,
                 None,
             );
-            assert_eq!(result.unwrap_err(), marker);
-            assert_eq!(attempts.load(Ordering::SeqCst), 1, "marker: {marker}");
+            assert_eq!(result.unwrap_err(), error);
+            assert_eq!(calls, 1);
         }
     }
 
     #[test]
-    fn error_classification_markers() {
-        assert!(is_context_overflow("exceeded_context_window: too big"));
-        assert!(!is_context_overflow("rate_limited: busy"));
-        assert!(is_retryable("request_timeout: no answer in 100s"));
-        assert!(is_retryable("rate_limited: busy"));
-        assert!(is_retryable("some opaque transient failure"));
-        assert!(!is_retryable("guardrail_violation: refused"));
-        assert!(!is_retryable("exceeded_context_window: too big"));
-        assert!(!is_retryable(
-            crate::apple_intelligence::HELPER_TIMEOUT_PREFIX
-        ));
+    fn transient_failure_returns_last_error_after_two_attempts() {
+        let mut calls = 0;
+        let result = generate_guarded(
+            |_| {
+                calls += 1;
+                Err(Error::Provider(format!("rate limited {calls}")))
+            },
+            Duration::from_millis(40),
+            Duration::ZERO,
+            None,
+        );
+        assert_eq!(calls, MAX_ATTEMPTS);
+        assert_eq!(
+            result.unwrap_err(),
+            Error::Provider("rate limited 2".into())
+        );
     }
 }
