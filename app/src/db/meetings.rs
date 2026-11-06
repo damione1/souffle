@@ -23,7 +23,9 @@ use crate::transcript::{
 };
 
 use super::Database;
-use super::compression::{fingerprint, invalidate_changed, read_compact, write_compact};
+use super::compression::{
+    fingerprint, invalidate_changed, invalidation_snapshot, read_compact, write_compact,
+};
 
 fn meeting_fts_text(edited_transcript: Option<&str>, segment_text: String) -> String {
     edited_transcript
@@ -69,7 +71,7 @@ impl Database {
         let tx = conn
             .transaction()
             .map_err(|e| format!("Transaction: {e}"))?;
-        let compact_before = fingerprint(&tx, &meeting.id)?;
+        let compact_before = invalidation_snapshot(&tx, &meeting.id)?;
         let had_compact = read_compact(&tx, &meeting.id)?.is_some();
 
         tx.execute(
@@ -157,16 +159,12 @@ impl Database {
         );
         reindex_meeting_fts(&tx, &meeting.id, &full_text)?;
 
-        if compact_before.is_some() {
-            invalidate_changed(&tx, &meeting.id, compact_before)?;
-        }
-        if !had_compact {
-            if let Some(compact) = &meeting.compact_transcript {
-                let mut compact = compact.clone();
-                compact.is_stale |=
-                    Some(compact.source_sha256.clone()) != fingerprint(&tx, &meeting.id)?;
-                write_compact(&tx, &meeting.id, &compact)?;
-            }
+        invalidate_changed(&tx, &meeting.id, compact_before)?;
+        if !had_compact && let Some(compact) = &meeting.compact_transcript {
+            let mut compact = compact.clone();
+            compact.is_stale |=
+                Some(compact.source_sha256.clone()) != fingerprint(&tx, &meeting.id)?;
+            write_compact(&tx, &meeting.id, &compact)?;
         }
         tx.commit().map_err(|e| format!("Commit: {e}"))?;
         Ok(())
@@ -182,7 +180,7 @@ impl Database {
     pub fn upsert_meeting_header(&self, meeting: &MeetingTranscript) -> Result<(), String> {
         let mut conn = self.conn.acquire()?;
         let tx = conn.transaction().map_err(|e| e.to_string())?;
-        let before = fingerprint(&tx, &meeting.id)?;
+        let before = invalidation_snapshot(&tx, &meeting.id)?;
         tx.execute(
             &format!(
                 "INSERT INTO {MEETINGS} (
@@ -247,7 +245,7 @@ impl Database {
         let tx = conn
             .transaction()
             .map_err(|e| format!("Transaction: {e}"))?;
-        let compact_before = fingerprint(&tx, meeting_id)?;
+        let compact_before = invalidation_snapshot(&tx, meeting_id)?;
         let insert_segment_sql = format!(
             "INSERT INTO {SEGMENTS} ({MEETING_ID}, {TEXT}, {START_TIME}, {END_TIME}, {IS_FINAL}, {LANGUAGE}, {CONFIDENCE}, {SORT_ORDER}, {SPEAKER})
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)"
@@ -288,7 +286,7 @@ impl Database {
         let tx = conn
             .transaction()
             .map_err(|e| format!("Transaction: {e}"))?;
-        let compact_before = fingerprint(&tx, meeting_id)?;
+        let compact_before = invalidation_snapshot(&tx, meeting_id)?;
         let update_segment_sql = format!(
             "UPDATE {SEGMENTS} SET {TEXT} = ?3 WHERE {MEETING_ID} = ?1 AND {SORT_ORDER} = ?2"
         );
@@ -726,7 +724,7 @@ impl Database {
         let tx = conn
             .transaction()
             .map_err(|e| format!("Transaction: {e}"))?;
-        let compact_before = fingerprint(&tx, id)?;
+        let compact_before = invalidation_snapshot(&tx, id)?;
 
         tx.execute(
             &format!(

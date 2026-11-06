@@ -234,7 +234,9 @@ impl Database {
 
             if current_version < 18 {
                 use souffle_schema::sql::{column::*, table::MEETINGS};
-                let tx = conn.transaction().map_err(|e| e.to_string())?;
+                let tx = conn
+                    .transaction()
+                    .map_err(|e| format!("Begin v18 compression migration: {e}"))?;
                 for (column, kind) in [
                     (COMPACT_TRANSCRIPT, "TEXT"),
                     (COMPACT_MODEL, "TEXT"),
@@ -251,8 +253,9 @@ impl Database {
                     .map_err(|e| format!("Compression migration: {e}"))?;
                 }
                 tx.execute(&update_version_sql, [18])
-                    .map_err(|e| e.to_string())?;
-                tx.commit().map_err(|e| e.to_string())?;
+                    .map_err(|e| format!("Update schema version v18: {e}"))?;
+                tx.commit()
+                    .map_err(|e| format!("Commit v18 compression migration: {e}"))?;
             }
             info!("Schema migration complete");
         }

@@ -46,6 +46,19 @@ pub use turns::turns_from_segments;
 pub const APPLE_INTELLIGENCE_MODEL_ID: &str = "apple-intelligence";
 const APPLE_INTELLIGENCE_MODEL_LABEL: &str = "Apple Intelligence";
 
+/// Typed failure from the summary command's orchestration phases. Provider
+/// internals retain their existing diagnostic strings at this boundary.
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
+pub enum SummaryCommandError {
+    #[error("Summary database operation failed: {detail}")]
+    Database { detail: String },
+    #[error("Transcript has no text")]
+    EmptyTranscript,
+    #[error("Summary provider unavailable: {detail}")]
+    Provider { detail: String },
+    #[error("Summary generation failed: {detail}")]
+    Generation { detail: String },
+}
 /// Prose summary is always persisted; structured extraction is best-effort.
 /// On extract/parse failure, callers should save prose with no structured data.
 pub fn structured_extract_for_persist(

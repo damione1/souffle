@@ -1,5 +1,7 @@
 //! Synthetic native compression QA. No bootstrap, microphone, TCC or personal DB.
 //! COMPRESSION_FIXTURE_CACHE points to the checksum-verified prepared model cache.
+//! Rename changes the title by default. Set COMPRESSION_FIXTURE_EDIT_SOURCE_ON_RENAME=1
+//! to make Rename an explicit synthetic edited-source/stale-regeneration test seam.
 use slint::ComponentHandle;
 use souffle_lib::{state::AppState, transcript::MeetingTranscript};
 use souffle_slint::*;
@@ -122,12 +124,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
     let weak = window.as_weak();
+    let edit_source_on_rename =
+        std::env::var("COMPRESSION_FIXTURE_EDIT_SOURCE_ON_RENAME").as_deref() == Ok("1");
     window.on_meeting_detail_rename(move |title| {
         if let Some(w) = weak.upgrade() {
-            state
-                .db
-                .save_edited_transcript(w.get_active_meeting_id().as_str(), Some(&title))
-                .unwrap();
+            // The source mutation is fixture-only and requires an explicit opt-in.
+            if edit_source_on_rename {
+                state
+                    .db
+                    .save_edited_transcript(w.get_active_meeting_id().as_str(), Some(&title))
+                    .unwrap();
+            } else {
+                state
+                    .db
+                    .update_meeting_title(w.get_active_meeting_id().as_str(), &title)
+                    .unwrap();
+            }
             show(&w, &state, w.get_active_meeting_id().as_str());
         }
     });

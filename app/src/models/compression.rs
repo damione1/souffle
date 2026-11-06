@@ -53,15 +53,19 @@ pub const FILES: &[(&str, u64, &str)] = &[
         "ab01af377c6285e0bd040661569238aba5f66f842dcecaa4c2fc704f40c7402b",
     ),
 ];
+/// Total immutable upstream transfer size, including pinned sidecars.
 pub fn download_bytes() -> u64 {
     FILES.iter().map(|f| f.1).sum()
 }
+/// Revision-scoped cache beneath the current application profile.
 pub fn model_dir() -> PathBuf {
     crate::constants::app_data_dir()
         .join("models/compression/llmlingua-2-mbert")
         .join(REVISION)
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
+/// Conversion lineage saved beside immutable runtime weights; the derived hash
+/// is checked before inference, while startup reads only this small metadata.
 pub struct Installation {
     pub repository: String,
     pub revision: String,
@@ -73,6 +77,7 @@ pub struct Installation {
     pub license: String,
 }
 #[derive(Debug, Clone, PartialEq)]
+/// Installation lifecycle with only the progress/error payload valid in each state.
 pub enum ModelStatus {
     NotDownloaded,
     Downloading { downloaded: u64, total: u64 },
@@ -80,6 +85,7 @@ pub enum ModelStatus {
     Ready { bytes: u64 },
     Failed { detail: String },
 }
+/// Check cooperative cancellation between network, hash and tensor boundaries.
 pub fn cancelled(cancel: &AtomicBool) -> Result<(), String> {
     if cancel.load(Ordering::Relaxed) {
         Err("Compression cancelled".into())
@@ -87,6 +93,8 @@ pub fn cancelled(cancel: &AtomicBool) -> Result<(), String> {
         Ok(())
     }
 }
+/// Hash a file incrementally, releasing the buffer and checking cancellation
+/// at each MiB boundary; callers keep this blocking operation off the UI thread.
 pub fn checksum(path: &Path, cancel: &AtomicBool) -> Result<String, String> {
     let mut file = File::open(path).map_err(|e| e.to_string())?;
     let mut hash = Sha256::new();
@@ -101,6 +109,8 @@ pub fn checksum(path: &Path, cancel: &AtomicBool) -> Result<String, String> {
     }
     Ok(format!("{:x}", hash.finalize()))
 }
+/// Require the exact manifest size and SHA-256; partial or wrong-revision bytes
+/// never qualify as a source artifact.
 pub fn validate_file(
     path: &Path,
     bytes: u64,
@@ -139,6 +149,8 @@ pub fn installed(dir: &Path) -> Option<Installation> {
     }
     Some(metadata)
 }
+/// Verify runtime bytes, every pinned sidecar and required tensor layout on a
+/// blocking worker. This deliberately does more work than cheap readiness.
 pub fn verify(dir: &Path, cancel: &AtomicBool) -> Result<Installation, String> {
     let meta = installed(dir).ok_or("Compression model is not installed")?;
     validate_file(&dir.join(WEIGHTS), meta.bytes, &meta.sha256, cancel)?;
@@ -148,6 +160,7 @@ pub fn verify(dir: &Path, cancel: &AtomicBool) -> Result<Installation, String> {
     validate_tensors(&dir.join(WEIGHTS))?;
     Ok(meta)
 }
+/// Reject malformed, non-fp16 or incompatible core tensor layouts before load.
 fn validate_tensors(path: &Path) -> Result<(), String> {
     // SAFETY: installed files are immutable and published by atomic rename.
     let map = unsafe { memmap2::Mmap::map(&File::open(path).map_err(|e| e.to_string())?) }
@@ -169,6 +182,8 @@ fn validate_tensors(path: &Path) -> Result<(), String> {
     }
     Ok(())
 }
+/// Prepare fp16 from verified mapped fp32 weights, checking cancellation between
+/// tensors and retaining the exact upstream and derived checksum lineage.
 fn convert(stage: &Path, cancel: &AtomicBool) -> Result<Installation, String> {
     // A mapped source plus fp16 tensor storage: never a second fp32 model copy.
     let source = stage.join(FILES[0].0);
@@ -217,6 +232,35 @@ impl Drop for InstallLock {
         }
     }
 }
+/// Remove only abandoned directories created by this installer, while its exclusive
+/// filesystem lock is held. Symlinks and unrelated directory names are never followed.
+fn clean_abandoned_staging(parent: &Path) -> Result<(), String> {
+    for entry in fs::read_dir(parent).map_err(|e| format!("Read compression cache: {e}"))? {
+        let entry = entry.map_err(|e| format!("Inspect compression cache: {e}"))?;
+        if !entry
+            .file_type()
+            .map_err(|e| format!("Inspect staging type: {e}"))?
+            .is_dir()
+        {
+            continue;
+        }
+        let name = entry.file_name();
+        let Some(id) = name
+            .to_str()
+            .and_then(|name| name.strip_prefix(".staging-"))
+        else {
+            continue;
+        };
+        if uuid::Uuid::parse_str(id).is_ok_and(|uuid| uuid.hyphenated().to_string() == id) {
+            fs::remove_dir_all(entry.path())
+                .map_err(|e| format!("Clean abandoned compression staging: {e}"))?;
+        }
+    }
+    Ok(())
+}
+/// Install the pinned checkpoint under an advisory lock, publish it atomically,
+/// and leave a retryable cache after cancellation or failure. Healthy reads have
+/// no total transfer deadline; connect/read stalls remain bounded.
 pub fn install(
     dir: &Path,
     cancel: &AtomicBool,
@@ -239,6 +283,7 @@ pub fn install(
         }
         std::thread::sleep(Duration::from_millis(100));
     }
+    clean_abandoned_staging(parent)?;
     if installed(dir).is_some() {
         match verify(dir, cancel) {
             Ok(meta) => return Ok(meta),
@@ -260,7 +305,6 @@ pub fn install(
         let client = reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(20))
             .read_timeout(Duration::from_secs(15))
-            .timeout(Duration::from_secs(1800))
             .build()
             .map_err(|e| e.to_string())?;
         let mut done = 0;
@@ -326,6 +370,30 @@ pub fn prepare_cached(source: &Path, dir: &Path) -> Result<Installation, String>
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn abandoned_staging_cleanup_preserves_unrelated_and_symlink_targets() {
+        let dir = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let abandoned = dir
+            .path()
+            .join(format!(".staging-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&abandoned).unwrap();
+        fs::write(abandoned.join("partial"), b"partial").unwrap();
+        let unrelated = dir.path().join(".staging-personal");
+        fs::create_dir(&unrelated).unwrap();
+        let noncanonical = dir.path().join(".staging-11111111111111111111111111111111");
+        fs::create_dir(&noncanonical).unwrap();
+        fs::write(outside.path().join("keep"), b"preserved").unwrap();
+        let symlink = dir
+            .path()
+            .join(format!(".staging-{}", uuid::Uuid::new_v4()));
+        std::os::unix::fs::symlink(outside.path(), &symlink).unwrap();
+        clean_abandoned_staging(dir.path()).unwrap();
+        assert!(!abandoned.exists());
+        assert!(unrelated.is_dir() && noncanonical.is_dir());
+        assert!(symlink.symlink_metadata().unwrap().file_type().is_symlink());
+        assert_eq!(fs::read(outside.path().join("keep")).unwrap(), b"preserved");
+    }
     #[test]
     fn manifest_refuses_partial_wrong_hash_and_cancel() {
         let tmp = tempfile::tempdir().unwrap();

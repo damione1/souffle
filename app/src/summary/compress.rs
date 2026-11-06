@@ -7,6 +7,10 @@ use candle_core::{DType, Device, Tensor};
 use candle_nn::{Module, VarBuilder};
 use candle_transformers::models::bert::{BertEncoder, Config};
 use sha2::{Digest, Sha256};
+mod orchestration;
+pub use orchestration::{
+    CompressionAdmission, CompressionCapture, CompressionError, observe_capture,
+};
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
@@ -17,6 +21,7 @@ use std::{
 };
 
 #[derive(Debug)]
+/// Encoder-local failure; orchestration preserves its cause in CompressionError.
 pub enum CompressionFailure {
     ModelValidation { detail: String },
     Inference { detail: String },
@@ -44,23 +49,27 @@ impl std::error::Error for CompressionFailure {}
 
 pub const POLICY: &str = "mbert-offset-spans-v1";
 #[derive(Debug, Clone, Copy, PartialEq)]
+/// A checked finite fraction of words to retain; no unchecked construction.
 pub struct CompressionRate(f32);
 impl CompressionRate {
     pub const MIN: f32 = 0.3;
     pub const MAX: f32 = 0.9;
     pub const DEFAULT: f32 = 0.5;
-    pub fn new(rate: f32) -> Result<Self, String> {
+    /// Accept only finite fractions in MIN..=MAX; settings normalize invalid persisted values.
+    pub fn new(rate: f32) -> Result<Self, CompressionError> {
         if rate.is_finite() && (Self::MIN..=Self::MAX).contains(&rate) {
             Ok(Self(rate))
         } else {
-            Err("Compression rate must be finite and between 0.3 and 0.9".into())
+            Err(CompressionError::InvalidRate)
         }
     }
+    /// Return the validated fraction for inference or percentage projection.
     pub fn get(self) -> f32 {
         self.0
     }
 }
 #[derive(Debug, Clone)]
+/// Immutable effective source shared by fingerprinting, compression and reuse.
 pub struct CompressionInput {
     pub lines: Vec<String>,
     pub participants: Vec<String>,
@@ -68,6 +77,8 @@ pub struct CompressionInput {
     pub segmented: bool,
 }
 impl CompressionInput {
+    /// Prefer edited prose; otherwise preserve canonical grouped, timed turns.
+    /// Fingerprints bind that effective text to forcing names and recording sessions.
     pub fn from_meeting(meeting: &MeetingTranscript) -> Self {
         let edited = meeting
             .edited_transcript
@@ -88,6 +99,7 @@ impl CompressionInput {
             edited.is_none(),
         )
     }
+    /// Canonicalize all source facts that can change extraction or forcing.
     pub(crate) fn new(
         lines: Vec<String>,
         participants: Vec<String>,
@@ -106,16 +118,18 @@ impl CompressionInput {
     }
 }
 #[derive(Debug, Clone, PartialEq)]
+/// Typed compact lifecycle; only native projection splits its payload fields.
 pub enum CompactJobStatus {
     Idle,
     WaitingForModel,
     Queued,
     Compressing { completed: usize, total: usize },
-    Failed { detail: String },
+    Failed { error: CompressionError },
     SourceChanged,
     InterruptedByRecording,
 }
 #[derive(Clone)]
+/// Generation-specific cancellation and observable progress, with no resident model.
 pub struct CompactJob {
     pub generation: String,
     pub cancel: Arc<AtomicBool>,
@@ -123,7 +137,7 @@ pub struct CompactJob {
 }
 struct InstallationAttempt {
     cancel: Arc<AtomicBool>,
-    result: Mutex<Option<Result<(), String>>>,
+    result: Mutex<Option<Result<(), CompressionError>>>,
     done: tokio::sync::Notify,
     recording_epoch: u64,
 }
@@ -138,12 +152,14 @@ pub struct CompressionService {
     pub model_dir: PathBuf,
 }
 impl CompressionService {
+    /// Process-wide coordinator for GUI and headless callers.
     pub fn shared() -> Arc<Self> {
         static SERVICE: OnceLock<Arc<CompressionService>> = OnceLock::new();
         SERVICE
             .get_or_init(|| Arc::new(Self::new(compression::model_dir())))
             .clone()
     }
+    /// Inspect cheap installation metadata only; never download or hash at startup.
     pub fn new(model_dir: PathBuf) -> Self {
         let status = compression::installed(&model_dir)
             .map(|m| ModelStatus::Ready { bytes: m.bytes })
@@ -168,12 +184,14 @@ impl CompressionService {
         requests.insert(id.into(), Arc::downgrade(&request));
         request
     }
+    /// Snapshot current installation progress without loading model data.
     pub fn model_status(&self) -> ModelStatus {
         self.model.lock().unwrap_or_else(|p| p.into_inner()).clone()
     }
     pub(crate) fn set_model(&self, status: ModelStatus) {
         *self.model.lock().unwrap_or_else(|p| p.into_inner()) = status;
     }
+    /// Snapshot one meeting job without retaining a lock across UI publication.
     pub fn job(&self, id: &str) -> Option<CompactJob> {
         self.jobs
             .lock()
@@ -181,6 +199,7 @@ impl CompressionService {
             .get(id)
             .cloned()
     }
+    /// Replace the request generation and cancel any older worker for that meeting.
     pub fn start_job(&self, id: &str) -> CompactJob {
         let mut jobs = self.jobs.lock().unwrap_or_else(|p| p.into_inner());
         if let Some(old) = jobs.get(id) {
@@ -194,6 +213,7 @@ impl CompressionService {
         jobs.insert(id.into(), job.clone());
         job
     }
+    /// Reject late progress from cancelled or superseded generations.
     pub fn update_job(&self, id: &str, generation: &str, status: CompactJobStatus) {
         if let Some(job) = self
             .jobs
@@ -205,6 +225,7 @@ impl CompressionService {
             job.status = status;
         }
     }
+    /// Signal one meeting job; inference stops at its next cancellation boundary.
     pub fn cancel(&self, id: &str) {
         if let Some(job) = self
             .jobs
@@ -216,6 +237,7 @@ impl CompressionService {
             job.status = CompactJobStatus::Idle;
         }
     }
+    /// Cancel the shared installation attempt; every overlapping waiter sees its outcome.
     pub fn cancel_install(&self) {
         if let Some(attempt) = self
             .install
@@ -226,9 +248,11 @@ impl CompressionService {
             attempt.cancel.store(true, Ordering::Relaxed);
         }
     }
+    /// Capture-start generation used to invalidate queued work, including after a stop.
     pub fn recording_epoch(&self) -> u64 {
         self.recording_epoch.load(Ordering::SeqCst)
     }
+    /// Give recording priority without waiting for GPU work or queued compactions.
     pub fn recording_started(&self) {
         self.recording_epoch.fetch_add(1, Ordering::SeqCst);
         self.cancel_install();
@@ -252,10 +276,24 @@ impl CompressionService {
             }
         }
     }
+    /// Join/install on explicit user intent; ready cache checks remain cheap and
+    /// transient capture-observation contention does not cancel model preparation.
     pub async fn ensure_model(
         self: &Arc<Self>,
         state: std::sync::Weak<crate::state::AppState>,
-    ) -> Result<(), String> {
+    ) -> Result<(), CompressionError> {
+        // An existing ready installation is checked on inference; toggling a
+        // setting must not synchronously rehash 355 MB or flicker to Preparing.
+        let ready = match self.model_status() {
+            ModelStatus::Ready { .. } => compression::installed(&self.model_dir).is_some(),
+            ModelStatus::NotDownloaded
+            | ModelStatus::Downloading { .. }
+            | ModelStatus::Preparing
+            | ModelStatus::Failed { .. } => false,
+        };
+        if ready {
+            return Ok(());
+        }
         // Every caller overlapping this attempt observes its same outcome. A failed or
         // cancelled attempt is only retried by a later explicit action.
         let (attempt, start) = {
@@ -306,17 +344,11 @@ impl CompressionService {
         self: &Arc<Self>,
         state: std::sync::Weak<crate::state::AppState>,
         attempt: &InstallationAttempt,
-    ) -> Result<(), String> {
-        let idle = || {
-            state.upgrade().is_some_and(|state| {
-                !crate::commands::settings_capture_busy(&state).unwrap_or(true)
-            })
-        };
-        if self.recording_epoch() != attempt.recording_epoch
-            || !idle()
-            || attempt.cancel.load(Ordering::Relaxed)
-        {
-            return Err("Compression interrupted by recording or cancelled".into());
+    ) -> Result<(), CompressionError> {
+        let state = state.upgrade().ok_or(CompressionError::Cancelled)?;
+        orchestration::wait_capture_idle(&state, self, attempt.recording_epoch).await?;
+        if attempt.cancel.load(Ordering::Relaxed) {
+            return Err(CompressionError::Cancelled);
         }
         self.set_model(if compression::installed(&self.model_dir).is_some() {
             ModelStatus::Preparing
@@ -326,41 +358,57 @@ impl CompressionService {
                 total: compression::download_bytes(),
             }
         });
+        let worker_state = Arc::downgrade(&state);
         let service = self.clone();
         let cancel = attempt.cancel.clone();
         let worker_cancel = cancel.clone();
         let result = tokio::task::spawn_blocking(move || {
             compression::install(&service.model_dir, &worker_cancel, |status| {
-                if !state.upgrade().is_some_and(|state| {
-                    !crate::commands::settings_capture_busy(&state).unwrap_or(true)
-                }) {
+                if let Some(state) = worker_state.upgrade() {
+                    match observe_capture(&state) {
+                        CompressionCapture::Capturing => {
+                            worker_cancel.store(true, Ordering::Relaxed)
+                        }
+                        CompressionCapture::Idle | CompressionCapture::Unknown => {}
+                    }
+                } else {
                     worker_cancel.store(true, Ordering::Relaxed);
                 }
                 service.set_model(status);
             })
         })
         .await
-        .map_err(|e| e.to_string())
-        .and_then(|result| result);
+        .map_err(|error| CompressionError::Runtime {
+            detail: error.to_string(),
+        })?;
         match result {
             Ok(meta) => {
                 self.set_model(ModelStatus::Ready { bytes: meta.bytes });
                 Ok(())
             }
-            Err(error) => {
-                self.set_model(if cancel.load(Ordering::Relaxed) {
-                    compression::installed(&self.model_dir)
-                        .map(|meta| ModelStatus::Ready { bytes: meta.bytes })
-                        .unwrap_or(ModelStatus::NotDownloaded)
-                } else {
-                    ModelStatus::Failed {
-                        detail: error.clone(),
+            Err(detail) => {
+                if cancel.load(Ordering::Relaxed) {
+                    self.set_model(
+                        compression::installed(&self.model_dir)
+                            .map(|meta| ModelStatus::Ready { bytes: meta.bytes })
+                            .unwrap_or(ModelStatus::NotDownloaded),
+                    );
+                    if self.recording_epoch() != attempt.recording_epoch {
+                        Err(CompressionError::InterruptedByRecording)
+                    } else {
+                        Err(CompressionError::Cancelled)
                     }
-                });
-                Err(error)
+                } else {
+                    self.set_model(ModelStatus::Failed {
+                        detail: detail.clone(),
+                    });
+                    Err(CompressionError::ModelPreparation { detail })
+                }
             }
         }
     }
+    /// Reuse only fresh source/rate/checkpoint/policy-compatible saved output,
+    /// even if the optional runtime model cache has since been removed.
     pub fn compatible(
         &self,
         compact: &CompactTranscript,
@@ -381,6 +429,7 @@ impl CompressionService {
                 .is_some_and(|hash| hash.len() == 64 && hash.bytes().all(|b| b.is_ascii_hexdigit()))
     }
 }
+/// Stable saved lineage for the pinned checkpoint, fp16 bytes and selection policy.
 pub fn provenance(meta: &compression::Installation) -> String {
     format!(
         "{}@{};fp16:{};{}",
@@ -458,11 +507,11 @@ fn split_prefix(line: &str) -> (&str, &str) {
         return ("", line);
     };
     let mut end = found.end();
-    if let Some((label, _)) = line[end..].split_once(':') {
-        if crate::engine::Speaker::parse(&label.to_lowercase()).is_some() {
-            end += label.len() + 1;
-            end += line[end..].len() - line[end..].trim_start_matches([' ', '\t']).len();
-        }
+    if let Some((label, _)) = line[end..].split_once(':')
+        && crate::engine::Speaker::parse(&label.to_lowercase()).is_some()
+    {
+        end += label.len() + 1;
+        end += line[end..].len() - line[end..].trim_start_matches([' ', '\t']).len();
     }
     line.split_at(end)
 }
@@ -720,10 +769,10 @@ mod tests {
         assert!(futures_util::poll!(first.as_mut()).is_pending());
         assert!(futures_util::poll!(second.as_mut()).is_pending());
         service.cancel_install();
-        *attempt.result.lock().unwrap() = Some(Err("cancelled fixture attempt".into()));
+        *attempt.result.lock().unwrap() = Some(Err(CompressionError::Cancelled));
         attempt.done.notify_waiters();
-        assert_eq!(first.await, Err("cancelled fixture attempt".into()));
-        assert_eq!(second.await, Err("cancelled fixture attempt".into()));
+        assert_eq!(first.await, Err(CompressionError::Cancelled));
+        assert_eq!(second.await, Err(CompressionError::Cancelled));
         assert!(Arc::ptr_eq(
             service.install.lock().unwrap().as_ref().unwrap(),
             &attempt

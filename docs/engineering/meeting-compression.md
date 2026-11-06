@@ -90,3 +90,19 @@ when present. `list_meetings` exposes `has_compact` without reading compact text
 Use summary for an overview, compact for an economical first pass, and transcript
 for exact citations. The sidecar remains read-only and can read genuine pre-v18
 databases without referencing missing compact columns.
+
+## Synthetic native fixture
+
+`meeting_compression_fixture` uses a temporary/explicit synthetic database and
+the production compression controller without bootstrap, capture or TCC.
+`COMPRESSION_FIXTURE_CACHE` selects a verified prepared cache and
+`COMPRESSION_FIXTURE_DB` optionally retains the synthetic database between runs.
+Rename edits the meeting title by default. For a deliberate source-edit/stale
+regeneration test, set `COMPRESSION_FIXTURE_EDIT_SOURCE_ON_RENAME=1`; only this
+fixture then routes Rename text to the edited transcript.
+
+Compact preview rows reuse the session-aware paragraph seek action with original
+source seconds. Edited, stale, overlapping-session and grouped cross-session
+rows have no seek action when their source association cannot be verified.
+Expanding the virtualized preview uses its cached row model and does not read
+meeting segments on the UI thread.

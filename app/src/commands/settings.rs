@@ -154,7 +154,7 @@ fn save_settings_in_lane(
         .as_ref()
         .map(|_| true)
         .unwrap_or_else(|error| error.committed());
-    if committed && enable && !super::settings_capture_busy(&state).unwrap_or(true) {
+    if committed && enable {
         let service = state.compression.clone();
         let state = Arc::downgrade(&state);
         crate::async_runtime::spawn(async move {

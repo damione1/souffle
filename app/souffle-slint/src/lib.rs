@@ -5,3 +5,5 @@ slint::include_modules!();
 mod conversions;
 
 pub mod compression_ui;
+
+pub mod summary_jobs;

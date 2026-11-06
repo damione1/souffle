@@ -5,7 +5,7 @@ use souffle_lib::{
     models::compression::ModelStatus,
     settings::{AppSettings, SettingsOptions},
     state::AppState,
-    summary::compress::CompactJobStatus,
+    summary::compress::{CompactJobStatus, CompressionError, CompressionInput},
     transcript::MeetingTranscript,
 };
 use std::{rc::Rc, sync::Arc, time::Duration};
@@ -39,23 +39,106 @@ pub fn populate_settings(window: &MainWindow, settings: &AppSettings) {
     ui.set_rate_min((options.compression_rate_min * 100.).round() as i32);
     ui.set_rate_max((options.compression_rate_max * 100.).round() as i32);
 }
-fn preview(text: &str, expanded: bool) -> Vec<CompactLine> {
-    text.lines()
-        .take(if expanded { usize::MAX } else { 4 })
-        .map(|line| {
-            let timestamp = line
-                .strip_prefix('[')
-                .and_then(|s| s.split_once(']'))
-                .and_then(|(time, _)| time.split_once(':'))
-                .and_then(|(m, s)| Some(m.parse::<f32>().ok()? * 60. + s.parse::<f32>().ok()?));
+/// Associate a compact turn with its exact original recording session. Edited,
+/// stale, cross-session or unverified source spans deliberately have no seek target.
+fn preview(
+    meeting: &MeetingTranscript,
+    compact: &souffle_lib::transcript::CompactTranscript,
+) -> Vec<CompactLine> {
+    use souffle_schema::paragraphs::{
+        PAUSE_THRESHOLD_SECONDS, SegmentLike, group_into_paragraph_segments,
+    };
+    struct Indexed<'a> {
+        index: usize,
+        segment: &'a souffle_lib::engine::TranscriptionSegment,
+    }
+    impl SegmentLike for Indexed<'_> {
+        fn text(&self) -> &str {
+            &self.segment.text
+        }
+        fn start_time(&self) -> f64 {
+            self.segment.start_time
+        }
+        fn end_time(&self) -> f64 {
+            self.segment.end_time
+        }
+        fn speaker(&self) -> Option<souffle_lib::engine::Speaker> {
+            self.segment.speaker
+        }
+    }
+    let source = CompressionInput::from_meeting(meeting);
+    let trusted =
+        !compact.is_stale && source.segmented && source.source_sha256 == compact.source_sha256;
+    let indexed: Vec<_> = meeting
+        .segments
+        .iter()
+        .enumerate()
+        .filter(|(_, s)| !s.text.trim().is_empty())
+        .map(|(index, segment)| Indexed { index, segment })
+        .collect();
+    let groups = if trusted {
+        group_into_paragraph_segments(&indexed, PAUSE_THRESHOLD_SECONDS)
+    } else {
+        Vec::new()
+    };
+    let count = compact.text.lines().count();
+    compact
+        .text
+        .lines()
+        .enumerate()
+        .map(|(line_index, line)| {
+            let seek = if trusted && groups.len() == count {
+                groups.get(line_index).and_then(|group| {
+                    let first = group.first()?;
+                    let session_for =
+                        |index| {
+                            let mut matches = meeting.recording_sessions.iter().enumerate().filter(
+                                |(_, session)| {
+                                    index >= session.start_segment_index as usize
+                                        && index < session.end_segment_index as usize
+                                },
+                            );
+                            let (session, _) = matches.next()?;
+                            if matches.next().is_some() {
+                                None
+                            } else {
+                                Some(session)
+                            }
+                        };
+                    let session = session_for(first.index)?;
+                    if !group
+                        .iter()
+                        .all(|segment| session_for(segment.index) == Some(session))
+                    {
+                        return None;
+                    }
+                    let original = source.lines.get(line_index)?;
+                    if line.split_once(']').map(|(prefix, _)| prefix)
+                        != original.split_once(']').map(|(prefix, _)| prefix)
+                    {
+                        return None;
+                    }
+                    let seconds = first.segment.start_time;
+                    if !seconds.is_finite() || seconds < 0. {
+                        return None;
+                    }
+                    Some((i32::try_from(session).ok()?, seconds as f32))
+                })
+            } else {
+                None
+            };
+            let (session_index, seconds) = seek.unwrap_or_default();
             CompactLine {
                 text: line.into(),
-                seconds: timestamp.unwrap_or(0.),
-                timed: timestamp.is_some(),
+                seconds,
+                timed: seek.is_some(),
+                session_index,
             }
         })
         .collect()
 }
+/// Publish compact metadata and a virtualized row model from a coherent meeting
+/// snapshot. Full rows are cached by the model; expanding never rereads segments.
 pub fn populate(window: &MainWindow, meeting: &MeetingTranscript) {
     let ui = window.global::<CompressionUi>();
     if ui.get_meeting_id().as_str() != meeting.id {
@@ -67,19 +150,19 @@ pub fn populate(window: &MainWindow, meeting: &MeetingTranscript) {
     }
     ui.set_meeting_id(meeting.id.clone().into());
     ui.set_ongoing(meeting.ended_at.is_none());
+    ui.set_has_source(
+        CompressionInput::from_meeting(meeting)
+            .lines
+            .iter()
+            .any(|line| !line.trim().is_empty()),
+    );
     ui.set_has_compact(meeting.compact_transcript.is_some());
     if let Some(compact) = &meeting.compact_transcript {
         ui.set_stale(compact.is_stale);
         ui.set_generated_at(compact.generated_at.clone().into());
         ui.set_compact_rate((compact.rate * 100.).round() as i32);
         ui.set_approx_tokens(compact.approx_tokens.min(i32::MAX as usize) as i32);
-        ui.set_lines(
-            Rc::new(slint::VecModel::from(preview(
-                &compact.text,
-                ui.get_expanded(),
-            )))
-            .into(),
-        );
+        ui.set_lines(Rc::new(slint::VecModel::from(preview(meeting, compact))).into());
     } else {
         ui.set_stale(false);
         ui.set_lines(Default::default());
@@ -163,23 +246,24 @@ pub fn install(window: &MainWindow, state: Arc<AppState>) -> slint::Timer {
                                 && w.global::<CompressionUi>().get_ui_generation().as_str()
                                     == ui_generation
                                 && service.job(&id).map(|job| job.generation) == generation
+                                && let Ok(meeting) = meeting
                             {
-                                if let Ok(meeting) = meeting {
-                                    populate(&w, &meeting);
-                                }
+                                populate(&w, &meeting);
                             }
                         });
                     });
                 }
                 match status {
-                    CompactJobStatus::Compressing { completed, total } => {
-                        ui.set_progress(if total == 0 {
-                            0
-                        } else {
-                            (completed * 100 / total) as i32
-                        })
+                    CompactJobStatus::Compressing { completed, total } => ui.set_progress(
+                        completed
+                            .saturating_mul(100)
+                            .checked_div(total)
+                            .unwrap_or(0)
+                            .min(100) as i32,
+                    ),
+                    CompactJobStatus::Failed { error } => {
+                        ui.set_job_error(error.to_string().into())
                     }
-                    CompactJobStatus::Failed { detail } => ui.set_job_error(detail.into()),
                     CompactJobStatus::Idle
                     | CompactJobStatus::WaitingForModel
                     | CompactJobStatus::Queued
@@ -191,9 +275,6 @@ pub fn install(window: &MainWindow, state: Arc<AppState>) -> slint::Timer {
     );
     let download_state = state.clone();
     window.global::<CompressionUi>().on_download(move || {
-        if souffle_lib::commands::settings_capture_busy(&download_state).unwrap_or(true) {
-            return;
-        }
         let service = download_state.compression.clone();
         let state = Arc::downgrade(&download_state);
         souffle_lib::async_runtime::spawn(async move {
@@ -228,7 +309,6 @@ pub fn install(window: &MainWindow, state: Arc<AppState>) -> slint::Timer {
         let state = generate_state.clone();
         let weak = weak.clone();
         souffle_lib::async_runtime::spawn(async move {
-            let previous_generation = state.compression.job(&id).map(|job| job.generation);
             let result = souffle_lib::commands::generate_compact_transcript(
                 state.clone(),
                 id.clone(),
@@ -236,10 +316,6 @@ pub fn install(window: &MainWindow, state: Arc<AppState>) -> slint::Timer {
                 true,
             )
             .await;
-            let cancelled = state.compression.job(&id).is_some_and(|job| {
-                Some(&job.generation) != previous_generation.as_ref()
-                    && job.cancel.load(std::sync::atomic::Ordering::Relaxed)
-            });
             let meeting = state.db.load_meeting(&id);
             let _ = weak.upgrade_in_event_loop(move |w| {
                 if w.get_active_meeting_id().as_str() != id
@@ -251,8 +327,25 @@ pub fn install(window: &MainWindow, state: Arc<AppState>) -> slint::Timer {
                     populate(&w, &meeting);
                 }
                 if let Err(error) = result {
-                    if !cancelled {
-                        w.global::<CompressionUi>().set_job_error(error.into());
+                    match error {
+                        CompressionError::Cancelled => {}
+                        CompressionError::InterruptedByRecording
+                        | CompressionError::CaptureBusy
+                        | CompressionError::RuntimeBusy
+                        | CompressionError::SourceChanged
+                        | CompressionError::Deleted
+                        | CompressionError::Ongoing
+                        | CompressionError::EmptyTranscript
+                        | CompressionError::InvalidRate
+                        | CompressionError::ModelUnavailable
+                        | CompressionError::AlreadyRunning
+                        | CompressionError::ModelPreparation { .. }
+                        | CompressionError::ModelValidation { .. }
+                        | CompressionError::Inference { .. }
+                        | CompressionError::Database { .. }
+                        | CompressionError::Runtime { .. } => w
+                            .global::<CompressionUi>()
+                            .set_job_error(error.to_string().into()),
                     }
                 }
             });
@@ -281,35 +374,113 @@ pub fn install(window: &MainWindow, state: Arc<AppState>) -> slint::Timer {
             });
         });
     });
-    let expand_state = state.clone();
     let weak = window.as_weak();
     window.global::<CompressionUi>().on_expand(move || {
-        let Some(w) = weak.upgrade() else { return };
-        let ui = w.global::<CompressionUi>();
-        ui.set_expanded(!ui.get_expanded());
-        if let Ok(meeting) = expand_state
-            .db
-            .load_meeting(w.get_active_meeting_id().as_str())
-        {
-            populate(&w, &meeting);
+        if let Some(w) = weak.upgrade() {
+            let ui = w.global::<CompressionUi>();
+            ui.set_expanded(!ui.get_expanded());
         }
     });
     let weak = window.as_weak();
-    window.global::<CompressionUi>().on_seek(move |seconds| {
-        if let Some(w) = weak.upgrade() {
-            if let Ok(meeting) = state.db.load_meeting(w.get_active_meeting_id().as_str()) {
-                if meeting.duration_seconds > 0. {
-                    w.invoke_meeting_detail_audio_seek_requested(
-                        (seconds as f64 / meeting.duration_seconds).clamp(0., 1.) as f32,
-                    );
-                }
+    window
+        .global::<CompressionUi>()
+        .on_seek(move |session_index, seconds| {
+            if let Some(w) = weak.upgrade()
+                && w.get_active_meeting_id() == w.global::<CompressionUi>().get_meeting_id()
+                && session_index >= 0
+                && seconds.is_finite()
+                && seconds >= 0.
+            {
+                w.invoke_meeting_detail_transcript_paragraph_clicked(session_index, seconds);
             }
-        }
-    });
+        });
     timer
 }
 
 thread_local! { static APP_TIMER: std::cell::RefCell<Option<slint::Timer>> = const { std::cell::RefCell::new(None) }; }
 pub fn install_for_app(window: &MainWindow, state: Arc<AppState>) {
     APP_TIMER.with(|timer| *timer.borrow_mut() = Some(install(window, state)));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use souffle_lib::{
+        engine::{Speaker, TranscriptionSegment},
+        transcript::{CompactTranscript, MeetingRecordingSession},
+    };
+    fn fixture() -> MeetingTranscript {
+        let now = chrono::Utc::now();
+        let segment = |speaker, text: &str| TranscriptionSegment {
+            text: text.into(),
+            start_time: 12.4,
+            end_time: 13.,
+            is_final: true,
+            language: None,
+            confidence: None,
+            speaker: Some(speaker),
+        };
+        MeetingTranscript {
+            id: "seek-fixture".into(),
+            title: "Synthetic".into(),
+            started_at: now,
+            ended_at: Some(now),
+            duration_seconds: 200.,
+            transcription_profile: Default::default(),
+            recording_sessions: vec![
+                MeetingRecordingSession::completed("first".into(), now, now, 0, 1),
+                MeetingRecordingSession::completed("resumed".into(), now, now, 1, 2),
+            ],
+            segments: vec![
+                segment(Speaker::Me, "First session."),
+                segment(Speaker::Them, "Resumed session."),
+            ],
+            summary: None,
+            summary_is_stale: false,
+            summary_model: None,
+            summary_generated_at: None,
+            structured_summary: None,
+            compact_transcript: None,
+            edited_transcript: None,
+            notes: None,
+            calendar_event_id: None,
+            participants: vec![],
+            system_audio: None,
+        }
+    }
+    fn compact(meeting: &MeetingTranscript) -> CompactTranscript {
+        let source = CompressionInput::from_meeting(meeting);
+        CompactTranscript {
+            text: source.lines.join("\n"),
+            model: "synthetic".into(),
+            rate: 0.5,
+            generated_at: chrono::Utc::now().to_rfc3339(),
+            is_stale: false,
+            source_sha256: source.source_sha256,
+            approx_tokens: 10,
+        }
+    }
+    #[test]
+    fn compact_preview_seek_keeps_session_identity_and_disables_ambiguous_sources() {
+        let mut meeting = fixture();
+        let mut saved = compact(&meeting);
+        let rows = preview(&meeting, &saved);
+        assert_eq!(rows.len(), 2);
+        assert!(rows.iter().all(|row| row.timed));
+        assert_eq!((rows[0].session_index, rows[1].session_index), (0, 1));
+        assert_eq!((rows[0].seconds, rows[1].seconds), (12.4, 12.4));
+        saved.is_stale = true;
+        assert!(preview(&meeting, &saved).iter().all(|row| !row.timed));
+        meeting.edited_transcript = Some("[0:12] Me: edited text with a timestamp".into());
+        saved = compact(&meeting);
+        assert!(preview(&meeting, &saved).iter().all(|row| !row.timed));
+        meeting.edited_transcript = None;
+        meeting.segments[1].speaker = Some(Speaker::Me);
+        meeting.segments[1].start_time = 13.1;
+        meeting.segments[1].end_time = 13.5;
+        saved = compact(&meeting);
+        let cross_session = preview(&meeting, &saved);
+        assert_eq!(cross_session.len(), 1);
+        assert!(!cross_session[0].timed);
+    }
 }

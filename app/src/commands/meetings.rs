@@ -758,6 +758,9 @@ pub async fn pull_recommended_ollama_model(
 /// `template_id` picks the summary template controlling the final-pass system
 /// prompt; `None` (or an unknown id) falls back to the default template
 /// configured in settings, so automatic summarization always uses the default.
+pub use crate::summary::SummaryCommandError;
+
+/// Legacy generic-string command boundary, retained for existing consumers.
 pub async fn summarize_meeting(
     state: Arc<AppState>,
     id: String,
@@ -765,10 +768,25 @@ pub async fn summarize_meeting(
     template_id: Option<String>,
     channel: ProgressChannel<crate::summary::SummarizeProgress>,
 ) -> Result<(), String> {
-    let settings = AppSettings::load(&state.db)?;
+    summarize_meeting_typed(state, id, model, template_id, channel)
+        .await
+        .map_err(|error| error.to_string())
+}
+/// Native lifecycle consumers keep database/provider/generation failures typed.
+pub async fn summarize_meeting_typed(
+    state: Arc<AppState>,
+    id: String,
+    model: String,
+    template_id: Option<String>,
+    channel: ProgressChannel<crate::summary::SummarizeProgress>,
+) -> Result<(), SummaryCommandError> {
+    let settings =
+        AppSettings::load(&state.db).map_err(|detail| SummaryCommandError::Database { detail })?;
     summarize_meeting_with_settings(state, id, model, template_id, channel, settings).await
 }
 
+/// Summarize with invocation-specific settings; compact persistence precedes
+/// generative work, while compression failure falls back to the original input.
 pub async fn summarize_meeting_with_settings(
     state: Arc<AppState>,
     id: String,
@@ -776,85 +794,31 @@ pub async fn summarize_meeting_with_settings(
     template_id: Option<String>,
     channel: ProgressChannel<crate::summary::SummarizeProgress>,
     settings: AppSettings,
-) -> Result<(), String> {
-    let transcript = state.db.load_meeting(&id)?;
+) -> Result<(), SummaryCommandError> {
+    let transcript = state
+        .db
+        .load_meeting(&id)
+        .map_err(|detail| SummaryCommandError::Database { detail })?;
     let generated_from_edited = transcript.edited_transcript.clone();
     let generated_from_notes = transcript.notes.clone();
 
-    let (text, turn_units) = match transcript.edited_transcript {
-        Some(ref edited) if !edited.is_empty() => (edited.clone(), None),
-        _ => {
-            let turns = crate::summary::turns_from_segments(&transcript.segments);
-            let text = turns.join("\n");
-            (text, Some(turns))
-        }
-    };
-
+    let source = crate::summary::compress::CompressionInput::from_meeting(&transcript);
+    let text = source.lines.join("\n");
     if text.is_empty() {
-        return Err("Transcript has no text".into());
+        return Err(SummaryCommandError::EmptyTranscript);
     }
-
-    let wants_map = crate::summary::needs_map(&text, &model)?;
-    let wants_compact =
-        settings.compact_transcript_enabled || (settings.summary_compression_enabled && wants_map);
-    let fresh_compact = transcript
-        .compact_transcript
-        .as_ref()
-        .is_some_and(|compact| {
-            crate::summary::compress::CompressionRate::new(settings.summary_compression_rate)
-                .is_ok_and(|rate| {
-                    state.compression.compatible(
-                        compact,
-                        &crate::summary::compress::CompressionInput::from_meeting(&transcript),
-                        rate,
-                    )
-                })
-        });
-    let compact = if wants_compact
-        && (fresh_compact
-            || crate::models::compression::installed(&state.compression.model_dir).is_some())
-    {
-        match super::generate_compact_transcript_ready(
+    let turn_units = source.segmented.then_some(source.lines.as_slice());
+    let compressed_map = state
+        .compression
+        .prepare_summary_map(
             state.clone(),
-            id.clone(),
-            Some(settings.summary_compression_rate),
+            &transcript,
+            &source,
+            &text,
+            &model,
+            &settings,
         )
-        .await
-        {
-            Ok(compact) => {
-                if compact.source_sha256
-                    == crate::summary::compress::CompressionInput::from_meeting(&transcript)
-                        .source_sha256
-                {
-                    Some(compact)
-                } else {
-                    tracing::warn!(
-                        "Meeting changed during compression; summary keeps its original snapshot"
-                    );
-                    None
-                }
-            }
-            Err(error) => {
-                tracing::warn!("Compression unavailable; summarizing original transcript: {error}");
-                None
-            }
-        }
-    } else {
-        if wants_compact {
-            tracing::warn!("Compression model unavailable; summarizing original transcript");
-        }
-        None
-    };
-    let compressed_map = if settings.summary_compression_enabled && wants_map {
-        compact.map(|compact| crate::summary::CompressedMapInput {
-            turns: turn_units
-                .as_ref()
-                .map(|_| compact.text.split('\n').map(str::to_owned).collect()),
-            text: compact.text,
-        })
-    } else {
-        None
-    };
+        .await?;
 
     let final_system_prompt =
         crate::summary::resolve_summary_template_prompt(&settings, template_id.as_deref());
@@ -868,7 +832,7 @@ pub async fn summarize_meeting_with_settings(
     let db = state.db.clone();
     let summary = crate::summary::summarize_stream(
         &text,
-        turn_units.as_deref(),
+        turn_units,
         compressed_map.as_ref(),
         transcript.notes.as_deref(),
         &transcript.participants,
@@ -880,7 +844,8 @@ pub async fn summarize_meeting_with_settings(
             channel_clone.send(progress);
         },
     )
-    .await?;
+    .await
+    .map_err(|detail| SummaryCommandError::Generation { detail })?;
 
     channel.send(crate::summary::SummarizeProgress {
         text: String::new(),
@@ -913,7 +878,8 @@ pub async fn summarize_meeting_with_settings(
         &model,
         generated_from_edited.as_deref(),
         generated_from_notes.as_deref(),
-    )?;
+    )
+    .map_err(|detail| SummaryCommandError::Database { detail })?;
 
     Ok(())
 }

@@ -14,7 +14,7 @@ export component CompactTranscriptSection inherits VerticalLayout {
         if !CompressionUi.busy: ThemedButton {
             text: CompressionUi.has-compact ? @tr("Régénérer") : @tr("Générer");
             kind: ThemedButtonKind.primary;
-            enabled: !CompressionUi.ongoing;
+            enabled: !CompressionUi.ongoing && CompressionUi.has-source;
             clicked => { CompressionUi.generate(); }
         }
         if CompressionUi.busy: ThemedButton { text: @tr("Annuler"); clicked => { CompressionUi.cancel(); } }
@@ -45,7 +45,7 @@ export component CompactTranscriptSection inherits VerticalLayout {
             accessible-role: list-item;
             accessible-label: line.text;
             AppText { x: 8px; y: 6px; width: parent.width - 16px; height: 60px; text: line.text; typography: Typography.secondary; color: Theme.text-secondary; wrap: word-wrap; overflow: elide; }
-            area := TouchArea { mouse-cursor: line.timed ? pointer : default; clicked => { if line.timed { CompressionUi.seek(line.seconds); } } }
+            area := TouchArea { mouse-cursor: line.timed ? pointer : default; clicked => { if line.timed { CompressionUi.seek(line.session-index, line.seconds); } } }
         }
     }
     if CompressionUi.has-compact: HorizontalLayout {

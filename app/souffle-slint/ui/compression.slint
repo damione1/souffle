@@ -1,5 +1,5 @@
 import { CompressionModelPhase, CompactJobPhase } from "types.slint";
-export struct CompactLine { text: string, seconds: float, timed: bool }
+export struct CompactLine { text: string, seconds: float, timed: bool, session-index: int }
 // One native controller owns this projection; lifecycle payloads stay attached in Rust.
 export global CompressionUi {
     in property <bool> summary-enabled;
@@ -17,6 +17,7 @@ export global CompressionUi {
     in property <bool> has-compact;
     in property <bool> stale;
     in property <bool> ongoing;
+    in property <bool> has-source;
     in property <string> generated-at;
     in property <int> compact-rate;
     in property <int> approx-tokens;
@@ -35,5 +36,5 @@ export global CompressionUi {
     callback cancel();
     callback copy();
     callback expand();
-    callback seek(float);
+    callback seek(int, float);
 }

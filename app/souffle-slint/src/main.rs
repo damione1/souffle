@@ -515,10 +515,6 @@ fn stopped_by_sleep(handle: &AppHandle, meeting_id: &str) -> bool {
 /// `controller.svelte.ts`'s `openMeeting`/`loadMeeting` effect.
 fn populate_meeting_detail(window: &MainWindow, handle: &AppHandle, meeting: &MeetingTranscript) {
     compression_ui::populate(window, meeting);
-    if window.get_active_meeting_id().as_str() != meeting.id {
-        window.set_meeting_detail_summary_generation_id("".into());
-        window.set_meeting_detail_summary_is_generating(false);
-    }
     window.set_active_meeting_id(meeting.id.clone().into());
     window.set_meeting_detail_title(meeting.title.clone().into());
     window.set_meeting_detail_meta(meeting_meta(meeting));
@@ -530,7 +526,6 @@ fn populate_meeting_detail(window: &MainWindow, handle: &AppHandle, meeting: &Me
     ));
     window.set_meeting_detail_resume_error("".into());
     window.set_meeting_detail_delete_error("".into());
-    window.set_meeting_detail_summary_generation_error("".into());
     window.set_meeting_detail_export_error("".into());
     window.set_meeting_detail_audio_export_error("".into());
     let participants: Vec<MeetingParticipantChip> =
@@ -581,6 +576,7 @@ fn populate_meeting_detail(window: &MainWindow, handle: &AppHandle, meeting: &Me
     window.set_meeting_detail_summary_open_questions(
         std::rc::Rc::new(slint::VecModel::from(open_questions)).into(),
     );
+    summary_jobs::project(window, &meeting.id);
 }
 
 fn load_meeting_summary_models(window_weak: slint::Weak<MainWindow>, state: Arc<AppState>) {
@@ -4737,85 +4733,91 @@ fn wire_callbacks(
 
     let weak_sum = window.as_weak();
     let handle_sum = tauri_handle.clone();
+    let summary_jobs = summary_jobs::SummaryJobs::shared();
     window.on_meeting_detail_summarize(move || {
         let Some(window) = weak_sum.upgrade() else {
             return;
         };
-        window.set_meeting_detail_summary_is_generating(true);
-        // Empty lets summary_section.slint show its own translated
-        // "generating" placeholder until the first progress event.
-        window.set_meeting_detail_summary_generation_progress("".into());
-        window.set_meeting_detail_summary_generation_error("".into());
         let id = window.get_active_meeting_id().to_string();
-        let state = handle_sum.clone();
-
+        if id.is_empty() {
+            return;
+        }
+        let generation = summary_jobs
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .begin(&id);
+        let Some(generation) = generation else {
+            summary_jobs::project(&window, &id);
+            return;
+        };
+        summary_jobs::project(&window, &id);
         let selected_model = window
             .get_meeting_detail_summary_selected_model_id()
             .to_string();
-
-        let summary_generation = uuid::Uuid::new_v4().to_string();
-        window.set_meeting_detail_summary_generation_id(summary_generation.clone().into());
+        let state = handle_sum.clone();
+        let jobs = summary_jobs.clone();
+        let progress_jobs = jobs.clone();
         let progress_id = id.clone();
-        let progress_generation = summary_generation.clone();
-        let weak_for_progress = weak_sum.clone();
+        let weak_progress = weak_sum.clone();
         let channel =
             ProgressChannel::new(move |progress: souffle_lib::summary::SummarizeProgress| {
-                let weak = weak_for_progress.clone();
-                let text = progress.text.clone();
-                let progress_id = progress_id.clone();
-                let progress_generation = progress_generation.clone();
+                if !progress_jobs
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .progress(&progress_id, generation, progress)
+                {
+                    return;
+                }
+                let weak = weak_progress.clone();
+                let id = progress_id.clone();
+                let jobs = progress_jobs.clone();
                 let _ = slint::invoke_from_event_loop(move || {
-                    if let Some(w) = weak.upgrade() {
-                        if w.get_active_meeting_id().as_str() == progress_id
-                            && w.get_meeting_detail_summary_generation_id().as_str()
-                                == progress_generation
-                        {
-                            w.set_meeting_detail_summary_generation_progress(text.into());
-                        }
+                    let current = jobs
+                        .lock()
+                        .unwrap_or_else(|p| p.into_inner())
+                        .get(&id)
+                        .is_some_and(|job| job.generation() == generation);
+                    if current
+                        && let Some(w) = weak.upgrade()
+                        && w.get_active_meeting_id().as_str() == id
+                    {
+                        summary_jobs::project(&w, &id);
                     }
                 });
             });
-
-        let weak_for_done = weak_sum.clone();
-        let state_for_done = state.clone();
+        let weak = weak_sum.clone();
         souffle_lib::async_runtime::spawn(async move {
-            let model = selected_model;
-            let result = souffle_lib::commands::summarize_meeting(
+            let result = souffle_lib::commands::summarize_meeting_typed(
                 state.clone(),
                 id.clone(),
-                model,
+                selected_model,
                 None,
                 channel,
             )
             .await;
-
+            // Record terminal state even while another meeting is visible.
+            if !jobs
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .complete(&id, generation, result)
+            {
+                return;
+            }
+            let meeting = state.db.load_meeting(&id);
             let _ = slint::invoke_from_event_loop(move || {
-                if let Some(w) = weak_for_done.upgrade() {
-                    if w.get_active_meeting_id().as_str() != id
-                        || w.get_meeting_detail_summary_generation_id().as_str()
-                            != summary_generation
-                    {
-                        return;
-                    }
-                    w.set_meeting_detail_summary_is_generating(false);
-                    if let Ok(meeting) = state_for_done.db.load_meeting(&id) {
-                        compression_ui::populate(&w, &meeting);
-                    }
-                    match result {
-                        Ok(_) => {
-                            if let Ok(m) = state_for_done.db.load_meeting(&id) {
-                                populate_meeting_detail(&w, &state_for_done, &m);
-                            }
-                        }
-                        // Its own property, not `generation_progress`: that one
-                        // is only on screen while `is_generating`, so an error
-                        // written there disappeared with the spinner and a
-                        // failed click read as "the button does nothing". The
-                        // "failed:" wording lives in Slint behind @tr().
-                        Err(e) if w.get_active_meeting_id().as_str() == id => {
-                            w.set_meeting_detail_summary_generation_error(e.into());
-                        }
-                        Err(e) => eprintln!("Summary of meeting {id} failed: {e}"),
+                let current = jobs
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .get(&id)
+                    .is_some_and(|job| job.generation() == generation);
+                if current
+                    && let Some(w) = weak.upgrade()
+                    && w.get_active_meeting_id().as_str() == id
+                {
+                    if let Ok(meeting) = meeting {
+                        populate_meeting_detail(&w, &state, &meeting);
+                    } else {
+                        summary_jobs::project(&w, &id);
                     }
                 }
             });

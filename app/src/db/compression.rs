@@ -3,7 +3,7 @@ use super::Database;
 use crate::{
     engine::{Speaker, TranscriptionSegment},
     lock_ext::MutexExt,
-    summary::compress::CompressionInput,
+    summary::compress::{CompressionError, CompressionInput},
     transcript::{MeetingParticipant, MeetingRecordingSession},
 };
 use rusqlite::{Connection, OptionalExtension, params};
@@ -82,13 +82,36 @@ pub(crate) fn source(
 pub(crate) fn fingerprint(conn: &Connection, id: &str) -> Result<Option<String>, String> {
     Ok(source(conn, id)?.map(|(input, _)| input.source_sha256))
 }
+/// A mutation pays for source fingerprints only when a compact or an active
+/// generation can be invalidated. Skipped does not mean the row is absent.
+#[derive(Debug, PartialEq)]
+pub(crate) enum InvalidationSnapshot {
+    Untracked,
+    Tracked(Option<String>),
+}
+pub(crate) fn invalidation_snapshot(
+    conn: &Connection,
+    id: &str,
+) -> Result<InvalidationSnapshot, String> {
+    let tracked=conn.query_row(&format!("SELECT {COMPACT_TRANSCRIPT} IS NOT NULL OR {COMPACT_GENERATION_TOKEN} IS NOT NULL FROM {MEETINGS} WHERE {ID}=?1"),[id],|row|row.get::<_,bool>(0)).optional().map_err(|e|e.to_string())?.unwrap_or(false);
+    if tracked {
+        Ok(InvalidationSnapshot::Tracked(fingerprint(conn, id)?))
+    } else {
+        Ok(InvalidationSnapshot::Untracked)
+    }
+}
 pub(crate) fn invalidate_changed(
     conn: &Connection,
     id: &str,
-    before: Option<String>,
+    before: InvalidationSnapshot,
 ) -> Result<(), String> {
-    if before != fingerprint(conn, id)? {
-        conn.execute(&format!("UPDATE {MEETINGS} SET {COMPACT_GENERATION_TOKEN}=NULL,{COMPACT_IS_STALE}=CASE WHEN {COMPACT_TRANSCRIPT} IS NOT NULL THEN 1 ELSE {COMPACT_IS_STALE} END WHERE {ID}=?1"),[id]).map_err(|e|e.to_string())?;
+    match before {
+        InvalidationSnapshot::Untracked => {}
+        InvalidationSnapshot::Tracked(before) => {
+            if before != fingerprint(conn, id)? {
+                conn.execute(&format!("UPDATE {MEETINGS} SET {COMPACT_GENERATION_TOKEN}=NULL,{COMPACT_IS_STALE}=CASE WHEN {COMPACT_TRANSCRIPT} IS NOT NULL THEN 1 ELSE {COMPACT_IS_STALE} END WHERE {ID}=?1"),[id]).map_err(|e|e.to_string())?;
+            }
+        }
     }
     Ok(())
 }
@@ -110,27 +133,42 @@ pub(crate) fn write_compact(
     Ok(())
 }
 impl Database {
-    pub fn begin_compaction(&self, id: &str) -> Result<CompactionSnapshot, String> {
-        let mut conn = self.conn.acquire()?;
+    /// Reserve a fresh generation and effective source in one short transaction,
+    /// refusing deleted, ongoing or empty meetings before inference.
+    pub fn begin_compaction(&self, id: &str) -> Result<CompactionSnapshot, CompressionError> {
+        let mut conn = self
+            .conn
+            .acquire()
+            .map_err(|detail| CompressionError::Database { detail })?;
         let tx = conn
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
-            .map_err(|e| e.to_string())?;
-        let (input, ongoing) = source(&tx, id)?.ok_or("Meeting was deleted")?;
+            .map_err(|e| CompressionError::Database {
+                detail: e.to_string(),
+            })?;
+        let (input, ongoing) = source(&tx, id)
+            .map_err(|detail| CompressionError::Database { detail })?
+            .ok_or(CompressionError::Deleted)?;
         if ongoing {
-            return Err("Cannot compact an ongoing meeting".into());
+            return Err(CompressionError::Ongoing);
         }
         if input.lines.iter().all(|s| s.trim().is_empty()) {
-            return Err("Transcript has no text".into());
+            return Err(CompressionError::EmptyTranscript);
         }
         let token = uuid::Uuid::new_v4().to_string();
         tx.execute(
             &format!("UPDATE {MEETINGS} SET {COMPACT_GENERATION_TOKEN}=?2 WHERE {ID}=?1"),
             params![id, token],
         )
-        .map_err(|e| e.to_string())?;
-        tx.commit().map_err(|e| e.to_string())?;
+        .map_err(|e| CompressionError::Database {
+            detail: e.to_string(),
+        })?;
+        tx.commit().map_err(|e| CompressionError::Database {
+            detail: e.to_string(),
+        })?;
         Ok(CompactionSnapshot { input, token })
     }
+    /// Publish only when the finalized source and generation still match, using
+    /// UPDATE rather than insertion so a completed job cannot resurrect a meeting.
     pub fn commit_compaction(
         &self,
         id: &str,
@@ -166,6 +204,7 @@ impl Database {
             CompactCommit::Superseded
         })
     }
+    /// Read the single optional compact object without loading meeting segments.
     pub fn load_compact_transcript(&self, id: &str) -> Result<Option<CompactTranscript>, String> {
         {
             let conn = self.conn.acquire()?;
@@ -196,6 +235,57 @@ mod tests {
             db.commit_compaction(id, &s, &compact(&s)).unwrap(),
             CompactCommit::Committed
         );
+    }
+    #[test]
+    fn default_off_mutations_skip_hashes_but_active_generation_is_invalidated() {
+        let (db, _dir) = test_db();
+        db.save_meeting(&sample_meeting("default-off")).unwrap();
+        // Malformed source metadata proves both before/after hashes are skipped.
+        {
+            let conn = db.conn.acquire().unwrap();
+            conn.execute(
+                &format!("UPDATE {MEETINGS} SET {RECORDING_SESSIONS}='invalid' WHERE {ID}=?1"),
+                ["default-off"],
+            )
+            .unwrap();
+        }
+        db.update_segment_texts("default-off", &[(0, "changed".into())])
+            .unwrap();
+        db.append_segments("default-off", &[sample_segment("new", 4., 5.)], 2)
+            .unwrap();
+        db.save_edited_transcript("default-off", Some("edited"))
+            .unwrap();
+        {
+            let conn = db.conn.acquire().unwrap();
+            assert_eq!(
+                invalidation_snapshot(&conn, "default-off").unwrap(),
+                InvalidationSnapshot::Untracked
+            );
+        }
+        db.save_meeting(&sample_meeting("active-generation"))
+            .unwrap();
+        let active = db.begin_compaction("active-generation").unwrap();
+        assert!(
+            db.load_compact_transcript("active-generation")
+                .unwrap()
+                .is_none()
+        );
+        db.save_edited_transcript("active-generation", Some("source changed"))
+            .unwrap();
+        assert_eq!(
+            db.commit_compaction("active-generation", &active, &compact(&active))
+                .unwrap(),
+            CompactCommit::Superseded
+        );
+        let conn = db.conn.acquire().unwrap();
+        let token: Option<String> = conn
+            .query_row(
+                &format!("SELECT {COMPACT_GENERATION_TOKEN} FROM {MEETINGS} WHERE {ID}=?1"),
+                ["active-generation"],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(token.is_none());
     }
     #[test]
     fn compact_source_cas_and_preserving_full_save() {

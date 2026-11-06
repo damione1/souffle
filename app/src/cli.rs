@@ -195,7 +195,9 @@ fn run_meeting_action(cli: &CliArgs) -> i32 {
         let mut settings = crate::settings::AppSettings::load_read_only(&db)?;
         if let Some(rate) = cli.compression_rate {
             settings.summary_compression_rate =
-                crate::summary::compress::CompressionRate::new(rate)?.get();
+                crate::summary::compress::CompressionRate::new(rate)
+                    .map_err(|error| error.to_string())?
+                    .get();
         }
         if let Some(value) = cli.summary_compression {
             settings.summary_compression_enabled = match value {
@@ -234,7 +236,8 @@ fn run_meeting_action(cli: &CliArgs) -> i32 {
                     Some(settings.summary_compression_rate),
                     false,
                 )
-                .await?;
+                .await
+                .map_err(|error| error.to_string())?;
                 return serde_json::to_value(compact).map_err(|e| e.to_string());
             }
             let id = cli.summarize_meeting.as_ref().ok_or("No meeting action")?;
@@ -243,7 +246,7 @@ fn run_meeting_action(cli: &CliArgs) -> i32 {
                 None => {
                     let providers = crate::summary::check_providers(&settings.ollama_url).await;
                     crate::summary::choose_summary_model(&settings, &providers.models)
-                        .map_err(|e| format!("Summary provider unavailable: {e:?}"))?
+                        .map_err(|e| e.message().to_owned())?
                 }
             };
             crate::commands::summarize_meeting_with_settings(
@@ -254,7 +257,8 @@ fn run_meeting_action(cli: &CliArgs) -> i32 {
                 crate::progress::ProgressChannel::new(|_| {}),
                 settings,
             )
-            .await?;
+            .await
+            .map_err(|error| error.to_string())?;
             serde_json::to_value(db.load_meeting(id)?).map_err(|e| e.to_string())
         })
     })();
