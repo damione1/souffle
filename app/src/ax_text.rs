@@ -85,17 +85,48 @@ fn macos_set_selected_text(text: &str) -> Result<bool, String> {
     ))
 }
 
-/// System-wide element → `kAXFocusedUIElementAttribute`.
+/// Resolve the focused application, check its PID, then ask that same
+/// application for its focused child. Never query our own AX provider: Slint's
+/// AccessKit adapter can be updating its tree on the UI thread at the same time.
+/// An unreadable PID fails closed before any child or value request.
+#[cfg(any(test, target_os = "macos"))]
+fn focused_child_of_external_app<App, Child>(
+    own_pid: u32,
+    resolve_app: impl FnOnce() -> Option<App>,
+    get_pid: impl FnOnce(&App) -> Option<i32>,
+    focused_child: impl FnOnce(&App) -> Option<Child>,
+) -> Option<Child> {
+    let app = resolve_app()?;
+    let pid = get_pid(&app)?;
+    if pid <= 0 || u32::try_from(pid).ok()? == own_pid {
+        return None;
+    }
+    focused_child(&app)
+}
+
+/// System-wide focused application → PID → that application's focused child.
 ///
 /// Create/Copy AXUIElement and CFTypeRef values are wrapped in `CFRetained`
 /// so they are released on drop (no leaks).
 #[cfg(target_os = "macos")]
 fn focused_element() -> Option<objc2_core_foundation::CFRetained<objc2_core_foundation::CFType>> {
-    use accessibility_sys::{AXUIElementCreateSystemWide, kAXFocusedUIElementAttribute};
+    use accessibility_sys::{
+        AXUIElementCreateSystemWide, AXUIElementGetPid, kAXErrorSuccess,
+        kAXFocusedApplicationAttribute, kAXFocusedUIElementAttribute,
+    };
 
     let system_raw = unsafe { AXUIElementCreateSystemWide() };
     let system = retain_created(system_raw)?;
-    copy_attribute(&system, kAXFocusedUIElementAttribute)
+    focused_child_of_external_app(
+        std::process::id(),
+        || copy_attribute(&system, kAXFocusedApplicationAttribute),
+        |app| {
+            let mut pid = 0;
+            let err = unsafe { AXUIElementGetPid(as_ax(app), &mut pid) };
+            (err == kAXErrorSuccess).then_some(pid)
+        },
+        |app| copy_attribute(app, kAXFocusedUIElementAttribute),
+    )
 }
 
 #[cfg(target_os = "macos")]
@@ -178,7 +209,47 @@ fn set_string_attribute(
 
 #[cfg(test)]
 mod tests {
-    use super::nonempty_ax_string;
+    use super::{focused_child_of_external_app, nonempty_ax_string};
+
+    #[test]
+    fn own_or_unreadable_ax_target_never_queries_child_or_value() {
+        use std::cell::Cell;
+        for pid in [Some(42), None, Some(0), Some(-1)] {
+            let child_queries = Cell::new(0);
+            let value_queries = Cell::new(0);
+            let result = focused_child_of_external_app(
+                42,
+                || Some(7),
+                |_| pid,
+                |_| {
+                    child_queries.set(child_queries.get() + 1);
+                    value_queries.set(value_queries.get() + 1);
+                    Some("value")
+                },
+            );
+            assert_eq!(result, None);
+            assert_eq!(child_queries.get(), 0);
+            assert_eq!(value_queries.get(), 0);
+        }
+    }
+
+    #[test]
+    fn external_ax_child_is_queried_from_pinned_application() {
+        use std::cell::Cell;
+        let global_focus = Cell::new(7);
+        let result = focused_child_of_external_app(
+            42,
+            || Some(global_focus.get()),
+            |app| {
+                assert_eq!(*app, 7);
+                global_focus.set(9);
+                Some(43)
+            },
+            |app| Some(*app),
+        );
+        assert_eq!(global_focus.get(), 9);
+        assert_eq!(result, Some(7));
+    }
 
     #[test]
     fn stubs_return_none_without_ax() {

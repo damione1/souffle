@@ -136,15 +136,22 @@ fn save_settings_in_lane(
     settings: AppSettings,
     lane: SettingsSaveLane,
 ) -> SettingsSaveResult {
-    save_settings_with_effects(&state.db, &state.machine, settings, |settings| {
-        apply_settings_effects(&state, settings, lane)
-    })
+    // This boundary covers the real audio start while the machine is Ready.
+    // Native/window effects remain outside both locks.
+    save_settings_with_effects(
+        &state.db,
+        &state.machine,
+        settings,
+        &state.capture_start,
+        |settings| apply_settings_effects(&state, settings, lane),
+    )
 }
 
 fn save_settings_with_effects(
     db: &Database,
     machine: &Mutex<AppStateMachine>,
     settings: AppSettings,
+    capture_start: &crate::audio::start_gate::CaptureStartGate,
     apply_effects: impl FnOnce(&AppSettings) -> Result<(), SettingsEffectFailure>,
 ) -> SettingsSaveResult {
     let settings = settings
@@ -153,12 +160,12 @@ fn save_settings_with_effects(
 
     // Keep the canonical machine stable from the decision through the SQLite
     // commit. Native/window effects run only after this guard is dropped.
-    {
+    capture_start.with_start_boundary(|starting| {
         let machine = machine
             .acquire()
             .map_err(|message| SettingsSaveError::NotCommitted { message })?;
         settings
-            .save_prepared_with_recording_guard(db, machine.is_recording())
+            .save_prepared_with_recording_guard(db, starting || machine.is_recording())
             .map_err(|error| match error {
                 PreparedSettingsSaveError::ModelChangeRejected => SettingsSaveError::Rejected {
                     message: "Cannot change the transcription model while recording".into(),
@@ -166,8 +173,8 @@ fn save_settings_with_effects(
                 PreparedSettingsSaveError::Persistence { message } => {
                     SettingsSaveError::NotCommitted { message }
                 }
-            })?;
-    }
+            })
+    })?;
 
     apply_effects(&settings).map_err(|cause| SettingsSaveError::EffectFailedAfterCommit { cause })
 }
@@ -233,22 +240,43 @@ fn apply_autostart_effect(
 pub fn register_shortcuts(
     state: &Arc<AppState>,
     shortcuts: &ShortcutSettings,
-) -> Result<(), String> {
-    crate::native::shortcuts::register_shortcuts(state, shortcuts)
+) -> Result<(), super::SettingsCaptureError> {
+    super::settings_guard::with_capture_idle(&state.capture_start, &state.machine, || {
+        crate::native::shortcuts::register_shortcuts(state, shortcuts)
+    })
 }
 
 /// Update shortcut bindings at runtime.
-pub fn save_shortcuts(state: Arc<AppState>, shortcuts: ShortcutSettings) -> Result<(), String> {
-    let previous = ShortcutSettings::load(&state.db)?;
-    let shortcuts = shortcuts.normalize()?;
+pub fn save_shortcuts(
+    state: Arc<AppState>,
+    shortcuts: ShortcutSettings,
+) -> Result<(), super::SettingsCaptureError> {
+    save_shortcuts_with(
+        &state.db,
+        &state.capture_start,
+        &state.machine,
+        shortcuts,
+        |shortcuts| crate::native::shortcuts::register_shortcuts(&state, shortcuts),
+    )
+}
 
-    register_shortcuts(&state, &shortcuts)?;
-    if let Err(e) = shortcuts.save(&state.db) {
-        let _ = register_shortcuts(&state, &previous);
-        return Err(e);
-    }
-
-    Ok(())
+fn save_shortcuts_with(
+    db: &Database,
+    gate: &crate::audio::start_gate::CaptureStartGate,
+    machine: &Mutex<AppStateMachine>,
+    shortcuts: ShortcutSettings,
+    mut register: impl FnMut(&ShortcutSettings) -> Result<(), String>,
+) -> Result<(), super::SettingsCaptureError> {
+    super::settings_guard::with_capture_idle(gate, machine, || {
+        let previous = ShortcutSettings::load(db)?;
+        let shortcuts = shortcuts.normalize()?;
+        register(&shortcuts)?;
+        if let Err(error) = shortcuts.save(db) {
+            let _ = register(&previous);
+            return Err(error);
+        }
+        Ok(())
+    })
 }
 
 /// The shipped defaults, with nothing read from the database.
@@ -329,11 +357,11 @@ mod tests {
 
     use super::{
         SettingsEffectFailure, SettingsSaveError, SettingsSaveLane, apply_autostart_effect,
-        save_settings_with_effects,
+        save_settings_with_effects, save_shortcuts_with,
     };
     use crate::audio::InputPriority;
     use crate::engine::default_transcription_profile;
-    use crate::settings::{AppSettings, MeetingTranscriptionLanguage, Theme};
+    use crate::settings::{AppSettings, MeetingTranscriptionLanguage, ShortcutSettings, Theme};
     use crate::state_machine::AppStateMachine;
     use crate::test_helpers::fixtures::test_db;
 
@@ -342,6 +370,105 @@ mod tests {
             profile: default_transcription_profile(),
             session_id: 7,
         }
+    }
+
+    #[test]
+    fn shortcut_refusal_preserves_database_and_native_bindings() {
+        use crate::audio::start_gate::CaptureStartGate;
+        use crate::state_machine::RecordingKind;
+        let profile = crate::engine::default_transcription_profile();
+        for machine in [
+            recording_machine(),
+            AppStateMachine::RecordingMeeting {
+                profile: profile.clone(),
+                session_id: 2,
+                meeting_id: "fixture".into(),
+            },
+            AppStateMachine::Stopping {
+                profile: profile.clone(),
+                was_recording: RecordingKind::Dictation,
+            },
+            AppStateMachine::Ready { profile },
+        ] {
+            let (db, _dir) = test_db();
+            let previous = ShortcutSettings::default();
+            previous.save(&db).unwrap();
+            let before = db.get_all_settings().unwrap();
+            let gate = CaptureStartGate::new();
+            if !machine.is_recording() {
+                gate.begin(1);
+            }
+            let registered = Cell::new(0);
+            let result = save_shortcuts_with(
+                &db,
+                &gate,
+                &Mutex::new(machine),
+                ShortcutSettings {
+                    toggle: String::new(),
+                    ..previous
+                },
+                |_| {
+                    registered.set(registered.get() + 1);
+                    Ok(())
+                },
+            );
+            assert!(result.is_err());
+            assert_eq!(registered.get(), 0, "PTT and Escape bindings stay intact");
+            assert_eq!(db.get_all_settings().unwrap(), before);
+        }
+    }
+
+    #[test]
+    fn reserved_start_rejects_model_before_every_write_but_allows_hot_settings() {
+        use crate::audio::start_gate::CaptureStartGate;
+        let (db, _dir) = test_db();
+        let initial = AppSettings::default();
+        initial.save(&db).unwrap();
+        let before = db.get_all_settings().unwrap();
+        let gate = CaptureStartGate::new();
+        gate.begin(1);
+        let machine = Mutex::new(AppStateMachine::Ready {
+            profile: crate::engine::default_transcription_profile(),
+        });
+        let effects = Cell::new(0);
+        let result = save_settings_with_effects(
+            &db,
+            &machine,
+            AppSettings {
+                transcription_model_id: "stt-2.6b-en".into(),
+                theme: Theme::Dark,
+                ..initial.clone()
+            },
+            &gate,
+            |_| {
+                effects.set(effects.get() + 1);
+                Ok(())
+            },
+        );
+        assert!(matches!(result, Err(SettingsSaveError::Rejected { .. })));
+        assert_eq!(effects.get(), 0);
+        assert_eq!(db.get_all_settings().unwrap(), before);
+        let result = save_settings_with_effects(
+            &db,
+            &machine,
+            AppSettings {
+                theme: Theme::Dark,
+                locale: "fr".into(),
+                allow_bluetooth_mic: true,
+                ..initial
+            },
+            &gate,
+            |_| {
+                effects.set(effects.get() + 1);
+                Ok(())
+            },
+        );
+        assert_eq!(result, Ok(()));
+        assert_eq!(effects.get(), 1);
+        let stored = AppSettings::load(&db).unwrap();
+        assert_eq!(stored.theme, Theme::Dark);
+        assert_eq!(stored.locale, "fr");
+        assert!(stored.allow_bluetooth_mic);
     }
 
     #[test]
@@ -394,6 +521,7 @@ mod tests {
             &db,
             &Mutex::new(recording_machine()),
             candidate.clone(),
+            &crate::audio::start_gate::CaptureStartGate::new(),
             |_| {
                 effects_applied.set(true);
                 Ok(())
@@ -406,10 +534,13 @@ mod tests {
         after.sort();
         assert_eq!(after, before, "a machine refusal must change no key");
 
-        let result =
-            save_settings_with_effects(&db, &Mutex::new(AppStateMachine::Idle), candidate, |_| {
-                Ok(())
-            });
+        let result = save_settings_with_effects(
+            &db,
+            &Mutex::new(AppStateMachine::Idle),
+            candidate,
+            &crate::audio::start_gate::CaptureStartGate::new(),
+            |_| Ok(()),
+        );
         assert_eq!(result, Ok(()));
         let stored = AppSettings::load(&db).expect("load idle settings");
         assert_eq!(stored.transcription_model_id, "stt-2.6b-en");
@@ -444,6 +575,7 @@ mod tests {
             &db,
             &Mutex::new(recording_machine()),
             candidate,
+            &crate::audio::start_gate::CaptureStartGate::new(),
             |_| Ok(()),
         );
         assert_eq!(result, Ok(()));
@@ -469,12 +601,17 @@ mod tests {
             ..initial
         };
 
-        let result =
-            save_settings_with_effects(&db, &Mutex::new(AppStateMachine::Idle), candidate, |_| {
+        let result = save_settings_with_effects(
+            &db,
+            &Mutex::new(AppStateMachine::Idle),
+            candidate,
+            &crate::audio::start_gate::CaptureStartGate::new(),
+            |_| {
                 Err(SettingsEffectFailure::Logging {
                     message: "injected native effect failure".into(),
                 })
-            });
+            },
+        );
         let error = result.expect_err("native effect must fail");
         assert_eq!(
             error,
@@ -519,11 +656,16 @@ mod tests {
             calendar_integration_enabled: true,
             ..initial
         };
-        let result =
-            save_settings_with_effects(&db, &Mutex::new(AppStateMachine::Idle), candidate, |_| {
+        let result = save_settings_with_effects(
+            &db,
+            &Mutex::new(AppStateMachine::Idle),
+            candidate,
+            &crate::audio::start_gate::CaptureStartGate::new(),
+            |_| {
                 effects_applied.set(true);
                 Ok(())
-            });
+            },
+        );
         let error = result.expect_err("persistence must fail");
         assert!(matches!(error, SettingsSaveError::NotCommitted { .. }));
         assert!(!error.committed());
@@ -555,7 +697,13 @@ mod tests {
         };
         let worker = std::thread::spawn(move || {
             worker_started.wait();
-            save_settings_with_effects(&worker_db, &worker_machine, candidate, |_| Ok(()))
+            save_settings_with_effects(
+                &worker_db,
+                &worker_machine,
+                candidate,
+                &crate::audio::start_gate::CaptureStartGate::new(),
+                |_| Ok(()),
+            )
         });
 
         started.wait();
@@ -590,10 +738,16 @@ mod tests {
             theme: Theme::Dark,
             ..initial
         };
-        let result = save_settings_with_effects(&db, &machine, candidate, |_| {
-            effects_applied.set(true);
-            Ok(())
-        });
+        let result = save_settings_with_effects(
+            &db,
+            &machine,
+            candidate,
+            &crate::audio::start_gate::CaptureStartGate::new(),
+            |_| {
+                effects_applied.set(true);
+                Ok(())
+            },
+        );
         let error = result.expect_err("poisoned machine lock must fail");
         assert!(matches!(error, SettingsSaveError::NotCommitted { .. }));
         assert!(!error.committed());

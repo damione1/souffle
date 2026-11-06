@@ -6,6 +6,12 @@ authors = ["Damien Goehrig"]
 license = "GPL-3.0-or-later"
 edition = "2024"
 
+# Generated UI and conversions are shared by every executable. Existing tests
+# remain in the app binary; avoid a second empty harness for this library.
+[lib]
+test = false
+doctest = false
+
 [[bin]]
 name = "souffle-slint"
 path = "src/main.rs"

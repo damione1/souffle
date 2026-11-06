@@ -1,0 +1,22 @@
+{% if analytics.measurementId %}
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  if (location.hostname === 'usesouffle.app') {
+    gtag('js', new Date());
+    let debug = false;
+    try { debug = sessionStorage.getItem('site-analytics-debug') === '1'; } catch {}
+    gtag('config', '{{ analytics.measurementId }}', {
+      content_group: '{% if isNotFound %}not_found{% elif isDocs %}documentation{% else %}landing{% endif %}',
+      page_locale: '{{ t.htmlLang }}',
+      {% if isDocs %}content_id: '/{{ translationPath }}',{% endif %}
+      ...(debug ? {debug_mode:true} : {})
+    });
+    const tag = document.createElement('script');
+    tag.async = true;
+    tag.src = 'https://www.googletagmanager.com/gtag/js?id={{ analytics.measurementId }}';
+    document.head.append(tag);
+  }
+</script>
+<script src="{{ '/js/analytics.js' | bust }}" data-web-vitals="{{ webVitalsUrl }}" defer></script>
+{% endif %}

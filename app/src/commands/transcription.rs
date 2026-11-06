@@ -65,8 +65,11 @@ fn build_meeting_on_segment(
     channel: ProgressChannel<TranscriptionSegment>,
     accumulator: Arc<Mutex<Option<MeetingAccumulator>>>,
     db: Arc<Database>,
+    write_lease: Option<crate::meeting_access::MeetingLease>,
 ) -> SegmentCallback {
     Box::new(move |seg| {
+        // This callback may outlive the accumulator (abort/stop/timeout).
+        let _writer = &write_lease;
         channel.send(seg.clone());
 
         // Tentatives are live-UI only. Persisting them would write a row
@@ -95,27 +98,30 @@ fn build_meeting_on_segment(
                     slice,
                     start,
                     meeting.persisted_new_count,
+                    meeting.write_lease.clone(),
                 ))
             }
         };
 
-        if let Some((id, segments, start, advanced_to)) = batch
-            && let Err(e) = db.append_segments(&id, &segments, start)
-        {
-            warn!("Incremental meeting segment flush failed: {e}");
-            // Roll the counter back so this batch is retried on the next flush
-            // instead of being permanently skipped, which would otherwise widen
-            // the crash-loss window beyond one batch. This callback runs only on
-            // the single engine-actor thread, so nothing else advances
-            // persisted_new_count between the write above and this re-lock; the
-            // equality check below only guards against the accumulator having
-            // been taken (and possibly replaced) by a concurrent stop.
-            if let Ok(mut guard) = accumulator.lock()
-                && let Some(meeting) = guard.as_mut()
-                && meeting.persisted_new_count == advanced_to
-            {
-                meeting.persisted_new_count -= segments.len();
+        if let Some((id, segments, start, advanced_to, batch_lease)) = batch {
+            if let Err(e) = db.append_segments(&id, &segments, start) {
+                warn!("Incremental meeting segment flush failed: {e}");
+                // Roll the counter back so this batch is retried on the next flush
+                // instead of being permanently skipped, which would otherwise widen
+                // the crash-loss window beyond one batch. This callback runs only on
+                // the single engine-actor thread, so nothing else advances
+                // persisted_new_count between the write above and this re-lock; the
+                // equality check below only guards against the accumulator having
+                // been taken (and possibly replaced) by a concurrent stop.
+                if let Ok(mut guard) = accumulator.lock()
+                    && let Some(meeting) = guard.as_mut()
+                    && meeting.id == id
+                    && meeting.persisted_new_count == advanced_to
+                {
+                    meeting.persisted_new_count -= segments.len();
+                }
             }
+            drop(batch_lease);
         }
     })
 }
@@ -127,7 +133,7 @@ pub fn meeting_callback_for_test(
     accumulator: Arc<Mutex<Option<MeetingAccumulator>>>,
     db: Arc<Database>,
 ) -> SegmentCallback {
-    build_meeting_on_segment(channel, accumulator, db)
+    build_meeting_on_segment(channel, accumulator, db, None)
 }
 
 /// Set up and launch a meeting recording (new or resumed). Persists the header
@@ -139,6 +145,7 @@ async fn launch_meeting(
     channel: ProgressChannel<TranscriptionSegment>,
 ) -> Result<u64, String> {
     let session_id = next_audio_session_id(state)?;
+    let meeting_id = accumulator.id.clone();
 
     // Session-scoped transcription hints: participant names plus distinctive
     // jargon from the event title/description. Never persisted.
@@ -157,9 +164,12 @@ async fn launch_meeting(
 
     // The on-disk file index a recorder should write to, if recording is on.
     let recording_target = RecordingTarget {
-        meeting_id: accumulator.id.clone(),
-        session_index: crate::audio::recorder::next_session_index(&accumulator.id)
-            .map_err(|e| format!("Determine session index: {e}"))?,
+        path: {
+            let directory = state.recordings_root.join(&accumulator.id);
+            crate::audio::recorder::next_session_path_in(&directory)
+                .map_err(|e| format!("Determine session index: {e}"))?
+        },
+        write_lease: accumulator.write_lease.clone(),
     };
 
     // Persist the header before any segments so a crash leaves a recoverable
@@ -168,6 +178,7 @@ async fn launch_meeting(
         .db
         .upsert_meeting_header(&meeting_header(&accumulator))?;
 
+    let write_lease = accumulator.write_lease.clone();
     {
         let mut acc = state.meeting_accumulator.acquire()?;
         *acc = Some(accumulator);
@@ -177,6 +188,7 @@ async fn launch_meeting(
         channel,
         Arc::clone(&state.meeting_accumulator),
         Arc::clone(&state.db),
+        write_lease.clone(),
     );
 
     let pipeline_state = Arc::clone(state);
@@ -214,13 +226,15 @@ async fn launch_meeting(
             if let Ok(mut acc) = acc.lock() {
                 *acc = None;
             }
-            // The header row upserted above is now orphaned (ended_at IS NULL) with
-            // no recording in progress: recovery is safe to run here immediately,
-            // rather than waiting for the next app restart, because clearing the
-            // accumulator above guarantees no meeting is mid-recording. This either
-            // deletes an empty new-meeting shell or finalizes a resumed meeting from
-            // its already-persisted segments.
-            if let Err(e) = state.db.recover_unfinished_meetings() {
+            // Recover only our header, under the lease reserved before its
+            // first read/upsert. Other unfinished IDs are not owned here and
+            // must not be loaded then recreated after an authorized deletion.
+            if let Some(lease) = &write_lease {
+                lease.set_phase(crate::meeting_access::MeetingDeleteBlockReason::Finalizing);
+            }
+            if let Err(e) = recover_failed_meeting_start_with(state, &meeting_id, &|id| {
+                meeting_has_recorded_audio(state, id)
+            }) {
                 warn!("Meeting recovery after failed start failed: {e}");
             }
             return Err(error);
@@ -233,7 +247,27 @@ async fn launch_meeting(
     // already-handled meeting as needing a resume prompt.
     state.clear_sleep_paused_meeting();
 
+    if let Some(lease) = &write_lease {
+        lease.set_phase(crate::meeting_access::MeetingDeleteBlockReason::Recording);
+    }
+
     Ok(session_id)
+}
+
+fn meeting_has_recorded_audio(state: &AppState, id: &str) -> Result<bool, String> {
+    crate::audio::recorder::list_session_files_in(&state.recordings_root.join(id))
+        .map(|files| !files.is_empty())
+        .map_err(|e| format!("List session files for {id}: {e}"))
+}
+
+fn recover_failed_meeting_start_with(
+    state: &AppState,
+    meeting_id: &str,
+    has_recorded_audio: &dyn Fn(&str) -> Result<bool, String>,
+) -> Result<usize, String> {
+    state
+        .db
+        .recover_unfinished_meeting_with(meeting_id, has_recorded_audio)
 }
 
 fn next_audio_session_id(state: &AppState) -> Result<u64, String> {
@@ -262,8 +296,8 @@ enum PipelineMode {
 /// on-disk session index); whether to actually record is decided inside
 /// `start_pipeline_blocking` once settings are loaded.
 struct RecordingTarget {
-    meeting_id: String,
-    session_index: usize,
+    path: std::path::PathBuf,
+    write_lease: Option<crate::meeting_access::MeetingLease>,
 }
 
 /// What a starting session intends to do about system audio.
@@ -443,9 +477,7 @@ fn start_pipeline_blocking(
     let record_path = if mode == PipelineMode::Meeting
         && settings.meeting_audio_retention != crate::settings::MeetingAudioRetention::Off
     {
-        recording_target.as_ref().map(|target| {
-            crate::audio::recorder::session_path(&target.meeting_id, target.session_index)
-        })
+        recording_target.as_ref().map(|target| target.path.clone())
     } else {
         None
     };
@@ -472,6 +504,9 @@ fn start_pipeline_blocking(
                     diarize,
                     record_path,
                     meeting_audio_diagnostic: settings.meeting_audio_diagnostic,
+                    meeting_lease: recording_target
+                        .as_ref()
+                        .and_then(|t| t.write_lease.clone()),
                     // No pre-spawned tap: start_meeting opens the mic first,
                     // then the tap (see the disposable probe above).
                     #[cfg(target_os = "macos")]
@@ -830,6 +865,7 @@ pub async fn start_meeting_recording(
         None => (None, Vec::new(), None),
     };
     let accumulator = MeetingAccumulator {
+        write_lease: Some(state.meeting_access.reserve(&meeting_id)?),
         id: meeting_id.clone(),
         title,
         existing_segments: Vec::new(),
@@ -881,6 +917,9 @@ pub async fn resume_meeting_recording(
         return Err("A meeting is already starting or recording".into());
     }
 
+    // Reserve before loading: otherwise delete can land between this read
+    // and launch's header upsert, which would resurrect the deleted meeting.
+    let write_lease = state.meeting_access.reserve(&meeting_id)?;
     let meeting = state.db.load_meeting(&meeting_id)?;
     let active_profile = current_active_profile(&state)?;
     if active_profile != meeting.transcription_profile {
@@ -894,6 +933,7 @@ pub async fn resume_meeting_recording(
     }
 
     let accumulator = MeetingAccumulator {
+        write_lease: Some(write_lease),
         id: meeting.id.clone(),
         title: meeting.title,
         existing_segments: meeting.segments,
@@ -951,6 +991,14 @@ pub async fn stop_meeting_recording(state: Arc<AppState>) -> Result<String, Stri
         .ok_or("No meeting accumulator")?;
 
     // Transition to Stopping immediately so the UI can show "Finalizing…".
+    if let Some(lease) = state
+        .meeting_accumulator
+        .acquire()?
+        .as_ref()
+        .and_then(|m| m.write_lease.as_ref())
+    {
+        lease.set_phase(crate::meeting_access::MeetingDeleteBlockReason::Finalizing);
+    }
     state.apply_transition(StateAction::StopRecording)?;
     // The meeting ends when its capture does: when the user asked, not once
     // the engine has worked through what was buffered (SOU-260 AC3). A stop
@@ -995,6 +1043,10 @@ pub async fn stop_meeting_recording(state: Arc<AppState>) -> Result<String, Stri
             if let Ok(mut guard) = state.meeting_accumulator.lock()
                 && let Some(meeting) = guard.take()
             {
+                let write_lease = meeting.write_lease.clone();
+                if let Some(lease) = &write_lease {
+                    lease.set_phase(crate::meeting_access::MeetingDeleteBlockReason::Finalizing);
+                }
                 let mut transcript = meeting.into_transcript(ended_at);
                 // A meeting can be resumed, and each session gets its own
                 // verdict: keep the one that explains the most missing
@@ -1017,6 +1069,7 @@ pub async fn stop_meeting_recording(state: Arc<AppState>) -> Result<String, Stri
                         "Meeting recording saved"
                     );
                 }
+                drop(write_lease);
             }
 
             pipeline_err
@@ -1317,6 +1370,216 @@ pub fn clear_sleep_paused_meeting(state: Arc<AppState>) {
 }
 
 #[cfg(test)]
+mod failed_start_recovery {
+    use super::{meeting_has_recorded_audio, recover_failed_meeting_start_with};
+    use crate::meeting_access::MeetingDeleteBlockReason;
+    use crate::state::AppState;
+    use crate::state_machine::AppStateMachine;
+    use crate::test_helpers::fixtures::{sample_meeting, test_db};
+    use std::sync::{Arc, Mutex};
+
+    fn fixture(with_segments: bool) -> (Arc<AppState>, tempfile::TempDir) {
+        let (db, dir) = test_db();
+        let (_audio_tx, audio_rx) = crossbeam_channel::unbounded();
+        let actor = crate::pipeline::EngineActorHandle::spawn(
+            audio_rx,
+            Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            Arc::new(Mutex::new(None)),
+            Box::new(|_| Err("No engine in failed-start recovery fixture".into())),
+        )
+        .unwrap();
+        let (cmd_tx, _cmd_rx) = crossbeam_channel::unbounded();
+        let mut state = AppState::new(
+            cmd_tx,
+            Arc::new(actor),
+            Arc::new(db),
+            Arc::new(std::sync::atomic::AtomicU32::new(0)),
+        );
+        state.recordings_root = dir.path().join("recordings");
+        *state.machine.lock().unwrap() = AppStateMachine::Ready {
+            profile: crate::engine::default_transcription_profile(),
+        };
+        for id in ["A", "B"] {
+            let mut meeting = sample_meeting(id);
+            meeting.ended_at = None;
+            if !with_segments {
+                meeting.segments.clear();
+                meeting.recording_sessions.clear();
+            }
+            state.db.save_meeting(&meeting).unwrap();
+            let recorder = crate::audio::recorder::MeetingRecorder::start(
+                state.recordings_root.join(id).join("0.ogg"),
+                48_000,
+                1,
+                opus::Channels::Mono,
+            )
+            .unwrap();
+            recorder.push(&vec![0.1; 960]);
+            drop(recorder);
+            assert!(meeting_has_recorded_audio(&state, id).unwrap());
+        }
+        (Arc::new(state), dir)
+    }
+
+    #[test]
+    fn failed_resume_recovers_only_its_owned_meeting() {
+        let (state, _dir) = fixture(true);
+        let before_b = serde_json::to_value(state.db.load_meeting("B").unwrap()).unwrap();
+        let result = crate::async_runtime::block_on(super::resume_meeting_recording(
+            Arc::clone(&state),
+            "A".into(),
+            crate::progress::ProgressChannel::new(|_| {}),
+        ));
+        assert!(result.is_err(), "fixture has no loaded engine");
+        assert!(state.db.load_meeting("A").unwrap().ended_at.is_some());
+        assert_eq!(
+            serde_json::to_value(state.db.load_meeting("B").unwrap()).unwrap(),
+            before_b,
+            "runtime recovery must not mutate an unowned meeting"
+        );
+        assert_eq!(
+            crate::commands::get_meeting_delete_block(&state, "A").unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn recovery_does_not_resurrect_an_unowned_meeting_deleted_after_load() {
+        let (state, _dir) = fixture(false);
+        let lease = state.meeting_access.reserve("A").unwrap();
+        lease.set_phase(MeetingDeleteBlockReason::Finalizing);
+        let (loaded_tx, loaded_rx) = crossbeam_channel::unbounded();
+        let (release_tx, release_rx) = crossbeam_channel::unbounded();
+        let (done_tx, done_rx) = crossbeam_channel::bounded(1);
+        let handle = Arc::clone(&state);
+        let writer = std::thread::spawn(move || {
+            let result = recover_failed_meeting_start_with(&handle, "A", &|id| {
+                // This existing audio-check seam is after load and before
+                // save; remember real fixture audio before any deletion.
+                let has_audio = meeting_has_recorded_audio(&handle, id)?;
+                loaded_tx.send(id.to_string()).unwrap();
+                release_rx.recv().unwrap();
+                Ok(has_audio)
+            });
+            drop(lease);
+            done_tx.send(result).unwrap();
+        });
+        let mut loaded_unowned = false;
+        let result = loop {
+            crossbeam_channel::select! {
+                recv(loaded_rx) -> id => {
+                    let Ok(id) = id else { break done_rx.recv().unwrap(); };
+                    if id == "B" {
+                        loaded_unowned = true;
+                        crate::commands::delete_meeting(Arc::clone(&state), id).unwrap();
+                    }
+                    release_tx.send(()).unwrap();
+                }
+                recv(done_rx) -> result => break result.unwrap(),
+            }
+        };
+        writer.join().unwrap();
+        result.unwrap();
+        if !loaded_unowned {
+            crate::commands::delete_meeting(Arc::clone(&state), "B".into()).unwrap();
+        }
+        assert!(
+            !state.db.meeting_exists("B").unwrap(),
+            "recovery recreated B after its deletion was authorized"
+        );
+        assert!(!loaded_unowned, "runtime recovery loaded an unowned ID");
+    }
+
+    #[test]
+    fn recovery_owns_target_through_audio_only_save_then_releases_lease() {
+        let (state, _dir) = fixture(false);
+        let before = serde_json::to_value(state.db.load_meeting("A").unwrap()).unwrap();
+        let audio_path = state.recordings_root.join("A/0.ogg");
+        let audio = std::fs::read(&audio_path).unwrap();
+        let lease = state.meeting_access.reserve("A").unwrap();
+        lease.set_phase(MeetingDeleteBlockReason::Finalizing);
+        let (loaded_tx, loaded_rx) = crossbeam_channel::bounded(1);
+        let (release_tx, release_rx) = crossbeam_channel::bounded(1);
+        let handle = Arc::clone(&state);
+        let writer = std::thread::spawn(move || {
+            let result = recover_failed_meeting_start_with(&handle, "A", &|id| {
+                assert_eq!(id, "A", "runtime must not inspect another ID");
+                let has_audio = meeting_has_recorded_audio(&handle, id)?;
+                loaded_tx.send(()).unwrap();
+                release_rx.recv().unwrap();
+                Ok(has_audio)
+            });
+            drop(lease);
+            result
+        });
+        loaded_rx
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .unwrap();
+        let delete_a = crate::commands::delete_meeting(Arc::clone(&state), "A".into());
+        let resume_a = crate::async_runtime::block_on(super::resume_meeting_recording(
+            Arc::clone(&state),
+            "A".into(),
+            crate::progress::ProgressChannel::new(|_| {}),
+        ));
+        let delete_b = crate::commands::delete_meeting(Arc::clone(&state), "B".into());
+        let during = serde_json::to_value(state.db.load_meeting("A").unwrap()).unwrap();
+        let during_audio = std::fs::read(&audio_path).unwrap();
+        release_tx.send(()).unwrap();
+        assert_eq!(writer.join().unwrap().unwrap(), 1);
+        assert!(delete_a.is_err());
+        assert!(resume_a.is_err());
+        delete_b.unwrap();
+        assert_eq!(during, before);
+        assert_eq!(during_audio, audio);
+        assert!(!state.db.meeting_exists("B").unwrap());
+        assert!(!state.recordings_root.join("B").exists());
+        let recovered = state.db.load_meeting("A").unwrap();
+        assert!(
+            recovered.ended_at.is_some(),
+            "audio-only header is preserved"
+        );
+        assert!(recovered.segments.is_empty());
+        assert_eq!(std::fs::read(&audio_path).unwrap(), audio);
+        assert_eq!(
+            crate::commands::get_meeting_delete_block(&state, "A").unwrap(),
+            None
+        );
+        crate::commands::delete_meeting(Arc::clone(&state), "A".into()).unwrap();
+        assert!(!state.db.meeting_exists("A").unwrap());
+        assert!(!audio_path.exists());
+    }
+
+    #[test]
+    fn deleted_target_is_not_recreated_by_late_recovery_or_resume() {
+        let (state, _dir) = fixture(false);
+        let before_b = serde_json::to_value(state.db.load_meeting("B").unwrap()).unwrap();
+        crate::commands::delete_meeting(Arc::clone(&state), "A".into()).unwrap();
+        let lease = state.meeting_access.reserve("A").unwrap();
+        let result = recover_failed_meeting_start_with(&state, "A", &|id| {
+            meeting_has_recorded_audio(&state, id)
+        });
+        drop(lease);
+        assert!(result.is_err(), "recovery must not upsert a deleted header");
+        let resume = crate::async_runtime::block_on(super::resume_meeting_recording(
+            Arc::clone(&state),
+            "A".into(),
+            crate::progress::ProgressChannel::new(|_| {}),
+        ));
+        assert!(resume.is_err());
+        assert!(!state.db.meeting_exists("A").unwrap());
+        assert!(!state.recordings_root.join("A").exists());
+        assert_eq!(
+            crate::commands::get_meeting_delete_block(&state, "A").unwrap(),
+            None
+        );
+        assert_eq!(
+            serde_json::to_value(state.db.load_meeting("B").unwrap()).unwrap(),
+            before_b
+        );
+    }
+}
+
+#[cfg(test)]
 mod tests {
     #[cfg(target_os = "macos")]
     use super::report_probe_outcome;
@@ -1353,6 +1616,7 @@ mod tests {
         let db = Arc::new(db);
 
         let accumulator = Arc::new(Mutex::new(Some(MeetingAccumulator {
+            write_lease: None,
             id: "missing-meeting".to_string(),
             title: "Ghost".to_string(),
             existing_segments: Vec::new(),
@@ -1372,7 +1636,7 @@ mod tests {
         })));
 
         let channel: ProgressChannel<TranscriptionSegment> = ProgressChannel::new(|_| {});
-        let on_segment = build_meeting_on_segment(channel, Arc::clone(&accumulator), db);
+        let on_segment = build_meeting_on_segment(channel, Arc::clone(&accumulator), db, None);
 
         for i in 0..MEETING_FLUSH_THRESHOLD {
             on_segment(TranscriptionSegment {
@@ -1401,6 +1665,7 @@ mod tests {
         let db = Arc::new(db);
 
         let accumulator = Arc::new(Mutex::new(Some(MeetingAccumulator {
+            write_lease: None,
             id: "live-only".to_string(),
             title: "Live".to_string(),
             existing_segments: Vec::new(),
@@ -1420,7 +1685,7 @@ mod tests {
         })));
 
         let channel: ProgressChannel<TranscriptionSegment> = ProgressChannel::new(|_| {});
-        let on_segment = build_meeting_on_segment(channel, Arc::clone(&accumulator), db);
+        let on_segment = build_meeting_on_segment(channel, Arc::clone(&accumulator), db, None);
 
         on_segment(test_segment("pending", false));
         on_segment(test_segment("hello", true));
@@ -1679,8 +1944,8 @@ mod tests {
                 PipelineMode::Dictation => (None, false),
                 PipelineMode::Meeting => (
                     Some(super::RecordingTarget {
-                        meeting_id: "start-confirmation-test".into(),
-                        session_index: 0,
+                        path: std::env::temp_dir().join("start-confirmation-test/0.ogg"),
+                        write_lease: None,
                     }),
                     diagnostic,
                 ),

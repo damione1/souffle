@@ -64,6 +64,12 @@ jobs:
     runs-on: macos-latest
     # Cold native builds have exceeded 50 minutes before tests even started.
     timeout-minutes: 75
+    # Keep backtrace line numbers without full variable/type debug metadata
+    # for the generated UI. Set these before restoring the profile's cache.
+    # Assertions, overflow checks and Slint element ids remain enabled.
+    env:
+      CARGO_PROFILE_DEV_DEBUG: line-tables-only
+      CARGO_PROFILE_TEST_DEBUG: line-tables-only
 
     steps:
       - uses: actions/checkout@v6.0.1

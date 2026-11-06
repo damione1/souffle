@@ -1,0 +1,71 @@
+---
+pagination: { data: guidePages, size: 1, alias: docPage, addAllPagesToCollections: true }
+permalink: "{{ docPage.loc.dir }}docs/{{ docPage.guide.slug }}/index.html"
+layout: layouts/base.njk
+isDocs: true
+tags: sitemap
+---
+{% set text = guide[locale.code] %}
+{% set docs = "/" + locale.dir + "docs/" %}
+<article class="band">
+  <header class="sheet docs-heading docs-lede">
+    <nav class="t-2xs" aria-label="{{ t.docs.breadcrumb }}"><a href="/{{ locale.dir }}">{{ t.nav.home }}</a> / <a href="{{ docs }}">{{ t.footer.docs }}</a></nav>
+    <h1 class="t-l">{{ text.title }}</h1>
+    <p class="t-s measure">{{ text.intro }}</p>
+    <p class="t-2xs dim">{{ t.docs.updated }} <time datetime="2026-10-27">{{ t.docs.updatedDate }}</time></p>
+  </header>
+  <div class="docs">
+    <aside class="docs-side">
+      <details class="docs-navigation">
+        <summary class="t-2xs">{{ t.docs.navigation }}</summary>
+        <div class="docs-menu">
+          <nav class="docs-group" aria-label="{{ t.docs.onThisPage }}">
+            <span class="docs-group-h t-3xs">{{ t.docs.onThisPage }}</span>
+            <a class="t-2xs" href="#quick-start">{{ t.docs.quickStart }}</a>
+            {% for section in t.docs.sections | guideSections(guide.sections) %}
+            <a class="t-2xs" href="#{{ section.id }}">{{ section.h }}</a>
+            {% endfor %}
+          </nav>
+          <nav class="docs-group" aria-label="{{ t.docs.allGuides }}">
+            <a class="t-2xs" href="{{ docs }}">{{ t.docs.allGuides }}</a>
+            {% for entry in guides %}
+            <a class="t-2xs" href="{{ docs }}{{ entry.slug }}/"{% if entry.slug == guide.slug %} aria-current="page"{% endif %}>{{ entry[locale.code].title }}</a>
+            {% endfor %}
+          </nav>
+        </div>
+      </details>
+    </aside>
+    <div class="docs-body">
+      <section class="docs-section" id="quick-start">
+        <h2 class="t-m">{{ t.docs.quickStart }}</h2>
+        <ol class="guide-steps t-xs measure">
+          {% for step in text.steps %}<li>{{ step }}</li>{% endfor %}
+        </ol>
+      </section>
+      {% for s in t.docs.sections | guideSections(guide.sections) %}
+      <section id="{{ s.id }}" class="docs-section">
+        <h2 class="t-m">{{ s.h }}</h2>
+        {% for b in s.blocks %}
+          {% if b.p %}<p class="docs-p t-xs measure">{{ b.p | safe }}</p>
+          {% elif b.code %}<pre class="docs-code"><code>{{ b.code | escape }}</code></pre>
+          {% elif b.table %}
+          <div class="docs-table">
+            {% for row in b.table %}
+            <div class="docs-row"><span class="docs-k t-xs">{{ row[0] | safe }}</span><span class="docs-v t-xs">{{ row[1] | safe }}</span></div>
+            {% endfor %}
+          </div>
+          {% endif %}
+        {% endfor %}
+      </section>
+      {% endfor %}
+      <nav class="docs-section related-guides" aria-label="{{ t.docs.nextSteps }}">
+        <h2 class="t-m">{{ t.docs.nextSteps }}</h2>
+        <ul class="guide-topics t-xs">
+          {% for entry in guides %}{% if entry.slug != guide.slug %}
+          <li><a href="{{ docs }}{{ entry.slug }}/">{{ entry[locale.code].title }}</a></li>
+          {% endif %}{% endfor %}
+        </ul>
+      </nav>
+    </div>
+  </div>
+</article>

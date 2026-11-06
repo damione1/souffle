@@ -98,11 +98,21 @@ struct Harness {
     /// test suite needs to touch it directly anymore now that
     /// `stop_meeting_recording` runs unmodified (see the module doc).
     audio_msg_tx: Sender<AudioMessage>,
-    /// Kept alive so `AppState::audio_cmd_sender.send(...)` never errors with
-    /// "all receivers dropped" — nothing needs to read from it since there is
-    /// no real audio-capture thread in this test.
+    /// The mock consumes queued capture commands before emitting EOS. A
+    /// pending Start owns its meeting until consumed, just like real capture.
     pub audio_cmd_rx: Receiver<AudioCommand>,
     _tmp: TempDir,
+}
+
+impl Harness {
+    fn finish_mock_capture(&self, session_id: u64) {
+        // This fixture has no native capture or Ogg writer. Consuming Start
+        // completes its capture ownership before the mock produces EOS.
+        self.audio_cmd_rx.try_iter().for_each(drop);
+        self.audio_msg_tx
+            .send(AudioMessage::EndOfStream { session_id })
+            .unwrap();
+    }
 }
 
 fn build_harness(mock: MockEngine) -> Harness {
@@ -132,12 +142,9 @@ fn build_harness(mock: MockEngine) -> Harness {
     let (audio_cmd_tx, audio_cmd_rx) = crossbeam_channel::unbounded::<AudioCommand>();
     let audio_rms = Arc::new(AtomicU32::new(0f32.to_bits()));
 
-    let state = Arc::new(AppState::new(
-        audio_cmd_tx,
-        Arc::clone(&actor),
-        Arc::clone(&db),
-        audio_rms,
-    ));
+    let mut state = AppState::new(audio_cmd_tx, Arc::clone(&actor), Arc::clone(&db), audio_rms);
+    state.recordings_root = tmp.path().join("recordings");
+    let state = Arc::new(state);
     bring_to_ready(&state, &actor);
 
     Harness {
@@ -146,6 +153,57 @@ fn build_harness(mock: MockEngine) -> Harness {
         audio_msg_tx,
         audio_cmd_rx,
         _tmp: tmp,
+    }
+}
+
+#[test]
+fn recording_settings_commands_refuse_reset_and_rebind_but_keep_hot_swap() {
+    let h = build_harness(MockEngine::new());
+    let profile = default_transcription_profile();
+    let before = h.db.get_all_settings().unwrap();
+    for machine in [
+        AppStateMachine::RecordingDictation {
+            profile: profile.clone(),
+            session_id: 1,
+        },
+        AppStateMachine::RecordingMeeting {
+            profile: profile.clone(),
+            session_id: 1,
+            meeting_id: "fixture".into(),
+        },
+        AppStateMachine::Stopping {
+            profile: profile.clone(),
+            was_recording: souffle_lib::state_machine::RecordingKind::Dictation,
+        },
+        AppStateMachine::Ready { profile },
+    ] {
+        let starting = !machine.is_recording();
+        *h.state.machine.lock().unwrap() = machine;
+        if starting {
+            h.state.capture_start.begin(1);
+        }
+        assert!(commands::settings_capture_busy(&h.state).unwrap());
+        assert!(
+            commands::save_shortcuts(
+                h.state.clone(),
+                commands::get_shortcuts(h.state.clone()).unwrap()
+            )
+            .is_err()
+        );
+        assert!(
+            souffle_lib::async_runtime::block_on(commands::reset_input_sample_rate(
+                h.state.clone(),
+                "fixture-mic".into()
+            ))
+            .is_err()
+        );
+        assert_eq!(h.db.get_all_settings().unwrap(), before);
+        commands::select_audio_device(h.state.clone(), "fixture-hot-swap".into()).unwrap();
+        assert!(
+            matches!(h.audio_cmd_rx.try_recv().unwrap(), AudioCommand::SelectDevice(uid) if uid == "fixture-hot-swap")
+        );
+        assert!(h.audio_cmd_rx.try_recv().is_err());
+        h.state.capture_start.abandon(1);
     }
 }
 
@@ -388,9 +446,7 @@ async fn meeting_stop_persists_meeting() {
     // directly — there's no real AudioCapture thread in this test, so this
     // stands in for the microphone.
     h.audio_msg_tx.send(audio_chunk(session_id)).unwrap();
-    h.audio_msg_tx
-        .send(AudioMessage::EndOfStream { session_id })
-        .unwrap();
+    h.finish_mock_capture(session_id);
 
     let returned_id = commands::stop_meeting_recording(Arc::clone(&state))
         .await
@@ -459,9 +515,7 @@ async fn dictation_round_trip() {
     };
 
     h.audio_msg_tx.send(audio_chunk(session_id)).unwrap();
-    h.audio_msg_tx
-        .send(AudioMessage::EndOfStream { session_id })
-        .unwrap();
+    h.finish_mock_capture(session_id);
 
     commands::stop_transcription(Arc::clone(&state))
         .await
@@ -593,9 +647,7 @@ async fn sleep_paused_meeting_flag_survives_peek_and_clears_on_resume() {
     };
 
     h.audio_msg_tx.send(audio_chunk(session_id)).unwrap();
-    h.audio_msg_tx
-        .send(AudioMessage::EndOfStream { session_id })
-        .unwrap();
+    h.finish_mock_capture(session_id);
 
     // Mirror handle_system_will_sleep: remember the id, then stop through
     // the same command a user-initiated stop takes.
@@ -608,6 +660,11 @@ async fn sleep_paused_meeting_flag_survives_peek_and_clears_on_resume() {
     // Two peeks in a row (matching the UI's wake handling plus a
     // belt-and-braces recheck) must both see the id: neither call may
     // consume it.
+    assert_eq!(
+        commands::get_meeting_delete_block(&state, &meeting_id).unwrap(),
+        None,
+        "mock capture and DB writers must be quiescent before resume"
+    );
     assert_eq!(
         commands::peek_sleep_paused_meeting(Arc::clone(&state)),
         Some(meeting_id.clone())
@@ -628,6 +685,77 @@ async fn sleep_paused_meeting_flag_survives_peek_and_clears_on_resume() {
         commands::peek_sleep_paused_meeting(Arc::clone(&state)),
         None
     );
+}
+
+#[tokio::test]
+async fn queued_capture_start_keeps_delete_and_resume_blocked_after_machine_ready() {
+    let h = build_harness(MockEngine::new());
+    let state = Arc::clone(&h.state);
+    commands::start_meeting_recording(
+        Arc::clone(&state),
+        "Queued capture".into(),
+        None,
+        ProgressChannel::new(|_| {}),
+    )
+    .await
+    .unwrap();
+    let (session_id, meeting_id) = match state.current_machine_state().unwrap() {
+        AppStateMachine::RecordingMeeting {
+            session_id,
+            meeting_id,
+            ..
+        } => (session_id, meeting_id),
+        other => panic!("expected RecordingMeeting, got {other:?}"),
+    };
+    // Deliberately forge actor EOS without consuming capture's queued Start:
+    // the actor/DB may finish first, but this message could still open Ogg.
+    h.audio_msg_tx
+        .send(AudioMessage::EndOfStream { session_id })
+        .unwrap();
+    commands::stop_meeting_recording(Arc::clone(&state))
+        .await
+        .unwrap();
+    wait_until_ready(&state).await;
+    assert_eq!(
+        commands::get_meeting_delete_block(&state, &meeting_id).unwrap(),
+        Some(souffle_lib::meeting_access::MeetingDeleteBlockReason::Finalizing)
+    );
+    let before = serde_json::to_value(state.db.load_meeting(&meeting_id).unwrap()).unwrap();
+    assert!(commands::delete_meeting(Arc::clone(&state), meeting_id.clone()).is_err());
+    assert!(
+        commands::resume_meeting_recording(
+            Arc::clone(&state),
+            meeting_id.clone(),
+            ProgressChannel::new(|_| {}),
+        )
+        .await
+        .is_err()
+    );
+    assert_eq!(
+        serde_json::to_value(state.db.load_meeting(&meeting_id).unwrap()).unwrap(),
+        before
+    );
+    h.audio_cmd_rx.try_iter().for_each(drop);
+    assert_eq!(
+        commands::get_meeting_delete_block(&state, &meeting_id).unwrap(),
+        None
+    );
+    commands::resume_meeting_recording(
+        Arc::clone(&state),
+        meeting_id,
+        ProgressChannel::new(|_| {}),
+    )
+    .await
+    .unwrap();
+    let resumed_session_id = match state.current_machine_state().unwrap() {
+        AppStateMachine::RecordingMeeting { session_id, .. } => session_id,
+        other => panic!("expected resumed meeting, got {other:?}"),
+    };
+    h.finish_mock_capture(resumed_session_id);
+    commands::stop_meeting_recording(Arc::clone(&state))
+        .await
+        .unwrap();
+    wait_until_ready(&state).await;
 }
 
 /// `clear_sleep_paused_meeting` lets the frontend drop the flag on an

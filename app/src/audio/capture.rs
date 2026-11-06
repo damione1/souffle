@@ -2483,6 +2483,7 @@ pub struct AudioCapture {
     recorder: Option<MeetingRecorder>,
     diagnostic: super::diagnostic::DiagnosticSession,
     diagnostic_mic_generation: u64,
+    recording_lease: Option<crate::meeting_access::MeetingLease>,
     /// Parameters of the running session, kept for mid-session rebuilds.
     active_params: Option<StartParams>,
     /// Name of the input device the current stream was built on.
@@ -2597,6 +2598,7 @@ impl AudioCapture {
                     recorder: None,
                     diagnostic: super::diagnostic::DiagnosticSession::default(),
                     diagnostic_mic_generation: 0,
+                    recording_lease: None,
                     active_params: None,
                     mic_device_name: None,
                     mic_device_uid: None,
@@ -2681,11 +2683,13 @@ impl AudioCapture {
                             diarize,
                             record_path,
                             meeting_audio_diagnostic,
+                            meeting_lease,
                             #[cfg(target_os = "macos")]
                             tap,
                             #[cfg(target_os = "macos")]
                             tap_cons,
                         } => {
+                            capture.recording_lease = meeting_lease;
                             if let Err(e) = capture.start(
                                 session_id,
                                 target_sample_rate,
@@ -3044,8 +3048,12 @@ impl AudioCapture {
             target_sample_rate,
             diarize,
         );
-        self.diagnostic
-            .sync(session_id, record_path.as_deref(), meeting_audio_diagnostic);
+        self.diagnostic.sync_guarded(
+            session_id,
+            record_path.as_deref(),
+            meeting_audio_diagnostic,
+            self.recording_lease.clone(),
+        );
 
         // Stored before any fallible step so a failed (re)build is retried
         // by the next mic health check instead of killing the session.
@@ -3308,8 +3316,13 @@ impl AudioCapture {
                 } else {
                     opus::Channels::Mono
                 };
-                match MeetingRecorder::start(path.to_path_buf(), sample_rate, session_id, channels)
-                {
+                match MeetingRecorder::start_guarded(
+                    path.to_path_buf(),
+                    sample_rate,
+                    session_id,
+                    channels,
+                    self.recording_lease.clone(),
+                ) {
                     Ok(recorder) => self.recorder = Some(recorder),
                     Err(e) => warn!("Failed to start meeting audio recorder: {e}"),
                 }
@@ -4135,6 +4148,7 @@ impl AudioCapture {
         // mixer, just whatever the recorder already buffered. A truncated
         // but structurally valid Ogg file is acceptable here.
         self.finish_recording();
+        self.recording_lease = None;
         self.emit_audio_level(0.0);
         self.level_throttle.reset();
         self.clear_mic_loss_ladder();
@@ -4468,6 +4482,8 @@ impl AudioCapture {
             }
             self.finish_recording();
 
+            self.recording_lease = None;
+
             if had_stream {
                 info!("Meeting audio capture stopped");
             }
@@ -4504,6 +4520,8 @@ impl AudioCapture {
             self.send_end_of_stream(session_id);
         }
         self.finish_recording();
+
+        self.recording_lease = None;
 
         if had_stream {
             info!("Audio capture stopped");

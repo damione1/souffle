@@ -13,6 +13,11 @@ on:
       - "site/**"
       - ".github/workflows/deploy-site.yml"
   workflow_dispatch:
+  workflow_run:
+    workflows: [Release]
+    types: [completed]
+  release:
+    types: [published]
 
 # Two pushes in a row would otherwise race to publish, and the loser could
 # land last and serve the older build. Never cancel in flight: a half-finished
@@ -26,11 +31,14 @@ permissions:
 
 jobs:
   deploy:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
     steps:
       - uses: actions/checkout@v6.0.1
+        with:
+          ref: master
 
       - uses: actions/setup-node@v6.1.0
         with:
@@ -41,7 +49,11 @@ jobs:
 
       - name: Build
         working-directory: site
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GA_MEASUREMENT_ID: ${{ vars.GA_MEASUREMENT_ID }}
         run: |
+          test -n "$GA_MEASUREMENT_ID"
           npm ci
           npm run build
 

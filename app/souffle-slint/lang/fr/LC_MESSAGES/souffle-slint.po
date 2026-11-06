@@ -156,6 +156,21 @@ msgstr "Code"
 msgctxt "ThemedComboBox"
 msgid "Modèle introuvable"
 msgstr "Modèle introuvable"
+msgctxt "ActionGuards"
+msgid "Cette réunion est en cours de démarrage."
+msgstr "Cette réunion est en cours de démarrage."
+
+msgctxt "ActionGuards"
+msgid "Cette réunion est en cours d'enregistrement."
+msgstr "Cette réunion est en cours d'enregistrement."
+
+msgctxt "ActionGuards"
+msgid "Cette réunion est en cours de finalisation."
+msgstr "Cette réunion est en cours de finalisation."
+
+msgctxt "ActionGuards"
+msgid "Impossible de vérifier si cette réunion peut être supprimée."
+msgstr "Impossible de vérifier si cette réunion peut être supprimée."
 
 #: app/souffle-slint/ui/meeting_detail.slint:90
 msgctxt "MeetingDetail"
@@ -3272,3 +3287,43 @@ msgstr "Erreur de capture audio"
 msgctxt "ModelSection"
 msgid "Erreur de capture audio"
 msgstr "Erreur de capture audio"
+
+msgctxt "UpdateCopy"
+msgid "Attendez la fin du démarrage de l'enregistrement."
+msgstr "Attendez la fin du démarrage de l'enregistrement."
+
+msgctxt "UpdateCopy"
+msgid "Une opération est en cours. Réessayez dans un instant."
+msgstr "Une opération est en cours. Réessayez dans un instant."
+
+msgctxt "ShortcutRecorderButton"
+msgid "Enregistrer un raccourci"
+msgstr "Enregistrer un raccourci"
+
+msgctxt "InterfaceSection"
+msgid "Terminez l'enregistrement avant de modifier les raccourcis."
+msgstr "Terminez l'enregistrement avant de modifier les raccourcis."
+
+msgctxt "MicrophoneSection"
+msgid "Terminez l'enregistrement avant de réinitialiser la fréquence du microphone."
+msgstr "Terminez l'enregistrement avant de réinitialiser la fréquence du microphone."
+
+msgctxt "ModelSection"
+msgid "Terminez l'enregistrement avant de changer de modèle."
+msgstr "Terminez l'enregistrement avant de changer de modèle."
+
+msgctxt "ModelDeleteSection"
+msgid "Les ressources Apple Speech sont gérées par macOS et ne peuvent pas être supprimées par Soufflé."
+msgstr "Les ressources Apple Speech sont gérées par macOS et ne peuvent pas être supprimées par Soufflé."
+
+msgctxt "ModelDeleteSection"
+msgid "Attendez la fin de l'opération sur le modèle avant de le supprimer."
+msgstr "Attendez la fin de l'opération sur le modèle avant de le supprimer."
+
+msgctxt "ModelDeleteSection"
+msgid "Déchargez le modèle actif ou choisissez un autre modèle avant de le supprimer."
+msgstr "Déchargez le modèle actif ou choisissez un autre modèle avant de le supprimer."
+
+msgctxt "InterfaceSection"
+msgid "Une opération est en cours. Réessayez dans un instant."
+msgstr "Une opération est en cours. Réessayez dans un instant."

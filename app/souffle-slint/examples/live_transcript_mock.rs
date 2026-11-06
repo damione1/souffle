@@ -17,12 +17,16 @@
 //! `MOCK_SPEED` (default 1.0) scales the script's pace, `MOCK_WIDTH` /
 //! `MOCK_HEIGHT` the window's logical size.
 
-slint::include_modules!();
+use souffle_slint::*;
+
+#[allow(dead_code)]
+#[path = "../src/action_guards.rs"]
+mod action_guards;
 
 #[path = "../src/typography.rs"]
 mod typography;
 
-// The app is a binary crate, so the modules the live path needs are pulled
+// The live implementation stays in the app binary, so its modules are pulled
 // in by path. Only a fraction of timeline/transcript is used here.
 #[allow(dead_code)]
 #[path = "../src/live_transcript.rs"]

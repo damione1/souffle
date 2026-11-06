@@ -24,6 +24,7 @@ pub mod lid;
 pub mod lock_ext;
 pub mod logging;
 mod main_thread;
+pub mod meeting_access;
 pub mod models;
 mod modifier_shortcut;
 pub mod native;
