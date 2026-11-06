@@ -1,7 +1,7 @@
 //! Bounded control of a thread-confined AVAudioEngine. A wedged CoreAudio call
 //! cannot be cancelled, so keep its owner until it really exits and refuse to
 //! stack another engine behind it. Never move Native or join this thread.
-use super::{Native, Sink, Telemetry, devices::Selection};
+use super::{Native, Sink, Telemetry, devices::Selection, startup::Control};
 use serde_json::Value;
 use std::sync::{
     Arc,
@@ -62,16 +62,19 @@ impl Owner {
         self.start_with(
             telemetry,
             timeout,
-            move |cancelled| {
+            move |control| {
                 let selection = Selection::for_input_uid(&uid)
                     .map_err(|e| format!("Apple microphone selection failed: {e}"))?;
-                if cancelled.load(Ordering::Acquire) {
-                    return Err("Apple microphone start cancelled during selection".into());
-                }
+                control.check().map_err(|e| e.to_string())?;
                 let mut log = serde_json::json!({});
                 // Silence only: the system tap never feeds the native output.
-                let result =
-                    Native::start(producer, native_telemetry, None, Some(&selection), &mut log);
+                let result = Native::start_controlled(
+                    producer,
+                    native_telemetry,
+                    &selection,
+                    &mut log,
+                    control,
+                );
                 tracing::info!("Apple meeting microphone requested={selection:?} readbacks={log}");
                 let native = result.map_err(|e| format!("Apple meeting microphone failed: {e}"))?;
                 let started = Started {
@@ -102,10 +105,11 @@ impl Owner {
     ) -> Result<I>
     where
         I: Send + 'static,
-        F: FnOnce(&AtomicBool) -> Result<(T, I)> + Send + 'static,
+        F: FnOnce(Control<'_>) -> Result<(T, I)> + Send + 'static,
         C: FnMut(&mut T) -> Result<Value> + Send + 'static,
     {
         let begun = Instant::now();
+        let deadline = begun + timeout;
         self.stop();
         if let Some(worker) = self.worker.as_ref()
             && !worker.thread.is_finished()
@@ -136,7 +140,10 @@ impl Owner {
                 }
                 let _completion = Completion(finished_tx);
                 objc2::rc::autoreleasepool(|_| {
-                    let (mut native, info) = match start(&worker_cancelled) {
+                    let (mut native, info) = match start(Control {
+                        cancelled: &worker_cancelled,
+                        deadline,
+                    }) {
                         Ok(value) => value,
                         Err(error) => {
                             let _ = ready.try_send(Err(error));

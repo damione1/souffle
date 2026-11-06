@@ -38,7 +38,11 @@ fn install_panic_hook() {
             .map(|s| s.to_string())
             .or_else(|| info.payload().downcast_ref::<String>().cloned())
             .unwrap_or_else(|| "<non-string panic payload>".to_string());
-        tracing::error!(thread = name, location = %location, "PANIC: {message}");
+        let backtrace = std::backtrace::Backtrace::force_capture();
+        // Capture before the default hook or any exit-time destructor runs;
+        // RUST_BACKTRACE is not guaranteed in a bundled app.
+        tracing::error!(thread = name, location = %location, backtrace = %backtrace, "PANIC: {message}");
+        eprintln!("PANIC on {name} at {location}: {message}\n{backtrace}");
         default(info);
     }));
 }
