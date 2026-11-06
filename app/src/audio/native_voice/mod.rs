@@ -5,13 +5,14 @@ mod audio_unit;
 pub mod devices;
 #[cfg(feature = "experimental-native-aec")]
 pub(crate) mod owner;
+mod startup;
 use audio_unit::audio_unit;
 use block2::RcBlock;
 use devices::{Device, Selection, Side};
 use objc2::{
     AnyThread,
     rc::Retained,
-    runtime::{Bool, NSObjectProtocol},
+    runtime::{Bool, NSObjectProtocol, ProtocolObject},
     sel,
 };
 use objc2_audio_toolbox::{
@@ -20,9 +21,12 @@ use objc2_audio_toolbox::{
 };
 use objc2_avf_audio::*;
 use objc2_core_audio_types::{AudioBufferList, AudioTimeStamp};
+use objc2_foundation::{NSNotification, NSNotificationCenter};
 use ringbuf::{HeapProd, traits::Producer};
 use serde_json::{Value, json};
+use startup::{Control, Failure, ReadbackFailure, Snapshot};
 use std::{
+    cell::{Cell, RefCell},
     ptr::NonNull,
     sync::{
         Arc, Mutex,
@@ -68,6 +72,140 @@ pub struct Native {
     pub evidence: Value,
     pub rendered: Arc<AtomicUsize>,
     telemetry: Arc<Telemetry>,
+    configuration_observer: ConfigurationObserver,
+}
+
+struct ConfigurationObserver {
+    center: Retained<NSNotificationCenter>,
+    token: Option<Retained<ProtocolObject<dyn NSObjectProtocol>>>,
+    count: Arc<AtomicU64>,
+}
+impl ConfigurationObserver {
+    unsafe fn new(engine: &AVAudioEngine) -> Self {
+        let center = NSNotificationCenter::defaultCenter();
+        let count = Arc::new(AtomicU64::new(0));
+        let observed = Arc::clone(&count);
+        let block = RcBlock::new(move |_: NonNull<NSNotification>| {
+            // Apple's internal queue must never stop, release or inspect the
+            // engine. It only publishes evidence to the owning thread.
+            observed.fetch_add(1, Ordering::Release);
+        });
+        // SAFETY: object scopes delivery to this engine; the block captures
+        // only a Send + Sync atomic counter. The center copies the block.
+        let token = unsafe {
+            center.addObserverForName_object_queue_usingBlock(
+                Some(AVAudioEngineConfigurationChangeNotification),
+                Some(engine),
+                None,
+                &block,
+            )
+        };
+        Self {
+            center,
+            token: Some(token),
+            count,
+        }
+    }
+
+    fn count(&self) -> u64 {
+        self.count.load(Ordering::Acquire)
+    }
+
+    fn remove(&mut self) {
+        if let Some(token) = self.token.take() {
+            // Always called on the engine owner, including failed starts.
+            unsafe { self.center.removeObserver(&token) };
+        }
+    }
+}
+impl Drop for ConfigurationObserver {
+    fn drop(&mut self) {
+        self.remove();
+    }
+}
+
+fn read_selection(
+    selection: &Selection,
+    input: &AVAudioInputNode,
+    output: &AVAudioOutputNode,
+    log: &mut Value,
+) -> std::result::Result<(), ReadbackFailure> {
+    use objc2_core_audio::{
+        kAudioDevicePropertyNominalSampleRate, kAudioHardwarePropertyDefaultOutputDevice,
+        kAudioObjectSystemObject,
+    };
+    let output_id = devices::global_u32(
+        kAudioObjectSystemObject as u32,
+        kAudioHardwarePropertyDefaultOutputDevice,
+    )
+    .map_err(ReadbackFailure::DeviceChanged)?;
+    if output_id != selection.output.id {
+        return Err(ReadbackFailure::DefaultOutputChanged);
+    }
+    for device in [&selection.input, &selection.output] {
+        let rate = devices::global_f64(device.id, kAudioDevicePropertyNominalSampleRate)
+            .map_err(ReadbackFailure::NominalRateChanged)?;
+        log["nominal_rate_readback"][&device.uid] = json!(rate);
+        if rate != device.nominal_rate {
+            return Err(ReadbackFailure::NominalRateChanged(format!(
+                "{} -> {rate}",
+                device.nominal_rate
+            )));
+        }
+    }
+    unsafe {
+        for (unit, side, device) in [
+            (audio_unit(input), Side::Input, &selection.input),
+            (audio_unit(output), Side::Output, &selection.output),
+        ] {
+            let unit = unit.map_err(|e| ReadbackFailure::DeviceChanged(e.to_string()))?;
+            read_device(unit, side, device, ReadbackPhase::AfterStart, log)
+                .map_err(|e| ReadbackFailure::DeviceChanged(e.to_string()))?;
+        }
+    }
+    Ok(())
+}
+
+unsafe fn startup_snapshot(
+    engine: &AVAudioEngine,
+    input: &AVAudioInputNode,
+    output: &AVAudioOutputNode,
+    format: &AVAudioFormat,
+    selection: Option<&Selection>,
+    observer: &ConfigurationObserver,
+    log: &mut Value,
+) -> Snapshot {
+    let before = observer.count();
+    unsafe {
+        let ducking_matches = if input
+            .respondsToSelector(sel!(setVoiceProcessingOtherAudioDuckingConfiguration:))
+        {
+            let actual = input.voiceProcessingOtherAudioDuckingConfiguration();
+            log["ducking_readback"] = json!({"available": true, "advanced": actual.enableAdvancedDucking.as_bool(), "level": actual.duckingLevel.0});
+            !actual.enableAdvancedDucking.as_bool()
+                && actual.duckingLevel == AVAudioVoiceProcessingOtherAudioDuckingLevel::Min
+        } else {
+            true
+        };
+        let client_formats = verify_client_formats(input, output, format)
+            .map_err(|e| ReadbackFailure::ClientFormatChanged(e.to_string()));
+        let devices = match selection {
+            Some(selection) => read_selection(selection, input, output, log),
+            None => Ok(()),
+        };
+        Snapshot {
+            running: engine.isRunning(),
+            input_voice_processing: input.isVoiceProcessingEnabled(),
+            output_voice_processing: output.isVoiceProcessingEnabled(),
+            agc: input.isVoiceProcessingAGCEnabled(),
+            bypassed: input.isVoiceProcessingBypassed(),
+            ducking_matches,
+            client_formats,
+            devices,
+            configuration_before: before,
+            configuration_after: observer.count(),
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -277,9 +415,39 @@ impl Native {
         selection: Option<&Selection>,
         log: &mut Value,
     ) -> Result<Self> {
+        Self::start_inner(producer, telemetry, playback, selection, log, None)
+    }
+
+    #[cfg(feature = "experimental-native-aec")]
+    pub(super) fn start_controlled(
+        producer: Sink,
+        telemetry: Arc<Telemetry>,
+        selection: &Selection,
+        log: &mut Value,
+        control: Control<'_>,
+    ) -> Result<Self> {
+        Self::start_inner(
+            producer,
+            telemetry,
+            None,
+            Some(selection),
+            log,
+            Some(control),
+        )
+    }
+
+    fn start_inner(
+        producer: Sink,
+        telemetry: Arc<Telemetry>,
+        playback: Option<(Vec<f32>, u32)>,
+        selection: Option<&Selection>,
+        log: &mut Value,
+        control: Option<Control<'_>>,
+    ) -> Result<Self> {
         // Engine retains nodes/blocks; Drop stops IO before releasing them.
         unsafe {
             let engine = AVAudioEngine::new();
+            let configuration_observer = ConfigurationObserver::new(&engine);
             let input = engine.inputNode();
             let enabled = input.setVoiceProcessingEnabled_error(true);
             log["setVoiceProcessingEnabled"] = match &enabled {
@@ -463,54 +631,68 @@ impl Native {
             }
             engine.prepare();
 
-            let started = engine.startAndReturnError();
-            log["startAndReturnError"] = match &started {
-                Ok(()) => json!({"success": true}),
-                Err(e) => json!({"success": false, "error": format!("{e:?}")}),
+            log["start_attempts"] = json!([]);
+            log["startup_readbacks"] = json!([]);
+            let baseline = Cell::new(configuration_observer.count());
+            let started = {
+                let startup_log = RefCell::new(&mut *log);
+                startup::run(
+                    control.is_some() && selection.is_some(),
+                    || match &control {
+                        Some(control) => control.check(),
+                        None => Ok(()),
+                    },
+                    |attempt| {
+                        baseline.set(configuration_observer.count());
+                        let result = engine.startAndReturnError();
+                        let entry = match &result {
+                            Ok(()) => {
+                                json!({"attempt": attempt + 1, "success": true, "configuration_before": baseline.get(), "configuration_after": configuration_observer.count()})
+                            }
+                            Err(e) => {
+                                json!({"attempt": attempt + 1, "success": false, "error": format!("{e:?}"), "configuration_before": baseline.get(), "configuration_after": configuration_observer.count()})
+                            }
+                        };
+                        let mut log = startup_log.borrow_mut();
+                        log["startAndReturnError"] = entry.clone();
+                        log["start_attempts"].as_array_mut().unwrap().push(entry);
+                        result.map_err(|e| Failure::Start(format!("{e:?}")))
+                    },
+                    |stage| {
+                        let mut log = startup_log.borrow_mut();
+                        let snapshot = startup_snapshot(
+                            &engine,
+                            &input,
+                            &output,
+                            &format,
+                            selection,
+                            &configuration_observer,
+                            &mut log,
+                        );
+                        log["running_readback"] = json!(snapshot);
+                        log["startup_readbacks"].as_array_mut().unwrap().push(json!({"stage": stage, "snapshot": snapshot, "failure": snapshot.validate().err()}));
+                        snapshot
+                    },
+                    || {
+                        let control = control
+                            .as_ref()
+                            .ok_or(Failure::ConfigurationNotificationTimedOut)?;
+                        // The wait shares the owner's original deadline.
+                        startup::wait_for_configuration(
+                            control,
+                            baseline.get(),
+                            || configuration_observer.count(),
+                            std::time::Instant::now,
+                            std::thread::sleep,
+                        )
+                    },
+                )
             };
-            if let Err(e) = started {
+            if let Err(error) = started {
+                log["startup_failure"] = json!(error.to_string());
                 engine.stop();
                 input.removeTapOnBus(0);
-                return Err(format!("startAndReturnError: {e:?}").into());
-            }
-            if let Err(error) = verify_client_formats(&input, &output, &format) {
-                engine.stop();
-                input.removeTapOnBus(0);
-                return Err(error);
-            }
-            log["running_readback"] = serde_json::json!({"running": engine.isRunning(), "input_voice_processing": input.isVoiceProcessingEnabled(), "output_voice_processing": output.isVoiceProcessingEnabled(), "agc": input.isVoiceProcessingAGCEnabled(), "bypassed": input.isVoiceProcessingBypassed()});
-            if let Some(s) = selection {
-                let selected = (|| {
-                    read_device(
-                        audio_unit(&input)?,
-                        Side::Input,
-                        &s.input,
-                        ReadbackPhase::AfterStart,
-                        log,
-                    )?;
-                    read_device(
-                        audio_unit(&output)?,
-                        Side::Output,
-                        &s.output,
-                        ReadbackPhase::AfterStart,
-                        log,
-                    )
-                })();
-                if let Err(error) = selected {
-                    engine.stop();
-                    input.removeTapOnBus(0);
-                    return Err(error);
-                }
-            }
-            if !engine.isRunning()
-                || !input.isVoiceProcessingEnabled()
-                || !output.isVoiceProcessingEnabled()
-                || input.isVoiceProcessingAGCEnabled()
-                || input.isVoiceProcessingBypassed()
-            {
-                engine.stop();
-                input.removeTapOnBus(0);
-                return Err("native post-start readback failed".into());
+                return Err(error.into());
             }
             evidence["input_presentation_latency_seconds"] = json!(input.presentationLatency());
             evidence["output_presentation_latency_seconds"] = json!(output.presentationLatency());
@@ -521,9 +703,13 @@ impl Native {
                 evidence,
                 rendered,
                 telemetry: retained_telemetry,
+                configuration_observer,
             };
             if let Some(selection) = selection {
                 capture.check_route(selection, log)?;
+            }
+            if let Some(control) = &control {
+                control.check()?;
             }
             Ok(capture)
         }
@@ -536,6 +722,7 @@ impl Drop for Native {
             self.engine.stop();
             self.input.removeTapOnBus(0);
         }
+        self.configuration_observer.remove();
     }
 }
 
