@@ -2104,6 +2104,27 @@ fn show_recording_starting(
     pending_stop: &AtomicBool,
     autosave: LiveNotesAutosave,
 ) {
+    show_recording_starting_with_cancel(
+        window,
+        live_state,
+        mode,
+        pending_stop,
+        autosave,
+        edit_learning::cancel_pending,
+    );
+}
+
+fn show_recording_starting_with_cancel(
+    window: &MainWindow,
+    live_state: &LiveTranscriptState,
+    mode: RecordingMode,
+    pending_stop: &AtomicBool,
+    autosave: LiveNotesAutosave,
+    cancel_learning: impl FnOnce(),
+) {
+    // A previous dictation's delayed AX read must be invalidated before the
+    // recording view changes, for meeting, dictation and resume starts alike.
+    cancel_learning();
     pending_stop.store(false, Ordering::Release);
     window.set_recording_stop_pending(false);
     clear_live_transcript(window, live_state);
@@ -8021,7 +8042,7 @@ mod tests {
         LiveTranscriptState, RecordingMode, ShortcutField, TranscriptionRuntimePhase,
         WindowActivity, begin_model_refresh, is_latest_model_refresh, meeting_can_resume,
         recording_timers_armed, replay_pending_stop, set_recording_idle, settle_recording_start,
-        show_recording_starting, sync_dictation_finalizing,
+        show_recording_starting, show_recording_starting_with_cancel, sync_dictation_finalizing,
     };
     use crate::model_ui;
     use crate::settings_drafts::SettingsDraftController;
@@ -8851,6 +8872,31 @@ mod tests {
         // A stale deferred stop from an earlier start never leaks into this one.
         assert!(!pending_stop.load(std::sync::atomic::Ordering::Acquire));
         assert!(!window.get_recording_stop_pending());
+    }
+
+    #[test]
+    fn recording_start_cancels_learning_before_changing_the_view() {
+        let window = test_window();
+        let live_state: LiveTranscriptState = Arc::new(Mutex::new(LiveTranscript::new()));
+        let pending_stop = std::sync::atomic::AtomicBool::new(false);
+        window.set_live_notes("old recording".into());
+        let generation = std::sync::atomic::AtomicU64::new(1);
+
+        show_recording_starting_with_cancel(
+            &window,
+            &live_state,
+            RecordingMode::Meeting,
+            &pending_stop,
+            no_autosave(),
+            || {
+                assert!(!window.get_recording_starting());
+                assert_eq!(window.get_live_notes(), "old recording");
+                generation.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+            },
+        );
+
+        assert_eq!(generation.load(std::sync::atomic::Ordering::Acquire), 2);
+        assert!(window.get_recording_starting());
     }
 
     #[test]
