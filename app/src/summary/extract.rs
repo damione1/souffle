@@ -135,6 +135,7 @@ pub async fn extract_structured_summary(
         super::metrics::Phase::Extract,
         generate_with_provider(
             provider,
+            super::apple::RequestPurpose::MeetingSummary,
             model,
             ollama_url,
             &system,
@@ -145,7 +146,8 @@ pub async fn extract_structured_summary(
             false,
         ),
     )
-    .await?;
+    .await
+    .map_err(|e| e.to_string())?;
     parse_structured_summary_response(&raw)
 }
 

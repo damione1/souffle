@@ -15,7 +15,7 @@ private func duplicateCString(_ text: String) -> UnsafeMutablePointer<CChar>? {
     }
 }
 
-/// Stable machine-readable markers parsed by the Rust caller (summary/apple.rs)
+/// Stable machine-readable markers parsed once at the Rust FFI boundary
 /// to decide between retry, structural re-batching, and clean failure.
 @available(macOS 26.0, *)
 private func classifyGenerationError(_ error: LanguageModelSession.GenerationError) -> String {
@@ -29,29 +29,8 @@ private func classifyGenerationError(_ error: LanguageModelSession.GenerationErr
     case .unsupportedLanguageOrLocale:
         return "unsupported_language: \(error.localizedDescription)"
     default:
-        return classifyFallbackError(error)
+        return error.localizedDescription
     }
-}
-
-private func classifyFallbackError(_ error: any Error) -> String {
-    let description = error.localizedDescription
-    let reflected = String(describing: error)
-    let lower = (description + " " + reflected).lowercased()
-    if lower.contains("contextsizeexceeded") || lower.contains("exceededcontextwindowsize")
-        || lower.contains("context window")
-    {
-        return "exceeded_context_window: \(description)"
-    }
-    if lower.contains("guardrail") || lower.contains("refusal") {
-        return "guardrail_violation: \(description)"
-    }
-    if lower.contains("ratelimited") || lower.contains("rate limit") {
-        return "rate_limited: \(description)"
-    }
-    if lower.contains("unsupportedlanguage") || lower.contains("unsupported locale") {
-        return "unsupported_language: \(description)"
-    }
-    return description
 }
 
 /// Single-consumer outcome holder shared between the request task and the
@@ -176,7 +155,7 @@ public func processTextWithSystemPrompt(
         } catch let error as LanguageModelSession.GenerationError {
             box.complete(response: nil, error: classifyGenerationError(error))
         } catch {
-            box.complete(response: nil, error: classifyFallbackError(error))
+            box.complete(response: nil, error: error.localizedDescription)
         }
     }
 
