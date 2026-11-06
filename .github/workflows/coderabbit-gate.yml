@@ -7,7 +7,7 @@ name: CodeRabbit gate
 # come back green.
 
 on:
-  pull_request:
+  pull_request_target:
     types: [synchronize, reopened]
   workflow_run:
     workflows: [Contracts]
@@ -26,10 +26,12 @@ permissions:
   issues: write
 
 concurrency:
-  # Contracts and E2E finish within seconds of each other; serialize so the
-  # later one reads a complete picture instead of racing on the label.
-  group: coderabbit-gate-${{ github.event.workflow_run.head_sha || github.event.pull_request.head.sha }}
+  # Both events mutate the same labels, including across different head SHAs.
+  group: coderabbit-gate-labels-${{ github.repository }}
   cancel-in-progress: false
+  # Preserve queued park events across PRs. GitHub allows at most 100 pending;
+  # queue saturation still requires a fresh event to reconcile a missed park.
+  queue: max
 
 env:
   GH_TOKEN: ${{ github.token }}
@@ -40,7 +42,7 @@ jobs:
   coderabbit-park:
     # A new push invalidates the previous verdict. Drop the label so an
     # incremental review does not start ahead of the suites.
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request_target'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -48,6 +50,7 @@ jobs:
       # write labels, so it must never source a helper as edited by the PR.
       - uses: actions/checkout@v6.0.1
         with:
+          repository: ${{ github.repository }}
           ref: ${{ github.event.repository.default_branch }}
           sparse-checkout: scripts/ci
           sparse-checkout-cone-mode: false
@@ -56,10 +59,11 @@ jobs:
       - name: Withdraw the gate for the new head commit
         env:
           PR: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
           . ./scripts/ci/coderabbit-gate-lib.sh
-          drop_label "$PR"
+          park_gate "$PR" "$HEAD_SHA"
 
   coderabbit-gate:
     if: github.event_name == 'workflow_run' && github.event.workflow_run.event == 'pull_request'
@@ -70,6 +74,7 @@ jobs:
       # write labels, so it must never source a helper as edited by the PR.
       - uses: actions/checkout@v6.0.1
         with:
+          repository: ${{ github.repository }}
           ref: ${{ github.event.repository.default_branch }}
           sparse-checkout: scripts/ci
           sparse-checkout-cone-mode: false
@@ -82,35 +87,4 @@ jobs:
           set -euo pipefail
           . ./scripts/ci/coderabbit-gate-lib.sh
 
-          pr=$(gh api "repos/$GH_REPO/commits/$HEAD_SHA/pulls" \
-                 --jq '[.[] | select(.state == "open")] | first | .number // empty')
-          if [ -z "$pr" ]; then
-            echo "No open PR for $HEAD_SHA"
-            exit 0
-          fi
-
-          # Only this repo's Actions checks decide. CodeRabbit's own check runs
-          # are excluded, otherwise the gate waits on what it is gating, and so
-          # are this workflow's jobs, which are running right now by definition.
-          not_green=$(gh api "repos/$GH_REPO/commits/$HEAD_SHA/check-runs?per_page=100" \
-            --jq '[.check_runs[]
-                   | select(.app.slug == "github-actions")
-                   | select(.name | startswith("coderabbit-") | not)
-                   | select((.status == "completed"
-                             and (.conclusion == "success"
-                                  or .conclusion == "skipped"
-                                  or .conclusion == "neutral")) | not)
-                   | .name] | unique | join(", ")')
-
-          if [ -n "$not_green" ]; then
-            echo "Still pending or failed: $not_green"
-            drop_label "$pr"
-            exit 0
-          fi
-
-          # Recreate the label if someone deleted it. A failure here needs no
-          # handling: --add-label below fails loudly on a label that is missing.
-          gh label create "$LABEL" --color 0e8a16 \
-            --description "CI green: CodeRabbit may review" 2>/dev/null || true
-          gh pr edit "$pr" --add-label "$LABEL"
-          echo "PR #$pr is green, CodeRabbit released"
+          grant_gate_when_green "$HEAD_SHA"
