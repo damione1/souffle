@@ -8042,7 +8042,7 @@ mod tests {
         LiveTranscriptState, RecordingMode, ShortcutField, TranscriptionRuntimePhase,
         WindowActivity, begin_model_refresh, is_latest_model_refresh, meeting_can_resume,
         recording_timers_armed, replay_pending_stop, set_recording_idle, settle_recording_start,
-        show_recording_starting, sync_dictation_finalizing,
+        show_recording_starting, show_recording_starting_with_cancel, sync_dictation_finalizing,
     };
     use crate::model_ui;
     use crate::settings_drafts::SettingsDraftController;
