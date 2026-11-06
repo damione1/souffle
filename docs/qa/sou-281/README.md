@@ -71,6 +71,33 @@ Do not substitute another input or treat a fallback as successful Apple capture.
 These app checks establish operator observations; they do not populate the
 formal probe matrix below. Keep WAVs, transcripts and hardware UIDs outside Git.
 
+## Retest startup after an I/O configuration change
+
+The first operator QA exposed a native engine stopping itself while Apple's
+hardware channel layout changed during startup. The mono client format and
+selected devices were correct. The corrected Nightly observes that transition,
+allows one complete reread if notification crosses a readback, and permits at
+most one restart of the unchanged graph. Cancellation and the original startup
+deadline still apply; other device/format/processing failures remain errors.
+
+Before continuing the acoustic trials, use the same built-in input and speaker
+route that exposed the failure. Perform **meeting → stop → dictation → stop →
+meeting** two or three times, waiting for each stop to complete. Start recordings
+yourself; automated UI inspection must not activate capture. Check that the
+meetings start, receive your speech, preserve their tail, and stop normally.
+
+Retain the new run's logs separately from earlier runs. Require the expected
+device/format readbacks, `running=true`, both voice-processing nodes enabled,
+AGC/bypass off, and normal callbacks. A recovered startup must have at most two
+start attempts; an ordinary startup needs no retry. If it still fails, retain
+the precise reason and attempt/notification snapshots instead of substituting
+another microphone or backend. A successful restart does not establish echo
+suppression or voice preservation; continue the listening checks above.
+
+The developer probe does not use the application's owner-controlled restart
+policy. Keep failed formal probe trials as evidence; these app regression checks
+do not replace or populate the formal comparison matrix.
+
 ## Inspect the app without recording
 
 The optional server listens on localhost only when `SLINT_MCP_PORT` is set at
