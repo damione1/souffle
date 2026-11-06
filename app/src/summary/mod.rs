@@ -1,5 +1,6 @@
 mod apple;
 mod chunking;
+pub mod compress;
 mod extract;
 mod formatters;
 mod language;
@@ -493,9 +494,20 @@ pub(crate) async fn generate_with_provider(
 /// prompts. A 7B follows the English instruction language unless told
 /// explicitly which language to write in.
 #[allow(clippy::too_many_arguments)]
+pub fn needs_map(text: &str, model: &str) -> Result<bool, String> {
+    Ok(estimate_tokens(text) > chunk_config(resolve_provider(model)?).stuff_token_limit)
+}
+
+pub struct CompressedMapInput {
+    pub text: String,
+    pub turns: Option<Vec<String>>,
+}
+
+#[allow(clippy::too_many_arguments)]
 pub async fn summarize_stream(
     transcript_text: &str,
     turn_units: Option<&[String]>,
+    compressed_map: Option<&CompressedMapInput>,
     notes: Option<&str>,
     participants: &[MeetingParticipant],
     model: &str,
@@ -542,9 +554,21 @@ pub async fn summarize_stream(
     }
 
     let no_op = |_: SummarizeProgress| {};
-    let chunks = match turn_units {
+    let map_text = compressed_map
+        .map(|input| input.text.as_str())
+        .unwrap_or(transcript_text);
+    let map_turns = compressed_map
+        .and_then(|input| input.turns.as_deref())
+        .or_else(|| {
+            if compressed_map.is_none() {
+                turn_units
+            } else {
+                None
+            }
+        });
+    let chunks = match map_turns {
         Some(turns) if !turns.is_empty() => chunk_turns(turns, config),
-        _ => chunk_transcript(transcript_text, config),
+        _ => chunk_transcript(map_text, config),
     };
     let n = chunks.len();
     let mut part_summaries = Vec::with_capacity(n);

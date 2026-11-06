@@ -1,3 +1,4 @@
+import { CompressionSection } from "components/settings/compression_section.slint";
 import { AppText, AppTextInput, Typography, TypographyStyle } from "@typography";
 import { AutostartSection } from "components/settings/autostart_section.slint";
 import { PermissionsSection } from "components/settings/permissions_section.slint";
@@ -533,6 +534,8 @@ export component SettingsView inherits Rectangle {
                             download-recommended-requested => { root.download-recommended-ollama-model-requested(); }
                             open-apple-intelligence-settings-requested => { root.open-apple-intelligence-settings-requested(); }
                         }
+
+                        CompressionSection { }
 
                         DictationPolishSection {
                             enabled: root.dictation-polish-enabled;

@@ -137,6 +137,7 @@ impl MeetingAccumulator {
             recording_sessions,
             segments,
             summary: self.summary,
+            compact_transcript: None,
             summary_is_stale: self.summary_is_stale || (has_summary && had_new_segments),
             summary_model: self.summary_model,
             summary_generated_at: self.summary_generated_at,
@@ -170,6 +171,7 @@ pub struct AppState {
     pub next_audio_session_id: Mutex<u64>,
     pub meeting_accumulator: Arc<Mutex<Option<MeetingAccumulator>>>,
     pub db: Arc<Database>,
+    pub compression: Arc<crate::summary::compress::CompressionService>,
     /// Recording storage for this state/profile. Fixtures set it to their
     /// temporary directory before sharing AppState; production uses its bundle.
     pub recordings_root: std::path::PathBuf,
@@ -221,6 +223,7 @@ impl AppState {
             next_audio_session_id: Mutex::new(0),
             meeting_accumulator: Arc::new(Mutex::new(None)),
             db,
+            compression: crate::summary::compress::CompressionService::shared(),
             recordings_root: crate::audio::recorder::recordings_root(),
             audio_rms,
             machine: Mutex::new(AppStateMachine::Idle),

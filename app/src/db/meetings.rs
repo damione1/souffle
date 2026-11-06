@@ -23,6 +23,7 @@ use crate::transcript::{
 };
 
 use super::Database;
+use super::compression::{fingerprint, invalidate_changed, read_compact, write_compact};
 
 fn meeting_fts_text(edited_transcript: Option<&str>, segment_text: String) -> String {
     edited_transcript
@@ -68,10 +69,12 @@ impl Database {
         let tx = conn
             .transaction()
             .map_err(|e| format!("Transaction: {e}"))?;
+        let compact_before = fingerprint(&tx, &meeting.id)?;
+        let had_compact = read_compact(&tx, &meeting.id)?.is_some();
 
         tx.execute(
             &format!(
-                "INSERT OR REPLACE INTO {MEETINGS} (
+                "INSERT INTO {MEETINGS} (
                 {ID},
                 {TITLE},
                 {STARTED_AT},
@@ -89,7 +92,7 @@ impl Database {
                 {PARTICIPANTS},
                 {STRUCTURED_SUMMARY},
                 {SYSTEM_AUDIO}
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)"
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17) ON CONFLICT({ID}) DO UPDATE SET {TITLE}=excluded.{TITLE}, {STARTED_AT}=excluded.{STARTED_AT}, {ENDED_AT}=excluded.{ENDED_AT}, {DURATION_SECONDS}=excluded.{DURATION_SECONDS}, {TRANSCRIPTION_PROFILE}=excluded.{TRANSCRIPTION_PROFILE}, {RECORDING_SESSIONS}=excluded.{RECORDING_SESSIONS}, {SUMMARY}=excluded.{SUMMARY}, {SUMMARY_IS_STALE}=excluded.{SUMMARY_IS_STALE}, {SUMMARY_MODEL}=excluded.{SUMMARY_MODEL}, {SUMMARY_GENERATED_AT}=excluded.{SUMMARY_GENERATED_AT}, {EDITED_TRANSCRIPT}=excluded.{EDITED_TRANSCRIPT}, {NOTES}=excluded.{NOTES}, {CALENDAR_EVENT_ID}=excluded.{CALENDAR_EVENT_ID}, {PARTICIPANTS}=excluded.{PARTICIPANTS}, {STRUCTURED_SUMMARY}=excluded.{STRUCTURED_SUMMARY}, {SYSTEM_AUDIO}=excluded.{SYSTEM_AUDIO}"
             ),
             params![
                 meeting.id,
@@ -154,6 +157,17 @@ impl Database {
         );
         reindex_meeting_fts(&tx, &meeting.id, &full_text)?;
 
+        if compact_before.is_some() {
+            invalidate_changed(&tx, &meeting.id, compact_before)?;
+        }
+        if !had_compact {
+            if let Some(compact) = &meeting.compact_transcript {
+                let mut compact = compact.clone();
+                compact.is_stale |=
+                    Some(compact.source_sha256.clone()) != fingerprint(&tx, &meeting.id)?;
+                write_compact(&tx, &meeting.id, &compact)?;
+            }
+        }
         tx.commit().map_err(|e| format!("Commit: {e}"))?;
         Ok(())
     }
@@ -166,8 +180,10 @@ impl Database {
     /// On resume (conflict) `ended_at` is reset to NULL and `edited_transcript`
     /// is deliberately left untouched so a user's edits survive re-recording.
     pub fn upsert_meeting_header(&self, meeting: &MeetingTranscript) -> Result<(), String> {
-        let conn = self.conn.acquire()?;
-        conn.execute(
+        let mut conn = self.conn.acquire()?;
+        let tx = conn.transaction().map_err(|e| e.to_string())?;
+        let before = fingerprint(&tx, &meeting.id)?;
+        tx.execute(
             &format!(
                 "INSERT INTO {MEETINGS} (
                 {ID}, {TITLE}, {STARTED_AT}, {ENDED_AT}, {DURATION_SECONDS},
@@ -210,6 +226,8 @@ impl Database {
             ],
         )
         .map_err(|e| format!("Upsert meeting header: {e}"))?;
+        invalidate_changed(&tx, &meeting.id, before)?;
+        tx.commit().map_err(|e| e.to_string())?;
         Ok(())
     }
 
@@ -229,6 +247,7 @@ impl Database {
         let tx = conn
             .transaction()
             .map_err(|e| format!("Transaction: {e}"))?;
+        let compact_before = fingerprint(&tx, meeting_id)?;
         let insert_segment_sql = format!(
             "INSERT INTO {SEGMENTS} ({MEETING_ID}, {TEXT}, {START_TIME}, {END_TIME}, {IS_FINAL}, {LANGUAGE}, {CONFIDENCE}, {SORT_ORDER}, {SPEAKER})
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)"
@@ -250,6 +269,7 @@ impl Database {
             )
             .map_err(|e| format!("Append segment: {e}"))?;
         }
+        invalidate_changed(&tx, meeting_id, compact_before)?;
         tx.commit().map_err(|e| format!("Commit: {e}"))?;
         Ok(())
     }
@@ -268,6 +288,7 @@ impl Database {
         let tx = conn
             .transaction()
             .map_err(|e| format!("Transaction: {e}"))?;
+        let compact_before = fingerprint(&tx, meeting_id)?;
         let update_segment_sql = format!(
             "UPDATE {SEGMENTS} SET {TEXT} = ?3 WHERE {MEETING_ID} = ?1 AND {SORT_ORDER} = ?2"
         );
@@ -294,6 +315,7 @@ impl Database {
             reindex_meeting_fts(&tx, meeting_id, &full_text)?;
         }
 
+        invalidate_changed(&tx, meeting_id, compact_before)?;
         tx.commit().map_err(|e| format!("Commit: {e}"))?;
         Ok(())
     }
@@ -499,6 +521,7 @@ impl Database {
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| format!("Collect segments: {e}"))?;
         drop(stmt);
+        let compact_transcript = read_compact(&conn, id)?;
         drop(conn);
 
         let transcription_profile = meeting.transcription_profile()?;
@@ -532,6 +555,7 @@ impl Database {
             summary_model: meeting.summary_model,
             summary_generated_at,
             edited_transcript: meeting.edited_transcript,
+            compact_transcript,
             notes: meeting.notes,
             calendar_event_id: meeting.calendar_event_id,
             participants,
@@ -702,6 +726,7 @@ impl Database {
         let tx = conn
             .transaction()
             .map_err(|e| format!("Transaction: {e}"))?;
+        let compact_before = fingerprint(&tx, id)?;
 
         tx.execute(
             &format!(
@@ -720,6 +745,7 @@ impl Database {
         let text_to_index = meeting_fts_text(edited_transcript, joined_segment_text(&tx, id)?);
         reindex_meeting_fts(&tx, id, &text_to_index)?;
 
+        invalidate_changed(&tx, id, compact_before)?;
         tx.commit().map_err(|e| format!("Commit: {e}"))?;
 
         Ok(())

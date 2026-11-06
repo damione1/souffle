@@ -811,6 +811,9 @@
           },
           {
             "p": "Backing that folder up backs up everything. Deleting it returns the app to a first launch."
+          },
+          {
+            "p": "Optional compact transcripts are derived local data stored with their meeting in SQLite and deleted with it. Source edits mark them stale. Compression weights live under <code>models/compression/</code>: approximately 713 MB first download, converted locally to 355 MB fp16. No startup download."
           }
         ]
       },
@@ -847,6 +850,9 @@
           },
           {
             "p": "Soufflé's MCP server is local and read-only. A client you connect can then use the transcripts with its own AI provider; that client's privacy settings apply to that use."
+          },
+          {
+            "p": "Use <code>include: [\"compact\"]</code> on <code>get_meeting</code> or <code>get_latest_meeting</code> for an economical, lossy first pass. The response includes freshness, model provenance and approximate token count; <code>list_meetings</code> includes <code>has_compact</code>. Use the transcript for exact citations."
           }
         ]
       },
@@ -890,6 +896,9 @@
           },
           {
             "p": "It reads the same database and the same downloaded models as the app, so anything already installed is reused."
+          },
+          {
+            "code": "souffle --compact-meeting MEETING_ID --compression-rate 0.5 --json\nsouffle --summarize-meeting MEETING_ID --summary-compression on --summary-model qwen2.5:7b --json\n# --database /path/to/fixture.db"
           }
         ]
       },

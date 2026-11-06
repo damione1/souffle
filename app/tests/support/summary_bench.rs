@@ -708,6 +708,7 @@ pub(crate) async fn run_bench() {
                         let prose = summary::summarize_stream(
                             &text,
                             edited.is_none().then_some(turns.as_slice()),
+                            None,
                             input.notes.as_deref(),
                             &input.participants,
                             model,

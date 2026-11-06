@@ -98,6 +98,7 @@ fn main() {
         session_started_at: chrono::Utc::now(),
         transcription_profile: souffle_lib::engine::default_transcription_profile(),
         summary: None,
+        compact_transcript: None,
         summary_is_stale: false,
         summary_model: None,
         summary_generated_at: None,

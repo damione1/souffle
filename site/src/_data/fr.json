@@ -811,6 +811,9 @@
           },
           {
             "p": "Sauvegarder ce dossier sauvegarde tout. Le supprimer ramène l'app à son premier lancement."
+          },
+          {
+            "p": "Les versions compactes facultatives sont des données locales dérivées, stockées avec leur réunion dans SQLite et supprimées avec elle. Une modification de la source les marque obsolètes. Les poids de compression sont dans <code>models/compression/</code> : environ 713 Mo au premier téléchargement, convertis localement en fp16 de 355 Mo. Aucun téléchargement au démarrage."
           }
         ]
       },
@@ -847,6 +850,9 @@
           },
           {
             "p": "Le serveur MCP de Soufflé est local et en lecture seule. Le client que vous y connectez peut ensuite utiliser les transcriptions avec son propre fournisseur d'IA : ses réglages de confidentialité s'appliquent à cette utilisation."
+          },
+          {
+            "p": "Utilisez <code>include: [\"compact\"]</code> avec <code>get_meeting</code> ou <code>get_latest_meeting</code> pour une première lecture économique avec perte. La réponse indique la fraîcheur, la provenance du modèle et une estimation des jetons ; <code>list_meetings</code> expose <code>has_compact</code>. Utilisez la transcription pour les citations exactes."
           }
         ]
       },
@@ -890,6 +896,9 @@
           },
           {
             "p": "La commande lit la même base et les mêmes modèles téléchargés que l'app : ce qui est déjà installé est réutilisé."
+          },
+          {
+            "code": "souffle --compact-meeting MEETING_ID --compression-rate 0.5 --json\nsouffle --summarize-meeting MEETING_ID --summary-compression on --summary-model qwen2.5:7b --json\n# --database /path/to/fixture.db"
           }
         ]
       },

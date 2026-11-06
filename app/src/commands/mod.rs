@@ -1,5 +1,6 @@
 mod audio;
 mod calendar;
+mod compression;
 mod data;
 mod diagnostics;
 mod dictation;
@@ -20,6 +21,7 @@ pub mod updater;
 
 pub use audio::*;
 pub use calendar::*;
+pub use compression::*;
 pub use data::*;
 pub use diagnostics::*;
 pub use dictation::*;

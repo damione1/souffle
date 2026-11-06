@@ -1,3 +1,7 @@
+import { CompressionUi, CompactLine } from "compression.slint";
+export { CompressionUi, CompactLine }
+import { CompressionModelPhase, CompactJobPhase } from "types.slint";
+export { CompressionModelPhase, CompactJobPhase }
 import { AppText, AppTextInput, Typography, TypographyStyle } from "@typography";
 import { TypographySpecimen } from "@typography";
 export { TypographySpecimen }
@@ -180,6 +184,7 @@ export component MainWindow inherits Window {
     in property <[StructuredActionItem]> meeting-detail-summary-action-items;
     in property <[string]> meeting-detail-summary-open-questions;
     in property <bool> meeting-detail-summary-is-generating: false;
+    in property <string> meeting-detail-summary-generation-id;
     in property <string> meeting-detail-summary-generation-progress: "";
     in property <string> meeting-detail-summary-generation-error: "";
     in property <[string]> meeting-detail-summary-available-models;

@@ -1,0 +1,56 @@
+import { AppText, Typography } from "@typography";
+import { ListView } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
+import { CompressionUi } from "../compression.slint";
+import { CompactJobPhase } from "../types.slint";
+import { ThemedButton, ThemedButtonKind } from "themed_button.slint";
+import { CompressionStatus } from "compression_status.slint";
+export component CompactTranscriptSection inherits VerticalLayout {
+    spacing: 10px;
+    vertical-stretch: 0;
+    HorizontalLayout {
+        spacing: 8px;
+        AppText { text: @tr("Version compacte"); typography: Typography.section; color: Theme.text-primary; vertical-alignment: center; horizontal-stretch: 1; }
+        if !CompressionUi.busy: ThemedButton {
+            text: CompressionUi.has-compact ? @tr("Régénérer") : @tr("Générer");
+            kind: ThemedButtonKind.primary;
+            enabled: !CompressionUi.ongoing;
+            clicked => { CompressionUi.generate(); }
+        }
+        if CompressionUi.busy: ThemedButton { text: @tr("Annuler"); clicked => { CompressionUi.cancel(); } }
+        if CompressionUi.has-compact: ThemedButton { text: CompressionUi.copied ? @tr("Copié") : @tr("Copier"); clicked => { CompressionUi.copy(); } }
+    }
+    if CompressionUi.ongoing: AppText { text: @tr("Disponible une fois l'enregistrement terminé."); typography: Typography.secondary; color: Theme.text-muted; }
+    if CompressionUi.stale: AppText { text: @tr("Cette version compacte précède les dernières modifications de la transcription. Régénérez-la avant de l'utiliser."); typography: Typography.secondary; color: Theme.text-muted; wrap: word-wrap; }
+    if CompressionUi.job-phase != CompactJobPhase.idle: AppText {
+        text: CompressionUi.job-phase == CompactJobPhase.waiting-for-model ? @tr("En attente du modèle…")
+            : CompressionUi.job-phase == CompactJobPhase.queued ? @tr("En attente du moteur de compression…")
+            : CompressionUi.job-phase == CompactJobPhase.compressing ? @tr("Compression : {}%", CompressionUi.progress)
+            : CompressionUi.job-phase == CompactJobPhase.failed ? @tr("La compression a échoué : {}", CompressionUi.job-error)
+            : CompressionUi.job-phase == CompactJobPhase.source-changed ? @tr("La transcription a changé. Relancez la compression.")
+            : @tr("Compression interrompue par un enregistrement. Réessayez après l'enregistrement.");
+        typography: Typography.secondary; color: Theme.text-muted; wrap: word-wrap;
+    }
+    if CompressionUi.job-error != "" && CompressionUi.job-phase != CompactJobPhase.failed: AppText {
+        text: @tr("L'opération a échoué : {}", CompressionUi.job-error);
+        typography: Typography.secondary; color: Theme.text-muted; wrap: word-wrap;
+    }
+    if !CompressionUi.has-compact || CompressionUi.busy: CompressionStatus { }
+    if CompressionUi.has-compact: AppText { text: @tr("LLMLingua-2 · cible {}% · {} · environ {} jetons", CompressionUi.compact-rate, CompressionUi.generated-at, CompressionUi.approx-tokens); typography: Typography.hint; color: Theme.text-muted; wrap: word-wrap; }
+    if CompressionUi.has-compact: ListView {
+        height: CompressionUi.expanded ? 320px : 160px;
+        for line in CompressionUi.lines: Rectangle {
+            height: 72px;
+            background: area.has-hover && line.timed ? Theme.surface-2 : transparent;
+            accessible-role: list-item;
+            accessible-label: line.text;
+            AppText { x: 8px; y: 6px; width: parent.width - 16px; height: 60px; text: line.text; typography: Typography.secondary; color: Theme.text-secondary; wrap: word-wrap; overflow: elide; }
+            area := TouchArea { mouse-cursor: line.timed ? pointer : default; clicked => { if line.timed { CompressionUi.seek(line.seconds); } } }
+        }
+    }
+    if CompressionUi.has-compact: HorizontalLayout {
+        alignment: start;
+        ThemedButton { text: CompressionUi.expanded ? @tr("Réduire l'aperçu") : @tr("Développer l'aperçu"); compact: true; clicked => { CompressionUi.expand(); } }
+    }
+    AppText { text: @tr("Extraction avec perte. Consultez la transcription pour les citations exactes."); typography: Typography.hint; color: Theme.text-muted; wrap: word-wrap; }
+}

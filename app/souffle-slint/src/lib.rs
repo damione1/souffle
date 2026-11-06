@@ -3,3 +3,5 @@
 slint::include_modules!();
 
 mod conversions;
+
+pub mod compression_ui;

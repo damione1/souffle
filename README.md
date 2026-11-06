@@ -85,7 +85,7 @@ Meetings and dictations land on one timeline, with today's calendar above it, se
 ## Own your data
 
 - **Export any meeting** as Markdown, JSON, or SRT/VTT subtitles, or the **whole archive** as a plain folder of Markdown and JSON.
-- **MCP server**: the bundled `souffle-mcp` sidecar lets Claude Desktop, Claude Code or any MCP client search and read your transcripts. Read-only, fully local, works even when the app is closed. Setup snippets live in Settings > System > Data.
+- **MCP server**: the bundled `souffle-mcp` sidecar lets Claude Desktop, Claude Code or any MCP client search and read your transcripts. Read-only, fully local, works even when the app is closed. Setup snippets live in Settings > System > Data. Meeting reads also accept `include: ["compact"]` for a lossy first pass, with freshness/provenance and token estimate; use the original transcript for exact citations.
 - **Headless CLI**: `souffle --transcribe-file audio.wav --json` transcribes a file without launching the app, and `--repeat N` doubles as a benchmark harness.
 
   The `souffle` binary ships inside the app bundle and is not added to your `PATH`, so it is not a global command. Invoke it by full path, or symlink it once:
@@ -184,3 +184,5 @@ The extra WAV stores the microphone on the left and system audio on the right. I
 Copyright (c) 2026 Damien Goehrig.
 
 Released under the GNU General Public License v3.0 or later (GPL-3.0-or-later). You are free to use, study, modify, and redistribute this software, provided that derivative works are also published under the same license. See [LICENSE.md](LICENSE.md) for the full text.
+
+Local meeting compression is optional in Settings > IA and available independently in meeting detail. [Model distribution, CLI and MCP details](docs/engineering/meeting-compression.md).

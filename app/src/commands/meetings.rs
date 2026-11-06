@@ -49,6 +49,7 @@ fn delete_meeting_in(
     recordings_dir: &std::path::Path,
 ) -> Result<(), crate::meeting_access::MeetingDeleteError> {
     state.meeting_access.delete(&state.machine, id, || {
+        state.compression.cancel(id);
         state.db.delete_meeting(id)?;
         if recordings_dir.exists()
             && let Err(e) = std::fs::remove_dir_all(recordings_dir)
@@ -764,10 +765,21 @@ pub async fn summarize_meeting(
     template_id: Option<String>,
     channel: ProgressChannel<crate::summary::SummarizeProgress>,
 ) -> Result<(), String> {
+    let settings = AppSettings::load(&state.db)?;
+    summarize_meeting_with_settings(state, id, model, template_id, channel, settings).await
+}
+
+pub async fn summarize_meeting_with_settings(
+    state: Arc<AppState>,
+    id: String,
+    model: String,
+    template_id: Option<String>,
+    channel: ProgressChannel<crate::summary::SummarizeProgress>,
+    settings: AppSettings,
+) -> Result<(), String> {
     let transcript = state.db.load_meeting(&id)?;
     let generated_from_edited = transcript.edited_transcript.clone();
     let generated_from_notes = transcript.notes.clone();
-    let settings = AppSettings::load(&state.db)?;
 
     let (text, turn_units) = match transcript.edited_transcript {
         Some(ref edited) if !edited.is_empty() => (edited.clone(), None),
@@ -782,6 +794,68 @@ pub async fn summarize_meeting(
         return Err("Transcript has no text".into());
     }
 
+    let wants_map = crate::summary::needs_map(&text, &model)?;
+    let wants_compact =
+        settings.compact_transcript_enabled || (settings.summary_compression_enabled && wants_map);
+    let fresh_compact = transcript
+        .compact_transcript
+        .as_ref()
+        .is_some_and(|compact| {
+            crate::summary::compress::CompressionRate::new(settings.summary_compression_rate)
+                .is_ok_and(|rate| {
+                    state.compression.compatible(
+                        compact,
+                        &crate::summary::compress::CompressionInput::from_meeting(&transcript),
+                        rate,
+                    )
+                })
+        });
+    let compact = if wants_compact
+        && (fresh_compact
+            || crate::models::compression::installed(&state.compression.model_dir).is_some())
+    {
+        match super::generate_compact_transcript_ready(
+            state.clone(),
+            id.clone(),
+            Some(settings.summary_compression_rate),
+        )
+        .await
+        {
+            Ok(compact) => {
+                if compact.source_sha256
+                    == crate::summary::compress::CompressionInput::from_meeting(&transcript)
+                        .source_sha256
+                {
+                    Some(compact)
+                } else {
+                    tracing::warn!(
+                        "Meeting changed during compression; summary keeps its original snapshot"
+                    );
+                    None
+                }
+            }
+            Err(error) => {
+                tracing::warn!("Compression unavailable; summarizing original transcript: {error}");
+                None
+            }
+        }
+    } else {
+        if wants_compact {
+            tracing::warn!("Compression model unavailable; summarizing original transcript");
+        }
+        None
+    };
+    let compressed_map = if settings.summary_compression_enabled && wants_map {
+        compact.map(|compact| crate::summary::CompressedMapInput {
+            turns: turn_units
+                .as_ref()
+                .map(|_| compact.text.split('\n').map(str::to_owned).collect()),
+            text: compact.text,
+        })
+    } else {
+        None
+    };
+
     let final_system_prompt =
         crate::summary::resolve_summary_template_prompt(&settings, template_id.as_deref());
     let output_language = crate::summary::resolve_summary_language(
@@ -795,6 +869,7 @@ pub async fn summarize_meeting(
     let summary = crate::summary::summarize_stream(
         &text,
         turn_units.as_deref(),
+        compressed_map.as_ref(),
         transcript.notes.as_deref(),
         &transcript.participants,
         &model,

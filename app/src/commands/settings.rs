@@ -138,13 +138,30 @@ fn save_settings_in_lane(
 ) -> SettingsSaveResult {
     // This boundary covers the real audio start while the machine is Ready.
     // Native/window effects remain outside both locks.
-    save_settings_with_effects(
+    let previous = AppSettings::load_read_only(&state.db).ok();
+    let enable = previous.as_ref().is_some_and(|previous| {
+        (!previous.summary_compression_enabled && settings.summary_compression_enabled)
+            || (!previous.compact_transcript_enabled && settings.compact_transcript_enabled)
+    });
+    let result = save_settings_with_effects(
         &state.db,
         &state.machine,
         settings,
         &state.capture_start,
         |settings| apply_settings_effects(&state, settings, lane),
-    )
+    );
+    let committed = result
+        .as_ref()
+        .map(|_| true)
+        .unwrap_or_else(|error| error.committed());
+    if committed && enable && !super::settings_capture_busy(&state).unwrap_or(true) {
+        let service = state.compression.clone();
+        let state = Arc::downgrade(&state);
+        crate::async_runtime::spawn(async move {
+            let _ = service.ensure_model(state).await;
+        });
+    }
+    result
 }
 
 fn save_settings_with_effects(

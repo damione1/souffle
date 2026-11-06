@@ -514,6 +514,11 @@ fn stopped_by_sleep(handle: &AppHandle, meeting_id: &str) -> bool {
 /// Loads a meeting and pushes it into MeetingDetail's properties - mirrors
 /// `controller.svelte.ts`'s `openMeeting`/`loadMeeting` effect.
 fn populate_meeting_detail(window: &MainWindow, handle: &AppHandle, meeting: &MeetingTranscript) {
+    compression_ui::populate(window, meeting);
+    if window.get_active_meeting_id().as_str() != meeting.id {
+        window.set_meeting_detail_summary_generation_id("".into());
+        window.set_meeting_detail_summary_is_generating(false);
+    }
     window.set_active_meeting_id(meeting.id.clone().into());
     window.set_meeting_detail_title(meeting.title.clone().into());
     window.set_meeting_detail_meta(meeting_meta(meeting));
@@ -4748,14 +4753,25 @@ fn wire_callbacks(
             .get_meeting_detail_summary_selected_model_id()
             .to_string();
 
+        let summary_generation = uuid::Uuid::new_v4().to_string();
+        window.set_meeting_detail_summary_generation_id(summary_generation.clone().into());
+        let progress_id = id.clone();
+        let progress_generation = summary_generation.clone();
         let weak_for_progress = weak_sum.clone();
         let channel =
             ProgressChannel::new(move |progress: souffle_lib::summary::SummarizeProgress| {
                 let weak = weak_for_progress.clone();
                 let text = progress.text.clone();
+                let progress_id = progress_id.clone();
+                let progress_generation = progress_generation.clone();
                 let _ = slint::invoke_from_event_loop(move || {
                     if let Some(w) = weak.upgrade() {
-                        w.set_meeting_detail_summary_generation_progress(text.into());
+                        if w.get_active_meeting_id().as_str() == progress_id
+                            && w.get_meeting_detail_summary_generation_id().as_str()
+                                == progress_generation
+                        {
+                            w.set_meeting_detail_summary_generation_progress(text.into());
+                        }
                     }
                 });
             });
@@ -4775,7 +4791,16 @@ fn wire_callbacks(
 
             let _ = slint::invoke_from_event_loop(move || {
                 if let Some(w) = weak_for_done.upgrade() {
+                    if w.get_active_meeting_id().as_str() != id
+                        || w.get_meeting_detail_summary_generation_id().as_str()
+                            != summary_generation
+                    {
+                        return;
+                    }
                     w.set_meeting_detail_summary_is_generating(false);
+                    if let Ok(meeting) = state_for_done.db.load_meeting(&id) {
+                        compression_ui::populate(&w, &meeting);
+                    }
                     match result {
                         Ok(_) => {
                             if let Ok(m) = state_for_done.db.load_meeting(&id) {
@@ -5169,6 +5194,7 @@ fn wire_callbacks(
         summary_status_state.clone(),
     );
     settings_values::wire(window, settings_values.clone());
+    compression_ui::install_for_app(window, tauri_handle.clone());
 
     // Which summary template's name/prompt are shown in the edit fields -
     // mirrors `editingTemplateId` in controller.svelte.ts (local UI state,

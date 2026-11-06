@@ -1,0 +1,31 @@
+import { AppText, Typography } from "@typography";
+import { Theme } from "../theme.slint";
+import { CompressionUi } from "../compression.slint";
+import { CompressionModelPhase, CompactJobPhase } from "../types.slint";
+import { ThemedButton } from "themed_button.slint";
+export component CompressionStatus inherits VerticalLayout {
+    spacing: 6px;
+    vertical-stretch: 0;
+    AppText {
+        text: CompressionUi.model-phase == CompressionModelPhase.not-downloaded ? @tr("Modèle de compression non téléchargé ({})", CompressionUi.model-size)
+            : CompressionUi.model-phase == CompressionModelPhase.downloading ? @tr("Téléchargement du modèle : {}", CompressionUi.download-progress)
+            : CompressionUi.model-phase == CompressionModelPhase.preparing ? @tr("Préparation locale du modèle fp16…")
+            : CompressionUi.model-phase == CompressionModelPhase.ready ? @tr("Modèle local prêt ({})", CompressionUi.model-size)
+            : @tr("Le téléchargement a échoué : {}", CompressionUi.model-error);
+        typography: Typography.secondary;
+        color: Theme.text-muted;
+        wrap: word-wrap;
+    }
+    HorizontalLayout {
+        alignment: start;
+        if CompressionUi.model-phase == CompressionModelPhase.not-downloaded || CompressionUi.model-phase == CompressionModelPhase.failed: ThemedButton {
+            text: CompressionUi.model-phase == CompressionModelPhase.failed ? @tr("Réessayer le téléchargement") : @tr("Télécharger le modèle");
+            compact: true;
+            clicked => { CompressionUi.download(); }
+        }
+        if CompressionUi.model-phase == CompressionModelPhase.downloading || CompressionUi.model-phase == CompressionModelPhase.preparing: ThemedButton {
+            text: @tr("Annuler le téléchargement"); compact: true;
+            clicked => { CompressionUi.cancel-download(); }
+        }
+    }
+}

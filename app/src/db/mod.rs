@@ -1,3 +1,4 @@
+pub mod compression;
 pub mod dictation;
 pub mod dictionary;
 pub mod meetings;
@@ -231,6 +232,28 @@ impl Database {
                     .map_err(|e| format!("Commit v17 migration: {e}"))?;
             }
 
+            if current_version < 18 {
+                use souffle_schema::sql::{column::*, table::MEETINGS};
+                let tx = conn.transaction().map_err(|e| e.to_string())?;
+                for (column, kind) in [
+                    (COMPACT_TRANSCRIPT, "TEXT"),
+                    (COMPACT_MODEL, "TEXT"),
+                    (COMPACT_RATE, "REAL"),
+                    (COMPACT_GENERATED_AT, "TEXT"),
+                    (COMPACT_IS_STALE, "INTEGER NOT NULL DEFAULT 0"),
+                    (COMPACT_SOURCE_SHA256, "TEXT"),
+                    (COMPACT_GENERATION_TOKEN, "TEXT"),
+                ] {
+                    tx.execute(
+                        &format!("ALTER TABLE {MEETINGS} ADD COLUMN {column} {kind}"),
+                        [],
+                    )
+                    .map_err(|e| format!("Compression migration: {e}"))?;
+                }
+                tx.execute(&update_version_sql, [18])
+                    .map_err(|e| e.to_string())?;
+                tx.commit().map_err(|e| e.to_string())?;
+            }
             info!("Schema migration complete");
         }
 

@@ -10,9 +10,7 @@
 /// only costs a little chunking margin. A single conservative ratio is
 /// therefore the right trade: a per-model table would be guesswork for every
 /// model not in the measured set.
-pub fn estimate_tokens(text: &str) -> usize {
-    (text.split_whitespace().count() as f32 * 1.8).ceil() as usize
-}
+pub use souffle_schema::estimate_tokens;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ChunkConfig {

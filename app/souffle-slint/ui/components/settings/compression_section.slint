@@ -1,0 +1,41 @@
+import { AppText, Typography } from "@typography";
+import { CompressionUi } from "../../compression.slint";
+import { Theme } from "../../theme.slint";
+import { SettingsGroup } from "settings_group.slint";
+import { SettingsField } from "settings_field.slint";
+import { ThemedSwitch } from "../themed_switch.slint";
+import { ThemedSlider } from "../themed_slider.slint";
+import { CompressionStatus } from "../compression_status.slint";
+export component CompressionSection inherits VerticalLayout {
+    vertical-stretch: 0;
+    SettingsGroup {
+        title: @tr("COMPRESSION DES TRANSCRIPTIONS");
+        SettingsField {
+            show-divider: false;
+            label: @tr("Compresser les longues transcriptions avant le résumé");
+            description: @tr("Réduit l'entrée des étapes intermédiaires. Les résumés courts utilisent le texte original.");
+            ThemedSwitch { control-label: @tr("Compresser avant le résumé"); checked: CompressionUi.summary-enabled; toggled(value) => { CompressionUi.summary-changed(value); } }
+        }
+        SettingsField {
+            label: @tr("Créer aussi une version compacte lors du résumé");
+            description: @tr("Conserve un texte compact consultable, indépendamment de l'entrée utilisée pour le résumé.");
+            ThemedSwitch { control-label: @tr("Créer aussi une version compacte"); checked: CompressionUi.alongside-enabled; toggled(value) => { CompressionUi.alongside-changed(value); } }
+        }
+        SettingsField {
+            label: @tr("Texte à conserver");
+            description: @tr("Une valeur plus basse omet davantage de mots. Les noms, nombres et négations protégés peuvent augmenter ce pourcentage.");
+            HorizontalLayout {
+                horizontal-stretch: 0;
+                spacing: 10px;
+                ThemedSlider { control-label: @tr("Pourcentage de texte à conserver"); value: CompressionUi.rate; minimum: CompressionUi.rate-min; maximum: CompressionUi.rate-max; changed(value) => { CompressionUi.rate-changed(value); } }
+                AppText { text: @tr("{} %", CompressionUi.rate); typography: Typography.secondary; color: Theme.text-muted; vertical-alignment: center; }
+            }
+        }
+        VerticalLayout {
+            padding: Theme.settings-inset;
+            spacing: 8px;
+            CompressionStatus { }
+            AppText { text: @tr("LLMLingua-2 de Microsoft, local et hors ligne après installation. La version compacte est une extraction avec perte : utilisez la transcription pour les citations exactes."); typography: Typography.secondary; color: Theme.text-muted; wrap: word-wrap; }
+        }
+    }
+}

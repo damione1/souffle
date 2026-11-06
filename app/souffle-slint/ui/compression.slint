@@ -1,0 +1,39 @@
+import { CompressionModelPhase, CompactJobPhase } from "types.slint";
+export struct CompactLine { text: string, seconds: float, timed: bool }
+// One native controller owns this projection; lifecycle payloads stay attached in Rust.
+export global CompressionUi {
+    in property <bool> summary-enabled;
+    in property <bool> alongside-enabled;
+    in property <int> rate;
+    in property <int> rate-min;
+    in property <int> rate-max;
+    in property <CompressionModelPhase> model-phase;
+    in property <string> model-size;
+    in property <string> download-progress;
+    in property <string> model-error;
+    in property <CompactJobPhase> job-phase;
+    in property <int> progress;
+    in property <string> job-error;
+    in property <bool> has-compact;
+    in property <bool> stale;
+    in property <bool> ongoing;
+    in property <string> generated-at;
+    in property <int> compact-rate;
+    in property <int> approx-tokens;
+    in property <[CompactLine]> lines;
+    in property <bool> expanded;
+    in property <bool> copied;
+    in property <string> meeting-id;
+    in property <string> ui-generation;
+    out property <bool> busy: self.job-phase == CompactJobPhase.waiting-for-model || self.job-phase == CompactJobPhase.queued || self.job-phase == CompactJobPhase.compressing;
+    callback summary-changed(bool);
+    callback alongside-changed(bool);
+    callback rate-changed(int);
+    callback download();
+    callback cancel-download();
+    callback generate();
+    callback cancel();
+    callback copy();
+    callback expand();
+    callback seek(float);
+}

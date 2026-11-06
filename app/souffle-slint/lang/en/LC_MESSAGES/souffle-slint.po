@@ -3319,3 +3319,159 @@ msgstr "Unload the active model or select another model before deleting it."
 msgctxt "InterfaceSection"
 msgid "Une opération est en cours. Réessayez dans un instant."
 msgstr "An operation is in progress. Try again in a moment."
+
+msgctxt "CompressionSection"
+msgid "COMPRESSION DES TRANSCRIPTIONS"
+msgstr "TRANSCRIPT COMPRESSION"
+
+msgctxt "CompressionSection"
+msgid "Compresser les longues transcriptions avant le résumé"
+msgstr "Compress long transcripts before summarizing"
+
+msgctxt "CompressionSection"
+msgid "Réduit l'entrée des étapes intermédiaires. Les résumés courts utilisent le texte original."
+msgstr "Reduces intermediate summary input. Short summaries use the original text."
+
+msgctxt "CompressionSection"
+msgid "Compresser avant le résumé"
+msgstr "Compress before summarizing"
+
+msgctxt "CompressionSection"
+msgid "Créer aussi une version compacte lors du résumé"
+msgstr "Also create a compact version when summarizing"
+
+msgctxt "CompressionSection"
+msgid "Conserve un texte compact consultable, indépendamment de l'entrée utilisée pour le résumé."
+msgstr "Saves a readable compact text independently of the input used for the summary."
+
+msgctxt "CompressionSection"
+msgid "Créer aussi une version compacte"
+msgstr "Also create a compact version"
+
+msgctxt "CompressionSection"
+msgid "Texte à conserver"
+msgstr "Text to retain"
+
+msgctxt "CompressionSection"
+msgid "Une valeur plus basse omet davantage de mots. Les noms, nombres et négations protégés peuvent augmenter ce pourcentage."
+msgstr "A lower value omits more words. Protected names, numbers and negations may increase this percentage."
+
+msgctxt "CompressionSection"
+msgid "Pourcentage de texte à conserver"
+msgstr "Percentage of text to retain"
+
+msgctxt "CompressionSection"
+msgid "{} %"
+msgstr "{}%"
+
+msgctxt "CompressionSection"
+msgid "LLMLingua-2 de Microsoft, local et hors ligne après installation. La version compacte est une extraction avec perte : utilisez la transcription pour les citations exactes."
+msgstr "Microsoft LLMLingua-2 runs locally and offline after installation. The compact version is lossy extraction: use the transcript for exact citations."
+
+msgctxt "CompactTranscriptSection"
+msgid "Version compacte"
+msgstr "Compact version"
+
+msgctxt "CompactTranscriptSection"
+msgid "Régénérer"
+msgstr "Regenerate"
+
+msgctxt "CompactTranscriptSection"
+msgid "Générer"
+msgstr "Generate"
+
+msgctxt "CompactTranscriptSection"
+msgid "Annuler"
+msgstr "Cancel"
+
+msgctxt "CompactTranscriptSection"
+msgid "Copié"
+msgstr "Copied"
+
+msgctxt "CompactTranscriptSection"
+msgid "Copier"
+msgstr "Copy"
+
+msgctxt "CompactTranscriptSection"
+msgid "Disponible une fois l'enregistrement terminé."
+msgstr "Available when recording has finished."
+
+msgctxt "CompactTranscriptSection"
+msgid "Cette version compacte précède les dernières modifications de la transcription. Régénérez-la avant de l'utiliser."
+msgstr "This compact version predates the latest transcript changes. Regenerate it before use."
+
+msgctxt "CompactTranscriptSection"
+msgid "En attente du modèle…"
+msgstr "Waiting for model…"
+
+msgctxt "CompactTranscriptSection"
+msgid "En attente du moteur de compression…"
+msgstr "Waiting for compression engine…"
+
+msgctxt "CompactTranscriptSection"
+msgid "Compression : {}%"
+msgstr "Compressing: {}%"
+
+msgctxt "CompactTranscriptSection"
+msgid "La compression a échoué : {}"
+msgstr "Compression failed: {}"
+
+msgctxt "CompactTranscriptSection"
+msgid "La transcription a changé. Relancez la compression."
+msgstr "The transcript changed. Generate the compact version again."
+
+msgctxt "CompactTranscriptSection"
+msgid "Compression interrompue par un enregistrement. Réessayez après l'enregistrement."
+msgstr "Compression interrupted by recording. Retry after recording."
+
+msgctxt "CompactTranscriptSection"
+msgid "LLMLingua-2 · cible {}% · {} · environ {} jetons"
+msgstr "LLMLingua-2 · target {}% · {} · about {} tokens"
+
+msgctxt "CompactTranscriptSection"
+msgid "Réduire l'aperçu"
+msgstr "Collapse preview"
+
+msgctxt "CompactTranscriptSection"
+msgid "Développer l'aperçu"
+msgstr "Expand preview"
+
+msgctxt "CompactTranscriptSection"
+msgid "Extraction avec perte. Consultez la transcription pour les citations exactes."
+msgstr "Lossy extraction. Use the transcript for exact citations."
+
+msgctxt "CompressionStatus"
+msgid "Modèle de compression non téléchargé ({})"
+msgstr "Compression model not downloaded ({})"
+
+msgctxt "CompressionStatus"
+msgid "Téléchargement du modèle : {}"
+msgstr "Downloading model: {}"
+
+msgctxt "CompressionStatus"
+msgid "Préparation locale du modèle fp16…"
+msgstr "Preparing the local fp16 model…"
+
+msgctxt "CompressionStatus"
+msgid "Modèle local prêt ({})"
+msgstr "Local model ready ({})"
+
+msgctxt "CompressionStatus"
+msgid "Le téléchargement a échoué : {}"
+msgstr "Download failed: {}"
+
+msgctxt "CompressionStatus"
+msgid "Réessayer le téléchargement"
+msgstr "Retry download"
+
+msgctxt "CompressionStatus"
+msgid "Télécharger le modèle"
+msgstr "Download model"
+
+msgctxt "CompressionStatus"
+msgid "Annuler le téléchargement"
+msgstr "Cancel download"
+
+msgctxt "CompactTranscriptSection"
+msgid "L'opération a échoué : {}"
+msgstr "Operation failed: {}"

@@ -146,3 +146,6 @@ export enum AppleIntelligenceUnavailableReason {
     unsupported-platform,
     unknown,
 }
+
+export enum CompressionModelPhase { not-downloaded, downloading, preparing, ready, failed }
+export enum CompactJobPhase { idle, waiting-for-model, queued, compressing, failed, source-changed, interrupted-by-recording }
