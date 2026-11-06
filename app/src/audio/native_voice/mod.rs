@@ -419,7 +419,7 @@ impl Native {
     }
 
     #[cfg(feature = "experimental-native-aec")]
-    pub(super) fn start_controlled(
+    fn start_controlled(
         producer: Sink,
         telemetry: Arc<Telemetry>,
         selection: &Selection,
