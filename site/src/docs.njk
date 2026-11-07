@@ -5,6 +5,7 @@ layout: layouts/base.njk
 isDocs: true
 tags: sitemap
 ---
+{% from "partials/guide_label.njk" import guideLabel %}
 <div class="band">
   <div class="sheet docs-hub">
     <header class="docs-lede">
@@ -16,7 +17,7 @@ tags: sitemap
       {% for entry in guides %}
       {% set text = entry[locale.code] %}
       <section class="guide-card">
-        <h2 class="t-m"><a href="/{{ locale.dir }}docs/{{ entry.slug }}/">{{ text.title }}</a></h2>
+        <h2 class="t-m"><a class="guide-link" href="/{{ locale.dir }}docs/{{ entry.slug }}/">{{ guideLabel(entry, locale, t.docs.experimental, 23) }}</a></h2>
         <p class="t-xs measure">{{ text.description }}</p>
         <ul class="guide-topics t-2xs">
           {% for section in t.docs.sections | guideSections(entry.sections) %}

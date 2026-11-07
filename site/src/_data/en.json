@@ -607,40 +607,84 @@
       },
       {
         "id": "summaries",
-        "h": "Summaries and compaction — experimental",
+        "icon": "checks",
+        "h": "What to expect",
         "blocks": [
           {
-            "p": "Available since <a href=\"https://github.com/damione1/souffle/releases/tag/v0.17.0\">Soufflé 0.17.0</a>. <strong>This feature is experimental and off by default.</strong> Enable <strong>Summarization</strong> in Settings → AI to reveal provider and model selection, prompt templates, compaction options and generation actions in meetings. Turning it off hides those controls while keeping your preferences and saved results. Transcription, exports and read-only MCP access remain available. Dictation polish has its own switch; its AI provider can still be configured when polish is enabled."
+            "p": "A summary can help you find the topics discussed, decisions and next steps without rereading the whole meeting. The original transcript remains your reference."
           },
           {
-            "p": "Accurately transcribing a meeting locally is already demanding. Producing a faithful summary of a long transcript with a local model is harder still: decisions, conditions, negations, owners and deadlines all need to survive. Soufflé prioritizes a useful transcript across supported Apple Silicon Macs, including modest configurations, rather than assuming everyone owns a large machine."
+            "p": "Start with a short meeting, around 15 minutes. Long discussions are harder for local AI to summarize faithfully: qualifications, conditions and commitments can be lost."
           },
           {
-            "p": "A meeting of around 15 minutes is generally a more approachable starting point for summary experiments. This is neither an automatic cutoff nor a quality guarantee: speaking density, language and model also matter. Longer meetings introduce more text and relationships to preserve. A Mac with 48 GB or more of unified memory can run larger models and may obtain better results; that hardware should not become a requirement for using Soufflé."
+            "p": "A more powerful Mac can run larger models, but does not guarantee a better summary. Soufflé is exploring options for different Apple Silicon configurations, including modest machines."
+          }
+        ]
+      },
+      {
+        "id": "summary-activation",
+        "icon": "sliders",
+        "h": "Turn summaries on",
+        "blocks": [
+          {
+            "p": "In <strong>Settings → AI</strong>, enable <strong>Summarization</strong>. Then choose Apple Intelligence, if offered, or an Ollama model."
           },
           {
-            "p": "Apple Intelligence's local model has a <a href=\"https://developer.apple.com/documentation/foundationmodels/managing-the-context-window\">4,096-token context window per session</a>, shared by instructions, input and output. A long transcript cannot simply be handed to it in one pass. Models around 7–8B that fit on more Macs have varying context windows: parameter count alone does not determine context size. Even when a model advertises a large window, memory, processing time and faithfulness over long text remain constraints. Soufflé uses intermediate stages for long sources, but those stages can also lose information."
+            "p": "Open a completed meeting to generate its summary. You can adjust the instructions to focus on decisions and next steps, for example."
           },
           {
-            "p": "<strong>The LLMLingua-2 experiment.</strong> Microsoft's <code>llmlingua-2-bert-base-multilingual-cased-meetingbank</code> ranks words to retain fragments of the original transcript. It shortens the input; it does not write a summary or enlarge the summary model's actual context window. The default target retains <strong>65% of the text</strong>, removing roughly a third of the words. Protected content may increase the retained percentage. Below 65%, the UI displays “A low value omits words.” Compaction can still lose details or relationships, so keep the original transcript as your reference."
+            "p": "This option is off by default. Turning it off again keeps your settings and saved results. Dictation polish has its own switch."
+          }
+        ]
+      },
+      {
+        "id": "summary-compaction",
+        "icon": "layers",
+        "h": "Keep a shorter version",
+        "blocks": [
+          {
+            "p": "Compaction prepares a shorter version of the transcript. It can help prepare a summary or give you compact text to read separately, without running a summary."
           },
           {
-            "p": "Two options are independent: <strong>compress long transcripts before summarizing</strong> to reduce intermediate-stage input, and <strong>also create a compact version when summarizing</strong> to save readable compact text beside the source. Short summaries use the original text. You can also generate or regenerate a compact version from a meeting without running a summary. The first download is about 713 MB, followed by local preparation of about 355 MB of fp16 weights. After installation, this processing is local and offline. Editing the source marks an existing compact as stale. Settings → AI also lets you remove the compression model, even with Summarization disabled. Saved compacts and preferences are kept; removal is refused while the model is busy."
+            "p": "The default setting aims to retain <strong>65% of the text</strong>. Start there: lowering it further can remove important details."
           },
           {
-            "p": "Experimental summaries use Apple Intelligence when available on macOS 26 or later, or Ollama. To try Ollama, install the server and download a chat model; availability alone does not establish long-summary quality:"
+            "p": "The original is kept. If you correct the transcript, regenerate the compact version to include those changes."
+          }
+        ]
+      },
+      {
+        "id": "summary-ollama",
+        "icon": "server",
+        "h": "Install Ollama",
+        "blocks": [
+          {
+            "p": "If Apple Intelligence is available, you can select it directly in Soufflé. To use Ollama, install it and download a first model. With Homebrew:"
           },
           {
             "code": "brew install ollama\nbrew services start ollama\nollama pull qwen2.5:7b"
           },
           {
-            "p": "After enabling Summarization in Settings → AI, leave the server at <code>http://localhost:11434</code> and select your model. <code>qwen2.5:7b</code> is a starting option offered by the app, not a quality endorsement for long meetings. Edit prompt templates and compare the output with the transcript. The provider is shared with dictation polish, which remains usable without enabling meeting summaries."
+            "p": "In <strong>Settings → AI</strong>, select Ollama, keep <code>http://localhost:11434</code> as the server address and choose the downloaded model."
           },
           {
-            "p": "With Apple Intelligence or Ollama on <code>localhost</code>, text is processed on your Mac. If you change the address to a remote Ollama server, Soufflé sends it the text needed for summaries or dictation polish. Choose that server accordingly."
+            "p": "With this address, processing stays on your Mac. If you choose a remote server, it receives the text you send to it."
+          }
+        ]
+      },
+      {
+        "id": "summary-cloud",
+        "icon": "plug",
+        "h": "Use your usual AI assistant",
+        "blocks": [
+          {
+            "p": "You can also use Claude, ChatGPT or another assistant with your transcripts through a client compatible with <strong>Soufflé’s MCP server</strong>. This works without enabling built-in summaries."
           },
           {
-            "p": "<strong>Your cloud LLM is another option.</strong> Soufflé's local MCP server lets a compatible client read original transcripts even when built-in summaries are disabled. You can use Claude, ChatGPT or another cloud LLM, with an MCP connection appropriate to that client, to produce a more capable summary and feed your second brain. Soufflé ships a local, read-only stdio server; setup depends on the client, and not every client accepts that transport directly. Soufflé supplies no direct integration with those services or automatic cloud synchronization. If you choose this workflow, the external client sends text to your chosen provider and manages your notes under its own settings. See <a href=\"/docs/privacy-and-data/#mcp\">MCP setup</a>."
+            "p": "You configure this connection yourself and choose what data the service receives. Soufflé does not enable cloud sharing or synchronization automatically."
+          },
+          {
+            "p": "Learn more: <a href=\"/docs/privacy-and-data/#mcp\">connect an MCP client to your transcripts</a>."
           }
         ]
       },
@@ -1036,7 +1080,8 @@
     "nextSteps": "Next steps",
     "updated": "Updated",
     "updatedDate": "November 7, 2026",
-    "readGuide": "Guide:"
+    "readGuide": "Guide:",
+    "experimental": "Experimental"
   },
   "privacy": {
     "title": "Private by design, not by promise.",

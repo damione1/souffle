@@ -12,6 +12,7 @@ import locales from "./src/_data/locales.js";
 
 const srcDir = join(dirname(fileURLToPath(import.meta.url)), "src");
 const readData = (name) => JSON.parse(readFileSync(join(srcDir, "_data", `${name}.json`), "utf8"));
+const iconNames = new Set([...readFileSync(join(srcDir, "_includes/icons.njk"), "utf8").matchAll(/name == "([^"]+)"/g)].map((match) => match[1]));
 
 const guidePages = () => {
   // One guide catalogue owns routes and section membership in both languages.
@@ -24,10 +25,15 @@ const guidePages = () => {
       throw new Error(`Invalid or duplicate guide slug: ${guide.slug}`);
     }
     slugs.add(guide.slug);
+    if (!iconNames.has(guide.icon)) throw new Error(`Unknown guide icon: ${guide.icon}`);
+    if (guide.experimental !== undefined && typeof guide.experimental !== "boolean") throw new Error(`Invalid guide experimental flag: ${guide.slug}`);
   }
   for (const locale of locales) {
     const bundle = readData(locale.code);
     const sectionIds = bundle.docs.sections.map((section) => section.id);
+    for (const section of bundle.docs.sections) {
+      if (section.icon && !iconNames.has(section.icon)) throw new Error(`Unknown section icon: ${section.icon}`);
+    }
     if (assigned.length !== new Set(assigned).size ||
         sectionIds.length !== new Set(sectionIds).size ||
         assigned.length !== sectionIds.length ||

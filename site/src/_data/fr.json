@@ -607,40 +607,84 @@
       },
       {
         "id": "summaries",
-        "h": "Résumés et compaction — expérimental",
+        "icon": "checks",
+        "h": "À quoi s’attendre",
         "blocks": [
           {
-            "p": "Disponible depuis <a href=\"https://github.com/damione1/souffle/releases/tag/v0.17.0\">Soufflé 0.17.0</a>. <strong>Cette fonctionnalité est expérimentale et désactivée par défaut.</strong> Dans Paramètres → IA, activez <strong>Résumés de réunion</strong> (<strong>Summarization</strong> dans l'interface anglaise) pour afficher le choix du fournisseur et du modèle, les modèles de consignes, les options de compaction et les actions de génération dans les réunions. Désactiver cet interrupteur masque ces éléments tout en conservant vos réglages et les résultats déjà enregistrés. La transcription, les exports et la lecture par MCP restent disponibles. La reformulation des dictées conserve sa configuration indépendante ; son fournisseur IA reste accessible si elle est activée."
+            "p": "Un résumé peut vous aider à retrouver les sujets abordés, les décisions et les actions à suivre, sans relire toute la réunion. La transcription originale reste votre référence."
           },
           {
-            "p": "Transcrire correctement une réunion en local est déjà exigeant. Résumer fidèlement une longue transcription avec un modèle local l'est encore davantage : il faut conserver les décisions, leurs conditions, les négations, les responsables et les échéances. La priorité de Soufflé est de fournir une transcription de qualité sur les Mac Apple Silicon pris en charge, y compris les configurations modestes, plutôt que de supposer que chacun dispose d'une grosse machine."
+            "p": "Commencez par une réunion courte, autour de 15 minutes. Les échanges longs sont plus difficiles à résumer fidèlement avec une IA locale : des nuances, des conditions ou des engagements peuvent se perdre."
           },
           {
-            "p": "Une réunion d'environ 15 minutes constitue généralement un point de départ plus accessible pour les essais de résumé. Ce n'est ni une limite automatique ni une garantie : la densité des échanges, la langue et le modèle comptent aussi. Au-delà, le volume du texte et les liens à préserver rendent la synthèse plus difficile. Avec 48 Go de mémoire unifiée ou davantage, un Mac peut faire tourner des modèles plus volumineux et obtenir de meilleurs résultats ; cette possibilité ne doit pas devenir un prérequis pour utiliser Soufflé."
+            "p": "Un Mac plus puissant permet d’utiliser de plus gros modèles, mais ne garantit pas un meilleur résumé. Soufflé explore des solutions adaptées aux différentes configurations Apple Silicon, y compris les plus modestes."
+          }
+        ]
+      },
+      {
+        "id": "summary-activation",
+        "icon": "sliders",
+        "h": "Activer les résumés",
+        "blocks": [
+          {
+            "p": "Dans <strong>Paramètres → IA</strong>, activez <strong>Résumés de réunion</strong>. Choisissez ensuite Apple Intelligence, s’il est proposé, ou un modèle Ollama."
           },
           {
-            "p": "Le modèle local d'Apple Intelligence dispose d'une <a href=\"https://developer.apple.com/documentation/foundationmodels/managing-the-context-window\">fenêtre de 4 096 tokens par session</a>, partagée entre les instructions, l'entrée et la réponse. On ne peut donc pas lui confier une longue transcription entière en une seule passe. Les modèles autour de 7–8B accessibles sur davantage de Mac ont des fenêtres variables : le nombre de paramètres ne fixe pas à lui seul le contexte. Même avec une grande fenêtre annoncée, la mémoire, le temps de calcul et la fidélité sur un long texte restent des contraintes. Soufflé utilise des étapes intermédiaires pour les longues sources, mais ce découpage peut lui aussi perdre de l'information."
+            "p": "Ouvrez une réunion terminée pour générer son résumé. Vous pouvez adapter les consignes pour privilégier, par exemple, les décisions et les prochaines actions."
           },
           {
-            "p": "<strong>Expérimentation LLMLingua-2.</strong> Le modèle Microsoft <code>llmlingua-2-bert-base-multilingual-cased-meetingbank</code> classe les mots pour retenir des fragments de la transcription originale. Il raccourcit l'entrée ; il ne produit pas lui-même un résumé rédigé et n'augmente pas la fenêtre physique du modèle de résumé. Le réglage par défaut conserve une cible de <strong>65 % du texte</strong>, soit environ un tiers de mots en moins. Des éléments protégés peuvent faire dépasser cette cible. Sous 65 %, l'interface affiche « Une valeur basse omet des mots. ». Une compaction peut néanmoins perdre des détails ou des relations : gardez la transcription comme référence."
+            "p": "Cette option est désactivée par défaut. La désactiver à nouveau conserve vos réglages et les résultats déjà enregistrés. La reformulation des dictées garde son propre interrupteur."
+          }
+        ]
+      },
+      {
+        "id": "summary-compaction",
+        "icon": "layers",
+        "h": "Garder une version plus courte",
+        "blocks": [
+          {
+            "p": "La compaction prépare une version plus courte de la transcription. Elle peut aider à préparer un résumé ou servir de texte compact à consulter séparément, sans lancer de résumé."
           },
           {
-            "p": "Deux options sont indépendantes : <strong>compresser les longues transcriptions avant le résumé</strong>, pour réduire l'entrée des étapes intermédiaires, et <strong>créer aussi une version compacte lors du résumé</strong>, pour conserver un texte consultable à côté de la source. Les résumés courts utilisent le texte original. Vous pouvez aussi générer ou régénérer la version compacte depuis une réunion, sans lancer de résumé. Le premier téléchargement représente environ 713 Mo, puis les poids sont préparés localement en fp16 d'environ 355 Mo. Après installation, ce traitement est local et hors ligne. Modifier la source marque le compact comme obsolète. Paramètres → IA permet aussi de supprimer le modèle de compression, même si les résumés sont désactivés. Les compacts et les préférences sont conservés ; la suppression est refusée si le modèle est occupé."
+            "p": "Le réglage par défaut vise à conserver <strong>65 % du texte</strong>. Commencez avec cette valeur : la réduire davantage peut faire disparaître des détails importants."
           },
           {
-            "p": "Les résumés expérimentaux utilisent Apple Intelligence, lorsqu'il est disponible sur macOS 26 ou plus récent, ou Ollama. Pour essayer Ollama, installez le serveur et téléchargez un modèle de conversation ; sa disponibilité ne garantit pas la qualité des longs résumés :"
+            "p": "L’original reste conservé. Si vous corrigez la transcription, régénérez la version compacte pour tenir compte des changements."
+          }
+        ]
+      },
+      {
+        "id": "summary-ollama",
+        "icon": "server",
+        "h": "Installer Ollama",
+        "blocks": [
+          {
+            "p": "Si Apple Intelligence est disponible, vous pouvez le choisir directement dans Soufflé. Pour utiliser Ollama, installez-le puis téléchargez un premier modèle. Avec Homebrew :"
           },
           {
             "code": "brew install ollama\nbrew services start ollama\nollama pull qwen2.5:7b"
           },
           {
-            "p": "Une fois Résumés de réunion activé dans Paramètres → IA, laissez le serveur sur <code>http://localhost:11434</code> et choisissez votre modèle. <code>qwen2.5:7b</code> est une option de départ proposée par l'app, pas une validation de qualité sur les réunions longues. Vous pouvez modifier les modèles de consignes et comparer les résultats à la transcription. Le fournisseur est partagé avec la reformulation des dictées, qui reste utilisable sans activer les résumés."
+            "p": "Dans <strong>Paramètres → IA</strong>, sélectionnez Ollama, gardez l’adresse <code>http://localhost:11434</code> et choisissez le modèle téléchargé."
           },
           {
-            "p": "Avec Apple Intelligence ou Ollama sur <code>localhost</code>, le texte est traité sur votre Mac. Si vous remplacez l'adresse par un serveur Ollama distant, Soufflé lui envoie le texte nécessaire au résumé ou à la reformulation. Choisissez ce serveur en connaissance de cause."
+            "p": "Avec cette adresse, le traitement reste sur votre Mac. Si vous choisissez un serveur distant, celui-ci reçoit le texte que vous lui envoyez."
+          }
+        ]
+      },
+      {
+        "id": "summary-cloud",
+        "icon": "plug",
+        "h": "Utiliser votre assistant IA habituel",
+        "blocks": [
+          {
+            "p": "Vous pouvez aussi confier vos transcriptions à Claude, ChatGPT ou un autre assistant, via un client compatible avec le <strong>MCP de Soufflé</strong>. Cela reste possible sans activer les résumés intégrés."
           },
           {
-            "p": "<strong>Votre LLM cloud reste une autre voie.</strong> Le serveur MCP local de Soufflé permet à un client compatible de lire les transcriptions originales, même lorsque les résumés intégrés sont désactivés. Vous pouvez confier cette source à Claude, ChatGPT ou un autre LLM cloud, avec la connexion MCP adaptée au client, pour obtenir une synthèse plus aboutie et alimenter votre second cerveau. Le serveur fourni par Soufflé est local, en lecture seule et utilise stdio ; la configuration dépend du client, et tous les clients n'acceptent pas directement ce transport. Soufflé ne fournit ni intégration directe à ces services ni synchronisation cloud automatique. Si vous choisissez ce flux de travail, le client externe transmet le texte au fournisseur choisi et gère vos notes selon ses propres réglages. Voir <a href=\"/fr/docs/privacy-and-data/#mcp\">la configuration MCP</a>."
+            "p": "Cette connexion est à configurer de votre côté. Vous choisissez les données partagées avec le service ; Soufflé n’active aucun partage ni synchronisation cloud automatiquement."
+          },
+          {
+            "p": "Pour aller plus loin : <a href=\"/fr/docs/privacy-and-data/#mcp\">connecter un client MCP à vos transcriptions</a>."
           }
         ]
       },
@@ -1036,7 +1080,8 @@
     "nextSteps": "Pour aller plus loin",
     "updated": "Mis à jour le",
     "updatedDate": "7 novembre 2026",
-    "readGuide": "Guide :"
+    "readGuide": "Guide :",
+    "experimental": "Expérimental"
   },
   "privacy": {
     "title": "Privé pour de vrai, pas juste en théorie.",

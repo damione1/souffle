@@ -115,6 +115,13 @@
      measured at its largest state once and pinned to that width, so the row
      holds still while the type inside it steps. */
   var reserve = function () {
+    // The folded menu stretches links across a row. Measuring that width
+    // as a minimum would push the menu past its gutter after a tablet resize.
+    var toggle = document.querySelector(".run-toggle");
+    if (toggle && getComputedStyle(toggle).display !== "none") {
+      Object.keys(runLinks).forEach(function (key) { runLinks[key].style.minWidth = ""; });
+      return;
+    }
     Object.keys(runLinks).forEach(function (key) {
       var a = runLinks[key];
       a.style.minWidth = "";
@@ -224,7 +231,7 @@
 })();
 
 /* Narrow screens: the bill of acts folds into the top line, opened by the
-   toggle. CSS hides the panel above 780px, so a class left behind by a
+   toggle. CSS hides the panel above 1080px, so a class left behind by a
    resize costs nothing. */
 (function () {
   "use strict";
@@ -258,5 +265,5 @@
     if (!e.target.closest("#margin-run")) set(false);
   });
 
-  window.matchMedia("(min-width: 781px)").addEventListener("change", function () { set(false); });
+  window.matchMedia("(min-width: 1081px)").addEventListener("change", function () { set(false); });
 })();

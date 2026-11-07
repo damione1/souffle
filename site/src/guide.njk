@@ -5,11 +5,14 @@ layout: layouts/base.njk
 isDocs: true
 tags: sitemap
 ---
+{% from "icons.njk" import icon %}
+{% from "partials/guide_label.njk" import guideLabel, experimentalStamp %}
 {% set text = guide[locale.code] %}
 {% set docs = "/" + locale.dir + "docs/" %}
 <article class="band">
   <header class="sheet docs-heading docs-lede">
     <nav class="t-2xs" aria-label="{{ t.docs.breadcrumb }}"><a href="/{{ locale.dir }}">{{ t.nav.home }}</a> / <a href="{{ docs }}">{{ t.footer.docs }}</a></nav>
+    {% if guide.experimental %}<div>{{ experimentalStamp(t.docs.experimental) }}</div>{% endif %}
     <h1 class="t-l">{{ text.title }}</h1>
     <p class="t-s measure">{{ text.intro }}</p>
     <p class="t-2xs dim">{{ t.docs.updated }} <time datetime="2026-11-07">{{ t.docs.updatedDate }}</time></p>
@@ -29,7 +32,7 @@ tags: sitemap
           <nav class="docs-group" aria-label="{{ t.docs.allGuides }}">
             <a class="t-2xs" href="{{ docs }}">{{ t.docs.allGuides }}</a>
             {% for entry in guides %}
-            <a class="t-2xs" href="{{ docs }}{{ entry.slug }}/"{% if entry.slug == guide.slug %} aria-current="page"{% endif %}>{{ entry[locale.code].title }}</a>
+            <a class="t-2xs guide-link" href="{{ docs }}{{ entry.slug }}/"{% if entry.slug == guide.slug %} aria-current="page"{% endif %}>{{ guideLabel(entry, locale, t.docs.experimental) }}</a>
             {% endfor %}
           </nav>
         </div>
@@ -44,7 +47,7 @@ tags: sitemap
       </section>
       {% for s in t.docs.sections | guideSections(guide.sections) %}
       <section id="{{ s.id }}" class="docs-section">
-        <h2 class="t-m">{{ s.h }}</h2>
+        <h2 class="t-m docs-section-heading">{% if s.icon %}{{ icon(s.icon, 23) }}{% endif %}<span>{{ s.h }}</span></h2>
         {% for b in s.blocks %}
           {% if b.p %}<p class="docs-p t-xs measure">{{ b.p | safe }}</p>
           {% elif b.code %}<pre class="docs-code"><code>{{ b.code | escape }}</code></pre>
@@ -62,7 +65,7 @@ tags: sitemap
         <h2 class="t-m">{{ t.docs.nextSteps }}</h2>
         <ul class="guide-topics t-xs">
           {% for entry in guides %}{% if entry.slug != guide.slug %}
-          <li><a href="{{ docs }}{{ entry.slug }}/">{{ entry[locale.code].title }}</a></li>
+          <li><a class="guide-link" href="{{ docs }}{{ entry.slug }}/">{{ guideLabel(entry, locale, t.docs.experimental) }}</a></li>
           {% endif %}{% endfor %}
         </ul>
       </nav>

@@ -13,7 +13,8 @@
       "description": "Installez Soufflé sur un Mac Apple Silicon, accordez les permissions utiles, téléchargez un modèle local et réussissez votre première dictée.",
       "intro": "Installez l'app sur un Mac compatible, puis téléchargez un modèle vocal. La dictée ne demande ni compte ni fournisseur d'IA. Ajoutez l'audio des réunions selon vos besoins ; les résumés locaux sont une option expérimentale à activer.",
       "steps": ["Installez Soufflé avec Homebrew ou le DMG signé disponible sur GitHub, puis ouvrez l'app depuis Applications.", "Autorisez le microphone, choisissez un modèle vocal et attendez son premier téléchargement. Kyutai 1B, le modèle par défaut, traite le français et l'anglais en continu.", "Enregistrez une courte dictée et vérifiez le texte. Activez le collage automatique et autorisez l'Accessibilité si vous souhaitez insérer le texte dans l'app utilisée."]
-    }
+    },
+    "icon": "check"
   },
   {
     "slug": "dictation",
@@ -29,7 +30,8 @@
       "description": "Configurez la dictée locale sur Mac avec Soufflé : raccourcis, appui maintenu, pastille d'enregistrement, insertion du texte et reformulation facultative.",
       "intro": "Un raccourci global lance l'enregistrement et Soufflé transforme votre voix en texte sur votre Mac. Copiez le résultat ou insérez-le dans l'app utilisée, sans passer par un éditeur séparé.",
       "steps": ["Placez le curseur à l'endroit voulu, puis utilisez le raccourci de dictée. Choisissez le mode bascule ou l'appui maintenu dans Paramètres → Interface.", "Parlez, puis arrêtez l'enregistrement. Kyutai affiche le texte en continu ; Whisper et Parakeet produisent le résultat à l'arrêt.", "Collez le texte copié ou activez le collage automatique. Si une app refuse l'insertion, vérifiez l'Accessibilité ou choisissez la frappe simulée dans Paramètres → Interface."]
-    }
+    },
+    "icon": "mic"
   },
   {
     "slug": "meetings",
@@ -45,7 +47,8 @@
       "description": "Transcrivez les réunions en local, capturez l’audio système, séparez Moi/Eux avec les moteurs de Soufflé et reprenez une session sur Mac.",
       "intro": "Une réunion combine votre microphone et le son joué sur le Mac. Kyutai, Whisper, Parakeet et Apple Speech lorsqu’il est disponible séparent Moi et Eux. Il s’agit de distinguer microphone et audio système, sans identifier chaque participant distant par son nom.",
       "steps": ["Utilisez macOS 14.4 ou plus récent pour capturer l’audio système et accordez la permission correspondante. Choisissez un moteur local ; Apple Speech exige aussi un Mac et des ressources linguistiques compatibles sous macOS 26.", "Lancez une réunion depuis l'accueil ou un événement du calendrier. Vérifiez que l'audio système est actif : Micro seul signifie que les autres participants ne sont pas capturés.", "Arrêtez la réunion et relisez la transcription. Reprenez l'enregistrement pour ajouter une session ou exportez le résultat. Pour essayer résumés et compaction expérimentaux, activez d'abord Paramètres → IA → Résumés de réunion."]
-    }
+    },
+    "icon": "users"
   },
   {
     "slug": "models",
@@ -61,23 +64,26 @@
       "description": "Comparez Kyutai, Whisper, Parakeet et Apple Speech dans Soufflé : langues, aperçus en direct, stockage et séparation Moi/Eux en réunion sur Mac Apple Silicon.",
       "intro": "Kyutai produit le texte en continu. Whisper et Parakeet décodent des fenêtres audio pendant l’enregistrement : les aperçus peuvent changer avec le contexte, puis l’arrêt finalise l’audio restant. Apple Speech fournit une reconnaissance progressive sur les systèmes compatibles. Tous distinguent les sources Moi/Eux en réunion.",
       "steps": ["Pour dicter en français et en anglais avec du texte en continu, commencez par Kyutai STT 1B. Il permet aussi la séparation Moi/Eux en réunion.", "Pour les autres langues, comparez Whisper, Parakeet et Apple Speech lorsqu’il est disponible. Whisper et Parakeet affichent des aperçus révisables puis finalisent à l’arrêt ; tous peuvent séparer les sources Moi/Eux en réunion.", "Choisissez moteur et langue dans Paramètres → Transcription, puis terminez le téléchargement avant de passer hors ligne. Apple Speech exige un Mac et une langue compatibles sous macOS 26 ; ses ressources sont gérées par macOS."]
-    }
+    },
+    "icon": "layers"
   },
   {
     "slug": "summaries",
-    "sections": ["summaries"],
+    "sections": ["summaries", "summary-activation", "summary-compaction", "summary-ollama", "summary-cloud"],
     "en": {
-      "title": "Experimental meeting summaries and compaction in Soufflé",
-      "description": "Opt into experimental local summaries and LLMLingua-2 compaction. Understand long-transcript limits and the optional cloud-LLM workflow through MCP.",
-      "intro": "Available in Soufflé 0.17.0. Meeting summaries and compaction are experimental and off by default. Short meetings are a more approachable test case; faithful long summaries remain difficult on modest Apple Silicon Macs. Transcription comes first.",
-      "steps": ["Enable Summarization in Settings → AI to reveal summary providers, models, prompt templates, compaction options and meeting actions. Dictation polish and MCP transcript access do not require it.", "Choose available Apple Intelligence or an Ollama chat model. Keep Ollama on localhost for local processing; larger models require more memory, and availability does not guarantee summary quality.", "Start with a short meeting and compare every decision, condition, owner and deadline with the transcript. Around 15 minutes is a useful starting point, not an automatic quality cutoff.", "Try LLMLingua-2 compaction with the default target of 65% retained text. Compress intermediate long-summary input, save a compact version, or generate a compact without a summary. Lower values omit more words.", "For a cloud-assisted second brain, connect a compatible MCP client to the original transcripts. Client setup and data sharing are your choice; Soufflé supplies no direct cloud AI service or automatic synchronization."]
+      "title": "Meeting summaries",
+      "description": "Try meeting summaries and compact transcripts in Soufflé. See what to expect, turn them on, and use Ollama or your usual AI assistant.",
+      "intro": "Find the essentials of a meeting more easily while keeping the original transcript. Summaries and compact versions are still being evaluated.",
+      "steps": ["Enable Summarization in Settings → AI.", "Choose Apple Intelligence, if available, or an Ollama model.", "Open a completed meeting to generate its summary or compact version."]
     },
     "fr": {
-      "title": "Résumés et compaction expérimentaux dans Soufflé",
-      "description": "Activez les résumés locaux et la compaction LLMLingua-2 expérimentaux. Comprenez les limites des longues transcriptions et l'option LLM cloud via MCP.",
-      "intro": "Disponible dans Soufflé 0.17.0. Résumés et compaction sont expérimentaux et désactivés par défaut. Les réunions courtes sont un terrain d'essai plus accessible ; une synthèse fidèle de longs échanges reste difficile sur un Mac Apple Silicon modeste. La transcription reste la priorité.",
-      "steps": ["Activez Résumés de réunion dans Paramètres → IA pour afficher les fournisseurs, modèles, consignes, options de compaction et actions dans les réunions. La reformulation des dictées et la lecture des transcriptions par MCP n'en dépendent pas.", "Choisissez Apple Intelligence lorsqu'il est disponible ou un modèle de conversation Ollama. Gardez Ollama sur localhost pour un traitement local ; les gros modèles demandent davantage de mémoire et leur disponibilité ne garantit pas la qualité du résumé.", "Commencez par une réunion courte et comparez décisions, conditions, responsables et échéances à la transcription. Environ 15 minutes est un point de départ, pas une limite de qualité automatique.", "Essayez LLMLingua-2 avec la cible par défaut de 65 % de texte conservé : compressez les étapes intermédiaires des longs résumés, conservez un compact consultable ou générez un compact sans résumé. Une valeur plus basse omet davantage de mots.", "Pour un second cerveau alimenté par un LLM cloud, connectez un client MCP compatible aux transcriptions originales. Vous choisissez sa configuration et le partage des données ; Soufflé ne fournit ni service IA cloud direct ni synchronisation automatique."]
-    }
+      "title": "Résumés de réunion",
+      "description": "Essayez les résumés et les versions compactes de vos réunions dans Soufflé. Découvrez à quoi vous attendre, comment les activer et comment utiliser Ollama ou votre assistant IA.",
+      "intro": "Retrouvez plus facilement l’essentiel d’une réunion, tout en conservant la transcription originale. Les résumés et les versions compactes sont encore en évaluation.",
+      "steps": ["Activez Résumés de réunion dans Paramètres → IA.", "Choisissez Apple Intelligence, s’il est disponible, ou un modèle Ollama.", "Ouvrez une réunion terminée pour générer son résumé ou sa version compacte."]
+    },
+    "icon": "checks",
+    "experimental": true
   },
   {
     "slug": "privacy-and-data",
@@ -93,7 +99,8 @@
       "description": "Consultez les connexions réseau de Soufflé, le stockage local, l'export et la suppression, ainsi que MCP et le CLI. Comprenez l'exception d'un Ollama distant.",
       "intro": "La reconnaissance vocale est locale et votre archive reste dans un dossier que vous contrôlez. Ce guide liste les connexions réseau, explique l'export et la suppression, et présente l'accès aux transcriptions par MCP ou en ligne de commande.",
       "steps": ["Gardez Ollama sur localhost pour que les requêtes de résumé et de reformulation restent sur ce Mac. Un serveur distant que vous choisissez reçoit le texte envoyé pour ces tâches.", "Dans Paramètres → Système → Données, révélez ou exportez votre archive. Sauvegardez le dossier de données avant de le déplacer ou de le supprimer.", "Exportez une réunion pour une transcription précise, ou l'archive entière pour l'ensemble. Connectez un client MCP seulement si vous souhaitez lui donner accès à vos transcriptions locales."]
-    }
+    },
+    "icon": "shield"
   },
   {
     "slug": "troubleshooting",
@@ -109,6 +116,7 @@
       "description": "Dépannez l'audio des réunions, le collage de dictée, le microphone, les modèles et les résumés dans Soufflé. Retrouvez les journaux et désinstallez sans surprise.",
       "intro": "Partez du symptôme, puis vérifiez la permission, le modèle ou le fournisseur concerné. La plupart des problèmes d'enregistrement ou d'insertion se diagnostiquent sans effacer vos données.",
       "steps": ["Ouvrez Paramètres → Système → Permissions et vérifiez Microphone, Audio système et Accessibilité selon le besoin. Utilisez la réparation si l'entrée Accessibilité est devenue obsolète après une mise à jour.", "Vérifiez le microphone, le modèle vocal et le fournisseur d'IA sélectionnés. L'absence d'audio système, une transcription mélangée et un résumé indisponible n'ont pas les mêmes prérequis.", "Si le problème persiste, joignez les journaux récents et indiquez votre version de macOS, votre Mac et vos appareils audio dans un ticket GitHub. Sauvegardez avant de supprimer les données de l'app."]
-    }
+    },
+    "icon": "help"
   }
 ]

@@ -510,7 +510,7 @@ html { scrollbar-color: var(--ink) var(--paper); }
   display: grid; grid-template-columns: 218px minmax(0, 1fr);
   gap: clamp(32px, 4.5vw, 72px); align-items: start;
 }
-.docs-side { position: sticky; top: 24px; display: flex; flex-direction: column; gap: 22px; }
+.docs-side { position: sticky; top: 24px; display: flex; flex-direction: column; gap: 22px; max-height: calc(100vh - 48px); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
 .docs-group { display: flex; flex-direction: column; }
 .docs-group-h { padding-bottom: 6px; margin-bottom: 4px; border-bottom: 1px solid var(--rule); color: var(--fg-2); }
 .docs-group a { padding: 5px 0; border-bottom: 1px solid var(--rule-faint); }
@@ -547,6 +547,19 @@ html { scrollbar-color: var(--ink) var(--paper); }
 .docs-navigation summary { cursor: pointer; padding: 12px 0; border-block: 1px solid var(--rule); }
 .docs-menu { display: flex; flex-direction: column; gap: 24px; padding-top: 18px; }
 .docs-group a[aria-current="page"] { font-weight: 700; color: var(--ox); }
+.guide-link { display: flex; align-items: center; flex-wrap: wrap; gap: 7px 10px; }
+.guide-link-label { display: flex; align-items: flex-start; gap: 9px; min-width: 0; flex: 1 1 140px; }
+.guide-link-label > svg { flex-shrink: 0; margin-top: 0.2em; }
+.guide-link-label > span { min-width: 0; }
+.experimental-stamp {
+  display: inline-flex; align-items: center; gap: 5px; flex-shrink: 0;
+  padding: 3px 7px; border: 3px double currentColor; border-radius: 3px;
+  color: var(--ox); font-size: 10px; font-weight: 700; line-height: 1.3;
+  font-variation-settings: "wdth" 100; letter-spacing: 0.08em;
+  text-transform: uppercase; white-space: nowrap;
+}
+.docs-section-heading { display: flex; align-items: baseline; gap: 12px; }
+.docs-section-heading > svg { flex-shrink: 0; align-self: flex-start; margin-top: 0.12em; }
 
 /* ─── Narrow ─── */
 @media (max-width: 1080px) {
@@ -563,13 +576,9 @@ html { scrollbar-color: var(--ink) var(--paper); }
   .points > div:first-child { border-top: 0; padding-top: 18px; }
   .bill-row { grid-template-columns: minmax(0, 1fr); gap: 10px; }
   .docs { grid-template-columns: minmax(0, 1fr); gap: 28px; }
-  .docs-side { position: static; }
+  .docs-side { position: static; max-height: none; overflow-y: visible; }
   .guide-list { grid-template-columns: minmax(0, 1fr); }
-}
-@media (max-width: 780px) {
   .margin-run { gap: 12px; }
-  .copyline { align-items: flex-start; flex-wrap: wrap; }
-  .copyline code { white-space: normal; overflow-wrap: anywhere; }
   .run-acts, .run-langs { display: none; }
   .margin-run.is-open { flex-wrap: wrap; }
   .margin-run.is-open .run-acts,
@@ -578,9 +587,19 @@ html { scrollbar-color: var(--ink) var(--paper); }
     padding-top: 10px; margin-left: 0; border-top: 1px solid var(--rule);
   }
   .margin-run.is-open .run-acts { flex-direction: column; align-items: stretch; }
-  .margin-run.is-open .run-acts a { padding: 10px 0; border-bottom: 1px solid var(--rule-faint); }
-  .run-toggle { display: inline-flex; }
-  .run-word { margin-left: auto; flex-shrink: 1; min-width: 0; text-align: center; }
+  .margin-run.is-open .run-acts a {
+    display: flex; align-items: center; justify-content: flex-start; text-align: left;
+    min-height: 44px; padding: 10px 0; border-bottom: 1px solid var(--rule-faint);
+    font-size: 13.5px; font-variation-settings: "wdth" 92; letter-spacing: 0.08em;
+    transition: none;
+  }
+  .margin-run.is-open .run-langs a { display: flex; align-items: center; justify-content: center; min-width: 44px; min-height: 44px; }
+  .run-toggle { display: inline-flex; align-items: center; justify-content: center; min-width: 44px; min-height: 44px; }
+  .run-word { display: flex; align-items: center; justify-content: center; min-height: 44px; margin-left: auto; flex-shrink: 1; min-width: 0; text-align: center; }
+}
+@media (max-width: 780px) {
+  .copyline { align-items: flex-start; flex-wrap: wrap; }
+  .copyline code { white-space: normal; overflow-wrap: anywhere; }
   .kv div { flex-direction: column; gap: 2px; }
   .kv div > :last-child { text-align: left; }
   .docs-row { grid-template-columns: minmax(0, 1fr); gap: 3px; }

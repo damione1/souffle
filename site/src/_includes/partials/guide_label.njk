@@ -1,0 +1,10 @@
+{% from "icons.njk" import icon %}
+
+{% macro experimentalStamp(text) %}
+<span class="experimental-stamp">{{ icon("flask", 13) }}<span>{{ text }}</span></span>
+{% endmacro %}
+
+{% macro guideLabel(entry, locale, stampText, size = 16) %}
+<span class="guide-link-label">{{ icon(entry.icon, size) }}<span>{{ entry[locale.code].title }}</span></span>
+{% if entry.experimental %}{{ experimentalStamp(stampText) }}{% endif %}
+{% endmacro %}
