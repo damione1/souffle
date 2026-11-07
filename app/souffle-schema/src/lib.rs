@@ -19,13 +19,13 @@ pub const APP_IDENTIFIER: &str = "com.souffle.desktop";
 pub const NIGHTLY_APP_IDENTIFIER: &str = "com.souffle.desktop.nightly";
 pub const DB_FILENAME: &str = "souffle.db";
 
-/// Schema version 17 adds the local dictionary suggestion queue. Meeting
-/// and dictation columns consumed by the read-only sidecar stay compatible.
+/// Schema version 18 adds versioned, source-bound compact transcripts. The
+/// sidecar NULL-projects compact fields for older database schemas.
 ///
 /// Both the writer (`db::schema` in the app) and the reader (`souffle-mcp`)
 /// build against this number. The sidecar refuses to serve a database whose
 /// stored version is higher, because the columns it reads may have moved.
-pub const SCHEMA_VERSION: i64 = 17;
+pub const SCHEMA_VERSION: i64 = 18;
 
 /// Who produced a segment in a meeting: the microphone is the local user
 /// (`Me`), system audio is everyone else (`Them`). `None` = single-stream
@@ -134,4 +134,30 @@ mod search_source_tests {
         assert_eq!(SearchSource::parse("unknown"), None);
         assert_eq!(Speaker::parse("spk:legacy"), None);
     }
+}
+
+/// A lossy, extractive first pass over a meeting. Exact citations use the transcript.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, specta::Type, schemars::JsonSchema)]
+pub struct CompactTranscript {
+    pub text: String,
+    pub model: String,
+    pub rate: f32,
+    pub generated_at: String,
+    pub is_stale: bool,
+    pub source_sha256: String,
+    pub approx_tokens: usize,
+}
+impl CompactTranscript {
+    /// The pre-session policy could reorder resumed recordings. Preserve its
+    /// text for inspection, but never present that derived artifact as current.
+    pub fn with_source_policy_freshness(mut self) -> Self {
+        if self.model.rsplit(';').next() == Some("mbert-offset-spans-v1") {
+            self.is_stale = true;
+        }
+        self
+    }
+}
+/// Conservative estimate shared by summary budgets and MCP responses.
+pub fn estimate_tokens(text: &str) -> usize {
+    (text.split_whitespace().count() as f32 * 1.8).ceil() as usize
 }

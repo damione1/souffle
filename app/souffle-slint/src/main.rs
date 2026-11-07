@@ -514,6 +514,7 @@ fn stopped_by_sleep(handle: &AppHandle, meeting_id: &str) -> bool {
 /// Loads a meeting and pushes it into MeetingDetail's properties - mirrors
 /// `controller.svelte.ts`'s `openMeeting`/`loadMeeting` effect.
 fn populate_meeting_detail(window: &MainWindow, handle: &AppHandle, meeting: &MeetingTranscript) {
+    compression_ui::populate(window, meeting);
     window.set_active_meeting_id(meeting.id.clone().into());
     window.set_meeting_detail_title(meeting.title.clone().into());
     window.set_meeting_detail_meta(meeting_meta(meeting));
@@ -525,7 +526,6 @@ fn populate_meeting_detail(window: &MainWindow, handle: &AppHandle, meeting: &Me
     ));
     window.set_meeting_detail_resume_error("".into());
     window.set_meeting_detail_delete_error("".into());
-    window.set_meeting_detail_summary_generation_error("".into());
     window.set_meeting_detail_export_error("".into());
     window.set_meeting_detail_audio_export_error("".into());
     let participants: Vec<MeetingParticipantChip> =
@@ -576,6 +576,7 @@ fn populate_meeting_detail(window: &MainWindow, handle: &AppHandle, meeting: &Me
     window.set_meeting_detail_summary_open_questions(
         std::rc::Rc::new(slint::VecModel::from(open_questions)).into(),
     );
+    summary_jobs::project(window, &meeting.id);
 }
 
 fn load_meeting_summary_models(window_weak: slint::Weak<MainWindow>, state: Arc<AppState>) {
@@ -4732,65 +4733,94 @@ fn wire_callbacks(
 
     let weak_sum = window.as_weak();
     let handle_sum = tauri_handle.clone();
+    let summary_jobs = summary_jobs::SummaryJobs::shared();
     window.on_meeting_detail_summarize(move || {
         let Some(window) = weak_sum.upgrade() else {
             return;
         };
-        window.set_meeting_detail_summary_is_generating(true);
-        // Empty lets summary_section.slint show its own translated
-        // "generating" placeholder until the first progress event.
-        window.set_meeting_detail_summary_generation_progress("".into());
-        window.set_meeting_detail_summary_generation_error("".into());
+        if !window.global::<SummarizationUi>().get_enabled() {
+            return;
+        }
         let id = window.get_active_meeting_id().to_string();
-        let state = handle_sum.clone();
-
+        if id.is_empty() {
+            return;
+        }
+        let generation = summary_jobs
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .begin(&id);
+        let Some(generation) = generation else {
+            summary_jobs::project(&window, &id);
+            return;
+        };
+        summary_jobs::project(&window, &id);
         let selected_model = window
             .get_meeting_detail_summary_selected_model_id()
             .to_string();
-
-        let weak_for_progress = weak_sum.clone();
+        let state = handle_sum.clone();
+        let jobs = summary_jobs.clone();
+        let progress_jobs = jobs.clone();
+        let progress_id = id.clone();
+        let weak_progress = weak_sum.clone();
         let channel =
             ProgressChannel::new(move |progress: souffle_lib::summary::SummarizeProgress| {
-                let weak = weak_for_progress.clone();
-                let text = progress.text.clone();
+                if !progress_jobs
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .progress(&progress_id, generation, progress)
+                {
+                    return;
+                }
+                let weak = weak_progress.clone();
+                let id = progress_id.clone();
+                let jobs = progress_jobs.clone();
                 let _ = slint::invoke_from_event_loop(move || {
-                    if let Some(w) = weak.upgrade() {
-                        w.set_meeting_detail_summary_generation_progress(text.into());
+                    let current = jobs
+                        .lock()
+                        .unwrap_or_else(|p| p.into_inner())
+                        .get(&id)
+                        .is_some_and(|job| job.generation() == generation);
+                    if current
+                        && let Some(w) = weak.upgrade()
+                        && w.get_active_meeting_id().as_str() == id
+                    {
+                        summary_jobs::project(&w, &id);
                     }
                 });
             });
-
-        let weak_for_done = weak_sum.clone();
-        let state_for_done = state.clone();
+        let weak = weak_sum.clone();
         souffle_lib::async_runtime::spawn(async move {
-            let model = selected_model;
-            let result = souffle_lib::commands::summarize_meeting(
+            let result = souffle_lib::commands::summarize_meeting_typed(
                 state.clone(),
                 id.clone(),
-                model,
+                selected_model,
                 None,
                 channel,
             )
             .await;
-
+            // Record terminal state even while another meeting is visible.
+            if !jobs
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .complete(&id, generation, result)
+            {
+                return;
+            }
+            let meeting = state.db.load_meeting(&id);
             let _ = slint::invoke_from_event_loop(move || {
-                if let Some(w) = weak_for_done.upgrade() {
-                    w.set_meeting_detail_summary_is_generating(false);
-                    match result {
-                        Ok(_) => {
-                            if let Ok(m) = state_for_done.db.load_meeting(&id) {
-                                populate_meeting_detail(&w, &state_for_done, &m);
-                            }
-                        }
-                        // Its own property, not `generation_progress`: that one
-                        // is only on screen while `is_generating`, so an error
-                        // written there disappeared with the spinner and a
-                        // failed click read as "the button does nothing". The
-                        // "failed:" wording lives in Slint behind @tr().
-                        Err(e) if w.get_active_meeting_id().as_str() == id => {
-                            w.set_meeting_detail_summary_generation_error(e.into());
-                        }
-                        Err(e) => eprintln!("Summary of meeting {id} failed: {e}"),
+                let current = jobs
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .get(&id)
+                    .is_some_and(|job| job.generation() == generation);
+                if current
+                    && let Some(w) = weak.upgrade()
+                    && w.get_active_meeting_id().as_str() == id
+                {
+                    if let Ok(meeting) = meeting {
+                        populate_meeting_detail(&w, &state, &meeting);
+                    } else {
+                        summary_jobs::project(&w, &id);
                     }
                 }
             });
@@ -5169,6 +5199,7 @@ fn wire_callbacks(
         summary_status_state.clone(),
     );
     settings_values::wire(window, settings_values.clone());
+    compression_ui::install_for_app(window, tauri_handle.clone());
 
     // Which summary template's name/prompt are shown in the edit fields -
     // mirrors `editingTemplateId` in controller.svelte.ts (local UI state,
@@ -6418,6 +6449,11 @@ fn wire_callbacks(
     let settings_drafts_for_ollama_url = settings_drafts.clone();
     window.on_settings_ollama_url_changed(move |value| {
         let submitted_generation = summary_refresh_state_for_ollama_url.mark_url_edited();
+        // Keep the draft on the window when the experimental toggle moves the
+        // shared provider editor between summary and dictation settings.
+        if let Some(window) = weak.upgrade() {
+            window.set_settings_ollama_url(value.clone());
+        }
         let value = value.to_string();
         let weak = weak.clone();
         let handle = handle.clone();
@@ -7572,6 +7608,7 @@ fn main() {
     }
 
     let window = MainWindow::new().expect("failed to create Slint window");
+    compression_ui::populate_settings(&window, &initial_settings);
     typography::initialize(&window).expect("Inter renderer font resolution failed");
     action_guards::install(&window, &handle);
     settings_instrumentation::install(&window);
@@ -8075,6 +8112,120 @@ mod tests {
     fn test_window() -> MainWindow {
         let _ = slint::platform::set_platform(Box::new(TestPlatform));
         MainWindow::new().unwrap()
+    }
+
+    #[test]
+    fn expanded_compact_preview_keeps_long_rows_readable_at_narrow_and_wide_sizes() {
+        use i_slint_backend_testing::ElementHandle;
+        let window = test_window();
+        window.set_active_meeting_id("preview-fixture".into());
+        window.global::<super::SummarizationUi>().set_enabled(true);
+        let ui = window.global::<super::CompressionUi>();
+        ui.set_meeting_id("preview-fixture".into());
+        ui.set_has_compact(true);
+        ui.set_has_source(true);
+        ui.set_expanded(true);
+        use super::{CompressionFailureReason as C, SummaryFailureReason as S};
+        let reasons = [
+            C::Cancelled,
+            C::InterruptedByRecording,
+            C::CaptureBusy,
+            C::RuntimeBusy,
+            C::SourceChanged,
+            C::Deleted,
+            C::Ongoing,
+            C::EmptyTranscript,
+            C::InvalidRate,
+            C::ModelUnavailable,
+            C::AlreadyRunning,
+            C::ModelBusy,
+            C::ModelRemoval,
+            C::ModelPreparation,
+            C::ModelValidation,
+            C::Inference,
+            C::Database,
+            C::Runtime,
+        ];
+        let summary_reasons = [S::Database, S::EmptyTranscript, S::Provider, S::Generation];
+        slint::select_bundled_translation("fr").unwrap();
+        let french: Vec<_> = reasons
+            .iter()
+            .map(|reason| ui.invoke_failure_text(*reason, "external diagnostic".into()))
+            .chain(summary_reasons.iter().map(|reason| {
+                ui.invoke_summary_failure_text(*reason, "external diagnostic".into())
+            }))
+            .collect();
+        slint::select_bundled_translation("en").unwrap();
+        let english: Vec<_> = reasons
+            .iter()
+            .map(|reason| ui.invoke_failure_text(*reason, "external diagnostic".into()))
+            .chain(summary_reasons.iter().map(|reason| {
+                ui.invoke_summary_failure_text(*reason, "external diagnostic".into())
+            }))
+            .collect();
+        assert!(
+            french
+                .iter()
+                .zip(&english)
+                .all(|(fr, en)| !fr.is_empty() && !en.is_empty() && fr != en),
+            "every owned failure explanation must translate"
+        );
+
+        ui.set_lines(
+            Rc::new(slint::VecModel::from(vec![
+                super::CompactLine {
+                    text: format!(
+                        "[0:12] Me: {}FINAL TIMED FACT",
+                        "Long timed source paragraph. ".repeat(90)
+                    )
+                    .into(),
+                    timed: true,
+                    seconds: 12.,
+                    session_index: 1,
+                },
+                super::CompactLine {
+                    text: format!(
+                        "{}FINAL EDITED FACT",
+                        "Long edited source paragraph. ".repeat(90)
+                    )
+                    .into(),
+                    timed: false,
+                    ..Default::default()
+                },
+            ]))
+            .into(),
+        );
+        crate::typography::initialize(&window).unwrap();
+        let adapter = TEST_SOFTWARE_WINDOW
+            .with(|slot| slot.borrow().clone())
+            .unwrap();
+        for width in [720, 1200] {
+            window
+                .window()
+                .set_size(slint::PhysicalSize::new(width, 2400));
+            let mut pixels = vec![
+                slint::platform::software_renderer::Rgb565Pixel::default();
+                width as usize * 2400
+            ];
+            for _ in 0..3 {
+                slint::platform::update_timers_and_animations();
+                adapter.request_redraw();
+                adapter.draw_if_needed(|renderer| {
+                    renderer.render(&mut pixels, width as usize);
+                });
+            }
+            let rows: Vec<_> =
+                ElementHandle::find_by_element_id(&window, "CompactTranscriptSection::row-text")
+                    .collect();
+            assert!(!rows.is_empty(), "compact rows must be rendered");
+            for row in rows {
+                assert!(
+                    row.size().height > 72.,
+                    "expanded long rows must grow instead of clipping, width {width}: {:?}",
+                    row.size()
+                );
+            }
+        }
     }
 
     #[test]

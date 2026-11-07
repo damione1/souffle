@@ -1,0 +1,69 @@
+import { CompressionModelPhase, CompactJobPhase, CompressionFailureReason, SummaryFailureReason } from "types.slint";
+export struct CompactLine { text: string, seconds: float, timed: bool, session-index: int }
+// One native controller owns this projection; lifecycle payloads stay attached in Rust.
+export global CompressionUi {
+    public function failure-text(reason: CompressionFailureReason, detail: string) -> string {
+        return reason == CompressionFailureReason.cancelled ? @tr("Compression annulée.")
+            : reason == CompressionFailureReason.interrupted-by-recording ? @tr("Compression interrompue par un enregistrement. Réessayez après l'enregistrement.")
+            : reason == CompressionFailureReason.capture-busy ? @tr("Enregistrement en cours. Réessayez après l'enregistrement.")
+            : reason == CompressionFailureReason.runtime-busy ? @tr("Le moteur est occupé. Réessayez dans un instant.")
+            : reason == CompressionFailureReason.source-changed ? @tr("La transcription a changé. Relancez la compression.")
+            : reason == CompressionFailureReason.deleted ? @tr("Cette réunion a été supprimée.")
+            : reason == CompressionFailureReason.ongoing ? @tr("Disponible une fois l'enregistrement terminé.")
+            : reason == CompressionFailureReason.empty-transcript ? @tr("La transcription ne contient aucun texte.")
+            : reason == CompressionFailureReason.invalid-rate ? @tr("Pourcentage de texte à conserver invalide.")
+            : reason == CompressionFailureReason.model-unavailable ? @tr("Modèle de compression indisponible. Le résumé utilise le texte original.")
+            : reason == CompressionFailureReason.already-running ? @tr("Une compression est déjà en cours pour cette réunion.")
+            : reason == CompressionFailureReason.model-busy ? @tr("Le modèle de compression est occupé. Réessayez après l'opération en cours.")
+            : reason == CompressionFailureReason.model-removal ? @tr("Impossible de supprimer le modèle : {}", detail)
+            : reason == CompressionFailureReason.model-preparation ? @tr("Impossible de préparer le modèle : {}", detail)
+            : reason == CompressionFailureReason.model-validation ? @tr("Modèle de compression invalide : {}", detail)
+            : reason == CompressionFailureReason.inference ? @tr("La compression a échoué : {}", detail)
+            : reason == CompressionFailureReason.database ? @tr("Erreur de base de données : {}", detail)
+            : @tr("Erreur du moteur de compression : {}", detail);
+    }
+    public function summary-failure-text(reason: SummaryFailureReason, detail: string) -> string {
+        return reason == SummaryFailureReason.database ? @tr("Erreur de base de données : {}", detail)
+            : reason == SummaryFailureReason.empty-transcript ? @tr("La transcription ne contient aucun texte.")
+            : reason == SummaryFailureReason.provider ? @tr("Fournisseur de résumé indisponible : {}", detail)
+            : @tr("La génération du résumé a échoué : {}", detail);
+    }
+    in property <bool> cache-present;
+    in property <bool> summary-enabled;
+    in property <bool> alongside-enabled;
+    in property <int> rate;
+    in property <int> rate-min;
+    in property <int> rate-max;
+    in property <int> rate-default;
+    in property <CompressionModelPhase> model-phase;
+    in property <string> model-size;
+    in property <string> download-progress;
+    in property <string> model-error;
+    in property <CompactJobPhase> job-phase;
+    in property <int> progress;
+    in property <string> job-error;
+    in property <bool> has-compact;
+    in property <bool> stale;
+    in property <bool> ongoing;
+    in property <bool> has-source;
+    in property <string> generated-at;
+    in property <int> compact-rate;
+    in property <int> approx-tokens;
+    in property <[CompactLine]> lines;
+    in property <bool> expanded;
+    in property <bool> copied;
+    in property <string> meeting-id;
+    in property <string> ui-generation;
+    out property <bool> busy: self.job-phase == CompactJobPhase.waiting-for-model || self.job-phase == CompactJobPhase.queued || self.job-phase == CompactJobPhase.compressing;
+    callback summary-changed(bool);
+    callback alongside-changed(bool);
+    callback rate-changed(int);
+    callback download();
+    callback cancel-download();
+    callback remove-model();
+    callback generate();
+    callback cancel();
+    callback copy();
+    callback expand();
+    callback seek(int, float);
+}

@@ -391,6 +391,24 @@ mod tests {
             .add_dictionary_entry("Kubernetes", Some("kubes"), Some("tech"))
             .unwrap();
         db.set_setting("unrelated", "preserved").unwrap();
+        // This fixture downgrades a freshly-created current schema. Remove
+        // newer columns too, so it represents an actual v16 database.
+        {
+            use souffle_schema::sql::{column::*, table::MEETINGS};
+            let conn = db.conn.acquire().unwrap();
+            for column in [
+                COMPACT_TRANSCRIPT,
+                COMPACT_MODEL,
+                COMPACT_RATE,
+                COMPACT_GENERATED_AT,
+                COMPACT_IS_STALE,
+                COMPACT_SOURCE_SHA256,
+                COMPACT_GENERATION_TOKEN,
+            ] {
+                conn.execute(&format!("ALTER TABLE {MEETINGS} DROP COLUMN {column}"), [])
+                    .unwrap();
+            }
+        }
         db.conn
             .acquire()
             .unwrap()

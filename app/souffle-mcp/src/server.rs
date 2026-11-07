@@ -54,7 +54,14 @@ pub struct GetMeetingArgs {
     /// Meeting id, as returned by `list_meetings` or `search_meetings`.
     pub id: String,
     /// Which sections to include: any of "transcript", "summary", "notes",
-    /// "metadata". Omit (or leave empty) to include everything.
+    /// "metadata", "compact". Omit (or leave empty) to include everything.
+    #[serde(default)]
+    pub include: Option<Vec<MeetingSection>>,
+}
+
+#[derive(Debug, Default, Deserialize, JsonSchema)]
+pub struct LatestMeetingArgs {
+    /// summary: overview; compact: lossy economical first pass; transcript: exact citations.
     #[serde(default)]
     pub include: Option<Vec<MeetingSection>>,
 }
@@ -133,7 +140,7 @@ impl SouffleMcpServer {
     }
 
     #[tool(
-        description = "Get a single meeting's transcript, summary, notes, and metadata by id. Ongoing meetings are readable live (ended_at: null, is_ongoing: true), with partial limits (up to ~15 recent un-flushed segments buffered in RAM)."
+        description = "Get a meeting by id. Use summary for an overview, compact for a lossy economical first pass (check is_stale), transcript for exact citations. Includes notes and metadata. Ongoing meetings are readable live (ended_at: null, is_ongoing: true), with partial limits (up to ~15 recent un-flushed segments buffered in RAM)."
     )]
     async fn get_meeting(
         &self,
@@ -161,11 +168,14 @@ impl SouffleMcpServer {
     }
 
     #[tool(
-        description = "Get the most recently recorded meeting (transcript, summary, notes, metadata). Ongoing meetings are readable live (ended_at: null, is_ongoing: true), with partial limits (up to ~15 recent un-flushed segments buffered in RAM)."
+        description = "Get the latest meeting; optional include selects summary (overview), compact (lossy economical first pass), transcript (exact citations), notes or metadata. Ongoing meetings are readable live (ended_at: null, is_ongoing: true), with partial limits (up to ~15 recent un-flushed segments buffered in RAM)."
     )]
-    async fn get_latest_meeting(&self) -> Result<Json<MeetingDetail>, String> {
+    async fn get_latest_meeting(
+        &self,
+        Parameters(args): Parameters<LatestMeetingArgs>,
+    ) -> Result<Json<MeetingDetail>, String> {
         self.db
-            .latest_meeting(IncludeSet::all())
+            .latest_meeting(IncludeSet::from_sections(args.include.as_deref()))
             .map(Json)
             .map_err(|e| e.to_string())
     }
@@ -326,7 +336,7 @@ mod section_contract_tests {
             );
         }
         let args: GetMeetingArgs = serde_json::from_value(
-            json!({"id":"m1","include":["transcript","summary","notes","metadata"]}),
+            json!({"id":"m1","include":["transcript","summary","notes","metadata","compact"]}),
         )
         .unwrap();
         assert_eq!(
@@ -334,6 +344,7 @@ mod section_contract_tests {
             IncludeSet::all()
         );
         for (name, section) in [
+            ("compact", MeetingSection::Compact),
             ("transcript", MeetingSection::Transcript),
             ("summary", MeetingSection::Summary),
             ("notes", MeetingSection::Notes),
@@ -344,7 +355,8 @@ mod section_contract_tests {
             assert_eq!(args.include, Some(vec![section]));
             let include = IncludeSet::from_sections(args.include.as_deref());
             assert_eq!(
-                usize::from(include.transcript)
+                usize::from(include.compact)
+                    + usize::from(include.transcript)
                     + usize::from(include.summary)
                     + usize::from(include.notes)
                     + usize::from(include.metadata),
@@ -357,7 +369,7 @@ mod section_contract_tests {
         let schema = serde_json::to_value(schemars::schema_for!(GetMeetingArgs)).unwrap();
         assert_eq!(
             schema["$defs"]["MeetingSection"]["enum"],
-            json!(["transcript", "summary", "notes", "metadata"])
+            json!(["compact", "transcript", "summary", "notes", "metadata"])
         );
     }
 }

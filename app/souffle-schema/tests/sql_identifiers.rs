@@ -72,6 +72,10 @@ fn local_identifiers(sql: &str) -> Vec<&str> {
 fn live_dual_reader_sql_has_no_local_identifiers() {
     for (name, source) in [
         ("app meetings", include_str!("../../src/db/meetings.rs")),
+        (
+            "app compression",
+            include_str!("../../src/db/compression.rs"),
+        ),
         ("app dictation", include_str!("../../src/db/dictation.rs")),
         ("app search", include_str!("../../src/db/search.rs")),
         ("app JSON import", include_str!("../../src/db/migrate.rs")),

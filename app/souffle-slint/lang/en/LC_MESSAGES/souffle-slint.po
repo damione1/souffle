@@ -887,8 +887,8 @@ msgstr "Summary"
 
 #: app/souffle-slint/ui/components/summary_section.slint:76
 msgctxt "SummarySection"
-msgid "Générer le résumé"
-msgstr "Generate summary"
+msgid "Générer le résumé (expérimental)"
+msgstr "Generate summary (experimental)"
 
 #: app/souffle-slint/ui/components/summary_section.slint:120
 msgctxt "SummarySection"
@@ -2208,8 +2208,8 @@ msgstr "Apple Intelligence is not available."
 
 #: app/souffle-slint/ui/components/settings/intelligence_section.slint:66
 msgctxt "IntelligenceSection"
-msgid "RÉSUMÉS"
-msgstr "SUMMARIES"
+msgid "RÉSUMÉS (EXPÉRIMENTAUX)"
+msgstr "SUMMARIES (EXPERIMENTAL)"
 
 #: app/souffle-slint/ui/components/settings/intelligence_section.slint:70
 msgctxt "IntelligenceSection"
@@ -3319,3 +3319,307 @@ msgstr "Unload the active model or select another model before deleting it."
 msgctxt "InterfaceSection"
 msgid "Une opération est en cours. Réessayez dans un instant."
 msgstr "An operation is in progress. Try again in a moment."
+
+msgctxt "CompressionSection"
+msgid "COMPRESSION DES TRANSCRIPTIONS"
+msgstr "TRANSCRIPT COMPRESSION"
+
+msgctxt "CompressionSection"
+msgid "Compresser les longues transcriptions avant le résumé"
+msgstr "Compress long transcripts before summarizing"
+
+msgctxt "CompressionSection"
+msgid "Réduit l'entrée des étapes intermédiaires. Les résumés courts utilisent le texte original."
+msgstr "Reduces intermediate summary input. Short summaries use the original text."
+
+msgctxt "CompressionSection"
+msgid "Compresser avant le résumé"
+msgstr "Compress before summarizing"
+
+msgctxt "CompressionSection"
+msgid "Créer aussi une version compacte lors du résumé"
+msgstr "Also create a compact version when summarizing"
+
+msgctxt "CompressionSection"
+msgid "Conserve un texte compact consultable, indépendamment de l'entrée utilisée pour le résumé."
+msgstr "Saves a readable compact text independently of the input used for the summary."
+
+msgctxt "CompressionSection"
+msgid "Créer aussi une version compacte"
+msgstr "Also create a compact version"
+
+msgctxt "CompressionSection"
+msgid "Texte à conserver"
+msgstr "Text to retain"
+
+msgctxt "CompressionSection"
+msgid "Une valeur basse omet des mots."
+msgstr "A low value omits words."
+
+msgctxt "CompressionSection"
+msgid "Pourcentage de texte à conserver"
+msgstr "Percentage of text to retain"
+
+msgctxt "CompressionSection"
+msgid "{} %"
+msgstr "{}%"
+
+msgctxt "CompressionSection"
+msgid "LLMLingua-2 de Microsoft, local et hors ligne après installation."
+msgstr "Microsoft LLMLingua-2 runs locally and offline after installation."
+
+msgctxt "CompactTranscriptSection"
+msgid "Version compacte (expérimentale)"
+msgstr "Compact version (experimental)"
+
+msgctxt "CompactTranscriptSection"
+msgid "Régénérer"
+msgstr "Regenerate"
+
+msgctxt "CompactTranscriptSection"
+msgid "Générer"
+msgstr "Generate"
+
+msgctxt "CompactTranscriptSection"
+msgid "Annuler"
+msgstr "Cancel"
+
+msgctxt "CompactTranscriptSection"
+msgid "Copié"
+msgstr "Copied"
+
+msgctxt "CompactTranscriptSection"
+msgid "Copier"
+msgstr "Copy"
+
+msgctxt "CompactTranscriptSection"
+msgid "Disponible une fois l'enregistrement terminé."
+msgstr "Available when recording has finished."
+
+msgctxt "CompactTranscriptSection"
+msgid "Cette version compacte précède les dernières modifications de la transcription. Régénérez-la avant de l'utiliser."
+msgstr "This compact version predates the latest transcript changes. Regenerate it before use."
+
+msgctxt "CompactTranscriptSection"
+msgid "En attente du modèle…"
+msgstr "Waiting for model…"
+
+msgctxt "CompactTranscriptSection"
+msgid "En attente du moteur de compression…"
+msgstr "Waiting for compression engine…"
+
+msgctxt "CompactTranscriptSection"
+msgid "Compression : {}%"
+msgstr "Compressing: {}%"
+
+msgctxt "CompactTranscriptSection"
+msgid "La compression a échoué : {}"
+msgstr "Compression failed: {}"
+
+msgctxt "CompactTranscriptSection"
+msgid "La transcription a changé. Relancez la compression."
+msgstr "The transcript changed. Generate the compact version again."
+
+msgctxt "CompactTranscriptSection"
+msgid "Compression interrompue par un enregistrement. Réessayez après l'enregistrement."
+msgstr "Compression interrupted by recording. Retry after recording."
+
+msgctxt "CompactTranscriptSection"
+msgid "LLMLingua-2 · cible {}% · {} · environ {} jetons"
+msgstr "LLMLingua-2 · target {}% · {} · about {} tokens"
+
+msgctxt "CompactTranscriptSection"
+msgid "Réduire l'aperçu"
+msgstr "Collapse preview"
+
+msgctxt "CompactTranscriptSection"
+msgid "Développer l'aperçu"
+msgstr "Expand preview"
+
+msgctxt "CompactTranscriptSection"
+msgid "Une valeur basse omet des mots."
+msgstr "A low value omits words."
+
+msgctxt "CompressionStatus"
+msgid "Modèle de compression non téléchargé ({})"
+msgstr "Compression model not downloaded ({})"
+
+msgctxt "CompressionStatus"
+msgid "Téléchargement du modèle : {}"
+msgstr "Downloading model: {}"
+
+msgctxt "CompressionStatus"
+msgid "Préparation locale du modèle fp16…"
+msgstr "Preparing the local fp16 model…"
+
+msgctxt "CompressionStatus"
+msgid "Modèle local prêt ({})"
+msgstr "Local model ready ({})"
+
+msgctxt "CompressionStatus"
+msgid "Le téléchargement a échoué : {}"
+msgstr "Download failed: {}"
+
+msgctxt "CompressionStatus"
+msgid "Réessayer le téléchargement"
+msgstr "Retry download"
+
+msgctxt "CompressionStatus"
+msgid "Télécharger le modèle"
+msgstr "Download model"
+
+msgctxt "CompressionStatus"
+msgid "Annuler le téléchargement"
+msgstr "Cancel download"
+
+msgctxt "CompactTranscriptSection"
+msgid "L'opération a échoué : {}"
+msgstr "Operation failed: {}"
+
+msgctxt "SummarizationSection"
+msgid "EXPÉRIMENTAL"
+msgstr "EXPERIMENTAL"
+
+msgctxt "SummarizationSection"
+msgid "Résumés de réunion"
+msgstr "Summarization"
+
+msgctxt "SummarizationSection"
+msgid "Active les résumés de réunion et la compaction expérimentaux. La qualité des longs résumés locaux reste à évaluer."
+msgstr "Enable experimental meeting summaries and compaction. Long local summaries are still being evaluated."
+
+msgctxt "IntelligenceSection"
+msgid "FOURNISSEUR IA DE LA DICTÉE"
+msgstr "DICTATION AI PROVIDER"
+
+msgctxt "IntelligenceSection"
+msgid "Le moteur qui nettoie la dictée."
+msgstr "The engine that polishes dictation."
+
+msgctxt "IntelligenceSection"
+msgid "Moteur de dictée IA"
+msgstr "Dictation AI engine"
+
+msgctxt "IntelligenceSection"
+msgid "Modèle de dictée IA"
+msgstr "Dictation AI model"
+
+msgctxt "SummaryTemplatesSection"
+msgid "Le modèle par défaut est utilisé lorsque vous générez le résumé d'une réunion terminée."
+msgstr "The default template is used when you generate a completed meeting's summary."
+
+msgctxt "CompressionUi"
+msgid "Compression annulée."
+msgstr "Compression cancelled."
+
+msgctxt "CompressionUi"
+msgid "Compression interrompue par un enregistrement. Réessayez après l'enregistrement."
+msgstr "Compression interrupted by recording. Retry after recording."
+
+msgctxt "CompressionUi"
+msgid "Enregistrement en cours. Réessayez après l'enregistrement."
+msgstr "Recording is active. Retry after recording."
+
+msgctxt "CompressionUi"
+msgid "Le moteur est occupé. Réessayez dans un instant."
+msgstr "The engine is busy. Retry shortly."
+
+msgctxt "CompressionUi"
+msgid "La transcription a changé. Relancez la compression."
+msgstr "The transcript changed. Generate the compact again."
+
+msgctxt "CompressionUi"
+msgid "Cette réunion a été supprimée."
+msgstr "This meeting was deleted."
+
+msgctxt "CompressionUi"
+msgid "Disponible une fois l'enregistrement terminé."
+msgstr "Available after recording ends."
+
+msgctxt "CompressionUi"
+msgid "La transcription ne contient aucun texte."
+msgstr "The transcript has no text."
+
+msgctxt "CompressionUi"
+msgid "Pourcentage de texte à conserver invalide."
+msgstr "Invalid percentage of text to retain."
+
+msgctxt "CompressionUi"
+msgid "Modèle de compression indisponible. Le résumé utilise le texte original."
+msgstr "Compression model unavailable. The summary uses the original text."
+
+msgctxt "CompressionUi"
+msgid "Une compression est déjà en cours pour cette réunion."
+msgstr "Compression is already running for this meeting."
+
+msgctxt "CompressionUi"
+msgid "Le modèle de compression est occupé. Réessayez après l'opération en cours."
+msgstr "The compression model is busy. Retry after the current operation."
+
+msgctxt "CompressionUi"
+msgid "Impossible de supprimer le modèle : {}"
+msgstr "Could not remove the model: {}"
+
+msgctxt "CompressionUi"
+msgid "Impossible de préparer le modèle : {}"
+msgstr "Could not prepare the model: {}"
+
+msgctxt "CompressionUi"
+msgid "Modèle de compression invalide : {}"
+msgstr "Invalid compression model: {}"
+
+msgctxt "CompressionUi"
+msgid "La compression a échoué : {}"
+msgstr "Compression failed: {}"
+
+msgctxt "CompressionUi"
+msgid "Erreur de base de données : {}"
+msgstr "Database error: {}"
+
+msgctxt "CompressionUi"
+msgid "Erreur du moteur de compression : {}"
+msgstr "Compression engine error: {}"
+
+msgctxt "CompressionUi"
+msgid "Fournisseur de résumé indisponible : {}"
+msgstr "Summary provider unavailable: {}"
+
+msgctxt "CompressionUi"
+msgid "La génération du résumé a échoué : {}"
+msgstr "Summary generation failed: {}"
+
+msgctxt "CompressionStatus"
+msgid "Installation du modèle en attente…"
+msgstr "Model installation queued…"
+
+msgctxt "CompressionStatus"
+msgid "Suppression du modèle…"
+msgstr "Removing model…"
+
+msgctxt "CompressionStatus"
+msgid "Le modèle de compression doit être réinstallé."
+msgstr "The compression model needs to be reinstalled."
+
+msgctxt "CompressionStatus"
+msgid "Confirmer la suppression"
+msgstr "Confirm removal"
+
+msgctxt "CompressionStatus"
+msgid "Supprimer le modèle de compression"
+msgstr "Remove compression model"
+
+msgctxt "CompressionStatus"
+msgid "Les versions compactes et les préférences seront conservées. Le modèle pourra être téléchargé à nouveau."
+msgstr "Saved compacts and preferences will be kept. You can download the model again."
+
+msgctxt "CompressionStorageSection"
+msgid "MODÈLE DE COMPRESSION LOCAL"
+msgstr "LOCAL COMPRESSION MODEL"
+
+msgctxt "CompressionStorageSection"
+msgid "LLMLingua-2 de Microsoft, local et hors ligne après installation."
+msgstr "Microsoft LLMLingua-2, local and offline after installation."
+
+msgctxt "CompressionStatus"
+msgid "Annuler"
+msgstr "Cancel"

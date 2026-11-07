@@ -89,6 +89,7 @@ safetensors = "0.7"
 reqwest = { version = "0.12", features = ["stream", "blocking"] }
 futures-util = "0.3"
 sha2 = "0.10"
+tokenizers = { version = "=0.23.1", default-features = false, features = ["onig"] }
 
 # Phase 6: Whisper engine via whisper.cpp
 whisper-rs = { version = "0.16", features = ["metal", "tracing_backend"] }

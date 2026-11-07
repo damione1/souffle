@@ -1,3 +1,5 @@
+import { CompactTranscriptSection } from "components/compact_transcript_section.slint";
+import { SummarizationUi } from "summarization.slint";
 import { AppText, AppTextInput, Typography, TypographyStyle } from "@typography";
 import { NotesSaveState, MeetingExportFormat, WakeResumeNotice } from "types.slint";
 import { ActionGuards, MeetingDeletePermission } from "action_guards.slint";
@@ -818,7 +820,9 @@ export component MeetingDetail inherits Rectangle {
                     copy-requested => { root.copy-transcript-requested(); }
                 }
 
-                if !root.is-empty-meeting: SummarySection {
+                if SummarizationUi.enabled: CompactTranscriptSection { }
+
+                if SummarizationUi.enabled && !root.is-empty-meeting: SummarySection {
                     vertical-stretch: 0;
                     summary: root.summary;
                     summary-is-stale: root.summary-is-stale;

@@ -102,6 +102,7 @@ pub fn populate(window: &MainWindow, settings: &AppSettings) {
     window.set_settings_stutter_collapse(settings.stutter_collapse);
     window.set_settings_dictionary_correction(settings.dictionary_correction);
 
+    crate::compression_ui::populate_settings(window, settings);
     let bounds = SettingsOptions::current();
     window.set_settings_diagnostic_max_minutes(bounds.meeting_diagnostic_max_minutes as i32);
     window.set_settings_diagnostic_megabytes_per_hour(

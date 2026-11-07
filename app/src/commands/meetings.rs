@@ -49,6 +49,7 @@ fn delete_meeting_in(
     recordings_dir: &std::path::Path,
 ) -> Result<(), crate::meeting_access::MeetingDeleteError> {
     state.meeting_access.delete(&state.machine, id, || {
+        state.compression.cancel(id);
         state.db.delete_meeting(id)?;
         if recordings_dir.exists()
             && let Err(e) = std::fs::remove_dir_all(recordings_dir)
@@ -757,6 +758,9 @@ pub async fn pull_recommended_ollama_model(
 /// `template_id` picks the summary template controlling the final-pass system
 /// prompt; `None` (or an unknown id) falls back to the default template
 /// configured in settings, so automatic summarization always uses the default.
+pub use crate::summary::SummaryCommandError;
+
+/// Legacy generic-string command boundary, retained for existing consumers.
 pub async fn summarize_meeting(
     state: Arc<AppState>,
     id: String,
@@ -764,23 +768,56 @@ pub async fn summarize_meeting(
     template_id: Option<String>,
     channel: ProgressChannel<crate::summary::SummarizeProgress>,
 ) -> Result<(), String> {
-    let transcript = state.db.load_meeting(&id)?;
-    let generated_from_edited = transcript.edited_transcript.clone();
+    summarize_meeting_typed(state, id, model, template_id, channel)
+        .await
+        .map_err(|error| error.to_string())
+}
+/// Native lifecycle consumers keep database/provider/generation failures typed.
+pub async fn summarize_meeting_typed(
+    state: Arc<AppState>,
+    id: String,
+    model: String,
+    template_id: Option<String>,
+    channel: ProgressChannel<crate::summary::SummarizeProgress>,
+) -> Result<(), SummaryCommandError> {
+    let settings =
+        AppSettings::load(&state.db).map_err(|detail| SummaryCommandError::Database { detail })?;
+    summarize_meeting_with_settings(state, id, model, template_id, channel, settings).await
+}
+
+/// Summarize with invocation-specific settings; compact persistence precedes
+/// generative work, while compression failure falls back to the original input.
+pub async fn summarize_meeting_with_settings(
+    state: Arc<AppState>,
+    id: String,
+    model: String,
+    template_id: Option<String>,
+    channel: ProgressChannel<crate::summary::SummarizeProgress>,
+    settings: AppSettings,
+) -> Result<(), SummaryCommandError> {
+    let transcript = state
+        .db
+        .load_meeting(&id)
+        .map_err(|detail| SummaryCommandError::Database { detail })?;
     let generated_from_notes = transcript.notes.clone();
-    let settings = AppSettings::load(&state.db)?;
 
-    let (text, turn_units) = match transcript.edited_transcript {
-        Some(ref edited) if !edited.is_empty() => (edited.clone(), None),
-        _ => {
-            let turns = crate::summary::turns_from_segments(&transcript.segments);
-            let text = turns.join("\n");
-            (text, Some(turns))
-        }
-    };
-
+    let source = crate::summary::compress::CompressionInput::from_meeting(&transcript);
+    let text = source.lines.join("\n");
     if text.is_empty() {
-        return Err("Transcript has no text".into());
+        return Err(SummaryCommandError::EmptyTranscript);
     }
+    let turn_units = source.segmented.then_some(source.lines.as_slice());
+    let compressed_map = state
+        .compression
+        .prepare_summary_map(
+            state.clone(),
+            &transcript,
+            &source,
+            &text,
+            &model,
+            &settings,
+        )
+        .await?;
 
     let final_system_prompt =
         crate::summary::resolve_summary_template_prompt(&settings, template_id.as_deref());
@@ -794,7 +831,8 @@ pub async fn summarize_meeting(
     let db = state.db.clone();
     let summary = crate::summary::summarize_stream(
         &text,
-        turn_units.as_deref(),
+        turn_units,
+        compressed_map.as_ref(),
         transcript.notes.as_deref(),
         &transcript.participants,
         &model,
@@ -805,7 +843,8 @@ pub async fn summarize_meeting(
             channel_clone.send(progress);
         },
     )
-    .await?;
+    .await
+    .map_err(|detail| SummaryCommandError::Generation { detail })?;
 
     channel.send(crate::summary::SummarizeProgress {
         text: String::new(),
@@ -836,9 +875,10 @@ pub async fn summarize_meeting(
         &summary,
         structured.as_ref(),
         &model,
-        generated_from_edited.as_deref(),
+        &source.source_sha256,
         generated_from_notes.as_deref(),
-    )?;
+    )
+    .map_err(|detail| SummaryCommandError::Database { detail })?;
 
     Ok(())
 }

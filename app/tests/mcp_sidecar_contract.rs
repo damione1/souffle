@@ -66,6 +66,7 @@ fn build_meeting(id: &str, title: &str, is_ongoing: bool) -> MeetingTranscript {
             },
         ],
         summary: Some("A short summary of the contract test meeting.".to_string()),
+        compact_transcript: None,
         summary_is_stale: false,
         summary_model: Some("qwen2.5".to_string()),
         summary_generated_at: ended_at,
@@ -260,6 +261,13 @@ fn every_shared_identifier_resolves_against_the_real_app_schema() {
                 col::PARTICIPANTS,
                 col::STRUCTURED_SUMMARY,
                 col::SYSTEM_AUDIO,
+                col::COMPACT_TRANSCRIPT,
+                col::COMPACT_MODEL,
+                col::COMPACT_RATE,
+                col::COMPACT_GENERATED_AT,
+                col::COMPACT_IS_STALE,
+                col::COMPACT_SOURCE_SHA256,
+                col::COMPACT_GENERATION_TOKEN,
             ][..],
         ),
         (
@@ -320,4 +328,65 @@ fn sidecar_get_meeting_include_filter_matches_across_the_boundary() {
     assert!(detail.metadata.is_none());
     assert!(detail.summary.is_some());
     assert!(detail.notes.is_some());
+}
+
+#[test]
+fn compact_contract_roundtrip_and_selective_reads() {
+    use souffle_mcp::db::MeetingSection;
+    use souffle_schema::CompactTranscript;
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("compact.db");
+    let db = Database::open(&path).unwrap();
+    db.save_meeting(&build_meeting("compact", "Compact fixture", false))
+        .unwrap();
+    let snapshot = db.begin_compaction("compact").unwrap();
+    let compact = CompactTranscript {
+        text: "[0:00] Alice Martin ne paie pas 42 euros".into(),
+        model: "fixture-pinned-model-policy".into(),
+        rate: 0.5,
+        generated_at: Utc::now().to_rfc3339(),
+        is_stale: false,
+        source_sha256: snapshot.input.source_sha256.clone(),
+        approx_tokens: 15,
+    };
+    db.commit_compaction("compact", &snapshot, &compact)
+        .unwrap();
+    let mcp = McpDb::open(&path).unwrap();
+    let only = IncludeSet::from_sections(Some(&[MeetingSection::Compact]));
+    let detail = mcp.get_meeting("compact", only).unwrap();
+    let read = detail.compact_transcript.unwrap();
+    assert_eq!(read.text, compact.text);
+    assert_eq!(read.model, compact.model);
+    assert_eq!(read.source_sha256, compact.source_sha256);
+    assert!(!read.is_stale);
+    assert!(
+        detail.transcript.is_none()
+            && detail.summary.is_none()
+            && detail.notes.is_none()
+            && detail.metadata.is_none()
+    );
+    assert!(mcp.list_meetings(None, None, None, 20).unwrap()[0].has_compact);
+    assert!(
+        mcp.latest_meeting(IncludeSet::all())
+            .unwrap()
+            .compact_transcript
+            .is_some()
+    );
+    db.save_edited_transcript("compact", Some("Changed source"))
+        .unwrap();
+    assert!(
+        mcp.get_meeting("compact", only)
+            .unwrap()
+            .compact_transcript
+            .unwrap()
+            .is_stale
+    );
+    db.save_meeting(&build_meeting("absent", "No compact", false))
+        .unwrap();
+    assert!(
+        mcp.get_meeting("absent", only)
+            .unwrap()
+            .compact_transcript
+            .is_none()
+    );
 }

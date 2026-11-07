@@ -43,6 +43,7 @@ fn meeting_header(acc: &MeetingAccumulator) -> MeetingTranscript {
         recording_sessions: acc.recording_sessions.clone(),
         segments: Vec::new(),
         summary: acc.summary.clone(),
+        compact_transcript: None,
         summary_is_stale: acc.summary_is_stale,
         summary_model: acc.summary_model.clone(),
         summary_generated_at: acc.summary_generated_at,
@@ -193,6 +194,7 @@ async fn launch_meeting(
 
     let pipeline_state = Arc::clone(state);
     let acc = Arc::clone(&state.meeting_accumulator);
+    state.compression.recording_started();
     state.capture_start.begin(session_id);
     let res = crate::async_runtime::spawn_blocking(move || {
         start_pipeline_blocking(
@@ -717,6 +719,7 @@ pub async fn start_transcription(
         return Err("Already recording".into());
     }
     let session_id = next_audio_session_id(&state)?;
+    state.compression.recording_started();
     state.capture_start.begin(session_id);
 
     let on_segment: SegmentCallback = build_dictation_on_segment(channel);

@@ -124,3 +124,7 @@ under 10 seconds for the 75-minute meeting on M-series. Preserve recall by
 third, owners and two reviewed before/after extracts in the private report.
 A missing/invalid baseline or pending review means **decision pending**, never
 a measured go or no-go. SOU-107/108 remain gated on the actual result.
+
+### Input application mode
+
+Variant runs record `input_application_mode: replace_input`: they substitute the input before the production stuff/map decision. Archived runs without this field have the same historical behavior. These experiments do not measure the shipped compaction path, which selects stuff/map from the original transcript and substitutes only map input. A future shipped-path campaign must use a separate, explicit mode; archived variants and scores remain unchanged.

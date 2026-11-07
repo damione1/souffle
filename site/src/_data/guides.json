@@ -5,13 +5,13 @@
     "en": {
       "title": "Get started with Soufflé on Mac",
       "description": "Install Soufflé on an Apple Silicon Mac, grant the permissions you need, download a local speech model and make your first dictation.",
-      "intro": "Start with a supported Mac, install the app, then download one speech model. Dictation needs no account or AI provider. Add meeting audio and summaries when you need them.",
+      "intro": "Start with a supported Mac, install the app, then download one speech model. Dictation needs no account or AI provider. Add meeting audio as needed; local summaries are an experimental opt-in.",
       "steps": ["Install Soufflé with Homebrew or the signed DMG from GitHub, then open it from Applications.", "Grant Microphone access, choose a speech model and wait for its first download. Keep the default Kyutai 1B model for streaming French and English.", "Record a short dictation and check the text. Enable auto-paste and grant Accessibility access if you want the text inserted into the app you were using."]
     },
     "fr": {
       "title": "Premiers pas avec Soufflé sur Mac",
       "description": "Installez Soufflé sur un Mac Apple Silicon, accordez les permissions utiles, téléchargez un modèle local et réussissez votre première dictée.",
-      "intro": "Installez l'app sur un Mac compatible, puis téléchargez un modèle vocal. La dictée ne demande ni compte ni fournisseur d'IA. Ajoutez l'audio des réunions et les résumés selon vos besoins.",
+      "intro": "Installez l'app sur un Mac compatible, puis téléchargez un modèle vocal. La dictée ne demande ni compte ni fournisseur d'IA. Ajoutez l'audio des réunions selon vos besoins ; les résumés locaux sont une option expérimentale à activer.",
       "steps": ["Installez Soufflé avec Homebrew ou le DMG signé disponible sur GitHub, puis ouvrez l'app depuis Applications.", "Autorisez le microphone, choisissez un modèle vocal et attendez son premier téléchargement. Kyutai 1B, le modèle par défaut, traite le français et l'anglais en continu.", "Enregistrez une courte dictée et vérifiez le texte. Activez le collage automatique et autorisez l'Accessibilité si vous souhaitez insérer le texte dans l'app utilisée."]
     }
   },
@@ -38,13 +38,13 @@
       "title": "Transcribe meetings locally on Mac",
       "description": "Record meeting transcripts with Soufflé on Mac, capture system audio, separate Me from Them with Kyutai, resume sessions and manage optional audio recordings.",
       "intro": "A meeting combines your microphone with the audio playing on your Mac. With a Kyutai model, the transcript separates your voice from everyone else's. It does not identify each remote participant by name.",
-      "steps": ["Use macOS 14.4 or later for system-audio capture, grant the relevant permission and select a Kyutai model if you need Me/Them separation.", "Start a meeting from Home or a calendar event. Check that system audio is active; Mic only means the other participants are not being captured.", "Stop the meeting and review the transcript. Resume recording to add another session, export the result, or generate a summary with a configured AI provider."]
+      "steps": ["Use macOS 14.4 or later for system-audio capture, grant the relevant permission and select a Kyutai model if you need Me/Them separation.", "Start a meeting from Home or a calendar event. Check that system audio is active; Mic only means the other participants are not being captured.", "Stop the meeting and review the transcript. Resume recording to add another session or export the result. To try experimental summaries and compaction, first enable Settings → AI → Summarization."]
     },
     "fr": {
       "title": "Transcrire une réunion en local sur Mac",
       "description": "Transcrivez vos réunions avec Soufflé : audio système sur Mac, séparation Moi/Eux avec Kyutai, reprise de session et conservation facultative de l'audio.",
       "intro": "Une réunion combine votre microphone et le son joué sur le Mac. Avec un modèle Kyutai, la transcription sépare votre voix de celle des autres. Elle n'identifie pas chaque participant distant par son nom.",
-      "steps": ["Utilisez macOS 14.4 ou plus récent pour capturer l'audio système, accordez la permission correspondante et choisissez Kyutai pour la séparation Moi/Eux.", "Lancez une réunion depuis l'accueil ou un événement du calendrier. Vérifiez que l'audio système est actif : Micro seul signifie que les autres participants ne sont pas capturés.", "Arrêtez la réunion et relisez la transcription. Reprenez l'enregistrement pour ajouter une session, exportez le résultat ou générez un résumé avec un fournisseur d'IA configuré."]
+      "steps": ["Utilisez macOS 14.4 ou plus récent pour capturer l'audio système, accordez la permission correspondante et choisissez Kyutai pour la séparation Moi/Eux.", "Lancez une réunion depuis l'accueil ou un événement du calendrier. Vérifiez que l'audio système est actif : Micro seul signifie que les autres participants ne sont pas capturés.", "Arrêtez la réunion et relisez la transcription. Reprenez l'enregistrement pour ajouter une session ou exportez le résultat. Pour essayer résumés et compaction expérimentaux, activez d'abord Paramètres → IA → Résumés de réunion."]
     }
   },
   {
@@ -67,16 +67,16 @@
     "slug": "summaries",
     "sections": ["summaries"],
     "en": {
-      "title": "Set up local meeting summaries in Soufflé",
-      "description": "Generate meeting summaries, decisions and action items with Apple Intelligence or Ollama in Soufflé. Check macOS requirements and local versus remote server settings.",
-      "intro": "Summaries are an optional step after transcription. A supported Apple Intelligence configuration or an Ollama instance can turn the transcript into a summary, decisions, action items and open questions.",
-      "steps": ["Open Settings → AI and check which provider is available. Apple Intelligence requires macOS 26 or later and availability on your Mac; transcription does not require it.", "For Ollama, install the server and a chat model, then select that model in Soufflé. Keep the server URL on localhost to process the transcript on this Mac.", "Open a recorded meeting and generate its summary. Review decisions and action items before using them; you can edit the summary templates in Settings → AI."]
+      "title": "Experimental meeting summaries and compaction in Soufflé",
+      "description": "Opt into experimental local summaries and LLMLingua-2 compaction. Understand long-transcript limits and the optional cloud-LLM workflow through MCP.",
+      "intro": "Meeting summaries and compaction are experimental and off by default. Short meetings are a more approachable test case; faithful long summaries remain difficult on modest Apple Silicon Macs. Transcription comes first.",
+      "steps": ["Enable Summarization in Settings → AI to reveal summary providers, models, prompt templates, compaction options and meeting actions. Dictation polish and MCP transcript access do not require it.", "Choose available Apple Intelligence or an Ollama chat model. Keep Ollama on localhost for local processing; larger models require more memory, and availability does not guarantee summary quality.", "Start with a short meeting and compare every decision, condition, owner and deadline with the transcript. Around 15 minutes is a useful starting point, not an automatic quality cutoff.", "Try LLMLingua-2 compaction with the default target of 65% retained text. Compress intermediate long-summary input, save a compact version, or generate a compact without a summary. Lower values omit more words.", "For a cloud-assisted second brain, connect a compatible MCP client to the original transcripts. Client setup and data sharing are your choice; Soufflé supplies no direct cloud AI service or automatic synchronization."]
     },
     "fr": {
-      "title": "Configurer les résumés locaux dans Soufflé",
-      "description": "Générez résumés de réunion, décisions et tâches avec Apple Intelligence ou Ollama dans Soufflé. Vérifiez les prérequis macOS et la configuration du serveur.",
-      "intro": "Le résumé est une étape facultative après la transcription. Apple Intelligence, quand il est disponible, ou une instance Ollama extrait un résumé, des décisions, des tâches et les questions ouvertes.",
-      "steps": ["Ouvrez Paramètres → IA et vérifiez le fournisseur disponible. Apple Intelligence demande macOS 26 ou plus récent et doit être disponible sur votre Mac ; la transcription n'en dépend pas.", "Pour Ollama, installez le serveur et un modèle de conversation, puis sélectionnez ce modèle dans Soufflé. Gardez l'adresse du serveur sur localhost pour traiter le texte sur ce Mac.", "Ouvrez une réunion enregistrée et générez son résumé. Relisez décisions et tâches avant de les utiliser ; les modèles de résumé se modifient dans Paramètres → IA."]
+      "title": "Résumés et compaction expérimentaux dans Soufflé",
+      "description": "Activez les résumés locaux et la compaction LLMLingua-2 expérimentaux. Comprenez les limites des longues transcriptions et l'option LLM cloud via MCP.",
+      "intro": "Résumés et compaction sont expérimentaux et désactivés par défaut. Les réunions courtes sont un terrain d'essai plus accessible ; une synthèse fidèle de longs échanges reste difficile sur un Mac Apple Silicon modeste. La transcription reste la priorité.",
+      "steps": ["Activez Résumés de réunion dans Paramètres → IA pour afficher les fournisseurs, modèles, consignes, options de compaction et actions dans les réunions. La reformulation des dictées et la lecture des transcriptions par MCP n'en dépendent pas.", "Choisissez Apple Intelligence lorsqu'il est disponible ou un modèle de conversation Ollama. Gardez Ollama sur localhost pour un traitement local ; les gros modèles demandent davantage de mémoire et leur disponibilité ne garantit pas la qualité du résumé.", "Commencez par une réunion courte et comparez décisions, conditions, responsables et échéances à la transcription. Environ 15 minutes est un point de départ, pas une limite de qualité automatique.", "Essayez LLMLingua-2 avec la cible par défaut de 65 % de texte conservé : compressez les étapes intermédiaires des longs résumés, conservez un compact consultable ou générez un compact sans résumé. Une valeur plus basse omet davantage de mots.", "Pour un second cerveau alimenté par un LLM cloud, connectez un client MCP compatible aux transcriptions originales. Vous choisissez sa configuration et le partage des données ; Soufflé ne fournit ni service IA cloud direct ni synchronisation automatique."]
     }
   },
   {

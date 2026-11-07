@@ -10,6 +10,11 @@
 //! contract test in `app/tests/mcp_sidecar_contract.rs`, which writes
 //! through the real app `Database` and reads back through this module.
 
+use souffle_schema::CompactTranscript;
+use souffle_schema::sql::column::{
+    COMPACT_GENERATED_AT, COMPACT_IS_STALE, COMPACT_MODEL, COMPACT_RATE, COMPACT_SOURCE_SHA256,
+    COMPACT_TRANSCRIPT,
+};
 use souffle_schema::sql::{
     column::{
         CALENDAR_EVENT_ID, DURATION_SECONDS, EDITED_TRANSCRIPT, END_TIME, ENDED_AT, ID, MEETING_ID,
@@ -153,6 +158,7 @@ fn bundle_id_from_info_plist_xml(plist: &str) -> Option<String> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum MeetingSection {
+    Compact,
     Transcript,
     Summary,
     Notes,
@@ -161,6 +167,7 @@ pub enum MeetingSection {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct IncludeSet {
+    pub compact: bool,
     pub transcript: bool,
     pub summary: bool,
     pub notes: bool,
@@ -170,6 +177,7 @@ pub struct IncludeSet {
 impl IncludeSet {
     pub fn all() -> Self {
         Self {
+            compact: true,
             transcript: true,
             summary: true,
             notes: true,
@@ -188,6 +196,7 @@ impl IncludeSet {
             return Self::all();
         }
         let mut include = Self {
+            compact: false,
             transcript: false,
             summary: false,
             notes: false,
@@ -195,6 +204,7 @@ impl IncludeSet {
         };
         for section in names {
             match section {
+                MeetingSection::Compact => include.compact = true,
                 MeetingSection::Transcript => include.transcript = true,
                 MeetingSection::Summary => include.summary = true,
                 MeetingSection::Notes => include.notes = true,
@@ -225,6 +235,7 @@ pub struct MeetingSummary {
     pub duration_seconds: f64,
     pub participants: Vec<String>,
     pub has_summary: bool,
+    pub has_compact: bool,
     pub has_notes: bool,
 }
 
@@ -246,6 +257,7 @@ pub struct MeetingDetail {
     pub is_ongoing: bool,
     pub duration_seconds: f64,
     pub transcript: Option<String>,
+    pub compact_transcript: Option<CompactTranscript>,
     pub summary: Option<String>,
     pub structured_summary: Option<StructuredSummary>,
     pub notes: Option<String>,
@@ -295,6 +307,7 @@ impl SegmentLike for SegmentRow {
 }
 
 struct MeetingRow {
+    has_compact: bool,
     id: String,
     title: String,
     started_at: String,
@@ -385,6 +398,45 @@ impl McpDb {
             .map_err(|e| McpDbError::Lock(e.to_string()))
     }
 
+    /// Project no unavailable columns for older sidecars/databases; list reads only a flag.
+    fn compact_presence(&self, alias: &str) -> Result<String, McpDbError> {
+        Ok(if self.schema_version()? >= 18 {
+            format!("{alias}{COMPACT_TRANSCRIPT} IS NOT NULL")
+        } else {
+            "0".into()
+        })
+    }
+    fn read_compact(&self, id: &str) -> Result<Option<CompactTranscript>, McpDbError> {
+        let projection = if self.schema_version()? >= 18 {
+            format!(
+                "{COMPACT_TRANSCRIPT}, {COMPACT_MODEL}, {COMPACT_RATE}, {COMPACT_GENERATED_AT}, {COMPACT_IS_STALE}, {COMPACT_SOURCE_SHA256}"
+            )
+        } else {
+            "NULL, NULL, NULL, NULL, 0, NULL".into()
+        };
+        self.conn()?
+            .query_row(
+                &format!("SELECT {projection} FROM {MEETINGS} WHERE {ID}=?1"),
+                [id],
+                |row| {
+                    let text: Option<String> = row.get(0)?;
+                    text.map(|text| {
+                        Ok(CompactTranscript {
+                            approx_tokens: souffle_schema::estimate_tokens(&text),
+                            text,
+                            model: row.get(1)?,
+                            rate: row.get(2)?,
+                            generated_at: row.get(3)?,
+                            is_stale: row.get(4)?,
+                            source_sha256: row.get(5)?,
+                        }
+                        .with_source_policy_freshness())
+                    })
+                    .transpose()
+                },
+            )
+            .map_err(McpDbError::Query)
+    }
     pub fn list_meetings(
         &self,
         query: Option<&str>,
@@ -393,13 +445,14 @@ impl McpDb {
         limit: i64,
     ) -> Result<Vec<MeetingSummary>, McpDbError> {
         let conn = self.conn()?;
+        let compact_presence = self.compact_presence("m.")?;
         let rows = if let Some(q) = query.filter(|q| !q.trim().is_empty()) {
             let mut stmt = conn
                 .prepare(
                     &format!("SELECT m.{ID}, m.{TITLE}, m.{STARTED_AT}, m.{ENDED_AT}, m.{DURATION_SECONDS},
                             m.{SUMMARY}, m.{SUMMARY_MODEL}, m.{SUMMARY_GENERATED_AT},
                             m.{STRUCTURED_SUMMARY},
-                            m.{EDITED_TRANSCRIPT}, m.{NOTES}, m.{CALENDAR_EVENT_ID}, m.{PARTICIPANTS}
+                            m.{EDITED_TRANSCRIPT}, m.{NOTES}, m.{CALENDAR_EVENT_ID}, m.{PARTICIPANTS}, {compact_presence}
                      FROM {MEETINGS} m
                      WHERE m.{ID} IN (
                          SELECT {SOURCE_ID} FROM {TEXT_SEARCH}
@@ -421,7 +474,7 @@ impl McpDb {
                     &format!("SELECT m.{ID}, m.{TITLE}, m.{STARTED_AT}, m.{ENDED_AT}, m.{DURATION_SECONDS},
                             m.{SUMMARY}, m.{SUMMARY_MODEL}, m.{SUMMARY_GENERATED_AT},
                             m.{STRUCTURED_SUMMARY},
-                            m.{EDITED_TRANSCRIPT}, m.{NOTES}, m.{CALENDAR_EVENT_ID}, m.{PARTICIPANTS}
+                            m.{EDITED_TRANSCRIPT}, m.{NOTES}, m.{CALENDAR_EVENT_ID}, m.{PARTICIPANTS}, {compact_presence}
                      FROM {MEETINGS} m
                      WHERE (?1 IS NULL OR julianday(m.{STARTED_AT}) >= julianday(?1))
                        AND (?2 IS NULL OR julianday(m.{STARTED_AT}) <= julianday(?2))
@@ -436,6 +489,7 @@ impl McpDb {
             .into_iter()
             .map(|row| MeetingSummary {
                 has_summary: row.summary.is_some(),
+                has_compact: row.has_compact,
                 has_notes: row.notes.as_deref().is_some_and(|n| !n.is_empty()),
                 participants: row.participant_names(),
                 id: row.id,
@@ -449,6 +503,7 @@ impl McpDb {
     }
 
     pub fn get_meeting(&self, id: &str, include: IncludeSet) -> Result<MeetingDetail, McpDbError> {
+        let compact_presence = self.compact_presence("")?;
         // `rusqlite::Error` is a foreign `#[non_exhaustive]` enum: listing its
         // variants here would be neither possible nor useful.
         #[allow(clippy::wildcard_enum_match_arm)]
@@ -458,7 +513,7 @@ impl McpDb {
                 &format!(
                     "SELECT {ID}, {TITLE}, {STARTED_AT}, {ENDED_AT}, {DURATION_SECONDS},
                         {SUMMARY}, {SUMMARY_MODEL}, {SUMMARY_GENERATED_AT}, {STRUCTURED_SUMMARY},
-                        {EDITED_TRANSCRIPT}, {NOTES}, {CALENDAR_EVENT_ID}, {PARTICIPANTS}
+                        {EDITED_TRANSCRIPT}, {NOTES}, {CALENDAR_EVENT_ID}, {PARTICIPANTS}, {compact_presence}
                  FROM {MEETINGS} WHERE {ID} = ?1"
                 ),
                 params![id],
@@ -539,6 +594,11 @@ impl McpDb {
             None
         };
 
+        let compact_transcript = if include.compact {
+            self.read_compact(&row.id)?
+        } else {
+            None
+        };
         Ok(MeetingDetail {
             id: row.id,
             title: row.title,
@@ -547,6 +607,7 @@ impl McpDb {
             ended_at: row.ended_at,
             duration_seconds: row.duration_seconds,
             transcript,
+            compact_transcript,
             summary,
             structured_summary,
             notes,
@@ -651,6 +712,7 @@ fn map_meeting_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<MeetingRow> {
         notes: row.get(10)?,
         calendar_event_id: row.get(11)?,
         participants: row.get(12)?,
+        has_compact: row.get(13)?,
     })
 }
 
@@ -812,7 +874,7 @@ mod tests {
         .unwrap();
         conn.execute(
             &format!("INSERT INTO {VERSION_TABLE} ({VERSION}) VALUES (?1)"),
-            params![souffle_schema::SCHEMA_VERSION],
+            params![17],
         )
         .unwrap();
         (conn, dir, path)
@@ -885,11 +947,58 @@ mod tests {
     fn serves_a_database_at_the_known_version() {
         let (conn, _dir, path) = fixture_db();
         insert_meeting(&conn, "m1", "Standup", "2026-01-01T09:00:00Z", &[], None);
+        for (column, kind) in [
+            (COMPACT_TRANSCRIPT, "TEXT"),
+            (COMPACT_MODEL, "TEXT"),
+            (COMPACT_RATE, "REAL"),
+            (COMPACT_GENERATED_AT, "TEXT"),
+            (COMPACT_IS_STALE, "INTEGER NOT NULL DEFAULT 0"),
+            (COMPACT_SOURCE_SHA256, "TEXT"),
+        ] {
+            conn.execute(
+                &format!("ALTER TABLE {MEETINGS} ADD COLUMN {column} {kind}"),
+                [],
+            )
+            .unwrap();
+        }
+        set_schema_version(&conn, souffle_schema::SCHEMA_VERSION);
         drop(conn);
 
         let db = McpDb::open(&path).unwrap();
         assert_eq!(db.schema_version().unwrap(), souffle_schema::SCHEMA_VERSION);
         assert_eq!(db.list_meetings(None, None, None, 10).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn compact_reads_a_real_v17_database_without_compact_columns() {
+        let (conn, _dir, path) = fixture_db();
+        insert_meeting(
+            &conn,
+            "v17",
+            "Old schema",
+            "2026-01-01T09:00:00Z",
+            &[("compatibility text", 0., 2., None)],
+            None,
+        );
+        drop(conn);
+        let db = McpDb::open(&path).unwrap();
+        let compact = IncludeSet::from_sections(Some(&[MeetingSection::Compact]));
+        assert_eq!(db.schema_version().unwrap(), 17);
+        let detail = db.get_meeting("v17", compact).unwrap();
+        assert!(detail.compact_transcript.is_none());
+        assert!(detail.transcript.is_none());
+        assert!(
+            db.latest_meeting(compact)
+                .unwrap()
+                .compact_transcript
+                .is_none()
+        );
+        assert!(!db.list_meetings(None, None, None, 10).unwrap()[0].has_compact);
+        assert!(
+            !db.list_meetings(Some("compatibility"), None, None, 10)
+                .unwrap()[0]
+                .has_compact
+        );
     }
 
     fn insert_meeting(

@@ -10,7 +10,7 @@ use souffle_schema::sql::{
 };
 
 use chrono::{DateTime, Utc};
-use rusqlite::params;
+use rusqlite::{OptionalExtension, params};
 
 use crate::app_events::MeetingSystemAudio;
 use crate::engine::{Speaker, TranscriptionProfile, TranscriptionSegment};
@@ -23,6 +23,9 @@ use crate::transcript::{
 };
 
 use super::Database;
+use super::compression::{
+    fingerprint, invalidate_changed, invalidation_snapshot, read_compact, write_compact,
+};
 
 fn meeting_fts_text(edited_transcript: Option<&str>, segment_text: String) -> String {
     edited_transcript
@@ -68,10 +71,12 @@ impl Database {
         let tx = conn
             .transaction()
             .map_err(|e| format!("Transaction: {e}"))?;
+        let compact_before = invalidation_snapshot(&tx, &meeting.id)?;
+        let had_compact = read_compact(&tx, &meeting.id)?.is_some();
 
         tx.execute(
             &format!(
-                "INSERT OR REPLACE INTO {MEETINGS} (
+                "INSERT INTO {MEETINGS} (
                 {ID},
                 {TITLE},
                 {STARTED_AT},
@@ -89,7 +94,7 @@ impl Database {
                 {PARTICIPANTS},
                 {STRUCTURED_SUMMARY},
                 {SYSTEM_AUDIO}
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)"
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17) ON CONFLICT({ID}) DO UPDATE SET {TITLE}=excluded.{TITLE}, {STARTED_AT}=excluded.{STARTED_AT}, {ENDED_AT}=excluded.{ENDED_AT}, {DURATION_SECONDS}=excluded.{DURATION_SECONDS}, {TRANSCRIPTION_PROFILE}=excluded.{TRANSCRIPTION_PROFILE}, {RECORDING_SESSIONS}=excluded.{RECORDING_SESSIONS}, {SUMMARY}=excluded.{SUMMARY}, {SUMMARY_IS_STALE}=excluded.{SUMMARY_IS_STALE}, {SUMMARY_MODEL}=excluded.{SUMMARY_MODEL}, {SUMMARY_GENERATED_AT}=excluded.{SUMMARY_GENERATED_AT}, {EDITED_TRANSCRIPT}=excluded.{EDITED_TRANSCRIPT}, {NOTES}=excluded.{NOTES}, {CALENDAR_EVENT_ID}=excluded.{CALENDAR_EVENT_ID}, {PARTICIPANTS}=excluded.{PARTICIPANTS}, {STRUCTURED_SUMMARY}=excluded.{STRUCTURED_SUMMARY}, {SYSTEM_AUDIO}=excluded.{SYSTEM_AUDIO}"
             ),
             params![
                 meeting.id,
@@ -154,6 +159,13 @@ impl Database {
         );
         reindex_meeting_fts(&tx, &meeting.id, &full_text)?;
 
+        invalidate_changed(&tx, &meeting.id, compact_before)?;
+        if !had_compact && let Some(compact) = &meeting.compact_transcript {
+            let mut compact = compact.clone();
+            compact.is_stale |=
+                Some(compact.source_sha256.clone()) != fingerprint(&tx, &meeting.id)?;
+            write_compact(&tx, &meeting.id, &compact)?;
+        }
         tx.commit().map_err(|e| format!("Commit: {e}"))?;
         Ok(())
     }
@@ -166,8 +178,10 @@ impl Database {
     /// On resume (conflict) `ended_at` is reset to NULL and `edited_transcript`
     /// is deliberately left untouched so a user's edits survive re-recording.
     pub fn upsert_meeting_header(&self, meeting: &MeetingTranscript) -> Result<(), String> {
-        let conn = self.conn.acquire()?;
-        conn.execute(
+        let mut conn = self.conn.acquire()?;
+        let tx = conn.transaction().map_err(|e| e.to_string())?;
+        let before = invalidation_snapshot(&tx, &meeting.id)?;
+        tx.execute(
             &format!(
                 "INSERT INTO {MEETINGS} (
                 {ID}, {TITLE}, {STARTED_AT}, {ENDED_AT}, {DURATION_SECONDS},
@@ -210,6 +224,8 @@ impl Database {
             ],
         )
         .map_err(|e| format!("Upsert meeting header: {e}"))?;
+        invalidate_changed(&tx, &meeting.id, before)?;
+        tx.commit().map_err(|e| e.to_string())?;
         Ok(())
     }
 
@@ -229,6 +245,7 @@ impl Database {
         let tx = conn
             .transaction()
             .map_err(|e| format!("Transaction: {e}"))?;
+        let compact_before = invalidation_snapshot(&tx, meeting_id)?;
         let insert_segment_sql = format!(
             "INSERT INTO {SEGMENTS} ({MEETING_ID}, {TEXT}, {START_TIME}, {END_TIME}, {IS_FINAL}, {LANGUAGE}, {CONFIDENCE}, {SORT_ORDER}, {SPEAKER})
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)"
@@ -250,6 +267,7 @@ impl Database {
             )
             .map_err(|e| format!("Append segment: {e}"))?;
         }
+        invalidate_changed(&tx, meeting_id, compact_before)?;
         tx.commit().map_err(|e| format!("Commit: {e}"))?;
         Ok(())
     }
@@ -268,6 +286,7 @@ impl Database {
         let tx = conn
             .transaction()
             .map_err(|e| format!("Transaction: {e}"))?;
+        let compact_before = invalidation_snapshot(&tx, meeting_id)?;
         let update_segment_sql = format!(
             "UPDATE {SEGMENTS} SET {TEXT} = ?3 WHERE {MEETING_ID} = ?1 AND {SORT_ORDER} = ?2"
         );
@@ -294,6 +313,7 @@ impl Database {
             reindex_meeting_fts(&tx, meeting_id, &full_text)?;
         }
 
+        invalidate_changed(&tx, meeting_id, compact_before)?;
         tx.commit().map_err(|e| format!("Commit: {e}"))?;
         Ok(())
     }
@@ -499,6 +519,7 @@ impl Database {
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| format!("Collect segments: {e}"))?;
         drop(stmt);
+        let compact_transcript = read_compact(&conn, id)?;
         drop(conn);
 
         let transcription_profile = meeting.transcription_profile()?;
@@ -532,6 +553,7 @@ impl Database {
             summary_model: meeting.summary_model,
             summary_generated_at,
             edited_transcript: meeting.edited_transcript,
+            compact_transcript,
             notes: meeting.notes,
             calendar_event_id: meeting.calendar_event_id,
             participants,
@@ -639,7 +661,7 @@ impl Database {
 
     /// Update meeting summary fields and structured summary.
     ///
-    /// `generated_from_edited` / `generated_from_notes` are snapshots taken
+    /// The effective-source hash and notes are snapshots taken
     /// when summarization started. If either changed during generation, the
     /// new summary is still stored but `summary_is_stale` stays set so an
     /// older summary cannot be marked fresh.
@@ -649,37 +671,47 @@ impl Database {
         summary: &str,
         structured_summary: Option<&StructuredSummary>,
         model: &str,
-        generated_from_edited: Option<&str>,
+        generated_from_source: &str,
         generated_from_notes: Option<&str>,
     ) -> Result<(), String> {
-        let conn = self.conn.acquire()?;
+        let mut conn = self.conn.acquire()?;
+        let tx = conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .map_err(|e| format!("Begin summary update: {e}"))?;
+        let current_source = super::compression::fingerprint(&tx, id)?;
+        let current_notes: Option<Option<String>> = tx
+            .query_row(
+                &format!("SELECT {NOTES} FROM {MEETINGS} WHERE {ID}=?1"),
+                [id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|e| e.to_string())?;
+        let stale = current_source.as_deref() != Some(generated_from_source)
+            || current_notes.as_ref().map(|notes| notes.as_deref()) != Some(generated_from_notes);
         let now = Utc::now().to_rfc3339();
 
-        conn.execute(
+        tx.execute(
             &format!(
                 "UPDATE {MEETINGS}
              SET {SUMMARY} = ?1, {SUMMARY_MODEL} = ?2, {SUMMARY_GENERATED_AT} = ?3,
                  {STRUCTURED_SUMMARY} = ?4,
-                 {SUMMARY_IS_STALE} = CASE
-                   WHEN {EDITED_TRANSCRIPT} IS NOT DISTINCT FROM ?5
-                    AND {NOTES} IS NOT DISTINCT FROM ?6 THEN 0
-                   ELSE 1
-                 END
-             WHERE {ID} = ?7"
+                 {SUMMARY_IS_STALE} = ?5
+             WHERE {ID} = ?6"
             ),
             params![
                 summary,
                 model,
                 now,
                 serialize_structured_summary(structured_summary)?,
-                generated_from_edited,
-                generated_from_notes,
+                stale,
                 id
             ],
         )
         .map_err(|e| format!("Update summary: {e}"))?;
 
-        Ok(())
+        tx.commit()
+            .map_err(|e| format!("Commit summary update: {e}"))
     }
 
     /// Save an edited transcript for a meeting.
@@ -702,6 +734,7 @@ impl Database {
         let tx = conn
             .transaction()
             .map_err(|e| format!("Transaction: {e}"))?;
+        let compact_before = invalidation_snapshot(&tx, id)?;
 
         tx.execute(
             &format!(
@@ -720,6 +753,7 @@ impl Database {
         let text_to_index = meeting_fts_text(edited_transcript, joined_segment_text(&tx, id)?);
         reindex_meeting_fts(&tx, id, &text_to_index)?;
 
+        invalidate_changed(&tx, id, compact_before)?;
         tx.commit().map_err(|e| format!("Commit: {e}"))?;
 
         Ok(())
@@ -1203,7 +1237,7 @@ mod tests {
                 open_questions: vec![],
             }),
             "qwen2.5",
-            None,
+            &crate::summary::compress::CompressionInput::from_meeting(&meeting).source_sha256,
             None,
         )
         .unwrap();
@@ -1230,7 +1264,10 @@ mod tests {
                 open_questions: vec![],
             }),
             "qwen2.5",
-            None,
+            &crate::summary::compress::CompressionInput::from_meeting(
+                &db.load_meeting("m1").unwrap(),
+            )
+            .source_sha256,
             None,
         )
         .unwrap();
@@ -1239,7 +1276,10 @@ mod tests {
             "Prose only after extract fail",
             None,
             "qwen2.5",
-            None,
+            &crate::summary::compress::CompressionInput::from_meeting(
+                &db.load_meeting("m1").unwrap(),
+            )
+            .source_sha256,
             None,
         )
         .unwrap();
@@ -1602,7 +1642,10 @@ mod tests {
             "fresh from corrigé",
             None,
             "qwen2.5",
-            Some("corrigé"),
+            &crate::summary::compress::CompressionInput::from_meeting(
+                &db.load_meeting("m1").unwrap(),
+            )
+            .source_sha256,
             None,
         )
         .unwrap();
@@ -1619,14 +1662,15 @@ mod tests {
         db.save_meeting(&meeting).unwrap();
 
         // Generation started from the unedited segments.
-        let snapshot = meeting.edited_transcript.clone();
+        let snapshot =
+            crate::summary::compress::CompressionInput::from_meeting(&meeting).source_sha256;
         db.save_edited_transcript("m1", Some("corrigé")).unwrap();
         db.update_meeting_summary(
             "m1",
             "summary of the old transcript",
             None,
             "qwen2.5",
-            snapshot.as_deref(),
+            &snapshot,
             None,
         )
         .unwrap();
@@ -1640,6 +1684,40 @@ mod tests {
             loaded.summary_is_stale,
             "an older summary must not be marked fresh after an edit during generation"
         );
+    }
+
+    #[test]
+    fn update_summary_detects_raw_and_session_mutations_and_never_resurrects_deletion() {
+        let (db, _dir) = test_db();
+        let mut meeting = sample_meeting("source-race");
+        db.save_meeting(&meeting).unwrap();
+        let original =
+            crate::summary::compress::CompressionInput::from_meeting(&meeting).source_sha256;
+        meeting.segments[0].text = "Changed raw decision".into();
+        db.save_meeting(&meeting).unwrap();
+        db.update_meeting_summary(
+            &meeting.id,
+            "Old source summary",
+            None,
+            "test",
+            &original,
+            None,
+        )
+        .unwrap();
+        assert!(db.load_meeting(&meeting.id).unwrap().summary_is_stale);
+        let current = crate::summary::compress::CompressionInput::from_meeting(
+            &db.load_meeting(&meeting.id).unwrap(),
+        )
+        .source_sha256;
+        meeting.ended_at = None;
+        db.save_meeting(&meeting).unwrap();
+        db.update_meeting_summary(&meeting.id, "Before resume", None, "test", &current, None)
+            .unwrap();
+        assert!(db.load_meeting(&meeting.id).unwrap().summary_is_stale);
+        db.delete_meeting(&meeting.id).unwrap();
+        db.update_meeting_summary(&meeting.id, "Late result", None, "test", &current, None)
+            .unwrap();
+        assert!(!db.meeting_exists(&meeting.id).unwrap());
     }
 
     #[test]
@@ -1657,7 +1735,7 @@ mod tests {
             "summary of the old notes",
             None,
             "qwen2.5",
-            None,
+            &crate::summary::compress::CompressionInput::from_meeting(&meeting).source_sha256,
             notes_snapshot.as_deref(),
         )
         .unwrap();

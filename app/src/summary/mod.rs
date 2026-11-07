@@ -1,5 +1,6 @@
 mod apple;
 mod chunking;
+pub mod compress;
 mod extract;
 mod formatters;
 mod language;
@@ -40,11 +41,24 @@ pub use templates::{
     default_summary_templates, is_builtin_summary_template, merge_summary_templates,
     resolve_summary_template_prompt,
 };
-pub use turns::turns_from_segments;
+pub use turns::{SessionTurn, TurnOrigin, turns_from_segments, turns_from_sessions};
 
 pub const APPLE_INTELLIGENCE_MODEL_ID: &str = "apple-intelligence";
 const APPLE_INTELLIGENCE_MODEL_LABEL: &str = "Apple Intelligence";
 
+/// Typed failure from the summary command's orchestration phases. Provider
+/// internals retain their existing diagnostic strings at this boundary.
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
+pub enum SummaryCommandError {
+    #[error("Summary database operation failed: {detail}")]
+    Database { detail: String },
+    #[error("Transcript has no text")]
+    EmptyTranscript,
+    #[error("Summary provider unavailable: {detail}")]
+    Provider { detail: String },
+    #[error("Summary generation failed: {detail}")]
+    Generation { detail: String },
+}
 /// Prose summary is always persisted; structured extraction is best-effort.
 /// On extract/parse failure, callers should save prose with no structured data.
 pub fn structured_extract_for_persist(
@@ -493,9 +507,20 @@ pub(crate) async fn generate_with_provider(
 /// prompts. A 7B follows the English instruction language unless told
 /// explicitly which language to write in.
 #[allow(clippy::too_many_arguments)]
+pub fn needs_map(text: &str, model: &str) -> Result<bool, String> {
+    Ok(estimate_tokens(text) > chunk_config(resolve_provider(model)?).stuff_token_limit)
+}
+
+pub struct CompressedMapInput {
+    pub text: String,
+    pub turns: Option<Vec<String>>,
+}
+
+#[allow(clippy::too_many_arguments)]
 pub async fn summarize_stream(
     transcript_text: &str,
     turn_units: Option<&[String]>,
+    compressed_map: Option<&CompressedMapInput>,
     notes: Option<&str>,
     participants: &[MeetingParticipant],
     model: &str,
@@ -542,9 +567,21 @@ pub async fn summarize_stream(
     }
 
     let no_op = |_: SummarizeProgress| {};
-    let chunks = match turn_units {
+    let map_text = compressed_map
+        .map(|input| input.text.as_str())
+        .unwrap_or(transcript_text);
+    let map_turns = compressed_map
+        .and_then(|input| input.turns.as_deref())
+        .or_else(|| {
+            if compressed_map.is_none() {
+                turn_units
+            } else {
+                None
+            }
+        });
+    let chunks = match map_turns {
         Some(turns) if !turns.is_empty() => chunk_turns(turns, config),
-        _ => chunk_transcript(transcript_text, config),
+        _ => chunk_transcript(map_text, config),
     };
     let n = chunks.len();
     let mut part_summaries = Vec::with_capacity(n);

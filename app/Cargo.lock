@@ -7194,6 +7194,7 @@ dependencies = [
  "strsim",
  "tempfile",
  "thiserror 2.0.18",
+ "tokenizers",
  "tokio",
  "tracing",
  "tracing-appender",

@@ -45,5 +45,12 @@ pub mod column {
     pub const SOURCE_TYPE: &str = "source_type";
     pub const SOURCE_ID: &str = "source_id";
     /// FTS5's hidden ranking column, used by both readers.
+    pub const COMPACT_TRANSCRIPT: &str = "compact_transcript";
+    pub const COMPACT_MODEL: &str = "compact_model";
+    pub const COMPACT_RATE: &str = "compact_rate";
+    pub const COMPACT_GENERATED_AT: &str = "compact_generated_at";
+    pub const COMPACT_IS_STALE: &str = "compact_is_stale";
+    pub const COMPACT_SOURCE_SHA256: &str = "compact_source_sha256";
+    pub const COMPACT_GENERATION_TOKEN: &str = "compact_generation_token";
     pub const RANK: &str = "rank";
 }
