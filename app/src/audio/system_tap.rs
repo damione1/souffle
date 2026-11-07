@@ -350,6 +350,11 @@ impl SystemTap {
         self.shared.callbacks.load(Ordering::Relaxed)
     }
 
+    /// Samples rejected by the bounded ring (development probe telemetry).
+    pub fn dropped_samples(&self) -> u64 {
+        self.shared.dropped.load(Ordering::Relaxed)
+    }
+
     fn share_callbacks(&self) -> Arc<AtomicU64> {
         Arc::clone(&self.shared.callbacks)
     }
@@ -365,6 +370,12 @@ static LIVE_TAPS: AtomicUsize = AtomicUsize::new(0);
 /// have survived in coreaudiod. Read by [`teardown_left_orphans`] so the next
 /// tap spawn can sweep, instead of waiting for the next app launch.
 static TEARDOWN_SUSPECT: AtomicBool = AtomicBool::new(false);
+
+/// Read-only diagnostic state: a CoreAudio teardown returned an error.
+/// The exact step and OSStatus are emitted through tracing by `SystemTap::drop`.
+pub fn teardown_left_orphans() -> bool {
+    TEARDOWN_SUSPECT.load(Ordering::Relaxed)
+}
 
 /// Whether a sweep should run now: a previous teardown may have leaked, and no
 /// tap is alive to be caught in it. The flag is left set when a tap is alive,

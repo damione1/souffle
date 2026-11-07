@@ -4821,6 +4821,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6948501a91121d6399b79abaa33a8aa4ea7857fe019f341b8c23ad6e81b79b08"
 dependencies = [
  "bitflags 2.11.0",
+ "block2 0.6.2",
  "libc",
  "objc2 0.6.4",
  "objc2-core-audio",
@@ -4847,7 +4848,10 @@ version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "13a380031deed8e99db00065c45937da434ca987c034e13b87e4441f9e4090be"
 dependencies = [
+ "block2 0.6.2",
  "objc2 0.6.4",
+ "objc2-audio-toolbox",
+ "objc2-core-audio-types",
  "objc2-foundation 0.3.2",
 ]
 
@@ -6501,9 +6505,9 @@ dependencies = [
 
 [[package]]
 name = "rustls"
-version = "0.23.37"
+version = "0.23.46"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "758025cb5fccfd3bc2fd74708fd4682be41d99e5dff73c377c0646c6012c73a4"
+checksum = "48e13bd8c0e9365c43cfa5c9e8f9ad49d3c8444926c9aac819e0e4dc503c8fdf"
 dependencies = [
  "log",
  "once_cell",
@@ -7067,7 +7071,7 @@ version = "0.8.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c1c97747dbf44bb1ca44a561ece23508e99cb592e862f22222dcf42f51d1e451"
 dependencies = [
- "heck 0.5.0",
+ "heck 0.4.1",
  "proc-macro2",
  "quote",
  "syn 2.0.117",
@@ -7159,7 +7163,9 @@ dependencies = [
  "moshi",
  "objc2 0.6.4",
  "objc2-app-kit 0.3.2",
+ "objc2-audio-toolbox",
  "objc2-av-foundation",
+ "objc2-avf-audio",
  "objc2-core-audio",
  "objc2-core-audio-types",
  "objc2-core-foundation",
@@ -7184,9 +7190,11 @@ dependencies = [
  "souffle",
  "souffle-mcp",
  "souffle-schema",
+ "souffle-typography",
  "strsim",
  "tempfile",
  "thiserror 2.0.18",
+ "tokenizers",
  "tokio",
  "tracing",
  "tracing-appender",
@@ -7196,6 +7204,29 @@ dependencies = [
  "uuid",
  "vad-rs",
  "whisper-rs",
+]
+
+[[package]]
+name = "souffle-aec-probe"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "cpal",
+ "hound",
+ "libc",
+ "objc2 0.6.4",
+ "objc2-avf-audio",
+ "objc2-core-audio",
+ "objc2-core-audio-types",
+ "objc2-foundation 0.3.2",
+ "ringbuf",
+ "serde",
+ "serde_json",
+ "sha2",
+ "souffle",
+ "tempfile",
+ "tracing-subscriber",
+ "unicode-normalization",
 ]
 
 [[package]]
@@ -7219,6 +7250,7 @@ dependencies = [
 name = "souffle-schema"
 version = "0.1.0"
 dependencies = [
+ "rusqlite",
  "schemars",
  "serde",
  "serde_json",
@@ -7243,6 +7275,7 @@ dependencies = [
  "slint-build",
  "souffle",
  "souffle-schema",
+ "souffle-typography",
  "tempfile",
  "tokio",
  "uuid",
@@ -7255,6 +7288,15 @@ dependencies = [
  "hound",
  "serde",
  "toml 0.8.2",
+]
+
+[[package]]
+name = "souffle-typography"
+version = "0.0.0"
+dependencies = [
+ "sha2",
+ "tempfile",
+ "ttf-parser",
 ]
 
 [[package]]
@@ -7562,7 +7604,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.4.2",
+ "getrandom 0.3.4",
  "once_cell",
  "rustix 1.1.4",
  "windows-sys 0.60.2",

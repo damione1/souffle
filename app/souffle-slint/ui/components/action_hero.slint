@@ -1,3 +1,4 @@
+import { AppText, AppTextInput, Typography, TypographyStyle } from "@typography";
 import { Theme } from "../theme.slint";
 import { LucideIcon, IconSet } from "lucide_icon.slint";
 
@@ -66,25 +67,25 @@ export component ActionHero inherits HorizontalLayout {
                 spacing: 4px;
                 alignment: start;
 
-                Text {
+                AppText {
                     text: @tr("Dicter");
-                    font-family: "Archivo SemiBold";
-                    font-size: 15px;
+                    typography: Typography.action-title;
+
                     color: Theme.text-primary;
                 }
 
-                if root.dictation-shortcut == "": Text {
+                if root.dictation-shortcut == "": AppText {
                     text: @tr("Définissez un raccourci");
-                    font-size: 12.5px;
+                    typography: Typography.hint;
                     color: Theme.text-muted;
                 }
                 if root.dictation-shortcut != "": HorizontalLayout {
                     spacing: 5px;
                     alignment: start;
 
-                    Text {
+                    AppText {
                         text: @tr("Appuyez sur");
-                        font-size: 12.5px;
+                        typography: Typography.hint;
                         color: Theme.text-muted;
                         vertical-alignment: center;
                     }
@@ -99,10 +100,10 @@ export component ActionHero inherits HorizontalLayout {
                             padding-top: 1.5px;
                             padding-bottom: 1.5px;
 
-                            Text {
+                            AppText {
                                 text: root.dictation-shortcut;
-                                font-family: "JetBrains Mono";
-                                font-size: 11px;
+                                typography: Typography.caption;
+
                                 color: Theme.text-tertiary;
                                 vertical-alignment: center;
                             }
@@ -162,15 +163,15 @@ export component ActionHero inherits HorizontalLayout {
                 spacing: 4px;
                 alignment: start;
 
-                Text {
+                AppText {
                     text: @tr("Démarrer une réunion");
-                    font-family: "Archivo SemiBold";
-                    font-size: 15px;
+                    typography: Typography.action-title;
+
                     color: Theme.text-primary;
                 }
-                Text {
+                AppText {
                     text: @tr("Transcrire en direct avec l’audio système");
-                    font-size: 12.5px;
+                    typography: Typography.hint;
                     color: Theme.text-muted;
                     wrap: word-wrap;
                 }

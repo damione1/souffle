@@ -1,3 +1,4 @@
+import { AppText, AppTextInput, Typography, TypographyStyle } from "@typography";
 import { Theme } from "../theme.slint";
 import { LucideIcon, IconSet } from "lucide_icon.slint";
 
@@ -66,12 +67,12 @@ export component ThemedSpinBox inherits Rectangle {
         }
     }
 
-    Text {
+    AppText {
         x: 10px;
         width: parent.width - 28px;
         height: parent.height;
         text: root.value;
-        font-size: 14px;
+        typography: Typography.body;
         color: Theme.text-secondary;
         vertical-alignment: center;
         horizontal-alignment: right;

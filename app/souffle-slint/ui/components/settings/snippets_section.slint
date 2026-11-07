@@ -1,3 +1,4 @@
+import { AppText, AppTextInput, Typography, TypographyStyle } from "@typography";
 import { Theme } from "../../theme.slint";
 import { SettingsFieldVertical } from "settings_field_vertical.slint";
 import { SettingsGroup } from "settings_group.slint";
@@ -55,20 +56,20 @@ export component SnippetsSection inherits VerticalLayout {
         padding-bottom: 15px;
         spacing: 8px;
 
-        Text {
+        AppText {
             text: @tr("Dites une phrase déclencheur au début d'une dictée pour insérer un bloc de texte. La comparaison ignore la casse et les accents ; aucune retouche IA n'est appliquée quand un extrait correspond.");
-            font-size: 12px;
+            typography: Typography.secondary;
             color: Theme.text-muted;
             wrap: word-wrap;
         }
 
-        Text { text: @tr("DÉCLENCHEUR"); font-size: 10.5px; color: Theme.text-tertiary; font-family: "Archivo Bold"; letter-spacing: 1px; }
+        AppText { text: @tr("DÉCLENCHEUR"); typography: Typography.table-heading; color: Theme.text-tertiary;   }
         ThemedLineEdit {
             text <=> root.new-trigger-draft;
             placeholder: @tr("Phrase déclencheur");
             control-label: @tr("Phrase déclencheur");
         }
-        Text { text: @tr("EXPANSION"); font-size: 10.5px; color: Theme.text-tertiary; font-family: "Archivo Bold"; letter-spacing: 1px; }
+        AppText { text: @tr("EXPANSION"); typography: Typography.table-heading; color: Theme.text-tertiary;   }
         ThemedTextArea {
             text <=> root.new-expansion-draft;
             area-height: 72px;
@@ -87,16 +88,16 @@ export component SnippetsSection inherits VerticalLayout {
             }
         }
 
-        if root.add-error != "": Text {
+        if root.add-error != "": AppText {
             text: root.add-error;
             color: Theme.danger;
-            font-size: 11px;
+            typography: Typography.caption;
         }
 
-        if root.entry-count == 0: Text {
+        if root.entry-count == 0: AppText {
             text: @tr("Aucune formule.");
             color: Theme.text-muted;
-            font-size: 12px;
+            typography: Typography.secondary;
         }
     }
 
@@ -133,10 +134,10 @@ export component SnippetsSection inherits VerticalLayout {
 
                         HorizontalLayout {
                             alignment: space-between;
-                            Text {
+                            AppText {
                                 text: row.trigger;
-                                font-size: 12.5px;
-                                font-weight: 600;
+                                typography: Typography.hint-emphasis;
+
                                 color: Theme.text-primary;
                                 overflow: elide;
                             }
@@ -152,9 +153,9 @@ export component SnippetsSection inherits VerticalLayout {
                                 }
                             }
                         }
-                        Text {
+                        AppText {
                             text: row.expansion;
-                            font-size: 11px;
+                            typography: Typography.caption;
                             color: Theme.text-muted;
                             max-height: 38px;
                             wrap: word-wrap;
@@ -165,21 +166,21 @@ export component SnippetsSection inherits VerticalLayout {
                     if row.editing: VerticalLayout {
                         spacing: 4px;
 
-                        Text { text: @tr("DÉCLENCHEUR"); font-size: 10.5px; color: Theme.text-tertiary; font-family: "Archivo Bold"; letter-spacing: 1px; }
+                        AppText { text: @tr("DÉCLENCHEUR"); typography: Typography.table-heading; color: Theme.text-tertiary;   }
                         ThemedLineEdit {
                             text <=> root.edit-trigger-draft;
                             control-label: @tr("Phrase déclencheur");
                         }
-                        Text { text: @tr("EXPANSION"); font-size: 10.5px; color: Theme.text-tertiary; font-family: "Archivo Bold"; letter-spacing: 1px; }
+                        AppText { text: @tr("EXPANSION"); typography: Typography.table-heading; color: Theme.text-tertiary;   }
                         ThemedTextArea {
                             text <=> root.edit-expansion-draft;
                             area-height: 72px;
                             control-label: @tr("Texte de l'extrait vocal");
                         }
-                        if root.update-error != "": Text {
+                        if root.update-error != "": AppText {
                             text: root.update-error;
                             color: Theme.danger;
-                            font-size: 11px;
+                            typography: Typography.caption;
                             overflow: elide;
                         }
                         HorizontalLayout {
@@ -197,10 +198,10 @@ export component SnippetsSection inherits VerticalLayout {
                         }
                     }
 
-                    if root.delete-error != "" && root.delete-error-id == row.id: Text {
+                    if root.delete-error != "" && root.delete-error-id == row.id: AppText {
                         text: root.delete-error;
                         color: Theme.danger;
-                        font-size: 11px;
+                        typography: Typography.caption;
                         overflow: elide;
                     }
                 }

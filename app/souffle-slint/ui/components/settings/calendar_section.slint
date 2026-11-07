@@ -1,3 +1,4 @@
+import { AppText, AppTextInput, Typography, TypographyStyle } from "@typography";
 import { SettingsField } from "settings_field.slint";
 import { SettingsGroup } from "settings_group.slint";
 import { Theme } from "../../theme.slint";
@@ -57,10 +58,10 @@ export component CalendarSection inherits VerticalLayout {
                 spacing: 16px;
                 alignment: space-between;
 
-                Text {
+                AppText {
                     text: @tr("L'accès au calendrier a été refusé.");
                     color: Theme.text-primary;
-                    font-size: 13.5px;
+                    typography: Typography.field-label;
                     wrap: word-wrap;
                     vertical-alignment: center;
                     horizontal-stretch: 1;
@@ -107,14 +108,14 @@ export component CalendarSection inherits VerticalLayout {
             spacing: 8px;
             alignment: start;
 
-            Text {
+            AppText {
                 text: @tr("Calendriers");
-                font-size: 13.5px;
+                typography: Typography.field-label;
                 color: Theme.text-secondary;
             }
-            Text {
+            AppText {
                 text: @tr("Tous les calendriers sont inclus ; décochez ceux à masquer.");
-                font-size: 12px;
+                typography: Typography.secondary;
                 color: Theme.text-muted;
                 wrap: word-wrap;
             }
@@ -126,11 +127,10 @@ export component CalendarSection inherits VerticalLayout {
                 if row.show-header && row.source-title != "": VerticalLayout {
                     padding-top: 10px;
                     padding-bottom: 4px;
-                    Text {
+                    AppText {
                         text: row.source-title;
-                        font-size: 10.5px;
-                        font-family: "Archivo Bold";
-                        letter-spacing: 1px;
+                        typography: Typography.table-heading;
+
                         color: Theme.text-tertiary;
                     }
                 }
@@ -143,9 +143,9 @@ export component CalendarSection inherits VerticalLayout {
                         checked: row.selected;
                         toggled(_) => { root.calendar-toggled(row.id); }
                     }
-                    Text {
+                    AppText {
                         text: row.title;
-                        font-size: 13.5px;
+                        typography: Typography.field-label;
                         color: Theme.text-secondary;
                         vertical-alignment: center;
                     }

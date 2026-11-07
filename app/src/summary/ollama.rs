@@ -419,6 +419,8 @@ pub async fn generate_stream(
     let needed = prompt_tokens.saturating_add(budget.num_predict);
     let num_ctx = resolve_num_ctx(native, budget.num_ctx, needed);
     let num_predict = cap_num_predict(num_ctx, prompt_tokens, budget.num_predict);
+    let measurement = super::metrics::context()
+        .map(|context| context.start("ollama", temperature, Some(num_ctx), Some(num_predict)));
     if needed > num_ctx {
         tracing::warn!(
             model,
@@ -443,51 +445,69 @@ pub async fn generate_stream(
             num_predict,
         },
     };
-    let resp = client
-        .post(format!("{url}/api/generate"))
-        .json(&body)
-        .send()
-        .await
-        .map_err(|e| format!("Ollama request: {e}"))?;
-    if !resp.status().is_success() {
-        return Err(format!("Ollama error: {}", resp.status()));
-    }
-
-    let mut full_text = String::new();
-    let mut eval_count = None;
-    let mut stream = resp.bytes_stream();
-    let mut buf: Vec<u8> = Vec::new();
-
-    use futures_util::StreamExt;
-    while let Some(chunk) = stream.next().await {
-        let bytes = chunk.map_err(|e| format!("Stream read: {e}"))?;
-        buf.extend_from_slice(&bytes);
-
-        while let Some(pos) = buf.iter().position(|&b| b == b'\n') {
-            let line: Vec<u8> = buf.drain(..=pos).collect();
-            handle_ndjson_line(
-                &line,
-                &mut full_text,
-                &mut eval_count,
-                on_chunk,
-                model,
-                num_ctx,
-            );
+    let result = async {
+        let resp = client
+            .post(format!("{url}/api/generate"))
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| format!("Ollama request: {e}"))?;
+        if !resp.status().is_success() {
+            return Err(format!("Ollama error: {}", resp.status()));
         }
-    }
-    handle_ndjson_line(
-        &buf,
-        &mut full_text,
-        &mut eval_count,
-        on_chunk,
-        model,
-        num_ctx,
-    );
 
-    Ok(GenerateOutput {
-        text: full_text,
-        eval_count,
-    })
+        let mut full_text = String::new();
+        let mut eval_count = None;
+        let mut stream = resp.bytes_stream();
+        let mut buf: Vec<u8> = Vec::new();
+
+        use futures_util::StreamExt;
+        while let Some(chunk) = stream.next().await {
+            let bytes = chunk.map_err(|e| format!("Stream read: {e}"))?;
+            buf.extend_from_slice(&bytes);
+
+            while let Some(pos) = buf.iter().position(|&b| b == b'\n') {
+                let line: Vec<u8> = buf.drain(..=pos).collect();
+                record_measured_tokens(&line, measurement.as_ref());
+                handle_ndjson_line(
+                    &line,
+                    &mut full_text,
+                    &mut eval_count,
+                    on_chunk,
+                    model,
+                    num_ctx,
+                );
+            }
+        }
+        record_measured_tokens(&buf, measurement.as_ref());
+        handle_ndjson_line(
+            &buf,
+            &mut full_text,
+            &mut eval_count,
+            on_chunk,
+            model,
+            num_ctx,
+        );
+
+        Ok(GenerateOutput {
+            text: full_text,
+            eval_count,
+        })
+    }
+    .await;
+    if let Some(measurement) = measurement {
+        measurement.finish(&result);
+    }
+    result
+}
+
+fn record_measured_tokens(line: &[u8], measurement: Option<&super::metrics::CallGuard>) {
+    if let Some(measurement) = measurement
+        && let Ok(chunk) = serde_json::from_slice::<GenerateChunk>(line)
+        && chunk.done
+    {
+        measurement.tokens(chunk.prompt_eval_count, chunk.eval_count);
+    }
 }
 
 pub fn validate_model(model: &str) -> Result<(), String> {
@@ -689,6 +709,95 @@ mod tests {
         context_length_from_model_info, is_summary_capable_model, polish_budget, resolve_num_ctx,
         sorted_summary_capable_models,
     };
+
+    #[tokio::test]
+    async fn measured_transport_status_and_stream_failures_keep_actual_error() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+        use std::time::Duration;
+
+        for response in [
+            Some(
+                "HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+            ),
+            Some(
+                "HTTP/1.1 200 OK\r\nContent-Length: 1000\r\nConnection: close\r\n\r\n{\"response\":\"partial\"}\n",
+            ),
+            None,
+        ] {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let address = listener.local_addr().unwrap();
+            let server = if let Some(response) = response {
+                Some(std::thread::spawn(move || {
+                    for round in 0..2 {
+                        let (mut socket, _) = listener.accept().unwrap();
+                        socket
+                            .set_read_timeout(Some(Duration::from_secs(3)))
+                            .unwrap();
+                        let mut request = Vec::new();
+                        loop {
+                            let mut bytes = [0; 4096];
+                            let n = socket.read(&mut bytes).unwrap();
+                            assert_ne!(n, 0);
+                            request.extend_from_slice(&bytes[..n]);
+                            if let Some(end) = request.windows(4).position(|s| s == b"\r\n\r\n") {
+                                let headers = std::str::from_utf8(&request[..end]).unwrap();
+                                let length = headers
+                                    .lines()
+                                    .filter_map(|line| line.split_once(':'))
+                                    .find(|(name, _)| name.eq_ignore_ascii_case("content-length"))
+                                    .map(|(_, value)| value.trim().parse::<usize>().unwrap())
+                                    .unwrap_or(0);
+                                if request.len() >= end + 4 + length {
+                                    break;
+                                }
+                            }
+                        }
+                        if round == 0 {
+                            assert!(request.starts_with(b"POST /api/show "));
+                            socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}").unwrap();
+                        } else {
+                            assert!(request.starts_with(b"POST /api/generate "));
+                            socket.write_all(response.as_bytes()).unwrap();
+                        }
+                    }
+                }))
+            } else {
+                drop(listener);
+                None
+            };
+            let client = reqwest::Client::builder()
+                .timeout(Duration::from_secs(3))
+                .build()
+                .unwrap();
+            let (result, metrics) = crate::summary::metrics::measure(super::generate_stream(
+                &client,
+                &format!("http://{address}"),
+                "synthetic",
+                "system",
+                "prompt".into(),
+                super::MAP_BUDGET,
+                0.2,
+                &|_| {},
+                false,
+            ))
+            .await;
+            if let Some(server) = server {
+                server.join().unwrap();
+            }
+            let error = result.expect_err("synthetic failure");
+            let prefix = match response {
+                Some(value) if value.starts_with("HTTP/1.1 503") => "Ollama error:",
+                Some(_) => "Stream read:",
+                None => "Ollama request:",
+            };
+            assert!(error.starts_with(prefix), "{error}");
+            assert_eq!(metrics.calls.len(), 1);
+            assert_eq!(metrics.calls[0].error.as_deref(), Some(error.as_str()));
+            assert!(metrics.calls[0].completed);
+            assert_eq!(metrics.calls[0].prompt_tokens, None);
+        }
+    }
 
     #[test]
     fn rejects_speech_and_embedding_models_for_summary() {

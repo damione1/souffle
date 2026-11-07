@@ -28,6 +28,10 @@ pub enum AudioCommand {
         /// setting is not off. `None` for dictation and for meetings
         /// recorded with retention off.
         record_path: Option<std::path::PathBuf>,
+        /// Capture a separate raw mic/tap artifact, only with `record_path`.
+        meeting_audio_diagnostic: bool,
+        /// Keeps deletion refused through queued capture start and Ogg finish.
+        meeting_lease: Option<crate::meeting_access::MeetingLease>,
         /// The pre-spawned system audio tap, if any (macOS only).
         #[cfg(target_os = "macos")]
         tap: Option<crate::audio::system_tap::TapHandle>,
@@ -35,10 +39,16 @@ pub enum AudioCommand {
         #[cfg(target_os = "macos")]
         tap_cons: Option<ringbuf::HeapCons<f32>>,
     },
+    /// Engine readiness succeeded for this capture's session. A raw
+    /// diagnostic cannot be published until this acknowledgement and Stop.
+    ConfirmStart {
+        session_id: u64,
+    },
     Stop,
     /// Stop a session whose start failed after its capture began (SOU-260),
     /// delete the audio file it started, then answer on `done`.
     Discard {
+        session_id: u64,
         done: crossbeam_channel::Sender<()>,
     },
     SelectDevice(String),
@@ -60,6 +70,7 @@ pub enum AudioCommand {
 
 /// Accumulated meeting segments while recording
 pub struct MeetingAccumulator {
+    pub write_lease: Option<crate::meeting_access::MeetingLease>,
     pub id: String,
     pub title: String,
     pub existing_segments: Vec<TranscriptionSegment>,
@@ -126,6 +137,7 @@ impl MeetingAccumulator {
             recording_sessions,
             segments,
             summary: self.summary,
+            compact_transcript: None,
             summary_is_stale: self.summary_is_stale || (has_summary && had_new_segments),
             summary_model: self.summary_model,
             summary_generated_at: self.summary_generated_at,
@@ -150,6 +162,7 @@ impl MeetingAccumulator {
 /// async runtime, and the transcription engine lives on the engine actor
 /// thread — both are driven via command channels.
 pub struct AppState {
+    pub(crate) meeting_access: crate::meeting_access::MeetingAccess,
     pub audio_cmd_sender: Sender<AudioCommand>,
     /// Wrapped in Arc so async commands can clone a handle into a blocking
     /// task (`spawn_blocking`) and keep the long crossbeam reply waits off the
@@ -158,6 +171,10 @@ pub struct AppState {
     pub next_audio_session_id: Mutex<u64>,
     pub meeting_accumulator: Arc<Mutex<Option<MeetingAccumulator>>>,
     pub db: Arc<Database>,
+    pub compression: Arc<crate::summary::compress::CompressionService>,
+    /// Recording storage for this state/profile. Fixtures set it to their
+    /// temporary directory before sharing AppState; production uses its bundle.
+    pub recordings_root: std::path::PathBuf,
     /// Latest audio RMS level (0.0-1.0), stored as f32 bits in AtomicU32
     pub audio_rms: Arc<AtomicU32>,
     /// Unified state machine — the source of truth for app lifecycle
@@ -200,11 +217,14 @@ impl AppState {
         audio_rms: Arc<AtomicU32>,
     ) -> Self {
         Self {
+            meeting_access: crate::meeting_access::MeetingAccess::default(),
             audio_cmd_sender,
             engine_actor,
             next_audio_session_id: Mutex::new(0),
             meeting_accumulator: Arc::new(Mutex::new(None)),
             db,
+            compression: crate::summary::compress::CompressionService::shared(),
+            recordings_root: crate::audio::recorder::recordings_root(),
             audio_rms,
             machine: Mutex::new(AppStateMachine::Idle),
             sleep_paused_meeting_id: Mutex::new(None),
@@ -295,7 +315,11 @@ impl AppState {
     /// leaves the recording state. Called by the engine actor after it emits
     /// the PipelineError event (the pipeline layer owns that event; this is
     /// the app-level cleanup that follows it).
-    pub fn abort_active_session(&self, message: String) {
+    pub fn abort_active_session(
+        &self,
+        source: crate::state_machine::FailureSource,
+        message: String,
+    ) {
         // Read the verdict before discarding it. After AudioGone the capture
         // thread is already gone, so Stop is a no-op and would otherwise
         // leave this snapshot for the next meeting (SOU-119).
@@ -312,6 +336,10 @@ impl AppState {
             .ok()
             .and_then(|mut guard| guard.take());
         if let Some(meeting) = accumulator {
+            let write_lease = meeting.write_lease.clone();
+            if let Some(lease) = &write_lease {
+                lease.set_phase(crate::meeting_access::MeetingDeleteBlockReason::Finalizing);
+            }
             let mut transcript = meeting.into_transcript(chrono::Utc::now());
             transcript.system_audio = crate::app_events::worse_system_audio(
                 self.db.meeting_system_audio(&transcript.id).unwrap_or(None),
@@ -324,9 +352,10 @@ impl AppState {
                 ),
                 Err(e) => error!("Failed to salvage meeting after session abort: {e}"),
             }
+            drop(write_lease);
         }
 
-        if let Err(e) = self.apply_transition(StateAction::Fail { message }) {
+        if let Err(e) = self.apply_transition(StateAction::Fail { source, message }) {
             warn!("Failed to apply Fail transition after session abort: {e}");
         }
     }
@@ -389,6 +418,7 @@ mod tests {
         let second_end = second_start + Duration::seconds(45);
 
         let accumulator = MeetingAccumulator {
+            write_lease: None,
             id: "meeting-1".to_string(),
             title: "Roadmap".to_string(),
             existing_segments: vec![TranscriptionSegment {
@@ -453,6 +483,7 @@ mod tests {
         let ended_at = started_at + Duration::seconds(10);
 
         let accumulator = MeetingAccumulator {
+            write_lease: None,
             id: "meeting-2".to_string(),
             title: "Silent Resume".to_string(),
             existing_segments: Vec::new(),

@@ -1,8 +1,176 @@
 #
+
+msgctxt "DictionarySection"
+msgid "Apprentissage depuis les corrections"
+msgstr "Apprentissage depuis les corrections"
+
+msgctxt "DictionarySection"
+msgid "Suggestions propose les corrections après collage et en réunion. Automatique apprend après collage. Les corrections de session restent immédiates."
+msgstr "Suggestions propose les corrections après collage et en réunion. Automatique apprend après collage. Les corrections de session restent immédiates."
+
+msgctxt "DictionarySection"
+msgid "Désactivé"
+msgstr "Désactivé"
+
+msgctxt "DictionarySection"
+msgid "Suggestions"
+msgstr "Suggestions"
+
+msgctxt "DictionarySection"
+msgid "Automatique"
+msgstr "Automatique"
+
+msgctxt "DictionarySection"
+msgid "CORRECTIONS À VALIDER"
+msgstr "CORRECTIONS À VALIDER"
+
+msgctxt "DictionarySection"
+msgid "Aucune suggestion en attente."
+msgstr "Aucune suggestion en attente."
+
+msgctxt "DictionarySection"
+msgid "Correction : {} → {}"
+msgstr "Correction : {} → {}"
+
+msgctxt "DictionarySection"
+msgid "Accepter"
+msgstr "Accepter"
+
+msgctxt "DictionarySection"
+msgid "Ignorer"
+msgstr "Ignorer"
+
+msgctxt "DictionarySection"
+msgid "Accepter {} → {}"
+msgstr "Accepter {} → {}"
+
+msgctxt "DictionarySection"
+msgid "Ignorer {} → {}"
+msgstr "Ignorer {} → {}"
+
 msgid ""
 msgstr ""
 "POT-Creation-Date: 2026-09-22 21:45+0000\n"
 "Content-Type: text/plain; charset=UTF-8\n"
+
+msgctxt "AppBranchesSection"
+msgid "RETOUCHE PAR APPLICATION"
+msgstr "RETOUCHE PAR APPLICATION"
+
+msgctxt "AppBranchesSection"
+msgid "Passez à l'application à tester. Capture dans {} secondes."
+msgstr "Passez à l'application à tester. Capture dans {} secondes."
+
+msgctxt "AppBranchesSection"
+msgid "Recherche de la règle pour l'application capturée…"
+msgstr "Recherche de la règle pour l'application capturée…"
+
+msgctxt "AppBranchesSection"
+msgid "La première règle active valide gagne. Le nom de l'application contient le motif, sans tenir compte de la casse. Par défaut suit le modèle global ; les instructions sont partagées."
+msgstr "La première règle active valide gagne. Le nom de l'application contient le motif, sans tenir compte de la casse. Par défaut suit le modèle global ; les instructions sont partagées."
+
+msgctxt "AppBranchesSection"
+msgid "Nom d'application"
+msgstr "Nom d'application"
+
+msgctxt "AppBranchesSection"
+msgid "Nouvelle règle d'application"
+msgstr "Nouvelle règle d'application"
+
+msgctxt "AppBranchesSection"
+msgid "Modèle de la nouvelle règle"
+msgstr "Modèle de la nouvelle règle"
+
+msgctxt "AppBranchesSection"
+msgid "Ajouter"
+msgstr "Ajouter"
+
+msgctxt "AppBranchesSection"
+msgid "Activer la règle {}"
+msgstr "Activer la règle {}"
+
+msgctxt "AppBranchesSection"
+msgid "Motif de la règle"
+msgstr "Motif de la règle"
+
+msgctxt "AppBranchesSection"
+msgid "Modèle partagé de la règle"
+msgstr "Modèle partagé de la règle"
+
+msgctxt "AppBranchesSection"
+msgid "Monter"
+msgstr "Monter"
+
+msgctxt "AppBranchesSection"
+msgid "Descendre"
+msgstr "Descendre"
+
+msgctxt "AppBranchesSection"
+msgid "Supprimer"
+msgstr "Supprimer"
+
+msgctxt "AppBranchesSection"
+msgid "Tester l'application actuelle"
+msgstr "Tester l'application actuelle"
+
+msgctxt "AppBranchesSection"
+msgid "Application actuelle : {}"
+msgstr "Application actuelle : {}"
+
+msgctxt "AppBranchesSection"
+msgid "Règle gagnante : {}"
+msgstr "Règle gagnante : {}"
+
+msgctxt "AppBranchesSection"
+msgid "Retouche désactivée : les règles sont sans effet."
+msgstr "Retouche désactivée : les règles sont sans effet."
+
+msgctxt "AppBranchesSection"
+msgid "Application inconnue : modèle global."
+msgstr "Application inconnue : modèle global."
+
+msgctxt "AppBranchesSection"
+msgid "Aucune règle active correspondante : modèle global."
+msgstr "Aucune règle active correspondante : modèle global."
+
+msgctxt "AppBranchesSection"
+msgid "Motif vide ignoré : modèle global."
+msgstr "Motif vide ignoré : modèle global."
+
+msgctxt "AppBranchesSection"
+msgid "Modèle de règle introuvable : modèle global."
+msgstr "Modèle de règle introuvable : modèle global."
+
+msgctxt "AppBranchesSection"
+msgid "Modèle résolu"
+msgstr "Modèle résolu"
+
+msgctxt "ThemedComboBox"
+msgid "Chat"
+msgstr "Chat"
+
+msgctxt "ThemedComboBox"
+msgid "Code"
+msgstr "Code"
+
+msgctxt "ThemedComboBox"
+msgid "Modèle introuvable"
+msgstr "Modèle introuvable"
+msgctxt "ActionGuards"
+msgid "Cette réunion est en cours de démarrage."
+msgstr "Cette réunion est en cours de démarrage."
+
+msgctxt "ActionGuards"
+msgid "Cette réunion est en cours d'enregistrement."
+msgstr "Cette réunion est en cours d'enregistrement."
+
+msgctxt "ActionGuards"
+msgid "Cette réunion est en cours de finalisation."
+msgstr "Cette réunion est en cours de finalisation."
+
+msgctxt "ActionGuards"
+msgid "Impossible de vérifier si cette réunion peut être supprimée."
+msgstr "Impossible de vérifier si cette réunion peut être supprimée."
 
 #: app/souffle-slint/ui/meeting_detail.slint:90
 msgctxt "MeetingDetail"
@@ -717,8 +885,8 @@ msgstr "Résumé"
 
 #: app/souffle-slint/ui/components/summary_section.slint:76
 msgctxt "SummarySection"
-msgid "Générer le résumé"
-msgstr "Générer le résumé"
+msgid "Générer le résumé (expérimental)"
+msgstr "Générer le résumé (expérimental)"
 
 #: app/souffle-slint/ui/components/summary_section.slint:120
 msgctxt "SummarySection"
@@ -2061,8 +2229,8 @@ msgstr "Apple Intelligence n'est pas disponible."
 
 #: app/souffle-slint/ui/components/settings/intelligence_section.slint:66
 msgctxt "IntelligenceSection"
-msgid "RÉSUMÉS"
-msgstr "RÉSUMÉS"
+msgid "RÉSUMÉS (EXPÉRIMENTAUX)"
+msgstr "RÉSUMÉS (EXPÉRIMENTAUX)"
 
 #: app/souffle-slint/ui/components/settings/intelligence_section.slint:70
 msgctxt "IntelligenceSection"
@@ -2914,6 +3082,10 @@ msgstr ""
 "La mise en veille a interrompu cette réunion. Reprenez l'enregistrement pour "
 "continuer."
 
+msgctxt "ThemedComboBox"
+msgid "Apple Speech — assets système"
+msgstr "Apple Speech — assets système"
+
 #: app/souffle-slint/ui/components/settings/interface_section.slint:14
 msgctxt "ShortcutNoticeText"
 msgid "Le raccourci doit inclure une touche de modification (Cmd, Ctrl, Maj, Alt) ou être une touche de fonction."
@@ -3003,3 +3175,459 @@ msgstr "Redémarrage…"
 msgctxt "AboutSection"
 msgid "Réessayer"
 msgstr "Réessayer"
+
+msgctxt "ModelDeleteSection"
+msgid "Les assets Apple Speech sont gérés par macOS. Soufflé ne les supprime pas."
+msgstr "Les assets Apple Speech sont gérés par macOS. Soufflé ne les supprime pas."
+
+msgctxt "TranscriptionLabels"
+msgid "Apple Speech — {} [{}]"
+msgstr "Apple Speech — {} [{}]"
+
+msgctxt "TranscriptionLabels"
+msgid "Apple Speech"
+msgstr "Apple Speech"
+
+msgctxt "TranscriptionLabels"
+msgid "Apple Speech ({})"
+msgstr "Apple Speech ({})"
+
+msgctxt "ModelSection"
+msgid "La langue affichée est celle prise en charge par Apple Speech pour la langue et la région de ce Mac. Pour la modifier, ouvrez Réglages Système > Général > Langue et région, puis relancez Soufflé."
+msgstr "La langue affichée est celle prise en charge par Apple Speech pour la langue et la région de ce Mac. Pour la modifier, ouvrez Réglages Système > Général > Langue et région, puis relancez Soufflé."
+
+msgctxt "ModelSection"
+msgid "La transcription fonctionne sans activer Siri ou Apple Intelligence. macOS gère le modèle."
+msgstr "La transcription fonctionne sans activer Siri ou Apple Intelligence. macOS gère le modèle."
+
+msgctxt "ModelSection"
+msgid "Ouvrir Langue et région"
+msgstr "Ouvrir Langue et région"
+
+msgctxt "ModelSection"
+msgid "Apple Speech indisponible"
+msgstr "Apple Speech indisponible"
+
+msgctxt "ModelSection"
+msgid "Apple Speech nécessite macOS 26 ou une version ultérieure. Vérifiez les mises à jour de macOS ou choisissez un autre modèle."
+msgstr "Apple Speech nécessite macOS 26 ou une version ultérieure. Vérifiez les mises à jour de macOS ou choisissez un autre modèle."
+
+msgctxt "ModelSection"
+msgid "Apple Speech n'est pas pris en charge sur ce Mac. Choisissez un autre modèle de transcription."
+msgstr "Apple Speech n'est pas pris en charge sur ce Mac. Choisissez un autre modèle de transcription."
+
+msgctxt "ModelSection"
+msgid "Cette version de Soufflé n'inclut pas Apple Speech. Installez une version compatible ou choisissez un autre modèle."
+msgstr "Cette version de Soufflé n'inclut pas Apple Speech. Installez une version compatible ou choisissez un autre modèle."
+
+msgctxt "ModelSection"
+msgid "La langue et la région actuelles de ce Mac ne sont pas prises en charge par Apple Speech. Modifiez-les dans Réglages Système > Général > Langue et région, puis relancez Soufflé, ou choisissez un autre modèle."
+msgstr "La langue et la région actuelles de ce Mac ne sont pas prises en charge par Apple Speech. Modifiez-les dans Réglages Système > Général > Langue et région, puis relancez Soufflé, ou choisissez un autre modèle."
+
+msgctxt "ModelSection"
+msgid "Les ressources Apple Speech ne sont pas disponibles pour la langue de ce Mac. Choisissez une autre langue dans Langue et région, puis relancez Soufflé, ou utilisez un autre modèle."
+msgstr "Les ressources Apple Speech ne sont pas disponibles pour la langue de ce Mac. Choisissez une autre langue dans Langue et région, puis relancez Soufflé, ou utilisez un autre modèle."
+
+msgctxt "ModelSection"
+msgid "Impossible de vérifier la disponibilité d'Apple Speech. Relancez Soufflé pour réessayer ou choisissez un autre modèle."
+msgstr "Impossible de vérifier la disponibilité d'Apple Speech. Relancez Soufflé pour réessayer ou choisissez un autre modèle."
+
+msgctxt "ModelSection"
+msgid "Ouvrir Mise à jour de logiciels"
+msgstr "Ouvrir Mise à jour de logiciels"
+
+msgctxt "RecordingView"
+msgid "Corriger"
+msgstr "Corriger"
+
+msgctxt "LiveParagraphEditor"
+msgid "Corriger le paragraphe"
+msgstr "Corriger le paragraphe"
+
+msgctxt "LiveParagraphEditor"
+msgid "Seul le texte confirmé est modifié. L’enregistrement continue."
+msgstr "Seul le texte confirmé est modifié. L’enregistrement continue."
+
+msgctxt "LiveParagraphEditor"
+msgid "Texte du paragraphe"
+msgstr "Texte du paragraphe"
+
+msgctxt "LiveParagraphEditor"
+msgid "Correction impossible. Fermez puis rouvrez le paragraphe pour réessayer."
+msgstr "Correction impossible. Fermez puis rouvrez le paragraphe pour réessayer."
+
+msgctxt "LiveParagraphEditor"
+msgid "Annuler"
+msgstr "Annuler"
+
+msgctxt "LiveParagraphEditor"
+msgid "Enregistrer"
+msgstr "Enregistrer"
+
+msgctxt "AudioSection"
+msgid "AUDIO AVANCÉ"
+msgstr "AUDIO AVANCÉ"
+
+msgctxt "AudioSection"
+msgid "Capture diagnostique avant AEC"
+msgstr "Capture diagnostique avant AEC"
+
+msgctxt "AudioSection"
+msgid "Activez d'abord la conservation de l'audio dans Données. Aucun diagnostic n'est enregistré sans elle."
+msgstr "Activez d'abord la conservation de l'audio dans Données. Aucun diagnostic n'est enregistré sans elle."
+
+msgctxt "AudioSection"
+msgid "À partir de la prochaine réunion, conserve les voies brutes séparées : micro à gauche, audio système à droite. WAV sans perte : environ {} Mo/heure, {} minutes maximum. Même conservation que l'audio de réunion."
+msgstr "À partir de la prochaine réunion, conserve les voies brutes séparées : micro à gauche, audio système à droite. WAV sans perte : environ {} Mo/heure, {} minutes maximum. Même conservation que l'audio de réunion."
+
+msgctxt "AppHeader"
+msgid "Erreur de capture audio"
+msgstr "Erreur de capture audio"
+
+msgctxt "ModelSection"
+msgid "Erreur de capture audio"
+msgstr "Erreur de capture audio"
+
+msgctxt "UpdateCopy"
+msgid "Attendez la fin du démarrage de l'enregistrement."
+msgstr "Attendez la fin du démarrage de l'enregistrement."
+
+msgctxt "UpdateCopy"
+msgid "Une opération est en cours. Réessayez dans un instant."
+msgstr "Une opération est en cours. Réessayez dans un instant."
+
+msgctxt "ShortcutRecorderButton"
+msgid "Enregistrer un raccourci"
+msgstr "Enregistrer un raccourci"
+
+msgctxt "InterfaceSection"
+msgid "Terminez l'enregistrement avant de modifier les raccourcis."
+msgstr "Terminez l'enregistrement avant de modifier les raccourcis."
+
+msgctxt "MicrophoneSection"
+msgid "Terminez l'enregistrement avant de réinitialiser la fréquence du microphone."
+msgstr "Terminez l'enregistrement avant de réinitialiser la fréquence du microphone."
+
+msgctxt "ModelSection"
+msgid "Terminez l'enregistrement avant de changer de modèle."
+msgstr "Terminez l'enregistrement avant de changer de modèle."
+
+msgctxt "ModelDeleteSection"
+msgid "Les ressources Apple Speech sont gérées par macOS et ne peuvent pas être supprimées par Soufflé."
+msgstr "Les ressources Apple Speech sont gérées par macOS et ne peuvent pas être supprimées par Soufflé."
+
+msgctxt "ModelDeleteSection"
+msgid "Attendez la fin de l'opération sur le modèle avant de le supprimer."
+msgstr "Attendez la fin de l'opération sur le modèle avant de le supprimer."
+
+msgctxt "ModelDeleteSection"
+msgid "Déchargez le modèle actif ou choisissez un autre modèle avant de le supprimer."
+msgstr "Déchargez le modèle actif ou choisissez un autre modèle avant de le supprimer."
+
+msgctxt "InterfaceSection"
+msgid "Une opération est en cours. Réessayez dans un instant."
+msgstr "Une opération est en cours. Réessayez dans un instant."
+
+msgctxt "CompressionSection"
+msgid "COMPRESSION DES TRANSCRIPTIONS"
+msgstr "COMPRESSION DES TRANSCRIPTIONS"
+
+msgctxt "CompressionSection"
+msgid "Compresser les longues transcriptions avant le résumé"
+msgstr "Compresser les longues transcriptions avant le résumé"
+
+msgctxt "CompressionSection"
+msgid "Réduit l'entrée des étapes intermédiaires. Les résumés courts utilisent le texte original."
+msgstr "Réduit l'entrée des étapes intermédiaires. Les résumés courts utilisent le texte original."
+
+msgctxt "CompressionSection"
+msgid "Compresser avant le résumé"
+msgstr "Compresser avant le résumé"
+
+msgctxt "CompressionSection"
+msgid "Créer aussi une version compacte lors du résumé"
+msgstr "Créer aussi une version compacte lors du résumé"
+
+msgctxt "CompressionSection"
+msgid "Conserve un texte compact consultable, indépendamment de l'entrée utilisée pour le résumé."
+msgstr "Conserve un texte compact consultable, indépendamment de l'entrée utilisée pour le résumé."
+
+msgctxt "CompressionSection"
+msgid "Créer aussi une version compacte"
+msgstr "Créer aussi une version compacte"
+
+msgctxt "CompressionSection"
+msgid "Texte à conserver"
+msgstr "Texte à conserver"
+
+msgctxt "CompressionSection"
+msgid "Une valeur basse omet des mots."
+msgstr "Une valeur basse omet des mots."
+
+msgctxt "CompressionSection"
+msgid "Pourcentage de texte à conserver"
+msgstr "Pourcentage de texte à conserver"
+
+msgctxt "CompressionSection"
+msgid "{} %"
+msgstr "{} %"
+
+msgctxt "CompressionSection"
+msgid "LLMLingua-2 de Microsoft, local et hors ligne après installation."
+msgstr "LLMLingua-2 de Microsoft, local et hors ligne après installation."
+
+msgctxt "CompactTranscriptSection"
+msgid "Version compacte (expérimentale)"
+msgstr "Version compacte (expérimentale)"
+
+msgctxt "CompactTranscriptSection"
+msgid "Régénérer"
+msgstr "Régénérer"
+
+msgctxt "CompactTranscriptSection"
+msgid "Générer"
+msgstr "Générer"
+
+msgctxt "CompactTranscriptSection"
+msgid "Annuler"
+msgstr "Annuler"
+
+msgctxt "CompactTranscriptSection"
+msgid "Copié"
+msgstr "Copié"
+
+msgctxt "CompactTranscriptSection"
+msgid "Copier"
+msgstr "Copier"
+
+msgctxt "CompactTranscriptSection"
+msgid "Disponible une fois l'enregistrement terminé."
+msgstr "Disponible une fois l'enregistrement terminé."
+
+msgctxt "CompactTranscriptSection"
+msgid "Cette version compacte précède les dernières modifications de la transcription. Régénérez-la avant de l'utiliser."
+msgstr "Cette version compacte précède les dernières modifications de la transcription. Régénérez-la avant de l'utiliser."
+
+msgctxt "CompactTranscriptSection"
+msgid "En attente du modèle…"
+msgstr "En attente du modèle…"
+
+msgctxt "CompactTranscriptSection"
+msgid "En attente du moteur de compression…"
+msgstr "En attente du moteur de compression…"
+
+msgctxt "CompactTranscriptSection"
+msgid "Compression : {}%"
+msgstr "Compression : {}%"
+
+msgctxt "CompactTranscriptSection"
+msgid "La compression a échoué : {}"
+msgstr "La compression a échoué : {}"
+
+msgctxt "CompactTranscriptSection"
+msgid "La transcription a changé. Relancez la compression."
+msgstr "La transcription a changé. Relancez la compression."
+
+msgctxt "CompactTranscriptSection"
+msgid "Compression interrompue par un enregistrement. Réessayez après l'enregistrement."
+msgstr "Compression interrompue par un enregistrement. Réessayez après l'enregistrement."
+
+msgctxt "CompactTranscriptSection"
+msgid "LLMLingua-2 · cible {}% · {} · environ {} jetons"
+msgstr "LLMLingua-2 · cible {}% · {} · environ {} jetons"
+
+msgctxt "CompactTranscriptSection"
+msgid "Réduire l'aperçu"
+msgstr "Réduire l'aperçu"
+
+msgctxt "CompactTranscriptSection"
+msgid "Développer l'aperçu"
+msgstr "Développer l'aperçu"
+
+msgctxt "CompactTranscriptSection"
+msgid "Une valeur basse omet des mots."
+msgstr "Une valeur basse omet des mots."
+
+msgctxt "CompressionStatus"
+msgid "Modèle de compression non téléchargé ({})"
+msgstr "Modèle de compression non téléchargé ({})"
+
+msgctxt "CompressionStatus"
+msgid "Téléchargement du modèle : {}"
+msgstr "Téléchargement du modèle : {}"
+
+msgctxt "CompressionStatus"
+msgid "Préparation locale du modèle fp16…"
+msgstr "Préparation locale du modèle fp16…"
+
+msgctxt "CompressionStatus"
+msgid "Modèle local prêt ({})"
+msgstr "Modèle local prêt ({})"
+
+msgctxt "CompressionStatus"
+msgid "Le téléchargement a échoué : {}"
+msgstr "Le téléchargement a échoué : {}"
+
+msgctxt "CompressionStatus"
+msgid "Réessayer le téléchargement"
+msgstr "Réessayer le téléchargement"
+
+msgctxt "CompressionStatus"
+msgid "Télécharger le modèle"
+msgstr "Télécharger le modèle"
+
+msgctxt "CompressionStatus"
+msgid "Annuler le téléchargement"
+msgstr "Annuler le téléchargement"
+
+msgctxt "CompactTranscriptSection"
+msgid "L'opération a échoué : {}"
+msgstr "L'opération a échoué : {}"
+
+msgctxt "SummarizationSection"
+msgid "EXPÉRIMENTAL"
+msgstr "EXPÉRIMENTAL"
+
+msgctxt "SummarizationSection"
+msgid "Résumés de réunion"
+msgstr "Résumés de réunion"
+
+msgctxt "SummarizationSection"
+msgid "Active les résumés de réunion et la compaction expérimentaux. La qualité des longs résumés locaux reste à évaluer."
+msgstr "Active les résumés de réunion et la compaction expérimentaux. La qualité des longs résumés locaux reste à évaluer."
+
+msgctxt "IntelligenceSection"
+msgid "FOURNISSEUR IA DE LA DICTÉE"
+msgstr "FOURNISSEUR IA DE LA DICTÉE"
+
+msgctxt "IntelligenceSection"
+msgid "Le moteur qui nettoie la dictée."
+msgstr "Le moteur qui nettoie la dictée."
+
+msgctxt "IntelligenceSection"
+msgid "Moteur de dictée IA"
+msgstr "Moteur de dictée IA"
+
+msgctxt "IntelligenceSection"
+msgid "Modèle de dictée IA"
+msgstr "Modèle de dictée IA"
+
+msgctxt "SummaryTemplatesSection"
+msgid "Le modèle par défaut est utilisé lorsque vous générez le résumé d'une réunion terminée."
+msgstr "Le modèle par défaut est utilisé lorsque vous générez le résumé d'une réunion terminée."
+
+msgctxt "CompressionUi"
+msgid "Compression annulée."
+msgstr "Compression annulée."
+
+msgctxt "CompressionUi"
+msgid "Compression interrompue par un enregistrement. Réessayez après l'enregistrement."
+msgstr "Compression interrompue par un enregistrement. Réessayez après l'enregistrement."
+
+msgctxt "CompressionUi"
+msgid "Enregistrement en cours. Réessayez après l'enregistrement."
+msgstr "Enregistrement en cours. Réessayez après l'enregistrement."
+
+msgctxt "CompressionUi"
+msgid "Le moteur est occupé. Réessayez dans un instant."
+msgstr "Le moteur est occupé. Réessayez dans un instant."
+
+msgctxt "CompressionUi"
+msgid "La transcription a changé. Relancez la compression."
+msgstr "La transcription a changé. Relancez la compression."
+
+msgctxt "CompressionUi"
+msgid "Cette réunion a été supprimée."
+msgstr "Cette réunion a été supprimée."
+
+msgctxt "CompressionUi"
+msgid "Disponible une fois l'enregistrement terminé."
+msgstr "Disponible une fois l'enregistrement terminé."
+
+msgctxt "CompressionUi"
+msgid "La transcription ne contient aucun texte."
+msgstr "La transcription ne contient aucun texte."
+
+msgctxt "CompressionUi"
+msgid "Pourcentage de texte à conserver invalide."
+msgstr "Pourcentage de texte à conserver invalide."
+
+msgctxt "CompressionUi"
+msgid "Modèle de compression indisponible. Le résumé utilise le texte original."
+msgstr "Modèle de compression indisponible. Le résumé utilise le texte original."
+
+msgctxt "CompressionUi"
+msgid "Une compression est déjà en cours pour cette réunion."
+msgstr "Une compression est déjà en cours pour cette réunion."
+
+msgctxt "CompressionUi"
+msgid "Le modèle de compression est occupé. Réessayez après l'opération en cours."
+msgstr "Le modèle de compression est occupé. Réessayez après l'opération en cours."
+
+msgctxt "CompressionUi"
+msgid "Impossible de supprimer le modèle : {}"
+msgstr "Impossible de supprimer le modèle : {}"
+
+msgctxt "CompressionUi"
+msgid "Impossible de préparer le modèle : {}"
+msgstr "Impossible de préparer le modèle : {}"
+
+msgctxt "CompressionUi"
+msgid "Modèle de compression invalide : {}"
+msgstr "Modèle de compression invalide : {}"
+
+msgctxt "CompressionUi"
+msgid "La compression a échoué : {}"
+msgstr "La compression a échoué : {}"
+
+msgctxt "CompressionUi"
+msgid "Erreur de base de données : {}"
+msgstr "Erreur de base de données : {}"
+
+msgctxt "CompressionUi"
+msgid "Erreur du moteur de compression : {}"
+msgstr "Erreur du moteur de compression : {}"
+
+msgctxt "CompressionUi"
+msgid "Fournisseur de résumé indisponible : {}"
+msgstr "Fournisseur de résumé indisponible : {}"
+
+msgctxt "CompressionUi"
+msgid "La génération du résumé a échoué : {}"
+msgstr "La génération du résumé a échoué : {}"
+
+msgctxt "CompressionStatus"
+msgid "Installation du modèle en attente…"
+msgstr "Installation du modèle en attente…"
+
+msgctxt "CompressionStatus"
+msgid "Suppression du modèle…"
+msgstr "Suppression du modèle…"
+
+msgctxt "CompressionStatus"
+msgid "Le modèle de compression doit être réinstallé."
+msgstr "Le modèle de compression doit être réinstallé."
+
+msgctxt "CompressionStatus"
+msgid "Confirmer la suppression"
+msgstr "Confirmer la suppression"
+
+msgctxt "CompressionStatus"
+msgid "Supprimer le modèle de compression"
+msgstr "Supprimer le modèle de compression"
+
+msgctxt "CompressionStatus"
+msgid "Les versions compactes et les préférences seront conservées. Le modèle pourra être téléchargé à nouveau."
+msgstr "Les versions compactes et les préférences seront conservées. Le modèle pourra être téléchargé à nouveau."
+
+msgctxt "CompressionStorageSection"
+msgid "MODÈLE DE COMPRESSION LOCAL"
+msgstr "MODÈLE DE COMPRESSION LOCAL"
+
+msgctxt "CompressionStorageSection"
+msgid "LLMLingua-2 de Microsoft, local et hors ligne après installation."
+msgstr "LLMLingua-2 de Microsoft, local et hors ligne après installation."
+
+msgctxt "CompressionStatus"
+msgid "Annuler"
+msgstr "Annuler"

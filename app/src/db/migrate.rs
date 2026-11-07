@@ -1,3 +1,5 @@
+use souffle_schema::sql::{column::ID, table::DICTATION_ENTRIES};
+
 use std::path::Path;
 
 use tracing::info;
@@ -140,7 +142,7 @@ impl Database {
                 let conn = self.conn.lock().map_err(|e| format!("Lock: {e}"))?;
                 let exists: bool = conn
                     .query_row(
-                        "SELECT COUNT(*) > 0 FROM dictation_entries WHERE id = ?1",
+                        &format!("SELECT COUNT(*) > 0 FROM {DICTATION_ENTRIES} WHERE {ID} = ?1"),
                         rusqlite::params![id],
                         |row| row.get(0),
                     )

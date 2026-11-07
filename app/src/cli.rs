@@ -17,7 +17,19 @@ use crate::engine::{
     TranscriptionEngine, TranscriptionProfile, TranscriptionSegment, collapse_whitespace,
     default_transcription_profile, resolve_transcription_profile, transcription_engine_catalog,
 };
-use clap::Parser;
+use clap::{Parser, ValueEnum};
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum CompressionOverride {
+    On,
+    Off,
+}
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum SummaryProviderArg {
+    Auto,
+    AppleIntelligence,
+    Ollama,
+}
 
 #[derive(Parser, Debug, Clone)]
 #[command(
@@ -26,9 +38,33 @@ use clap::Parser;
     disable_help_subcommand = true
 )]
 struct CliArgs {
+    /// Generate and persist a local compact transcript (downloads model if missing).
+    #[arg(long, conflicts_with_all=["summarize_meeting","transcribe_file","aec_replay","list_models","list_engines"])]
+    compact_meeting: Option<String>,
+    /// Summarize a stored meeting using the selected provider.
+    #[arg(long, conflicts_with_all=["transcribe_file","aec_replay","list_models","list_engines"])]
+    summarize_meeting: Option<String>,
+    /// Alternate SQLite database for headless actions.
+    #[arg(long)]
+    database: Option<PathBuf>,
+    /// Override compression for summary map input for this invocation only.
+    #[arg(long, value_enum)]
+    summary_compression: Option<CompressionOverride>,
+    /// Target fraction of words to retain (0.3–0.9).
+    #[arg(long)]
+    compression_rate: Option<f32>,
+    /// Summary model override, separate from the transcription --model.
+    #[arg(long)]
+    summary_model: Option<String>,
+    #[arg(long, value_enum)]
+    summary_provider: Option<SummaryProviderArg>,
     /// Transcribe a WAV file through the configured engine and exit.
     #[arg(long, value_name = "WAV")]
     transcribe_file: Option<PathBuf>,
+
+    /// Replay a lossless pre-AEC stereo diagnostic WAV (left mic, right tap).
+    #[arg(long, value_name = "WAV", conflicts_with_all = ["transcribe_file", "list_models", "list_engines"])]
+    aec_replay: Option<PathBuf>,
 
     /// Override the selected transcription engine id.
     #[arg(long)]
@@ -62,7 +98,12 @@ struct CliArgs {
 
 impl CliArgs {
     fn is_headless(&self) -> bool {
-        self.transcribe_file.is_some() || self.list_models || self.list_engines
+        self.compact_meeting.is_some()
+            || self.summarize_meeting.is_some()
+            || self.transcribe_file.is_some()
+            || self.aec_replay.is_some()
+            || self.list_models
+            || self.list_engines
     }
 }
 
@@ -105,10 +146,16 @@ fn dispatch(args: Vec<String>) -> Option<i32> {
 /// to `None` untouched.
 fn has_headless_flag(args: &[String]) -> bool {
     args.iter().any(|a| {
-        a == "--transcribe-file"
+        a == "--compact-meeting"
+            || a.starts_with("--compact-meeting=")
+            || a == "--summarize-meeting"
+            || a.starts_with("--summarize-meeting=")
+            || a == "--transcribe-file"
             || a.starts_with("--transcribe-file=")
             || a == "--list-models"
             || a == "--list-engines"
+            || a == "--aec-replay"
+            || a.starts_with("--aec-replay=")
     })
 }
 
@@ -131,8 +178,131 @@ impl ProfileSource {
     }
 }
 
+fn run_meeting_action(cli: &CliArgs) -> i32 {
+    let result = (|| -> Result<serde_json::Value, String> {
+        use std::sync::{
+            Arc, Mutex,
+            atomic::{AtomicU32, AtomicU64},
+        };
+        let path = cli
+            .database
+            .clone()
+            .or_else(|| std::env::var_os("SOUFFLE_DB").map(PathBuf::from))
+            .unwrap_or_else(|| {
+                crate::constants::app_data_dir().join(crate::constants::DB_FILENAME)
+            });
+        let db = Arc::new(crate::db::Database::open(&path)?);
+        let mut settings = crate::settings::AppSettings::load_read_only(&db)?;
+        if let Some(rate) = cli.compression_rate {
+            settings.summary_compression_rate =
+                crate::summary::compress::CompressionRate::new(rate)
+                    .map_err(|error| error.to_string())?
+                    .get();
+        }
+        if let Some(value) = cli.summary_compression {
+            settings.summary_compression_enabled = match value {
+                CompressionOverride::On => true,
+                CompressionOverride::Off => false,
+            };
+        }
+        if let Some(provider) = cli.summary_provider {
+            settings.summary_provider = match provider {
+                SummaryProviderArg::Auto => crate::summary::SummaryProviderChoice::Auto,
+                SummaryProviderArg::AppleIntelligence => {
+                    crate::summary::SummaryProviderChoice::AppleIntelligence
+                }
+                SummaryProviderArg::Ollama => crate::summary::SummaryProviderChoice::Ollama,
+            };
+        }
+        let (_audio, rx) = crossbeam_channel::unbounded();
+        let actor = crate::pipeline::EngineActorHandle::spawn(
+            rx,
+            Arc::new(AtomicU64::new(0)),
+            Arc::new(Mutex::new(None)),
+            Box::new(|_| Err("Headless meeting actions do not transcribe".into())),
+        )?;
+        let (tx, _commands) = crossbeam_channel::unbounded();
+        let state = Arc::new(crate::state::AppState::new(
+            tx,
+            Arc::new(actor),
+            db.clone(),
+            Arc::new(AtomicU32::new(0)),
+        ));
+        crate::async_runtime::block_on(async {
+            if let Some(id) = &cli.compact_meeting {
+                let compact = crate::commands::generate_compact_transcript(
+                    state,
+                    id.clone(),
+                    Some(settings.summary_compression_rate),
+                    false,
+                )
+                .await
+                .map_err(|error| error.to_string())?;
+                return serde_json::to_value(compact).map_err(|e| e.to_string());
+            }
+            let id = cli.summarize_meeting.as_ref().ok_or("No meeting action")?;
+            let model = match &cli.summary_model {
+                Some(model) => model.clone(),
+                None => {
+                    let providers = crate::summary::check_providers(&settings.ollama_url).await;
+                    crate::summary::choose_summary_model(&settings, &providers.models)
+                        .map_err(|e| e.message().to_owned())?
+                }
+            };
+            crate::commands::summarize_meeting_with_settings(
+                state,
+                id.clone(),
+                model,
+                None,
+                crate::progress::ProgressChannel::new(|_| {}),
+                settings,
+            )
+            .await
+            .map_err(|error| error.to_string())?;
+            serde_json::to_value(db.load_meeting(id)?).map_err(|e| e.to_string())
+        })
+    })();
+    match result {
+        Ok(value) => {
+            if cli.json {
+                println!("{}", value);
+            } else if let Some(text) = value.get("text").and_then(|v| v.as_str()) {
+                println!("{text}");
+            } else {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&value).unwrap_or_default()
+                );
+            }
+            0
+        }
+        Err(error) => {
+            eprintln!("{error}");
+            1
+        }
+    }
+}
+
 fn run(cli: CliArgs) -> i32 {
     init_cli_logging(cli.json);
+    if cli.compact_meeting.is_some() || cli.summarize_meeting.is_some() {
+        return run_meeting_action(&cli);
+    }
+    if let Some(path) = &cli.aec_replay {
+        return match crate::audio::aec_replay::replay_file(path) {
+            Ok(metrics) => {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&metrics).expect("finite replay metrics")
+                );
+                0
+            }
+            Err(e) => {
+                eprintln!("AEC replay: {e}");
+                1
+            }
+        };
+    }
 
     if cli.list_engines {
         return list_engines(cli.json);
@@ -178,8 +348,18 @@ fn run(cli: CliArgs) -> i32 {
         }
     };
 
-    let model_dir = crate::models::model_dir(&profile);
-    if let Err(e) = engine.load_model(&model_dir) {
+    let location = match crate::models::model_location(&profile) {
+        Ok(location) => location,
+        Err(error) => {
+            eprintln!("Error: {error}");
+            return 1;
+        }
+    };
+    let load = match location {
+        crate::engine::ModelLocation::Files(path) => engine.load_model(&path),
+        crate::engine::ModelLocation::SystemSpeech { locale } => engine.load_system_assets(&locale),
+    };
+    if let Err(e) = load {
         eprintln!("Error: failed to load model: {e}");
         return 1;
     }
@@ -236,7 +416,7 @@ fn resolve_cli_profile(cli: &CliArgs) -> Result<(TranscriptionProfile, ProfileSo
 }
 
 fn load_persisted_profile() -> Result<TranscriptionProfile, String> {
-    let db_path = crate::constants::app_data_dir().join("souffle.db");
+    let db_path = crate::constants::app_data_dir().join(crate::constants::DB_FILENAME);
     let db = crate::db::Database::open(&db_path)?;
     let settings = crate::settings::AppSettings::load(&db)?;
     resolve_transcription_profile(
@@ -615,6 +795,23 @@ mod tests {
     // ── has_headless_flag / dispatch ────────────────────────────────
 
     #[test]
+    fn aec_replay_flag_dispatches_without_loading_models_or_settings() {
+        let args = vec!["souffle".into(), "--aec-replay=/missing/pre-aec.wav".into()];
+        assert!(has_headless_flag(&args));
+        assert_eq!(dispatch(args), Some(1));
+        assert!(
+            CliArgs::try_parse_from([
+                "souffle",
+                "--aec-replay",
+                "x.wav",
+                "--transcribe-file",
+                "y.wav"
+            ])
+            .is_err()
+        );
+    }
+
+    #[test]
     fn has_headless_flag_detects_transcribe_file() {
         let args = vec![
             "souffle".to_string(),
@@ -714,6 +911,36 @@ mod tests {
         assert!(!cli.is_headless());
     }
 
+    #[test]
+    fn compression_cli_actions_parse_overrides_without_stealing_finder_launch() {
+        let args = [
+            "souffle",
+            "--compact-meeting",
+            "fixture",
+            "--database",
+            "/tmp/fixture.db",
+            "--compression-rate",
+            "0.5",
+            "--json",
+        ];
+        let cli = CliArgs::try_parse_from(args).unwrap();
+        assert!(cli.is_headless());
+        assert_eq!(cli.compact_meeting.as_deref(), Some("fixture"));
+        assert!(has_headless_flag(
+            &args.iter().map(|s| s.to_string()).collect::<Vec<_>>()
+        ));
+        assert!(
+            CliArgs::try_parse_from([
+                "souffle",
+                "--summarize-meeting",
+                "m",
+                "--summary-compression",
+                "maybe"
+            ])
+            .is_err()
+        );
+        assert!(!has_headless_flag(&["souffle".into(), "-psn_0_1".into()]));
+    }
     // ── WAV loading ─────────────────────────────────────────────────
 
     #[test]

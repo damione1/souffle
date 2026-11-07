@@ -21,7 +21,6 @@ private let kCornerRadiusMeet: CGFloat = 22
 private let kDictationWaveformBars: Int = 24
 private let kMeetingWaveformBars: Int = 3
 private let kMaxLiveLines: Int = 5
-private let kLiveFontSize: CGFloat = 13
 private let kLiveTextAlpha: CGFloat = 0.70
 private let kLiveTextColor = NSColor.white.withAlphaComponent(kLiveTextAlpha)
 /// Words the engine heard but has not confirmed yet are drawn at this
@@ -276,8 +275,8 @@ private final class PillContentView: NSView {
     private let blurView = NSVisualEffectView()
     private let borderView = NSView()
     private let recordingDot = NSView()
-    private let modeLabel = NSTextField(labelWithString: "")
-    private let liveLabel = NSTextField(wrappingLabelWithString: "")
+    private let modeLabel = Typography.makeHUDLabel()
+    private let liveLabel = Typography.makeHUDLiveText()
     private let stopButton = FirstMouseButton()
     private let waveform = WaveformView()
     private let spinner = NSProgressIndicator()
@@ -341,14 +340,12 @@ private final class PillContentView: NSView {
         }
 
         modeLabel.textColor = NSColor.white.withAlphaComponent(0.90)
-        modeLabel.font = NSFont.systemFont(ofSize: 12, weight: .medium)
         modeLabel.isEditable = false
         modeLabel.isBezeled = false
         modeLabel.drawsBackground = false
         addSubview(modeLabel)
 
         liveLabel.textColor = kLiveTextColor
-        liveLabel.font = NSFont.systemFont(ofSize: kLiveFontSize)
         liveLabel.maximumNumberOfLines = kMaxLiveLines
         liveLabel.usesSingleLineMode = false
         liveLabel.lineBreakMode = .byWordWrapping
@@ -519,7 +516,7 @@ private final class PillContentView: NSView {
 
     func setLiveText(_ text: String, provisional: Int) {
         let expanded = !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        let font = liveLabel.font ?? NSFont.systemFont(ofSize: kLiveFontSize)
+        let font = Typography.hud_live
         let (shown, lines) = lastWrappedLines(
             text,
             width: liveTextColumnWidth(),
@@ -572,7 +569,7 @@ private final class PillContentView: NSView {
     /// second time. 2 pt slack so the last descender is not clipped (SOU-122).
     func liveTextHeight(forWidth width: CGFloat) -> CGFloat {
         guard isExpanded, !liveLabel.stringValue.isEmpty, width > 0 else { return 0 }
-        let font = liveLabel.font ?? NSFont.systemFont(ofSize: kLiveFontSize)
+        let font = Typography.hud_live
         let lineH = ceil(font.ascender - font.descender + font.leading)
         let lines = CGFloat(min(kMaxLiveLines, max(1, liveLineCount)))
         return lines * lineH + 2
@@ -673,9 +670,11 @@ private final class PillContentView: NSView {
 
     /// Chrome clicks drag; only the Stop button is a real control. Child
     /// views (blur, border, waveform) must not eat the first mouse-down.
-    /// `point` is in this view's coordinates (`frame` of the button is too).
+    /// `point` is in `superview`'s (unflipped) coordinates, while `self` is
+    /// flipped (`isFlipped == true`), so convert before testing `stopButton.frame`.
     override func hitTest(_ point: NSPoint) -> NSView? {
-        if !stopButton.isHidden, stopButton.frame.contains(point) {
+        let local = convert(point, from: superview)
+        if !stopButton.isHidden, stopButton.frame.contains(local) {
             return stopButton
         }
         return self
@@ -683,8 +682,13 @@ private final class PillContentView: NSView {
 
     override func mouseDown(with event: NSEvent) {
         let loc = convert(event.locationInWindow, from: nil)
+        // `hitTest(_:)` already routes clicks inside `stopButton.frame` directly
+        // to `stopButton`. If `mouseDown(with:)` reaches `PillContentView` for a
+        // point inside `stopButton.frame`, `NSControl` forwarded the event up the
+        // responder chain via `super.mouseDown(with:)`; calling
+        // `stopButton.mouseDown(with:)` here would bounce the event back down to
+        // `stopButton` and cause infinite responder-chain recursion.
         if !stopButton.isHidden, stopButton.frame.contains(loc) {
-            stopButton.mouseDown(with: event)
             return
         }
         window?.performDrag(with: event)

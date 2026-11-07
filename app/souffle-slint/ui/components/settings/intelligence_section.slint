@@ -1,3 +1,4 @@
+import { AppText, AppTextInput, Typography, TypographyStyle } from "@typography";
 import { SettingsField } from "settings_field.slint";
 import { SettingsGroup } from "settings_group.slint";
 import { Theme } from "../../theme.slint";
@@ -15,6 +16,7 @@ import { StatusIndicator } from "status_indicator.slint";
 // follow-up pass. Summary models keep their open-set ids paired with labels
 // through the picker so duplicate labels remain distinct.
 export component IntelligenceSection inherits VerticalLayout {
+    in property <bool> for-dictation: false;
     in property <SummaryProvider> summary-provider;
     in property <bool> apple-intelligence-available;
     in property <AppleIntelligenceUnavailableReason> apple-intelligence-reason;
@@ -63,15 +65,15 @@ export component IntelligenceSection inherits VerticalLayout {
     alignment: start;
 
     SettingsGroup {
-        title: @tr("RÉSUMÉS");
+        title: root.for-dictation ? @tr("FOURNISSEUR IA DE LA DICTÉE") : @tr("RÉSUMÉS (EXPÉRIMENTAUX)");
 
     SettingsField {
         show-divider: false;
         label: @tr("Moteur");
-        description: @tr("Le moteur qui rédige les résumés et nettoie la dictée.");
+        description: root.for-dictation ? @tr("Le moteur qui nettoie la dictée.") : @tr("Le moteur qui rédige les résumés et nettoie la dictée.");
 
         ThemedComboBox {
-            control-label: @tr("Moteur de résumé");
+            control-label: root.for-dictation ? @tr("Moteur de dictée IA") : @tr("Moteur de résumé");
             model: [
                 root.provider-label(SummaryProvider.auto),
                 root.provider-label(SummaryProvider.apple-intelligence),
@@ -100,10 +102,10 @@ export component IntelligenceSection inherits VerticalLayout {
 
         VerticalLayout {
             padding: 10px;
-            Text {
+            AppText {
                 text: root.unusable-message;
                 color: Theme.danger;
-                font-size: 11.5px;
+                typography: Typography.small;
                 wrap: word-wrap;
             }
         }
@@ -117,10 +119,10 @@ export component IntelligenceSection inherits VerticalLayout {
 
         VerticalLayout {
             padding: 10px;
-            Text {
+            AppText {
                 text: root.refresh-error;
                 color: Theme.danger;
-                font-size: 11.5px;
+                typography: Typography.small;
                 wrap: word-wrap;
             }
         }
@@ -145,10 +147,10 @@ export component IntelligenceSection inherits VerticalLayout {
             spacing: 10px;
             alignment: space-between;
 
-            Text {
+            AppText {
                 text: root.apple-reason-label(root.apple-intelligence-reason);
                 color: Theme.text-muted;
-                font-size: 11px;
+                typography: Typography.caption;
                 wrap: word-wrap;
                 horizontal-stretch: 1;
             }
@@ -202,10 +204,10 @@ export component IntelligenceSection inherits VerticalLayout {
     }
 
     if root.model-picker-visible: SettingsField {
-        label: @tr("Modèle de résumé");
+        label: root.for-dictation ? @tr("Modèle de dictée IA") : @tr("Modèle de résumé");
 
         ThemedComboBox {
-            control-label: @tr("Modèle de résumé");
+            control-label: root.for-dictation ? @tr("Modèle de dictée IA") : @tr("Modèle de résumé");
             model: root.model-labels;
             option-values: root.model-ids;
             current-value: root.selected-model-label;
@@ -216,23 +218,23 @@ export component IntelligenceSection inherits VerticalLayout {
     if root.show-ollama-setup: VerticalLayout {
         spacing: 8px;
 
-        Text {
+        AppText {
             text: @tr("Aucun modèle compatible installé.");
             color: Theme.warning;
-            font-size: 11.5px;
+            typography: Typography.small;
         }
 
-        if root.ollama-pull-error != "": Text {
+        if root.ollama-pull-error != "": AppText {
             text: @tr("Échec du téléchargement : {}", root.ollama-pull-error);
             color: Theme.danger;
-            font-size: 11.5px;
+            typography: Typography.small;
             wrap: word-wrap;
         }
 
-        if root.ollama-pulling: Text {
+        if root.ollama-pulling: AppText {
             text: root.ollama-pull-status == "" ? @tr("Téléchargement de {}…", root.recommended-model) : root.ollama-pull-status;
             color: Theme.text-muted;
-            font-size: 11.5px;
+            typography: Typography.small;
         }
 
         if !root.ollama-pulling: HorizontalLayout {

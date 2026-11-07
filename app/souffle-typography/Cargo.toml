@@ -1,0 +1,15 @@
+[package]
+name = "souffle-typography"
+version = "0.0.0"
+edition = "2024"
+license = "GPL-3.0-or-later"
+
+[lints]
+workspace = true
+
+[dependencies]
+sha2 = "0.10"
+ttf-parser = "0.25.1"
+
+[dev-dependencies]
+tempfile = "3"

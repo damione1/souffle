@@ -32,16 +32,265 @@ pub fn get_meeting(
 
 /// Delete a meeting by ID, including any recorded audio.
 pub fn delete_meeting(state: Arc<AppState>, id: String) -> Result<(), String> {
-    state.db.delete_meeting(&id)?;
+    delete_meeting_guarded(state, id).map_err(|e| e.to_string())
+}
 
-    let recordings_dir = crate::audio::recorder::meeting_recordings_dir(&id);
-    if recordings_dir.exists()
-        && let Err(e) = std::fs::remove_dir_all(&recordings_dir)
-    {
-        tracing::warn!(meeting_id = %id, "Failed to delete meeting recordings: {e}");
+pub fn delete_meeting_guarded(
+    state: Arc<AppState>,
+    id: String,
+) -> Result<(), crate::meeting_access::MeetingDeleteError> {
+    let recordings_dir = state.recordings_root.join(&id);
+    delete_meeting_in(&state, &id, &recordings_dir)
+}
+
+fn delete_meeting_in(
+    state: &AppState,
+    id: &str,
+    recordings_dir: &std::path::Path,
+) -> Result<(), crate::meeting_access::MeetingDeleteError> {
+    state.meeting_access.delete(&state.machine, id, || {
+        state.compression.cancel(id);
+        state.db.delete_meeting(id)?;
+        if recordings_dir.exists()
+            && let Err(e) = std::fs::remove_dir_all(recordings_dir)
+        {
+            tracing::warn!(meeting_id = %id, "Failed to delete meeting recordings: {e}");
+        }
+
+        Ok(())
+    })
+}
+
+/// The same authoritative permission used by rendering, handlers and delete.
+pub fn get_meeting_delete_block(
+    state: &AppState,
+    id: &str,
+) -> Result<Option<crate::meeting_access::MeetingDeleteBlockReason>, String> {
+    state.meeting_access.block(&state.machine, id)
+}
+
+#[cfg(test)]
+mod delete_guard {
+    use super::*;
+    use crate::engine::default_transcription_profile;
+    use crate::pipeline::EngineActorHandle;
+    use crate::state_machine::{AppStateMachine, RecordingKind};
+    use crate::test_helpers::fixtures::{sample_meeting, test_db};
+
+    fn fixture() -> (Arc<AppState>, tempfile::TempDir) {
+        let (db, dir) = test_db();
+        db.save_meeting(&sample_meeting("active")).unwrap();
+        db.save_meeting(&sample_meeting("old")).unwrap();
+        let (_audio_tx, audio_rx) = crossbeam_channel::unbounded();
+        let actor = EngineActorHandle::spawn(
+            audio_rx,
+            Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            Arc::new(std::sync::Mutex::new(None)),
+            Box::new(|_| Err("No engine needed".into())),
+        )
+        .unwrap();
+        let (cmd_tx, _cmd_rx) = crossbeam_channel::unbounded();
+        let state = Arc::new(AppState::new(
+            cmd_tx,
+            Arc::new(actor),
+            Arc::new(db),
+            Arc::new(std::sync::atomic::AtomicU32::new(0)),
+        ));
+        std::fs::create_dir(dir.path().join("audio")).unwrap();
+        std::fs::write(dir.path().join("audio/0.ogg"), b"isolated recording").unwrap();
+        (state, dir)
     }
 
-    Ok(())
+    fn assert_protected(machine: AppStateMachine) {
+        let (state, dir) = fixture();
+        *state.machine.lock().unwrap() = machine;
+        let before = serde_json::to_value(state.db.load_meeting("active").unwrap()).unwrap();
+        let audio = std::fs::read(dir.path().join("audio/0.ogg")).unwrap();
+        let result = delete_meeting_in(&state, "active", &dir.path().join("audio"));
+        assert!(
+            result.is_err(),
+            "owned meeting deletion must be refused; got {result:?}"
+        );
+        assert_eq!(
+            serde_json::to_value(state.db.load_meeting("active").unwrap()).unwrap(),
+            before
+        );
+        assert_eq!(
+            std::fs::read(dir.path().join("audio/0.ogg")).unwrap(),
+            audio
+        );
+        assert_eq!(state.db.search_text("Hello", 20).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn recording_meeting_refuses_delete_without_mutating_db_or_audio() {
+        assert_protected(AppStateMachine::RecordingMeeting {
+            profile: default_transcription_profile(),
+            session_id: 1,
+            meeting_id: "active".into(),
+        });
+    }
+
+    #[test]
+    fn stopping_meeting_refuses_delete_without_mutating_db_or_audio() {
+        assert_protected(AppStateMachine::Stopping {
+            profile: default_transcription_profile(),
+            was_recording: RecordingKind::Meeting {
+                meeting_id: "active".into(),
+            },
+        });
+    }
+
+    #[test]
+    fn old_meeting_remains_deletable_while_another_records_or_finalizes() {
+        for machine in [
+            AppStateMachine::RecordingMeeting {
+                profile: default_transcription_profile(),
+                session_id: 1,
+                meeting_id: "active".into(),
+            },
+            AppStateMachine::Stopping {
+                profile: default_transcription_profile(),
+                was_recording: RecordingKind::Meeting {
+                    meeting_id: "active".into(),
+                },
+            },
+        ] {
+            let (state, dir) = fixture();
+            *state.machine.lock().unwrap() = machine;
+            let before = serde_json::to_value(state.db.load_meeting("active").unwrap()).unwrap();
+            let active_audio = std::fs::read(dir.path().join("audio/0.ogg")).unwrap();
+            std::fs::create_dir(dir.path().join("old-audio")).unwrap();
+            std::fs::write(dir.path().join("old-audio/0.ogg"), b"archived recording").unwrap();
+            delete_meeting_in(&state, "old", &dir.path().join("old-audio")).unwrap();
+            assert!(state.db.load_meeting("old").is_err());
+            assert!(!dir.path().join("old-audio").exists());
+            assert_eq!(
+                serde_json::to_value(state.db.load_meeting("active").unwrap()).unwrap(),
+                before
+            );
+            assert_eq!(
+                std::fs::read(dir.path().join("audio/0.ogg")).unwrap(),
+                active_audio
+            );
+        }
+    }
+
+    #[test]
+    fn stale_render_permission_cannot_bypass_start_reservation() {
+        let (state, dir) = fixture();
+        assert!(
+            get_meeting_delete_block(&state, "active")
+                .unwrap()
+                .is_none()
+        );
+        let lease = state.meeting_access.reserve("active").unwrap();
+        assert_eq!(
+            get_meeting_delete_block(&state, "active").unwrap(),
+            Some(crate::meeting_access::MeetingDeleteBlockReason::Starting)
+        );
+        let before = serde_json::to_value(state.db.load_meeting("active").unwrap()).unwrap();
+        assert!(delete_meeting_in(&state, "active", &dir.path().join("audio")).is_err());
+        assert_eq!(
+            serde_json::to_value(state.db.load_meeting("active").unwrap()).unwrap(),
+            before
+        );
+        drop(lease);
+        delete_meeting_in(&state, "active", &dir.path().join("audio")).unwrap();
+    }
+
+    #[test]
+    fn writer_in_flight_after_error_protects_the_final_db_save() {
+        use crate::meeting_access::MeetingDeleteBlockReason;
+        let (state, dir) = fixture();
+        let lease = state.meeting_access.reserve("active").unwrap();
+        lease.set_phase(MeetingDeleteBlockReason::Finalizing);
+        *state.machine.lock().unwrap() = AppStateMachine::Error {
+            source: crate::state_machine::FailureSource::AudioCapture,
+            message: "abort during final save".into(),
+            recovery: crate::state_machine::ErrorRecovery::RetryFromReady {
+                profile: default_transcription_profile(),
+            },
+        };
+        let (entered_tx, entered_rx) = crossbeam_channel::bounded(1);
+        let (release_tx, release_rx) = crossbeam_channel::bounded(1);
+        let db = Arc::clone(&state.db);
+        let writer = std::thread::spawn(move || {
+            entered_tx.send(()).unwrap();
+            release_rx.recv().unwrap();
+            db.save_meeting(&sample_meeting("active")).unwrap();
+            drop(lease);
+        });
+        entered_rx
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .unwrap();
+        assert_eq!(
+            get_meeting_delete_block(&state, "active").unwrap(),
+            Some(MeetingDeleteBlockReason::Finalizing)
+        );
+        assert!(delete_meeting_in(&state, "active", &dir.path().join("audio")).is_err());
+        assert!(state.db.load_meeting("active").is_ok());
+        assert!(dir.path().join("audio/0.ogg").exists());
+        release_tx.send(()).unwrap();
+        writer.join().unwrap();
+        delete_meeting_in(&state, "active", &dir.path().join("audio")).unwrap();
+        assert!(state.db.load_meeting("active").is_err());
+        assert!(!dir.path().join("audio").exists());
+    }
+
+    #[test]
+    fn actual_ogg_writer_keeps_ownership_after_db_and_actor_finish() {
+        let (state, dir) = fixture();
+        let lease = state.meeting_access.reserve("active").unwrap();
+        lease.set_phase(crate::meeting_access::MeetingDeleteBlockReason::Finalizing);
+        let (entered_tx, entered_rx) = crossbeam_channel::bounded(1);
+        let (release_tx, release_rx) = crossbeam_channel::bounded(1);
+        let recorder = crate::audio::recorder::MeetingRecorder::start_paused_finalize(
+            dir.path().join("audio/0.ogg"),
+            lease,
+            entered_tx,
+            release_rx,
+        )
+        .unwrap();
+        recorder.push(&vec![0.1; 960]);
+        let finish = std::thread::spawn(move || drop(recorder));
+        entered_rx
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .unwrap();
+        // Simulate the actor already having consumed EOS, DB saved and the
+        // machine back to Ready, while the actual Ogg tail is still in flight.
+        *state.machine.lock().unwrap() = AppStateMachine::Ready {
+            profile: default_transcription_profile(),
+        };
+        assert!(delete_meeting_in(&state, "active", &dir.path().join("audio")).is_err());
+        assert!(state.db.load_meeting("active").is_ok());
+        release_tx.send(()).unwrap();
+        finish.join().unwrap();
+        assert!(crate::audio::recorder::decode_ogg_opus(&dir.path().join("audio/0.ogg")).is_ok());
+        delete_meeting_in(&state, "active", &dir.path().join("audio")).unwrap();
+        assert!(!dir.path().join("audio").exists());
+    }
+
+    #[test]
+    fn completed_delete_cannot_be_resurrected_by_resume() {
+        let (state, dir) = fixture();
+        *state.machine.lock().unwrap() = AppStateMachine::Ready {
+            profile: default_transcription_profile(),
+        };
+        delete_meeting_in(&state, "active", &dir.path().join("audio")).unwrap();
+        let result = crate::async_runtime::block_on(crate::commands::resume_meeting_recording(
+            Arc::clone(&state),
+            "active".into(),
+            ProgressChannel::new(|_| {}),
+        ));
+        assert!(result.is_err());
+        assert!(!state.db.meeting_exists("active").unwrap());
+        assert!(
+            get_meeting_delete_block(&state, "active")
+                .unwrap()
+                .is_none()
+        );
+    }
 }
 
 /// List the recorded audio files for a meeting (empty if recording was never
@@ -129,6 +378,34 @@ pub fn apply_live_paragraph_edit(
     segment_indices: Vec<u32>,
     new_text: String,
 ) -> Result<(), String> {
+    apply_live_paragraph_edit_inner(state, meeting_id, segment_indices, new_text, None).map(|_| ())
+}
+
+/// A native editor freezes both the recording session and the original text.
+/// Grouping may change while it is open; neither a resumed session nor another
+/// edit may silently receive the stale replacement.
+pub struct LiveParagraphEditContext {
+    pub session_started_at: chrono::DateTime<chrono::Utc>,
+    pub original_text: String,
+}
+
+pub fn apply_live_paragraph_edit_checked(
+    state: Arc<AppState>,
+    meeting_id: String,
+    segment_indices: Vec<u32>,
+    new_text: String,
+    context: LiveParagraphEditContext,
+) -> Result<Vec<(u32, String)>, String> {
+    apply_live_paragraph_edit_inner(state, meeting_id, segment_indices, new_text, Some(context))
+}
+
+fn apply_live_paragraph_edit_inner(
+    state: Arc<AppState>,
+    meeting_id: String,
+    segment_indices: Vec<u32>,
+    new_text: String,
+    context: Option<LiveParagraphEditContext>,
+) -> Result<Vec<(u32, String)>, String> {
     use crate::filter::session_terms::{cap_learned_pairs, derive_corrections_from_edit};
     use crate::lock_ext::MutexExt;
 
@@ -148,7 +425,7 @@ pub fn apply_live_paragraph_edit(
     // put stale words over a newer edit.
     let _serialized = state.live_edit_lock.acquire()?;
 
-    let (previous_texts, db_updates, corrections) = {
+    let (previous_texts, db_updates, corrections, original_text, edited_texts) = {
         let mut acc = state.meeting_accumulator.acquire()?;
         let Some(meeting) = acc.as_mut() else {
             return Err("No meeting is recording".into());
@@ -171,11 +448,20 @@ pub fn apply_live_paragraph_edit(
             .map(|&index| meeting.new_segments[index].text.as_str())
             .collect::<Vec<_>>()
             .join(" ");
+        if let Some(context) = &context
+            && (context.session_started_at != meeting.session_started_at
+                || context.original_text != original_text)
+        {
+            return Err("This paragraph changed or its recording session ended".into());
+        }
         // Bail before touching anything: redistribution would still reshuffle
         // the words across the segments, and with no database write behind it
         // the accumulator would drift from the rows already on disk.
         if original_text == new_text {
-            return Ok(());
+            return Ok(indices
+                .iter()
+                .map(|&index| (index as u32, meeting.new_segments[index].text.clone()))
+                .collect());
         }
         let corrections =
             cap_learned_pairs(derive_corrections_from_edit(&original_text, &new_text));
@@ -186,6 +472,10 @@ pub fn apply_live_paragraph_edit(
             .collect();
 
         redistribute_segment_texts_at(&mut meeting.new_segments, &indices, &new_text);
+        let edited_texts = indices
+            .iter()
+            .map(|&index| (index as u32, meeting.new_segments[index].text.clone()))
+            .collect();
 
         let global_base = meeting.existing_segments.len();
         let db_updates: Vec<(i64, String)> = indices
@@ -200,7 +490,13 @@ pub fn apply_live_paragraph_edit(
             })
             .collect();
 
-        (previous_texts, db_updates, corrections)
+        (
+            previous_texts,
+            db_updates,
+            corrections,
+            original_text,
+            edited_texts,
+        )
     };
 
     // The accumulator drives the summary and the rows still to be flushed, so
@@ -223,7 +519,18 @@ pub fn apply_live_paragraph_edit(
         }
     }
 
-    Ok(())
+    // The edit and its immediate session corrections already landed. A queue
+    // failure must not make the caller undo the committed transcript.
+    if let Err(error) = super::dictionary::collect_edit_corrections(
+        &state.db,
+        &original_text,
+        &new_text,
+        crate::db::dictionary::DictionaryCorrectionSource::LiveMeeting,
+    ) {
+        tracing::warn!(%error, "Live edit could not collect dictionary suggestions");
+    }
+
+    Ok(edited_texts)
 }
 
 /// Undo a live edit in the accumulator after the database refused it.
@@ -451,6 +758,9 @@ pub async fn pull_recommended_ollama_model(
 /// `template_id` picks the summary template controlling the final-pass system
 /// prompt; `None` (or an unknown id) falls back to the default template
 /// configured in settings, so automatic summarization always uses the default.
+pub use crate::summary::SummaryCommandError;
+
+/// Legacy generic-string command boundary, retained for existing consumers.
 pub async fn summarize_meeting(
     state: Arc<AppState>,
     id: String,
@@ -458,23 +768,56 @@ pub async fn summarize_meeting(
     template_id: Option<String>,
     channel: ProgressChannel<crate::summary::SummarizeProgress>,
 ) -> Result<(), String> {
-    let transcript = state.db.load_meeting(&id)?;
-    let generated_from_edited = transcript.edited_transcript.clone();
+    summarize_meeting_typed(state, id, model, template_id, channel)
+        .await
+        .map_err(|error| error.to_string())
+}
+/// Native lifecycle consumers keep database/provider/generation failures typed.
+pub async fn summarize_meeting_typed(
+    state: Arc<AppState>,
+    id: String,
+    model: String,
+    template_id: Option<String>,
+    channel: ProgressChannel<crate::summary::SummarizeProgress>,
+) -> Result<(), SummaryCommandError> {
+    let settings =
+        AppSettings::load(&state.db).map_err(|detail| SummaryCommandError::Database { detail })?;
+    summarize_meeting_with_settings(state, id, model, template_id, channel, settings).await
+}
+
+/// Summarize with invocation-specific settings; compact persistence precedes
+/// generative work, while compression failure falls back to the original input.
+pub async fn summarize_meeting_with_settings(
+    state: Arc<AppState>,
+    id: String,
+    model: String,
+    template_id: Option<String>,
+    channel: ProgressChannel<crate::summary::SummarizeProgress>,
+    settings: AppSettings,
+) -> Result<(), SummaryCommandError> {
+    let transcript = state
+        .db
+        .load_meeting(&id)
+        .map_err(|detail| SummaryCommandError::Database { detail })?;
     let generated_from_notes = transcript.notes.clone();
-    let settings = AppSettings::load(&state.db)?;
 
-    let (text, turn_units) = match transcript.edited_transcript {
-        Some(ref edited) if !edited.is_empty() => (edited.clone(), None),
-        _ => {
-            let turns = crate::summary::turns_from_segments(&transcript.segments);
-            let text = turns.join("\n");
-            (text, Some(turns))
-        }
-    };
-
+    let source = crate::summary::compress::CompressionInput::from_meeting(&transcript);
+    let text = source.lines.join("\n");
     if text.is_empty() {
-        return Err("Transcript has no text".into());
+        return Err(SummaryCommandError::EmptyTranscript);
     }
+    let turn_units = source.segmented.then_some(source.lines.as_slice());
+    let compressed_map = state
+        .compression
+        .prepare_summary_map(
+            state.clone(),
+            &transcript,
+            &source,
+            &text,
+            &model,
+            &settings,
+        )
+        .await?;
 
     let final_system_prompt =
         crate::summary::resolve_summary_template_prompt(&settings, template_id.as_deref());
@@ -488,7 +831,8 @@ pub async fn summarize_meeting(
     let db = state.db.clone();
     let summary = crate::summary::summarize_stream(
         &text,
-        turn_units.as_deref(),
+        turn_units,
+        compressed_map.as_ref(),
         transcript.notes.as_deref(),
         &transcript.participants,
         &model,
@@ -499,7 +843,8 @@ pub async fn summarize_meeting(
             channel_clone.send(progress);
         },
     )
-    .await?;
+    .await
+    .map_err(|detail| SummaryCommandError::Generation { detail })?;
 
     channel.send(crate::summary::SummarizeProgress {
         text: String::new(),
@@ -530,9 +875,10 @@ pub async fn summarize_meeting(
         &summary,
         structured.as_ref(),
         &model,
-        generated_from_edited.as_deref(),
+        &source.source_sha256,
         generated_from_notes.as_deref(),
-    )?;
+    )
+    .map_err(|detail| SummaryCommandError::Database { detail })?;
 
     Ok(())
 }

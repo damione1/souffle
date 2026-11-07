@@ -21,3 +21,11 @@ schemars = "1.0"
 # Reads `tests/fixtures/paragraph_grouping.json`, the pinned reference the
 # paragraph grouper and every consumer of it are proven against.
 serde_json = "1"
+
+[features]
+# SQL consumers opt in; pure contract consumers do not acquire SQLite.
+sqlite = ["dep:rusqlite"]
+
+[dependencies.rusqlite]
+version = "0.33"
+optional = true

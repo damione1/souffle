@@ -71,6 +71,12 @@ pub struct MeetingMixer {
     /// frame when the apply decision flips so the boundary stays continuous
     /// (SOU-063 AC3).
     aec_apply_mix: f32,
+    /// Absent by default: no diagnostic queue or extra sample allocation.
+    diagnostic: Option<super::diagnostic::DiagnosticPush>,
+    /// `set_aec` reinserts already-processed delay-line output for the primary
+    /// stream. Those samples were captured raw earlier, and must not be
+    /// recorded a second time under a misleading pre-AEC label.
+    diagnostic_skip: usize,
 }
 
 impl MeetingMixer {
@@ -102,6 +108,8 @@ impl MeetingMixer {
             tap_signal: 0,
             tap_rms_ema: 0.0,
             aec_apply_mix: 0.0,
+            diagnostic: None,
+            diagnostic_skip: 0,
         }
     }
 
@@ -110,6 +118,10 @@ impl MeetingMixer {
     /// replaces the raw mic this frame.
     pub fn tap_has_energy(&self) -> bool {
         self.tap_rms_ema >= TAP_AEC_RMS_THRESHOLD
+    }
+
+    pub(crate) fn set_diagnostic(&mut self, push: Option<super::diagnostic::DiagnosticPush>) {
+        self.diagnostic = push;
     }
 
     fn note_tap_samples(&mut self, samples: &[f32]) {
@@ -139,6 +151,7 @@ impl MeetingMixer {
             let pending = old.drain_pending();
             if !pending.is_empty() {
                 let n = pending.len();
+                self.diagnostic_skip += n;
                 let mut mic = pending;
                 mic.append(&mut self.mic_fifo);
                 self.mic_fifo = mic;
@@ -240,7 +253,7 @@ impl MeetingMixer {
         // last words of a remote participant).
         while !self.tap_fifo.is_empty() {
             let n = self.tap_fifo.len().min(FRAME_SAMPLES);
-            let frame: Vec<f32> = self.tap_fifo.drain(..n).collect();
+            let frame = self.tap_only_frame(n);
             out.extend(self.to_engine.process(&frame));
         }
         out.extend(self.to_engine.flush());
@@ -271,7 +284,7 @@ impl MeetingMixer {
         }
         if tap_clock {
             while self.tap_fifo.len() >= FRAME_SAMPLES {
-                let tap: Vec<f32> = self.tap_fifo.drain(..FRAME_SAMPLES).collect();
+                let tap = self.tap_only_frame(FRAME_SAMPLES);
                 them.extend(self.tap_to_engine.process(&tap));
             }
         }
@@ -297,7 +310,7 @@ impl MeetingMixer {
         // Remaining system audio with no mic to pair → straight to "them".
         while !self.tap_fifo.is_empty() {
             let n = self.tap_fifo.len().min(FRAME_SAMPLES);
-            let tap: Vec<f32> = self.tap_fifo.drain(..n).collect();
+            let tap = self.tap_only_frame(n);
             them.extend(self.tap_to_engine.process(&tap));
         }
         me.extend(self.to_engine.flush());
@@ -374,6 +387,9 @@ impl MeetingMixer {
         let tap_n = n.min(self.tap_fifo.len());
         let mut tap: Vec<f32> = self.tap_fifo.drain(..tap_n).collect();
         tap.resize(n, 0.0);
+        if let Some(diagnostic) = &self.diagnostic {
+            diagnostic.push(&[], &tap);
+        }
         tap
     }
 
@@ -385,6 +401,12 @@ impl MeetingMixer {
         let tap_n = n.min(self.tap_fifo.len());
         let mut tap: Vec<f32> = self.tap_fifo.drain(..tap_n).collect();
         tap.resize(n, 0.0);
+
+        let skip = n.min(self.diagnostic_skip);
+        self.diagnostic_skip -= skip;
+        if let Some(diagnostic) = &self.diagnostic {
+            diagnostic.push(&mic[skip..], &tap[skip..]);
+        }
 
         // AEC works on exact 10ms frames; the only shorter frames are the
         // final flush tail, where skipping cancellation is harmless.
@@ -426,6 +448,201 @@ mod tests {
     use ringbuf::traits::{Producer, Split};
 
     use super::*;
+
+    #[test]
+    fn diagnostic_session_writes_distinct_raw_stereo_artifact() {
+        let dir = tempfile::tempdir().unwrap();
+        let primary = dir.path().join("0.ogg");
+        let diagnostic = dir.path().join("0.pre-aec.wav");
+        let (mut mic, mut tap, mut mixer) = make_mixer(48_000, 48_000, 48_000);
+        let mut session = super::super::diagnostic::DiagnosticSession::default();
+        session.sync(1, Some(&primary), true);
+        session.confirm_start(1);
+        mixer.set_diagnostic(session.push_handle());
+        mic.push_slice(&[0.1; 960]);
+        tap.push_slice(&[0.2; 960]);
+        let recorder = crate::audio::recorder::MeetingRecorder::start(
+            primary.clone(),
+            48_000,
+            1,
+            opus::Channels::Mono,
+        )
+        .unwrap();
+        recorder.push(&mixer.flush());
+        drop(recorder);
+        session.finish_and_wait();
+        assert!(primary.is_file());
+        assert!(
+            diagnostic.is_file(),
+            "raw stereo diagnostic artifact is missing"
+        );
+        let mut wav = hound::WavReader::open(diagnostic).unwrap();
+        assert_eq!(wav.spec().channels, 2);
+        assert_eq!(wav.spec().sample_rate, MIX_RATE);
+        let pairs: Vec<f32> = wav.samples::<f32>().map(Result::unwrap).collect();
+        assert_eq!(pairs, [0.1, 0.2].repeat(960));
+    }
+
+    #[test]
+    fn diagnostics_preserve_primary_ogg_bytes_and_transcription_in_both_layouts() {
+        for channels in [opus::Channels::Mono, opus::Channels::Stereo] {
+            let dir = tempfile::tempdir().unwrap();
+            let run = |enabled, primary: std::path::PathBuf| {
+                let recorder = crate::audio::recorder::MeetingRecorder::start(
+                    primary.clone(),
+                    24_000,
+                    1,
+                    channels,
+                )
+                .unwrap();
+                let mut session = super::super::diagnostic::DiagnosticSession::default();
+                session.sync(1, Some(&primary), enabled);
+                session.confirm_start(1);
+                let (mut mic, mut tap, mut mixer) = make_mixer(48_000, 48_000, 24_000);
+                mixer.set_diagnostic(session.push_handle());
+                mixer.set_aec(Some(Aec::new_with_default_delay_hint(MIX_RATE)));
+                let mut transcription = Vec::new();
+                for frame in 0..80 {
+                    let mic_frame: Vec<f32> = (0..480)
+                        .map(|i| ((frame * 480 + i) as f32 * 0.041).sin() * 0.2)
+                        .collect();
+                    let tap_frame: Vec<f32> = (0..480)
+                        .map(|i| ((frame * 480 + i) as f32 * 0.017).sin() * 0.1)
+                        .collect();
+                    mic.push_slice(&mic_frame);
+                    tap.push_slice(&tap_frame);
+                    let samples = match channels {
+                        opus::Channels::Mono => mixer.tick(),
+                        opus::Channels::Stereo => {
+                            let (me, them) = mixer.tick_split();
+                            crate::audio::recorder::interleave_stereo(&me, &them)
+                        }
+                    };
+                    transcription.extend_from_slice(&samples);
+                    recorder.push(&samples);
+                }
+                let tail = match channels {
+                    opus::Channels::Mono => mixer.flush(),
+                    opus::Channels::Stereo => {
+                        let (me, them) = mixer.flush_split();
+                        crate::audio::recorder::interleave_stereo(&me, &them)
+                    }
+                };
+                transcription.extend_from_slice(&tail);
+                recorder.push(&tail);
+                drop(recorder);
+                session.finish_and_wait();
+                (std::fs::read(&primary).unwrap(), transcription)
+            };
+            let off = dir.path().join("off.ogg");
+            let on = dir.path().join("on.ogg");
+            assert_eq!(
+                run(false, off.clone()),
+                run(true, on.clone()),
+                "{channels:?}"
+            );
+            assert!(!super::super::diagnostic::session_path(&off).exists());
+            assert!(super::super::diagnostic::session_path(&on).is_file());
+        }
+    }
+
+    #[test]
+    fn raw_diagnostic_route_flip_skips_already_captured_aec_pending_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let primary = dir.path().join("0.ogg");
+        let mut session = super::super::diagnostic::DiagnosticSession::default();
+        session.sync(5, Some(&primary), true);
+        session.confirm_start(5);
+        let (mut mic, mut tap, mut mixer) = make_mixer(48_000, 48_000, 48_000);
+        mixer.set_diagnostic(session.push_handle());
+        mixer.set_aec(Some(Aec::new_with_default_delay_hint(MIX_RATE)));
+        let mut expected = Vec::new();
+        for frame in 0..10 {
+            let left = frame as f32 / 100.0;
+            let right = 0.2;
+            mic.push_slice(&[left; FRAME_SAMPLES]);
+            tap.push_slice(&[right; FRAME_SAMPLES]);
+            expected.extend([left, right].repeat(FRAME_SAMPLES));
+            mixer.tick_split();
+        }
+        mixer.set_aec(None);
+        assert!(
+            mixer.diagnostic_skip > 0,
+            "actual AEC pending tail exercises exclusion"
+        );
+        mic.push_slice(&[0.37; 123]);
+        tap.push_slice(&[0.51; 123]);
+        expected.extend([0.37, 0.51].repeat(123));
+        mixer.flush_split();
+        assert_eq!(mixer.diagnostic_skip, 0);
+        session.finish_and_wait();
+        let actual: Vec<f32> =
+            hound::WavReader::open(super::super::diagnostic::session_path(&primary))
+                .unwrap()
+                .samples::<f32>()
+                .map(Result::unwrap)
+                .collect();
+        assert_eq!(
+            actual, expected,
+            "pending output is neither raw input nor a second capture"
+        );
+    }
+
+    #[test]
+    fn raw_diagnostic_tap_only_unavailable_tap_tails_and_mic_rebuild_align() {
+        for split in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let primary = dir.path().join("0.ogg");
+            let mut session = super::super::diagnostic::DiagnosticSession::default();
+            session.sync(9, Some(&primary), true);
+            session.confirm_start(9);
+            let (mut mic, mut tap, mut mixer) = make_mixer(48_000, 48_000, 48_000);
+            mixer.set_diagnostic(session.push_handle());
+            mic.push_slice(&[0.1; 480]); // Unavailable tap: right lane zero.
+            if split {
+                mixer.tick_split();
+            } else {
+                mixer.tick();
+            }
+            tap.push_slice(&[0.2; 480]); // Dead mic: left lane zero.
+            if split {
+                mixer.tick_split_on_tap_clock();
+            } else {
+                mixer.tick_on_tap_clock();
+            }
+            mic.push_slice(&[0.3; 17]);
+            tap.push_slice(&[0.4; 17]);
+            if split {
+                mixer.tick_split();
+            } else {
+                mixer.tick();
+            }
+            let (mut replacement, consumer) = HeapRb::<f32>::new(4096).split();
+            replacement.push_slice(&[0.5; 29]);
+            tap.push_slice(&[0.6; 29]);
+            mixer.replace_mic(consumer, 48_000, 1, 1.0);
+            session.sync(9, Some(&primary), false); // Mid-session setting change cannot disable/reopen.
+            tap.push_slice(&[0.7; 11]); // Tap-only final tail.
+            if split {
+                mixer.flush_split();
+            } else {
+                mixer.flush();
+            }
+            session.finish_and_wait();
+            let actual: Vec<f32> =
+                hound::WavReader::open(super::super::diagnostic::session_path(&primary))
+                    .unwrap()
+                    .samples::<f32>()
+                    .map(Result::unwrap)
+                    .collect();
+            let mut expected = [0.1, 0.0].repeat(480);
+            expected.extend([0.0, 0.2].repeat(480));
+            expected.extend([0.3, 0.4].repeat(17));
+            expected.extend([0.5, 0.6].repeat(29));
+            expected.extend([0.0, 0.7].repeat(11));
+            assert_eq!(actual, expected, "split={split}");
+        }
+    }
 
     fn make_mixer(
         mic_rate: u32,
@@ -1011,6 +1228,7 @@ mod aec_bench {
         let n_frames = total_samples / FRAME_SAMPLES;
         let mut echo_energy_per_frame = Vec::with_capacity(n_frames);
         let mut residual_energy_per_frame = Vec::with_capacity(n_frames);
+        let mut output = Vec::with_capacity(total_samples);
 
         for f in 0..n_frames {
             let start = f * FRAME_SAMPLES;
@@ -1038,6 +1256,7 @@ mod aec_bench {
 
             echo_energy_per_frame.push(echo_energy);
             residual_energy_per_frame.push(residual_energy);
+            output.extend(me);
         }
 
         // Post-convergence window: last quarter of the run.
@@ -1045,6 +1264,16 @@ mod aec_bench {
         let pre: f32 = echo_energy_per_frame[n_frames - tail..].iter().sum();
         let post: f32 = residual_energy_per_frame[n_frames - tail..].iter().sum();
         let erle_db = 10.0 * (pre / post.max(1e-9)).log10();
+        let metrics = crate::audio::aec_replay::measure(
+            &capture,
+            &output,
+            Some(&voice),
+            total_samples as u64,
+        );
+        println!(
+            "Synthetic ground-truth AEC metrics: {}",
+            serde_json::to_string(&metrics).unwrap()
+        );
 
         // Convergence point: first frame after which a 500ms sliding window
         // of residual energy stays below 10% (-10dB) of the echo energy in

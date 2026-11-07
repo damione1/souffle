@@ -204,6 +204,11 @@ pub fn next_session_index(meeting_id: &str) -> std::io::Result<usize> {
     Ok(next_session_index_from(&list_session_files(meeting_id)?))
 }
 
+pub(crate) fn next_session_path_in(directory: &std::path::Path) -> std::io::Result<PathBuf> {
+    let index = next_session_index_from(&list_session_files_in(directory)?);
+    Ok(directory.join(format!("{index}.ogg")))
+}
+
 /// Decodes an Ogg Opus recording (written by [`OggOpusWriter`]) to
 /// interleaved f32 PCM at 48kHz, returning the samples and the channel count
 /// (1 or 2) declared by the file's OpusHead. The decoder is created with the
@@ -750,6 +755,29 @@ impl MeetingRecorder {
         session_id: u64,
         channels: Channels,
     ) -> Result<Self, String> {
+        Self::start_guarded(path, sample_rate, session_id, channels, None)
+    }
+
+    pub(crate) fn start_guarded(
+        path: PathBuf,
+        sample_rate: u32,
+        session_id: u64,
+        channels: Channels,
+        write_lease: Option<crate::meeting_access::MeetingLease>,
+    ) -> Result<Self, String> {
+        Self::start_inner(path, sample_rate, session_id, channels, write_lease, None)
+    }
+
+    // The hook brackets the actual writer's final flush, so races can be
+    // exercised deterministically without hardware, sleeps or a fake writer.
+    fn start_inner(
+        path: PathBuf,
+        sample_rate: u32,
+        session_id: u64,
+        channels: Channels,
+        write_lease: Option<crate::meeting_access::MeetingLease>,
+        before_finalize: Option<Box<dyn FnOnce() + Send>>,
+    ) -> Result<Self, String> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| format!("Create recordings dir: {e}"))?;
         }
@@ -796,7 +824,12 @@ impl MeetingRecorder {
                     }
                 }
 
+                if let Some(hook) = before_finalize { hook(); }
                 finalize_recorder_writer(&mut resampler, &mut writer);
+                // Close the file before releasing its ownership. EOS can
+                // already have let the actor and DB finalization complete.
+                drop(writer);
+                drop(write_lease);
             })
             .map_err(|e| format!("Spawn meeting recorder thread: {e}"))?;
 
@@ -808,6 +841,26 @@ impl MeetingRecorder {
             samples_received,
             shutdown,
         })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn start_paused_finalize(
+        path: PathBuf,
+        write_lease: crate::meeting_access::MeetingLease,
+        entered: crossbeam_channel::Sender<()>,
+        release: crossbeam_channel::Receiver<()>,
+    ) -> Result<Self, String> {
+        Self::start_inner(
+            path,
+            48_000,
+            1,
+            Channels::Mono,
+            Some(write_lease),
+            Some(Box::new(move || {
+                entered.send(()).unwrap();
+                release.recv().unwrap();
+            })),
+        )
     }
 
     /// Retrieve the session ID this recorder is associated with.

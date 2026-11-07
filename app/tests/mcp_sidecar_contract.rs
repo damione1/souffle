@@ -16,6 +16,7 @@ use souffle_lib::transcript::{
     StructuredSummary,
 };
 use souffle_mcp::db::{IncludeSet, McpDb};
+use souffle_schema::sql::{column as col, table};
 use tempfile::TempDir;
 
 fn build_meeting(id: &str, title: &str, is_ongoing: bool) -> MeetingTranscript {
@@ -65,6 +66,7 @@ fn build_meeting(id: &str, title: &str, is_ongoing: bool) -> MeetingTranscript {
             },
         ],
         summary: Some("A short summary of the contract test meeting.".to_string()),
+        compact_transcript: None,
         summary_is_stale: false,
         summary_model: Some("qwen2.5".to_string()),
         summary_generated_at: ended_at,
@@ -92,7 +94,7 @@ fn build_meeting(id: &str, title: &str, is_ongoing: bool) -> MeetingTranscript {
 #[test]
 fn sidecar_round_trips_data_written_by_the_real_app() {
     let dir = TempDir::new().unwrap();
-    let db_path = dir.path().join("souffle.db");
+    let db_path = dir.path().join(souffle_schema::DB_FILENAME);
 
     // Write through the real app database, using the real writers — this is
     // the source of truth for what the schema actually looks like.
@@ -185,12 +187,127 @@ fn sidecar_round_trips_data_written_by_the_real_app() {
     assert_eq!(dictations.len(), 1);
     assert_eq!(dictations[0].id, "dict-1");
     assert_eq!(dictations[0].text, "Buy milk on the way home");
+
+    // V17 adds only dictionary_suggestions, an app-only table. Removing it
+    // produces the actual V16 schema rather than merely changing its number.
+    let v17_outputs = all_tool_outputs(&sidecar);
+    assert_eq!(
+        sidecar.schema_version().unwrap(),
+        souffle_schema::SCHEMA_VERSION
+    );
+    drop(sidecar);
+    let conn = rusqlite::Connection::open(&db_path).unwrap();
+    conn.execute_batch("DROP TABLE dictionary_suggestions;")
+        .unwrap();
+    conn.execute(
+        &format!("UPDATE {} SET {} = ?1", table::SCHEMA_VERSION, col::VERSION),
+        [16],
+    )
+    .unwrap();
+    let has_v17_table: bool = conn
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='dictionary_suggestions')",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(!has_v17_table);
+    drop(conn);
+    let v16 = McpDb::open(&db_path).unwrap();
+    assert_eq!(v16.schema_version().unwrap(), 16);
+    assert_eq!(
+        all_tool_outputs(&v16),
+        v17_outputs,
+        "all five MCP tools preserve their V16 output"
+    );
+}
+
+fn all_tool_outputs(db: &McpDb) -> serde_json::Value {
+    serde_json::json!({
+        "list_meetings": db.list_meetings(None, None, None, 10).unwrap(),
+        "filtered_meetings": db.list_meetings(Some("drift"), Some("1900-01-01"), Some("2099-12-31"), 10).unwrap(),
+        "get_meeting": db.get_meeting("contract-1", IncludeSet::all()).unwrap(),
+        "latest_meeting": db.latest_meeting(IncludeSet::all()).unwrap(),
+        "search_meetings": db.search_meetings("schema drift", 10).unwrap(),
+        "list_dictations": db.list_dictations(10).unwrap(),
+    })
+}
+
+#[test]
+fn every_shared_identifier_resolves_against_the_real_app_schema() {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join(souffle_schema::DB_FILENAME);
+    drop(Database::open(&path).unwrap());
+    let conn = rusqlite::Connection::open(&path).unwrap();
+    for (table, columns) in [
+        (table::SCHEMA_VERSION, &[col::VERSION][..]),
+        (
+            table::MEETINGS,
+            &[
+                col::ID,
+                col::TITLE,
+                col::STARTED_AT,
+                col::ENDED_AT,
+                col::DURATION_SECONDS,
+                col::TRANSCRIPTION_PROFILE,
+                col::RECORDING_SESSIONS,
+                col::SUMMARY,
+                col::SUMMARY_IS_STALE,
+                col::SUMMARY_MODEL,
+                col::SUMMARY_GENERATED_AT,
+                col::EDITED_TRANSCRIPT,
+                col::NOTES,
+                col::CALENDAR_EVENT_ID,
+                col::PARTICIPANTS,
+                col::STRUCTURED_SUMMARY,
+                col::SYSTEM_AUDIO,
+                col::COMPACT_TRANSCRIPT,
+                col::COMPACT_MODEL,
+                col::COMPACT_RATE,
+                col::COMPACT_GENERATED_AT,
+                col::COMPACT_IS_STALE,
+                col::COMPACT_SOURCE_SHA256,
+                col::COMPACT_GENERATION_TOKEN,
+            ][..],
+        ),
+        (
+            table::SEGMENTS,
+            &[
+                col::ID,
+                col::MEETING_ID,
+                col::TEXT,
+                col::START_TIME,
+                col::END_TIME,
+                col::IS_FINAL,
+                col::LANGUAGE,
+                col::CONFIDENCE,
+                col::SORT_ORDER,
+                col::SPEAKER,
+            ][..],
+        ),
+        (
+            table::DICTATION_ENTRIES,
+            &[col::ID, col::TEXT, col::TIMESTAMP][..],
+        ),
+        (
+            table::TEXT_SEARCH,
+            &[col::CONTENT, col::SOURCE_TYPE, col::SOURCE_ID, col::RANK][..],
+        ),
+    ] {
+        conn.prepare(&format!(
+            "SELECT {} FROM {table} LIMIT 0",
+            columns.join(", ")
+        ))
+        .unwrap_or_else(|error| {
+            panic!("shared identifiers drifted from app table {table}: {error}")
+        });
+    }
 }
 
 #[test]
 fn sidecar_get_meeting_include_filter_matches_across_the_boundary() {
     let dir = TempDir::new().unwrap();
-    let db_path = dir.path().join("souffle.db");
+    let db_path = dir.path().join(souffle_schema::DB_FILENAME);
 
     let app_db = Database::open(&db_path).unwrap();
     app_db
@@ -199,13 +316,77 @@ fn sidecar_get_meeting_include_filter_matches_across_the_boundary() {
     drop(app_db);
 
     let sidecar = McpDb::open(&db_path).unwrap();
-    let names = vec!["summary".to_string(), "notes".to_string()];
+    let names = vec![
+        souffle_mcp::db::MeetingSection::Summary,
+        souffle_mcp::db::MeetingSection::Notes,
+    ];
     let detail = sidecar
-        .get_meeting("contract-1", IncludeSet::from_names(Some(&names)))
+        .get_meeting("contract-1", IncludeSet::from_sections(Some(&names)))
         .unwrap();
 
     assert!(detail.transcript.is_none());
     assert!(detail.metadata.is_none());
     assert!(detail.summary.is_some());
     assert!(detail.notes.is_some());
+}
+
+#[test]
+fn compact_contract_roundtrip_and_selective_reads() {
+    use souffle_mcp::db::MeetingSection;
+    use souffle_schema::CompactTranscript;
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("compact.db");
+    let db = Database::open(&path).unwrap();
+    db.save_meeting(&build_meeting("compact", "Compact fixture", false))
+        .unwrap();
+    let snapshot = db.begin_compaction("compact").unwrap();
+    let compact = CompactTranscript {
+        text: "[0:00] Alice Martin ne paie pas 42 euros".into(),
+        model: "fixture-pinned-model-policy".into(),
+        rate: 0.5,
+        generated_at: Utc::now().to_rfc3339(),
+        is_stale: false,
+        source_sha256: snapshot.input.source_sha256.clone(),
+        approx_tokens: 15,
+    };
+    db.commit_compaction("compact", &snapshot, &compact)
+        .unwrap();
+    let mcp = McpDb::open(&path).unwrap();
+    let only = IncludeSet::from_sections(Some(&[MeetingSection::Compact]));
+    let detail = mcp.get_meeting("compact", only).unwrap();
+    let read = detail.compact_transcript.unwrap();
+    assert_eq!(read.text, compact.text);
+    assert_eq!(read.model, compact.model);
+    assert_eq!(read.source_sha256, compact.source_sha256);
+    assert!(!read.is_stale);
+    assert!(
+        detail.transcript.is_none()
+            && detail.summary.is_none()
+            && detail.notes.is_none()
+            && detail.metadata.is_none()
+    );
+    assert!(mcp.list_meetings(None, None, None, 20).unwrap()[0].has_compact);
+    assert!(
+        mcp.latest_meeting(IncludeSet::all())
+            .unwrap()
+            .compact_transcript
+            .is_some()
+    );
+    db.save_edited_transcript("compact", Some("Changed source"))
+        .unwrap();
+    assert!(
+        mcp.get_meeting("compact", only)
+            .unwrap()
+            .compact_transcript
+            .unwrap()
+            .is_stale
+    );
+    db.save_meeting(&build_meeting("absent", "No compact", false))
+        .unwrap();
+    assert!(
+        mcp.get_meeting("absent", only)
+            .unwrap()
+            .compact_transcript
+            .is_none()
+    );
 }

@@ -46,6 +46,7 @@ type PillStopCallback = unsafe extern "C" fn(recording_mode: i32);
 
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 unsafe extern "C" {
+    fn pill_typography_register(bytes: *const u8, count: usize, index: i32) -> i32;
     fn pill_panel_create();
     fn pill_panel_set_visible(visible: i32);
     fn pill_panel_set_capture_excluded(excluded: i32);
@@ -137,9 +138,31 @@ pub const LIVE_TEXT_MAX_CHARS: usize = 360;
 /// Create the native panel and install the stop callback.
 /// Must be called during startup (main thread).
 pub fn create_panel(state: &Arc<AppState>) {
+    register_fonts().expect("Inter HUD font registration failed");
     // SAFETY: Swift hops to the main thread internally.
     unsafe { pill_panel_create() };
     install_stop_callback(Arc::clone(state));
+}
+
+/// Embed/register in this process only; Swift retains these exact CGFonts.
+/// Must run before any panel can draw or measure text. Also used by the
+/// isolated native typography fixture, which never opens the user's DB.
+pub fn register_fonts() -> Result<(), String> {
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    for (index, asset) in souffle_typography::FONTS.iter().enumerate() {
+        // SAFETY: immutable embedded bytes remain valid for the process;
+        // Swift copies them into a CGDataProvider before this returns.
+        let status = unsafe {
+            pill_typography_register(asset.bytes.as_ptr(), asset.bytes.len(), index as i32)
+        };
+        if status != 0 {
+            return Err(format!(
+                "{}: process registration failed ({status})",
+                asset.file
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn install_stop_callback(state: Arc<AppState>) {

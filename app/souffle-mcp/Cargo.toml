@@ -29,7 +29,7 @@ thiserror = "2"
 
 # Schema version and row shapes shared with the app. Tiny by construction:
 # pulls no Tauri and no inference engine.
-souffle-schema = { path = "../souffle-schema" }
+souffle-schema = { path = "../souffle-schema", features = ["sqlite"] }
 
 # Read-only sidecar into the same SQLite file the app writes; bundled-full
 # matches the main crate's rusqlite build (FTS5 is required for search).

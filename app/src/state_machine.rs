@@ -2,6 +2,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::engine::TranscriptionProfile;
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum FailureSource {
+    Model,
+    AudioCapture,
+}
+
 /// Unified application state machine.
 /// Replaces scattered `is_recording`, `model_loaded`, `recording_mode`, `active_profile` booleans
 /// with a single enum that enforces valid transitions.
@@ -40,6 +47,7 @@ pub enum AppStateMachine {
         next_profile: Option<TranscriptionProfile>,
     },
     Error {
+        source: FailureSource,
         message: String,
         recovery: ErrorRecovery,
     },
@@ -84,12 +92,30 @@ pub enum StateAction {
     },
     UnloadComplete,
     Fail {
+        source: FailureSource,
         message: String,
     },
     Recover,
 }
 
 impl AppStateMachine {
+    /// A late Stop must report the failure that ended capture, rather than
+    /// replacing it with the secondary fact that recording has already ended.
+    pub fn inactive_recording_error(&self) -> String {
+        match self {
+            Self::Error { message, .. } => message.clone(),
+            Self::Idle
+            | Self::Downloading { .. }
+            | Self::Downloaded { .. }
+            | Self::Loading { .. }
+            | Self::Ready { .. }
+            | Self::RecordingDictation { .. }
+            | Self::RecordingMeeting { .. }
+            | Self::Stopping { .. }
+            | Self::Unloading { .. } => "Not recording".into(),
+        }
+    }
+
     /// Apply an action to the current state, returning the new state or an error
     /// if the transition is invalid.
     pub fn transition(self, action: StateAction) -> Result<AppStateMachine, String> {
@@ -103,7 +129,8 @@ impl AppStateMachine {
                 Ok(Downloading { profile })
             }
             (Downloading { profile }, DownloadComplete) => Ok(Downloaded { profile }),
-            (Downloading { .. }, Fail { message }) => Ok(Error {
+            (Downloading { .. }, Fail { source, message }) => Ok(Error {
+                source,
                 message,
                 recovery: ErrorRecovery::RetryFromIdle,
             }),
@@ -114,7 +141,8 @@ impl AppStateMachine {
             // model from `Downloaded` must not keep the previous profile.
             (Downloaded { .. }, StartLoad { profile }) => Ok(Loading { profile }),
             (Loading { profile }, LoadComplete) => Ok(Ready { profile }),
-            (Loading { profile }, Fail { message }) => Ok(Error {
+            (Loading { profile }, Fail { source, message }) => Ok(Error {
+                source,
                 message,
                 recovery: ErrorRecovery::RetryFromDownloaded { profile },
             }),
@@ -157,6 +185,10 @@ impl AppStateMachine {
             // late/duplicate StopComplete (e.g. after an abort already moved the
             // machine on) must not wedge or error noisily.
             (Ready { profile }, StopComplete) => Ok(Ready { profile }),
+            // Background stop/drain can complete after an abort. Its completion
+            // must not erase the original failure or produce a new error.
+            (failed @ Error { .. }, StopComplete) => Ok(failed),
+            (Error { message, .. }, StopRecording) => Err(message),
             // `Fail` is total over every model-loaded state. The async/decoupled
             // stop widens the `Stopping` window, so an abort can land while the
             // machine is Stopping (or already Ready) — without these arms it would
@@ -164,11 +196,12 @@ impl AppStateMachine {
             // `Unloading` is the same trap: unload_model can refuse while a
             // session is still on the actor, and without Fail the process stays
             // Unloading until restart.
-            (RecordingDictation { profile, .. }, Fail { message })
-            | (RecordingMeeting { profile, .. }, Fail { message })
-            | (Stopping { profile, .. }, Fail { message })
-            | (Ready { profile }, Fail { message })
-            | (Unloading { profile, .. }, Fail { message }) => Ok(Error {
+            (RecordingDictation { profile, .. }, Fail { source, message })
+            | (RecordingMeeting { profile, .. }, Fail { source, message })
+            | (Stopping { profile, .. }, Fail { source, message })
+            | (Ready { profile }, Fail { source, message })
+            | (Unloading { profile, .. }, Fail { source, message }) => Ok(Error {
+                source,
                 message,
                 recovery: ErrorRecovery::RetryFromReady { profile },
             }),
@@ -319,7 +352,101 @@ impl AppStateMachine {
                 transcription_runtime_phase(downloaded, profile == selected)
             }
             AppStateMachine::Unloading { .. } => TranscriptionRuntimePhase::Unloading,
-            AppStateMachine::Error { .. } => TranscriptionRuntimePhase::Failed,
+            AppStateMachine::Error { source, .. } => match source {
+                FailureSource::Model => TranscriptionRuntimePhase::Failed,
+                FailureSource::AudioCapture => TranscriptionRuntimePhase::AudioFailed,
+            },
+        }
+    }
+}
+
+#[cfg(test)]
+mod failure_tests {
+    use super::*;
+    use crate::engine::{TranscriptionRuntimePhase, default_transcription_profile};
+
+    #[test]
+    fn audio_recovery_recomputes_readiness_for_the_selected_profile() {
+        let retained = default_transcription_profile();
+        let selected = TranscriptionProfile {
+            model_id: "another-model".into(),
+            ..retained.clone()
+        };
+        for (recovery, profile, downloaded, expected) in [
+            (
+                ErrorRecovery::RetryFromReady {
+                    profile: retained.clone(),
+                },
+                retained.clone(),
+                true,
+                TranscriptionRuntimePhase::Ready,
+            ),
+            (
+                ErrorRecovery::RetryFromReady {
+                    profile: retained.clone(),
+                },
+                selected.clone(),
+                true,
+                TranscriptionRuntimePhase::LoadRequired,
+            ),
+            (
+                ErrorRecovery::RetryFromReady {
+                    profile: retained.clone(),
+                },
+                selected,
+                false,
+                TranscriptionRuntimePhase::DownloadRequired,
+            ),
+            (
+                ErrorRecovery::RetryFromDownloaded {
+                    profile: retained.clone(),
+                },
+                retained.clone(),
+                true,
+                TranscriptionRuntimePhase::LoadRequired,
+            ),
+            (
+                ErrorRecovery::RetryFromIdle,
+                retained,
+                false,
+                TranscriptionRuntimePhase::DownloadRequired,
+            ),
+        ] {
+            let recovered = AppStateMachine::Error {
+                source: FailureSource::AudioCapture,
+                message: "capture failure".into(),
+                recovery,
+            }
+            .transition(StateAction::Recover)
+            .unwrap();
+            assert_eq!(recovered.runtime_phase(&profile, downloaded), expected);
+        }
+    }
+
+    #[test]
+    fn failure_source_survives_late_stop_and_projects_the_correct_status() {
+        let profile = default_transcription_profile();
+        for (source, expected) in [
+            (
+                FailureSource::AudioCapture,
+                TranscriptionRuntimePhase::AudioFailed,
+            ),
+            (FailureSource::Model, TranscriptionRuntimePhase::Failed),
+        ] {
+            let failed = AppStateMachine::RecordingDictation {
+                profile: profile.clone(),
+                session_id: 1,
+            }
+            .transition(StateAction::Fail {
+                source,
+                message: "original diagnostic".into(),
+            })
+            .unwrap();
+            assert_eq!(failed.runtime_phase(&profile, true), expected);
+            assert_eq!(failed.inactive_recording_error(), "original diagnostic");
+            let failed = failed.transition(StateAction::StopComplete).unwrap();
+            assert_eq!(failed.runtime_phase(&profile, true), expected);
+            assert_eq!(failed.inactive_recording_error(), "original diagnostic");
         }
     }
 }
@@ -490,6 +617,7 @@ mod tests {
 
         let failed = unloading
             .transition(StateAction::Fail {
+                source: FailureSource::Model,
                 message: "Recording session active".into(),
             })
             .unwrap();
@@ -497,6 +625,7 @@ mod tests {
             AppStateMachine::Error {
                 recovery: ErrorRecovery::RetryFromReady { profile: p },
                 message,
+                ..
             } => {
                 assert_eq!(p.model_id, profile.model_id);
                 assert_eq!(message, "Recording session active");
@@ -525,6 +654,7 @@ mod tests {
 
         let failed = unloading
             .transition(StateAction::Fail {
+                source: FailureSource::Model,
                 message: "Unload failed".into(),
             })
             .unwrap();
@@ -550,6 +680,7 @@ mod tests {
         };
         let state = state
             .transition(StateAction::Fail {
+                source: FailureSource::Model,
                 message: "network".into(),
             })
             .unwrap();
@@ -566,6 +697,7 @@ mod tests {
         };
         let state = state
             .transition(StateAction::Fail {
+                source: FailureSource::Model,
                 message: "oom".into(),
             })
             .unwrap();
@@ -590,6 +722,7 @@ mod tests {
         };
         let state = state
             .transition(StateAction::Fail {
+                source: FailureSource::Model,
                 message: "audio gone".into(),
             })
             .unwrap();
@@ -606,6 +739,7 @@ mod tests {
             profile: profile.clone(),
         }
         .transition(StateAction::Fail {
+            source: FailureSource::Model,
             message: "late abort".into(),
         })
         .unwrap();
@@ -627,6 +761,7 @@ mod tests {
         };
         let state = state
             .transition(StateAction::Fail {
+                source: FailureSource::Model,
                 message: "audio error".into(),
             })
             .unwrap();
@@ -726,6 +861,7 @@ mod tests {
         assert!(AppStateMachine::Idle.active_profile().is_none());
         assert!(
             AppStateMachine::Error {
+                source: FailureSource::Model,
                 message: "x".into(),
                 recovery: ErrorRecovery::RetryFromIdle
             }
@@ -809,6 +945,7 @@ mod tests {
             ),
             (
                 AppStateMachine::Error {
+                    source: FailureSource::Model,
                     message: "load failed".into(),
                     recovery: ErrorRecovery::RetryFromDownloaded {
                         profile: profile.clone(),
@@ -873,6 +1010,7 @@ mod tests {
         // Simulates the fix: recover from error, then re-download + load
         let profile = test_profile();
         let state = AppStateMachine::Error {
+            source: FailureSource::Model,
             message: "previous failure".into(),
             recovery: ErrorRecovery::RetryFromIdle,
         };
@@ -897,6 +1035,7 @@ mod tests {
     #[test]
     fn error_cannot_start_load_directly() {
         let state = AppStateMachine::Error {
+            source: FailureSource::Model,
             message: "oops".into(),
             recovery: ErrorRecovery::RetryFromIdle,
         };

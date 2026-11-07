@@ -1,3 +1,4 @@
+import { AppText, AppTextInput, Typography, TypographyStyle } from "@typography";
 import { Theme } from "../../theme.slint";
 
 // Compact status used on the right side of SettingsField rows. Children are
@@ -20,12 +21,12 @@ export component StatusIndicator inherits Rectangle {
         background: root.indicator-color;
     }
 
-    label := Text {
+    label := AppText {
         x: 14px;
         y: 0px;
         height: parent.height;
         text: root.text;
-        font-size: 12px;
+        typography: Typography.secondary;
         color: Theme.text-secondary;
         vertical-alignment: center;
     }

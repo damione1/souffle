@@ -112,6 +112,7 @@ pub fn push_live_blocks(window: &MainWindow, live_state: &LiveTranscriptState) {
 /// are clickable.
 fn same_rendering(a: &TranscriptBlock, b: &TranscriptBlock) -> bool {
     a.text == b.text
+        && a.can_edit == b.can_edit
         && a.has_speaker == b.has_speaker
         && a.speaker == b.speaker
         && a.timestamp == b.timestamp
@@ -168,6 +169,7 @@ mod tests {
     fn meeting_window() -> MainWindow {
         let _ = slint::platform::set_platform(Box::new(TestPlatform));
         let window = MainWindow::new().unwrap();
+        crate::typography::initialize(&window).unwrap();
         window
             .window()
             .set_size(slint::PhysicalSize::new(WIDTH, HEIGHT));
@@ -188,6 +190,7 @@ mod tests {
         let db = Arc::new(Database::open(&directory.path().join("meeting.db")).unwrap());
         let started = chrono::Utc::now();
         let acc = Arc::new(Mutex::new(Some(MeetingAccumulator {
+            write_lease: None,
             id: "two-sources".into(),
             title: "Two sources".into(),
             existing_segments: vec![],
@@ -656,6 +659,29 @@ mod tests {
         );
     }
 
+    #[test]
+    fn transcript_separators_start_after_the_word_without_overlap() {
+        let window = meeting_window();
+        for separator in ["?", "? ", " ? ", "\u{a0}? ", "\u{202f}? ", ", ", ".", " "] {
+            let live_state = Arc::new(Mutex::new(LiveTranscript::new()));
+            apply_live_segment(
+                &window,
+                &live_state,
+                &final_seg(&format!("va{separator}suite"), 0.0, Speaker::Me),
+            );
+            settle();
+
+            let word = text_element(&window, "va");
+            let trailing = text_element(&window, separator);
+            let word_end = word.absolute_position().x + word.size().width;
+            let trailing_start = trailing.absolute_position().x;
+            assert!(
+                (word_end - trailing_start).abs() < 0.1,
+                "separator {separator:?} at x={trailing_start} must follow word ending at x={word_end}"
+            );
+        }
+    }
+
     // SOU-256 AC4: dictation shares the view; its single text surface must
     // still fill the card and show the streamed text.
     #[test]
@@ -970,5 +996,28 @@ mod tests {
 
         sync_blocks(&model, Vec::new());
         assert_eq!(model.row_count(), 0);
+    }
+    #[test]
+    fn inter_counter_rollover_preserves_digit_cell_geometry_and_full_ax_label() {
+        let window = meeting_window();
+        window.set_live_elapsed_offset_seconds(9);
+        settle();
+        let counter = element(&window, "RecordingView::elapsed-counter");
+        let before_size = counter.size();
+        text_element(&window, "0:09");
+        let before: Vec<_> =
+            ElementHandle::find_by_element_id(&window, "AppNumericText::numeric-glyph")
+                .map(|glyph| (glyph.absolute_position(), glyph.size()))
+                .collect();
+        assert_eq!(before.len(), 4, "the real counter must draw four glyphs");
+        window.set_live_elapsed_offset_seconds(10);
+        settle();
+        text_element(&window, "0:10");
+        let after: Vec<_> =
+            ElementHandle::find_by_element_id(&window, "AppNumericText::numeric-glyph")
+                .map(|glyph| (glyph.absolute_position(), glyph.size()))
+                .collect();
+        assert_eq!(counter.size(), before_size);
+        assert_eq!(before, after, "rollover must not move any glyph slot");
     }
 }

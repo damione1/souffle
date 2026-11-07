@@ -1,5 +1,16 @@
+use souffle_schema::sql::{
+    column::{
+        CALENDAR_EVENT_ID, CONFIDENCE, CONTENT, DURATION_SECONDS, EDITED_TRANSCRIPT, END_TIME,
+        ENDED_AT, ID, IS_FINAL, LANGUAGE, MEETING_ID, NOTES, PARTICIPANTS, RECORDING_SESSIONS,
+        SORT_ORDER, SOURCE_ID, SOURCE_TYPE, SPEAKER, START_TIME, STARTED_AT, STRUCTURED_SUMMARY,
+        SUMMARY, SUMMARY_GENERATED_AT, SUMMARY_IS_STALE, SUMMARY_MODEL, SYSTEM_AUDIO, TEXT, TITLE,
+        TRANSCRIPTION_PROFILE,
+    },
+    table::{MEETINGS, SEGMENTS, TEXT_SEARCH},
+};
+
 use chrono::{DateTime, Utc};
-use rusqlite::params;
+use rusqlite::{OptionalExtension, params};
 
 use crate::app_events::MeetingSystemAudio;
 use crate::engine::{Speaker, TranscriptionProfile, TranscriptionSegment};
@@ -12,6 +23,9 @@ use crate::transcript::{
 };
 
 use super::Database;
+use super::compression::{
+    fingerprint, invalidate_changed, invalidation_snapshot, read_compact, write_compact,
+};
 
 fn meeting_fts_text(edited_transcript: Option<&str>, segment_text: String) -> String {
     edited_transcript
@@ -22,13 +36,13 @@ fn meeting_fts_text(edited_transcript: Option<&str>, segment_text: String) -> St
 
 fn reindex_meeting_fts(tx: &rusqlite::Transaction<'_>, id: &str, text: &str) -> Result<(), String> {
     tx.execute(
-        "DELETE FROM text_search WHERE source_type = ?1 AND source_id = ?2",
+        &format!("DELETE FROM {TEXT_SEARCH} WHERE {SOURCE_TYPE} = ?1 AND {SOURCE_ID} = ?2"),
         params![SearchSource::Meeting, id],
     )
     .map_err(|e| format!("Delete FTS: {e}"))?;
     if !text.is_empty() {
         tx.execute(
-            "INSERT INTO text_search (content, source_type, source_id) VALUES (?1, ?2, ?3)",
+            &format!("INSERT INTO {TEXT_SEARCH} ({CONTENT}, {SOURCE_TYPE}, {SOURCE_ID}) VALUES (?1, ?2, ?3)"),
             params![text, SearchSource::Meeting, id],
         )
         .map_err(|e| format!("Insert FTS: {e}"))?;
@@ -38,7 +52,9 @@ fn reindex_meeting_fts(tx: &rusqlite::Transaction<'_>, id: &str, text: &str) -> 
 
 fn joined_segment_text(tx: &rusqlite::Transaction<'_>, meeting_id: &str) -> Result<String, String> {
     let mut stmt = tx
-        .prepare("SELECT text FROM segments WHERE meeting_id = ?1 ORDER BY sort_order")
+        .prepare(&format!(
+            "SELECT {TEXT} FROM {SEGMENTS} WHERE {MEETING_ID} = ?1 ORDER BY {SORT_ORDER}"
+        ))
         .map_err(|e| format!("Prepare segments: {e}"))?;
     stmt.query_map(params![meeting_id], |row| row.get::<_, String>(0))
         .map_err(|e| format!("Query segments: {e}"))?
@@ -55,27 +71,31 @@ impl Database {
         let tx = conn
             .transaction()
             .map_err(|e| format!("Transaction: {e}"))?;
+        let compact_before = invalidation_snapshot(&tx, &meeting.id)?;
+        let had_compact = read_compact(&tx, &meeting.id)?.is_some();
 
         tx.execute(
-            "INSERT OR REPLACE INTO meetings (
-                id,
-                title,
-                started_at,
-                ended_at,
-                duration_seconds,
-                transcription_profile,
-                recording_sessions,
-                summary,
-                summary_is_stale,
-                summary_model,
-                summary_generated_at,
-                edited_transcript,
-                notes,
-                calendar_event_id,
-                participants,
-                structured_summary,
-                system_audio
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
+            &format!(
+                "INSERT INTO {MEETINGS} (
+                {ID},
+                {TITLE},
+                {STARTED_AT},
+                {ENDED_AT},
+                {DURATION_SECONDS},
+                {TRANSCRIPTION_PROFILE},
+                {RECORDING_SESSIONS},
+                {SUMMARY},
+                {SUMMARY_IS_STALE},
+                {SUMMARY_MODEL},
+                {SUMMARY_GENERATED_AT},
+                {EDITED_TRANSCRIPT},
+                {NOTES},
+                {CALENDAR_EVENT_ID},
+                {PARTICIPANTS},
+                {STRUCTURED_SUMMARY},
+                {SYSTEM_AUDIO}
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17) ON CONFLICT({ID}) DO UPDATE SET {TITLE}=excluded.{TITLE}, {STARTED_AT}=excluded.{STARTED_AT}, {ENDED_AT}=excluded.{ENDED_AT}, {DURATION_SECONDS}=excluded.{DURATION_SECONDS}, {TRANSCRIPTION_PROFILE}=excluded.{TRANSCRIPTION_PROFILE}, {RECORDING_SESSIONS}=excluded.{RECORDING_SESSIONS}, {SUMMARY}=excluded.{SUMMARY}, {SUMMARY_IS_STALE}=excluded.{SUMMARY_IS_STALE}, {SUMMARY_MODEL}=excluded.{SUMMARY_MODEL}, {SUMMARY_GENERATED_AT}=excluded.{SUMMARY_GENERATED_AT}, {EDITED_TRANSCRIPT}=excluded.{EDITED_TRANSCRIPT}, {NOTES}=excluded.{NOTES}, {CALENDAR_EVENT_ID}=excluded.{CALENDAR_EVENT_ID}, {PARTICIPANTS}=excluded.{PARTICIPANTS}, {STRUCTURED_SUMMARY}=excluded.{STRUCTURED_SUMMARY}, {SYSTEM_AUDIO}=excluded.{SYSTEM_AUDIO}"
+            ),
             params![
                 meeting.id,
                 meeting.title,
@@ -101,15 +121,18 @@ impl Database {
         .map_err(|e| format!("Insert meeting: {e}"))?;
 
         tx.execute(
-            "DELETE FROM segments WHERE meeting_id = ?1",
+            &format!("DELETE FROM {SEGMENTS} WHERE {MEETING_ID} = ?1"),
             params![meeting.id],
         )
         .map_err(|e| format!("Delete segments: {e}"))?;
 
+        let insert_segment_sql = format!(
+            "INSERT INTO {SEGMENTS} ({MEETING_ID}, {TEXT}, {START_TIME}, {END_TIME}, {IS_FINAL}, {LANGUAGE}, {CONFIDENCE}, {SORT_ORDER}, {SPEAKER})
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)"
+        );
         for (i, seg) in meeting.segments.iter().enumerate() {
             tx.execute(
-                "INSERT INTO segments (meeting_id, text, start_time, end_time, is_final, language, confidence, sort_order, speaker)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                &insert_segment_sql,
                 params![
                     meeting.id,
                     seg.text,
@@ -136,6 +159,13 @@ impl Database {
         );
         reindex_meeting_fts(&tx, &meeting.id, &full_text)?;
 
+        invalidate_changed(&tx, &meeting.id, compact_before)?;
+        if !had_compact && let Some(compact) = &meeting.compact_transcript {
+            let mut compact = compact.clone();
+            compact.is_stale |=
+                Some(compact.source_sha256.clone()) != fingerprint(&tx, &meeting.id)?;
+            write_compact(&tx, &meeting.id, &compact)?;
+        }
         tx.commit().map_err(|e| format!("Commit: {e}"))?;
         Ok(())
     }
@@ -148,29 +178,33 @@ impl Database {
     /// On resume (conflict) `ended_at` is reset to NULL and `edited_transcript`
     /// is deliberately left untouched so a user's edits survive re-recording.
     pub fn upsert_meeting_header(&self, meeting: &MeetingTranscript) -> Result<(), String> {
-        let conn = self.conn.acquire()?;
-        conn.execute(
-            "INSERT INTO meetings (
-                id, title, started_at, ended_at, duration_seconds,
-                transcription_profile, recording_sessions, summary,
-                summary_is_stale, summary_model, summary_generated_at,
-                edited_transcript, notes, calendar_event_id, participants,
-                structured_summary
+        let mut conn = self.conn.acquire()?;
+        let tx = conn.transaction().map_err(|e| e.to_string())?;
+        let before = invalidation_snapshot(&tx, &meeting.id)?;
+        tx.execute(
+            &format!(
+                "INSERT INTO {MEETINGS} (
+                {ID}, {TITLE}, {STARTED_AT}, {ENDED_AT}, {DURATION_SECONDS},
+                {TRANSCRIPTION_PROFILE}, {RECORDING_SESSIONS}, {SUMMARY},
+                {SUMMARY_IS_STALE}, {SUMMARY_MODEL}, {SUMMARY_GENERATED_AT},
+                {EDITED_TRANSCRIPT}, {NOTES}, {CALENDAR_EVENT_ID}, {PARTICIPANTS},
+                {STRUCTURED_SUMMARY}
              ) VALUES (?1, ?2, ?3, NULL, 0, ?4, ?5, ?6, ?7, ?8, ?9, NULL, ?10, ?11, ?12, ?13)
-             ON CONFLICT(id) DO UPDATE SET
-                title = excluded.title,
-                started_at = excluded.started_at,
-                ended_at = NULL,
-                transcription_profile = excluded.transcription_profile,
-                recording_sessions = excluded.recording_sessions,
-                summary = excluded.summary,
-                summary_is_stale = excluded.summary_is_stale,
-                summary_model = excluded.summary_model,
-                summary_generated_at = excluded.summary_generated_at,
-                notes = excluded.notes,
-                calendar_event_id = excluded.calendar_event_id,
-                participants = excluded.participants,
-                structured_summary = excluded.structured_summary",
+             ON CONFLICT({ID}) DO UPDATE SET
+                {TITLE} = excluded.{TITLE},
+                {STARTED_AT} = excluded.{STARTED_AT},
+                {ENDED_AT} = NULL,
+                {TRANSCRIPTION_PROFILE} = excluded.{TRANSCRIPTION_PROFILE},
+                {RECORDING_SESSIONS} = excluded.{RECORDING_SESSIONS},
+                {SUMMARY} = excluded.{SUMMARY},
+                {SUMMARY_IS_STALE} = excluded.{SUMMARY_IS_STALE},
+                {SUMMARY_MODEL} = excluded.{SUMMARY_MODEL},
+                {SUMMARY_GENERATED_AT} = excluded.{SUMMARY_GENERATED_AT},
+                {NOTES} = excluded.{NOTES},
+                {CALENDAR_EVENT_ID} = excluded.{CALENDAR_EVENT_ID},
+                {PARTICIPANTS} = excluded.{PARTICIPANTS},
+                {STRUCTURED_SUMMARY} = excluded.{STRUCTURED_SUMMARY}"
+            ),
             params![
                 meeting.id,
                 meeting.title,
@@ -190,6 +224,8 @@ impl Database {
             ],
         )
         .map_err(|e| format!("Upsert meeting header: {e}"))?;
+        invalidate_changed(&tx, &meeting.id, before)?;
+        tx.commit().map_err(|e| e.to_string())?;
         Ok(())
     }
 
@@ -209,10 +245,14 @@ impl Database {
         let tx = conn
             .transaction()
             .map_err(|e| format!("Transaction: {e}"))?;
+        let compact_before = invalidation_snapshot(&tx, meeting_id)?;
+        let insert_segment_sql = format!(
+            "INSERT INTO {SEGMENTS} ({MEETING_ID}, {TEXT}, {START_TIME}, {END_TIME}, {IS_FINAL}, {LANGUAGE}, {CONFIDENCE}, {SORT_ORDER}, {SPEAKER})
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)"
+        );
         for (i, seg) in segments.iter().enumerate() {
             tx.execute(
-                "INSERT INTO segments (meeting_id, text, start_time, end_time, is_final, language, confidence, sort_order, speaker)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                &insert_segment_sql,
                 params![
                     meeting_id,
                     seg.text,
@@ -227,6 +267,7 @@ impl Database {
             )
             .map_err(|e| format!("Append segment: {e}"))?;
         }
+        invalidate_changed(&tx, meeting_id, compact_before)?;
         tx.commit().map_err(|e| format!("Commit: {e}"))?;
         Ok(())
     }
@@ -245,18 +286,19 @@ impl Database {
         let tx = conn
             .transaction()
             .map_err(|e| format!("Transaction: {e}"))?;
+        let compact_before = invalidation_snapshot(&tx, meeting_id)?;
+        let update_segment_sql = format!(
+            "UPDATE {SEGMENTS} SET {TEXT} = ?3 WHERE {MEETING_ID} = ?1 AND {SORT_ORDER} = ?2"
+        );
         for (sort_order, text) in updates {
-            tx.execute(
-                "UPDATE segments SET text = ?3 WHERE meeting_id = ?1 AND sort_order = ?2",
-                params![meeting_id, sort_order, text],
-            )
-            .map_err(|e| format!("Update segment text: {e}"))?;
+            tx.execute(&update_segment_sql, params![meeting_id, sort_order, text])
+                .map_err(|e| format!("Update segment text: {e}"))?;
         }
 
         // Rebuild FTS only if there is no edited_transcript
         let edited_transcript: Option<String> = tx
             .query_row(
-                "SELECT edited_transcript FROM meetings WHERE id = ?1",
+                &format!("SELECT {EDITED_TRANSCRIPT} FROM {MEETINGS} WHERE {ID} = ?1"),
                 params![meeting_id],
                 |row| row.get(0),
             )
@@ -271,6 +313,7 @@ impl Database {
             reindex_meeting_fts(&tx, meeting_id, &full_text)?;
         }
 
+        invalidate_changed(&tx, meeting_id, compact_before)?;
         tx.commit().map_err(|e| format!("Commit: {e}"))?;
         Ok(())
     }
@@ -287,10 +330,9 @@ impl Database {
     /// orphaned `.ogg` no `meetings` row points to. Everything else gets its
     /// crashed session closed off and `ended_at`/`duration_seconds`
     /// recomputed from the full session list, then is rewritten (which also
-    /// rebuilds FTS). Returns the number of meetings salvaged. Safe to call
-    /// whenever no recording is live: at startup, and also from the
-    /// failed-start path in `launch_meeting`, since the accumulator guard
-    /// there guarantees no other meeting is mid-recording when it runs.
+    /// rebuilds FTS). Returns the number of meetings salvaged. This global
+    /// recovery runs at startup before runtime actions are available. Runtime
+    /// recovery must target only the ID whose writer reservation it owns.
     pub fn recover_unfinished_meetings(&self) -> Result<usize, String> {
         self.recover_unfinished_meetings_with(&|id| {
             crate::audio::recorder::list_session_files(id)
@@ -309,7 +351,9 @@ impl Database {
         let ids: Vec<String> = {
             let conn = self.conn.acquire()?;
             let mut stmt = conn
-                .prepare("SELECT id FROM meetings WHERE ended_at IS NULL")
+                .prepare(&format!(
+                    "SELECT {ID} FROM {MEETINGS} WHERE {ENDED_AT} IS NULL"
+                ))
                 .map_err(|e| format!("Prepare unfinished: {e}"))?;
             stmt.query_map([], |row| row.get::<_, String>(0))
                 .map_err(|e| format!("Query unfinished: {e}"))?
@@ -319,62 +363,75 @@ impl Database {
 
         let mut recovered = 0;
         for id in ids {
-            let mut meeting = self.load_meeting(&id)?;
-            if meeting.segments.is_empty() {
-                if !has_recorded_audio(&id)? {
-                    self.delete_meeting(&id)?;
-                } else {
-                    meeting.ended_at = Some(meeting.started_at);
-                    self.save_meeting(&meeting)?;
-                    recovered += 1;
-                }
-                continue;
-            }
-
-            let closed_segment_count = meeting
-                .recording_sessions
-                .last()
-                .map(|s| s.end_segment_index)
-                .unwrap_or(0);
-            let total_segment_count = meeting.segments.len() as u64;
-            if total_segment_count > closed_segment_count {
-                let crashed_segments = &meeting.segments[closed_segment_count as usize..];
-                let crashed_duration = crashed_segments
-                    .iter()
-                    .map(|s| s.end_time)
-                    .fold(0.0_f64, f64::max);
-                // The gap between sessions (time spent stopped before the
-                // resume that crashed) isn't recorded anywhere, so the best
-                // available start is where the previous session left off.
-                let crashed_started_at = meeting
-                    .recording_sessions
-                    .last()
-                    .map(|s| s.ended_at)
-                    .unwrap_or(meeting.started_at);
-                let crashed_ended_at = crashed_started_at
-                    + chrono::Duration::milliseconds((crashed_duration * 1000.0) as i64);
-                meeting
-                    .recording_sessions
-                    .push(MeetingRecordingSession::completed(
-                        format!("{id}-recovered"),
-                        crashed_started_at,
-                        crashed_ended_at,
-                        closed_segment_count,
-                        total_segment_count,
-                    ));
-            }
-
-            meeting.duration_seconds = meeting
-                .recording_sessions
-                .iter()
-                .map(|s| s.duration_seconds)
-                .sum();
-            meeting.ended_at = meeting.recording_sessions.last().map(|s| s.ended_at);
-
-            self.save_meeting(&meeting)?;
-            recovered += 1;
+            recovered += self.recover_unfinished_meeting_with(&id, has_recorded_audio)?;
         }
         Ok(recovered)
+    }
+
+    /// Recover one ID. Runtime callers must own its writer reservation before
+    /// this load and retain it through the final save/delete. Audio lookup is
+    /// injected so runtime uses its AppState root and startup keeps its root.
+    pub(crate) fn recover_unfinished_meeting_with(
+        &self,
+        id: &str,
+        has_recorded_audio: &dyn Fn(&str) -> Result<bool, String>,
+    ) -> Result<usize, String> {
+        let mut meeting = self.load_meeting(id)?;
+        if meeting.ended_at.is_some() {
+            return Ok(0);
+        }
+        if meeting.segments.is_empty() {
+            if !has_recorded_audio(id)? {
+                self.delete_meeting(id)?;
+                return Ok(0);
+            }
+            meeting.ended_at = Some(meeting.started_at);
+            self.save_meeting(&meeting)?;
+            return Ok(1);
+        }
+
+        let closed_segment_count = meeting
+            .recording_sessions
+            .last()
+            .map(|s| s.end_segment_index)
+            .unwrap_or(0);
+        let total_segment_count = meeting.segments.len() as u64;
+        if total_segment_count > closed_segment_count {
+            let crashed_segments = &meeting.segments[closed_segment_count as usize..];
+            let crashed_duration = crashed_segments
+                .iter()
+                .map(|s| s.end_time)
+                .fold(0.0_f64, f64::max);
+            // The gap between sessions (time spent stopped before the
+            // resume that crashed) isn't recorded anywhere, so the best
+            // available start is where the previous session left off.
+            let crashed_started_at = meeting
+                .recording_sessions
+                .last()
+                .map(|s| s.ended_at)
+                .unwrap_or(meeting.started_at);
+            let crashed_ended_at = crashed_started_at
+                + chrono::Duration::milliseconds((crashed_duration * 1000.0) as i64);
+            meeting
+                .recording_sessions
+                .push(MeetingRecordingSession::completed(
+                    format!("{id}-recovered"),
+                    crashed_started_at,
+                    crashed_ended_at,
+                    closed_segment_count,
+                    total_segment_count,
+                ));
+        }
+
+        meeting.duration_seconds = meeting
+            .recording_sessions
+            .iter()
+            .map(|s| s.duration_seconds)
+            .sum();
+        meeting.ended_at = meeting.recording_sessions.last().map(|s| s.ended_at);
+
+        self.save_meeting(&meeting)?;
+        Ok(1)
     }
 
     /// Load a full meeting with segments by ID.
@@ -386,26 +443,28 @@ impl Database {
         #[allow(clippy::wildcard_enum_match_arm)]
         let meeting = conn
             .query_row(
-                "SELECT
-                    id,
-                    title,
-                    started_at,
-                    ended_at,
-                    duration_seconds,
-                    transcription_profile,
-                    recording_sessions,
-                    summary,
-                    summary_is_stale,
-                    summary_model,
-                    summary_generated_at,
-                    edited_transcript,
-                    notes,
-                    calendar_event_id,
-                    participants,
-                    structured_summary,
-                    system_audio
-                 FROM meetings
-                 WHERE id = ?1",
+                &format!(
+                    "SELECT
+                    {ID},
+                    {TITLE},
+                    {STARTED_AT},
+                    {ENDED_AT},
+                    {DURATION_SECONDS},
+                    {TRANSCRIPTION_PROFILE},
+                    {RECORDING_SESSIONS},
+                    {SUMMARY},
+                    {SUMMARY_IS_STALE},
+                    {SUMMARY_MODEL},
+                    {SUMMARY_GENERATED_AT},
+                    {EDITED_TRANSCRIPT},
+                    {NOTES},
+                    {CALENDAR_EVENT_ID},
+                    {PARTICIPANTS},
+                    {STRUCTURED_SUMMARY},
+                    {SYSTEM_AUDIO}
+                 FROM {MEETINGS}
+                 WHERE {ID} = ?1"
+                ),
                 params![id],
                 |row| {
                     Ok(MeetingRow {
@@ -436,8 +495,8 @@ impl Database {
 
         let mut stmt = conn
             .prepare(
-                "SELECT text, start_time, end_time, is_final, language, confidence, speaker
-                 FROM segments WHERE meeting_id = ?1 ORDER BY sort_order",
+                &format!("SELECT {TEXT}, {START_TIME}, {END_TIME}, {IS_FINAL}, {LANGUAGE}, {CONFIDENCE}, {SPEAKER}
+                 FROM {SEGMENTS} WHERE {MEETING_ID} = ?1 ORDER BY {SORT_ORDER}"),
             )
             .map_err(|e| format!("Prepare: {e}"))?;
 
@@ -460,6 +519,7 @@ impl Database {
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| format!("Collect segments: {e}"))?;
         drop(stmt);
+        let compact_transcript = read_compact(&conn, id)?;
         drop(conn);
 
         let transcription_profile = meeting.transcription_profile()?;
@@ -493,6 +553,7 @@ impl Database {
             summary_model: meeting.summary_model,
             summary_generated_at,
             edited_transcript: meeting.edited_transcript,
+            compact_transcript,
             notes: meeting.notes,
             calendar_event_id: meeting.calendar_event_id,
             participants,
@@ -511,7 +572,7 @@ impl Database {
         #[allow(clippy::wildcard_enum_match_arm)]
         let raw: Option<String> = conn
             .query_row(
-                "SELECT system_audio FROM meetings WHERE id = ?1",
+                &format!("SELECT {SYSTEM_AUDIO} FROM {MEETINGS} WHERE {ID} = ?1"),
                 params![id],
                 |row| row.get(0),
             )
@@ -525,13 +586,15 @@ impl Database {
     pub fn save_meeting_notes(&self, id: &str, notes: Option<&str>) -> Result<(), String> {
         let conn = self.conn.acquire()?;
         conn.execute(
-            "UPDATE meetings
-             SET notes = ?1,
-                 summary_is_stale = CASE
-                   WHEN summary IS NOT NULL AND notes IS DISTINCT FROM ?1 THEN 1
-                   ELSE summary_is_stale
+            &format!(
+                "UPDATE {MEETINGS}
+             SET {NOTES} = ?1,
+                 {SUMMARY_IS_STALE} = CASE
+                   WHEN {SUMMARY} IS NOT NULL AND {NOTES} IS DISTINCT FROM ?1 THEN 1
+                   ELSE {SUMMARY_IS_STALE}
                  END
-             WHERE id = ?2",
+             WHERE {ID} = ?2"
+            ),
             params![notes, id],
         )
         .map_err(|e| format!("Update meeting notes: {e}"))?;
@@ -544,8 +607,8 @@ impl Database {
 
         let mut stmt = conn
             .prepare(
-                "SELECT id, title, started_at, duration_seconds, summary IS NOT NULL, summary_is_stale
-                 FROM meetings ORDER BY started_at DESC",
+                &format!("SELECT {ID}, {TITLE}, {STARTED_AT}, {DURATION_SECONDS}, {SUMMARY} IS NOT NULL, {SUMMARY_IS_STALE}
+                 FROM {MEETINGS} ORDER BY {STARTED_AT} DESC"),
             )
             .map_err(|e| format!("Prepare: {e}"))?;
 
@@ -582,20 +645,23 @@ impl Database {
         let conn = self.conn.acquire()?;
 
         conn.execute(
-            "DELETE FROM text_search WHERE source_type = ?1 AND source_id = ?2",
+            &format!("DELETE FROM {TEXT_SEARCH} WHERE {SOURCE_TYPE} = ?1 AND {SOURCE_ID} = ?2"),
             params![SearchSource::Meeting, id],
         )
         .map_err(|e| format!("Delete FTS: {e}"))?;
 
-        conn.execute("DELETE FROM meetings WHERE id = ?1", params![id])
-            .map_err(|e| format!("Delete meeting: {e}"))?;
+        conn.execute(
+            &format!("DELETE FROM {MEETINGS} WHERE {ID} = ?1"),
+            params![id],
+        )
+        .map_err(|e| format!("Delete meeting: {e}"))?;
 
         Ok(())
     }
 
     /// Update meeting summary fields and structured summary.
     ///
-    /// `generated_from_edited` / `generated_from_notes` are snapshots taken
+    /// The effective-source hash and notes are snapshots taken
     /// when summarization started. If either changed during generation, the
     /// new summary is still stored but `summary_is_stale` stays set so an
     /// older summary cannot be marked fresh.
@@ -605,42 +671,54 @@ impl Database {
         summary: &str,
         structured_summary: Option<&StructuredSummary>,
         model: &str,
-        generated_from_edited: Option<&str>,
+        generated_from_source: &str,
         generated_from_notes: Option<&str>,
     ) -> Result<(), String> {
-        let conn = self.conn.acquire()?;
+        let mut conn = self.conn.acquire()?;
+        let tx = conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .map_err(|e| format!("Begin summary update: {e}"))?;
+        let current_source = super::compression::fingerprint(&tx, id)?;
+        let current_notes: Option<Option<String>> = tx
+            .query_row(
+                &format!("SELECT {NOTES} FROM {MEETINGS} WHERE {ID}=?1"),
+                [id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|e| e.to_string())?;
+        let stale = current_source.as_deref() != Some(generated_from_source)
+            || current_notes.as_ref().map(|notes| notes.as_deref()) != Some(generated_from_notes);
         let now = Utc::now().to_rfc3339();
 
-        conn.execute(
-            "UPDATE meetings
-             SET summary = ?1, summary_model = ?2, summary_generated_at = ?3,
-                 structured_summary = ?4,
-                 summary_is_stale = CASE
-                   WHEN edited_transcript IS NOT DISTINCT FROM ?5
-                    AND notes IS NOT DISTINCT FROM ?6 THEN 0
-                   ELSE 1
-                 END
-             WHERE id = ?7",
+        tx.execute(
+            &format!(
+                "UPDATE {MEETINGS}
+             SET {SUMMARY} = ?1, {SUMMARY_MODEL} = ?2, {SUMMARY_GENERATED_AT} = ?3,
+                 {STRUCTURED_SUMMARY} = ?4,
+                 {SUMMARY_IS_STALE} = ?5
+             WHERE {ID} = ?6"
+            ),
             params![
                 summary,
                 model,
                 now,
                 serialize_structured_summary(structured_summary)?,
-                generated_from_edited,
-                generated_from_notes,
+                stale,
                 id
             ],
         )
         .map_err(|e| format!("Update summary: {e}"))?;
 
-        Ok(())
+        tx.commit()
+            .map_err(|e| format!("Commit summary update: {e}"))
     }
 
     /// Save an edited transcript for a meeting.
     pub fn update_meeting_title(&self, id: &str, title: &str) -> Result<(), String> {
         let conn = self.conn.acquire()?;
         conn.execute(
-            "UPDATE meetings SET title = ?1 WHERE id = ?2",
+            &format!("UPDATE {MEETINGS} SET {TITLE} = ?1 WHERE {ID} = ?2"),
             params![title, id],
         )
         .map_err(|e| format!("Update meeting title: {e}"))?;
@@ -656,15 +734,18 @@ impl Database {
         let tx = conn
             .transaction()
             .map_err(|e| format!("Transaction: {e}"))?;
+        let compact_before = invalidation_snapshot(&tx, id)?;
 
         tx.execute(
-            "UPDATE meetings
-             SET edited_transcript = ?1,
-                 summary_is_stale = CASE
-                   WHEN summary IS NOT NULL AND edited_transcript IS DISTINCT FROM ?1 THEN 1
-                   ELSE summary_is_stale
+            &format!(
+                "UPDATE {MEETINGS}
+             SET {EDITED_TRANSCRIPT} = ?1,
+                 {SUMMARY_IS_STALE} = CASE
+                   WHEN {SUMMARY} IS NOT NULL AND {EDITED_TRANSCRIPT} IS DISTINCT FROM ?1 THEN 1
+                   ELSE {SUMMARY_IS_STALE}
                  END
-             WHERE id = ?2",
+             WHERE {ID} = ?2"
+            ),
             params![edited_transcript, id],
         )
         .map_err(|e| format!("Update edited transcript: {e}"))?;
@@ -672,6 +753,7 @@ impl Database {
         let text_to_index = meeting_fts_text(edited_transcript, joined_segment_text(&tx, id)?);
         reindex_meeting_fts(&tx, id, &text_to_index)?;
 
+        invalidate_changed(&tx, id, compact_before)?;
         tx.commit().map_err(|e| format!("Commit: {e}"))?;
 
         Ok(())
@@ -681,7 +763,7 @@ impl Database {
     pub fn load_edited_transcript(&self, id: &str) -> Result<Option<String>, String> {
         let conn = self.conn.acquire()?;
         conn.query_row(
-            "SELECT edited_transcript FROM meetings WHERE id = ?1",
+            &format!("SELECT {EDITED_TRANSCRIPT} FROM {MEETINGS} WHERE {ID} = ?1"),
             params![id],
             |row| row.get(0),
         )
@@ -693,7 +775,7 @@ impl Database {
         let conn = self.conn.acquire()?;
         let count: i64 = conn
             .query_row(
-                "SELECT COUNT(*) FROM meetings WHERE id = ?1",
+                &format!("SELECT COUNT(*) FROM {MEETINGS} WHERE {ID} = ?1"),
                 params![id],
                 |row| row.get(0),
             )
@@ -705,7 +787,9 @@ impl Database {
     pub fn count_meetings(&self) -> Result<u32, String> {
         let conn = self.conn.acquire()?;
         let count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM meetings", [], |row| row.get(0))
+            .query_row(&format!("SELECT COUNT(*) FROM {MEETINGS}"), [], |row| {
+                row.get(0)
+            })
             .map_err(|e| format!("Count meetings: {e}"))?;
         Ok(count.max(0) as u32)
     }
@@ -1153,7 +1237,7 @@ mod tests {
                 open_questions: vec![],
             }),
             "qwen2.5",
-            None,
+            &crate::summary::compress::CompressionInput::from_meeting(&meeting).source_sha256,
             None,
         )
         .unwrap();
@@ -1180,7 +1264,10 @@ mod tests {
                 open_questions: vec![],
             }),
             "qwen2.5",
-            None,
+            &crate::summary::compress::CompressionInput::from_meeting(
+                &db.load_meeting("m1").unwrap(),
+            )
+            .source_sha256,
             None,
         )
         .unwrap();
@@ -1189,7 +1276,10 @@ mod tests {
             "Prose only after extract fail",
             None,
             "qwen2.5",
-            None,
+            &crate::summary::compress::CompressionInput::from_meeting(
+                &db.load_meeting("m1").unwrap(),
+            )
+            .source_sha256,
             None,
         )
         .unwrap();
@@ -1552,7 +1642,10 @@ mod tests {
             "fresh from corrigé",
             None,
             "qwen2.5",
-            Some("corrigé"),
+            &crate::summary::compress::CompressionInput::from_meeting(
+                &db.load_meeting("m1").unwrap(),
+            )
+            .source_sha256,
             None,
         )
         .unwrap();
@@ -1569,14 +1662,15 @@ mod tests {
         db.save_meeting(&meeting).unwrap();
 
         // Generation started from the unedited segments.
-        let snapshot = meeting.edited_transcript.clone();
+        let snapshot =
+            crate::summary::compress::CompressionInput::from_meeting(&meeting).source_sha256;
         db.save_edited_transcript("m1", Some("corrigé")).unwrap();
         db.update_meeting_summary(
             "m1",
             "summary of the old transcript",
             None,
             "qwen2.5",
-            snapshot.as_deref(),
+            &snapshot,
             None,
         )
         .unwrap();
@@ -1590,6 +1684,40 @@ mod tests {
             loaded.summary_is_stale,
             "an older summary must not be marked fresh after an edit during generation"
         );
+    }
+
+    #[test]
+    fn update_summary_detects_raw_and_session_mutations_and_never_resurrects_deletion() {
+        let (db, _dir) = test_db();
+        let mut meeting = sample_meeting("source-race");
+        db.save_meeting(&meeting).unwrap();
+        let original =
+            crate::summary::compress::CompressionInput::from_meeting(&meeting).source_sha256;
+        meeting.segments[0].text = "Changed raw decision".into();
+        db.save_meeting(&meeting).unwrap();
+        db.update_meeting_summary(
+            &meeting.id,
+            "Old source summary",
+            None,
+            "test",
+            &original,
+            None,
+        )
+        .unwrap();
+        assert!(db.load_meeting(&meeting.id).unwrap().summary_is_stale);
+        let current = crate::summary::compress::CompressionInput::from_meeting(
+            &db.load_meeting(&meeting.id).unwrap(),
+        )
+        .source_sha256;
+        meeting.ended_at = None;
+        db.save_meeting(&meeting).unwrap();
+        db.update_meeting_summary(&meeting.id, "Before resume", None, "test", &current, None)
+            .unwrap();
+        assert!(db.load_meeting(&meeting.id).unwrap().summary_is_stale);
+        db.delete_meeting(&meeting.id).unwrap();
+        db.update_meeting_summary(&meeting.id, "Late result", None, "test", &current, None)
+            .unwrap();
+        assert!(!db.meeting_exists(&meeting.id).unwrap());
     }
 
     #[test]
@@ -1607,7 +1735,7 @@ mod tests {
             "summary of the old notes",
             None,
             "qwen2.5",
-            None,
+            &crate::summary::compress::CompressionInput::from_meeting(&meeting).source_sha256,
             notes_snapshot.as_deref(),
         )
         .unwrap();

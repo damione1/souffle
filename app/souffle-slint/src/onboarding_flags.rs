@@ -86,7 +86,7 @@ pub fn adopt_pre_slint_install() {
     let adopt = decide_adopt_pre_slint_install(
         sentinel.exists(),
         souffle_lib::constants::app_data_dir()
-            .join("souffle.db")
+            .join(souffle_schema::DB_FILENAME)
             .exists(),
         legacy_webview_dir().is_some_and(|dir| dir.exists()),
         read_setup_flags(),
@@ -110,7 +110,8 @@ pub fn decide_show_setup_wizard(phase: TranscriptionRuntimePhase, flags: SetupFl
         | TranscriptionRuntimePhase::LoadRequired
         | TranscriptionRuntimePhase::Loading
         | TranscriptionRuntimePhase::Ready
-        | TranscriptionRuntimePhase::Unloading => !flags.permissions_done,
+        | TranscriptionRuntimePhase::Unloading
+        | TranscriptionRuntimePhase::AudioFailed => !flags.permissions_done,
     }
 }
 

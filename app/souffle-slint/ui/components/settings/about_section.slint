@@ -1,3 +1,4 @@
+import { AppText, AppTextInput, Typography, TypographyStyle } from "@typography";
 import { SettingsField } from "settings_field.slint";
 import { SettingsGroup } from "settings_group.slint";
 import { Theme } from "../../theme.slint";
@@ -72,7 +73,8 @@ export component AboutSection inherits VerticalLayout {
     pure function update-button-enabled() -> bool {
         return root.update-row != UpdateRowStatus.checking
             && root.update-row != UpdateRowStatus.downloading
-            && root.update-row != UpdateRowStatus.installing;
+            && root.update-row != UpdateRowStatus.installing
+            && (root.update-row != UpdateRowStatus.ready || !root.update-blocked);
     }
 
     pure function update-button-kind() -> ThemedButtonKind {
@@ -93,9 +95,9 @@ export component AboutSection inherits VerticalLayout {
             show-divider: false;
             label: @tr("Version");
 
-            Text {
+            AppText {
                 text: root.app-version == "local build" ? @tr("Build local") : @tr("v{}", root.app-version);
-                font-size: 13px;
+                typography: Typography.content;
                 color: Theme.text-secondary;
                 horizontal-alignment: right;
                 overflow: elide;
@@ -107,9 +109,9 @@ export component AboutSection inherits VerticalLayout {
         SettingsField {
             label: @tr("Transcription");
 
-            Text {
+            AppText {
                 text: root.transcription-label;
-                font-size: 13px;
+                typography: Typography.content;
                 color: Theme.text-secondary;
                 horizontal-alignment: right;
                 overflow: elide;
@@ -121,9 +123,9 @@ export component AboutSection inherits VerticalLayout {
         SettingsField {
             label: @tr("Résumés");
 
-            Text {
+            AppText {
                 text: root.summary-label;
-                font-size: 13px;
+                typography: Typography.content;
                 color: Theme.text-secondary;
                 horizontal-alignment: right;
                 overflow: elide;
@@ -135,9 +137,9 @@ export component AboutSection inherits VerticalLayout {
         SettingsField {
             label: @tr("Confidentialité");
 
-            Text {
+            AppText {
                 text: @tr("100% local");
-                font-size: 13px;
+                typography: Typography.content;
                 color: Theme.text-secondary;
                 horizontal-alignment: right;
                 width: Theme.settings-control-width;
@@ -149,7 +151,7 @@ export component AboutSection inherits VerticalLayout {
             label: @tr("Mises à jour");
             description: root.update-description();
 
-            ThemedButton {
+            update-action := ThemedButton {
                 text: root.update-button-label();
                 kind: root.update-button-kind();
                 enabled: root.update-button-enabled();

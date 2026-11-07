@@ -1,3 +1,4 @@
+import { AppText, AppTextInput, Typography, TypographyStyle } from "@typography";
 import { MarkdownBlock } from "markdown_block.slint";
 import { ReleaseNotesBox } from "markdown_view.slint";
 import { ModalDialog } from "../modal_dialog.slint";
@@ -46,18 +47,18 @@ export component UpdateAvailableDialog inherits ModalDialog {
         link-clicked(url) => { root.link-clicked(url); }
     }
 
-    if root.error-message != "": Text {
+    if root.error-message != "": AppText {
         text: root.error-message;
         color: Theme.danger-soft;
-        font-size: 12px;
+        typography: Typography.secondary;
         wrap: word-wrap;
         vertical-stretch: 0;
     }
 
-    if root.phase == UpdatePhase.ready && root.install-blocked: Text {
+    if root.phase == UpdatePhase.ready && root.install-blocked: AppText {
         text: UpdateCopy.install-block-label(root.install-block-reason);
         color: Theme.text-muted;
-        font-size: 12px;
+        typography: Typography.secondary;
         wrap: word-wrap;
         vertical-stretch: 0;
     }

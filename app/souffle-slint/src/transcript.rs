@@ -117,6 +117,7 @@ fn paragraph_blocks(
         .map(|p| {
             let (has_speaker, speaker) = speaker_fields(p.speaker);
             TranscriptBlock {
+                can_edit: false,
                 is_session_break: false,
                 has_speaker,
                 speaker,
@@ -134,6 +135,7 @@ fn paragraph_blocks(
 
 fn session_break_block() -> TranscriptBlock {
     TranscriptBlock {
+        can_edit: false,
         is_session_break: true,
         has_speaker: false,
         speaker: SpeakerRole::Me,
@@ -459,6 +461,7 @@ mod tests {
 
     fn plain_block(text: &str) -> TranscriptBlock {
         TranscriptBlock {
+            can_edit: false,
             is_session_break: false,
             has_speaker: true,
             speaker: SpeakerRole::Me,

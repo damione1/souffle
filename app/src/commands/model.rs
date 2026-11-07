@@ -6,9 +6,9 @@ use crate::progress::ProgressChannel;
 
 use crate::engine::{
     TranscriptionCatalog, TranscriptionProfile, TranscriptionProfileSelection,
-    TranscriptionRuntimeStatus, resolve_transcription_profile, resolve_transcription_selection,
-    transcription_engine_catalog,
+    TranscriptionRuntimeStatus, resolve_transcription_selection, transcription_engine_catalog,
 };
+use crate::lock_ext::MutexExt;
 use crate::models;
 use crate::settings::AppSettings;
 use crate::state::AppState;
@@ -22,19 +22,14 @@ fn unload_loaded_model(
 ) -> Result<(), String> {
     state.apply_transition(StateAction::Unload { next_profile })?;
     if let Err(e) = state.engine_actor.unload_model() {
-        state.apply_transition(StateAction::Fail { message: e.clone() })?;
+        state.apply_transition(StateAction::Fail {
+            source: crate::state_machine::FailureSource::Model,
+            message: e.clone(),
+        })?;
         return Err(e);
     }
     state.apply_transition(StateAction::UnloadComplete)?;
     Ok(())
-}
-
-fn selected_profile_from_settings(settings: &AppSettings) -> Result<TranscriptionProfile, String> {
-    resolve_transcription_profile(
-        Some(&settings.transcription_engine_id),
-        Some(&settings.transcription_model_id),
-        Some(&settings.transcription_backend_id),
-    )
 }
 
 /// Build the transcription catalogue from an already-observed Settings
@@ -43,12 +38,11 @@ fn selected_profile_from_settings(settings: &AppSettings) -> Result<Transcriptio
 pub fn transcription_catalog_from_settings(
     settings: &AppSettings,
 ) -> Result<TranscriptionCatalog, String> {
-    let profile = selected_profile_from_settings(settings)?;
     Ok(TranscriptionCatalog {
         engines: transcription_engine_catalog(),
-        selected_engine_id: profile.engine_id,
-        selected_model_id: profile.model_id,
-        selected_backend_id: profile.backend_id,
+        selected_engine_id: settings.transcription_engine_id.clone(),
+        selected_model_id: settings.transcription_model_id.clone(),
+        selected_backend_id: settings.transcription_backend_id.clone(),
     })
 }
 
@@ -64,7 +58,10 @@ pub fn get_model_status(
     selection: TranscriptionProfileSelection,
 ) -> Result<TranscriptionRuntimeStatus, String> {
     let profile = resolve_transcription_selection(&selection)?;
-    let model_dir = models::model_dir(&profile);
+    let model_dir = match models::model_location(&profile)? {
+        crate::engine::ModelLocation::Files(path) => Some(path.display().to_string()),
+        crate::engine::ModelLocation::SystemSpeech { .. } => None,
+    };
 
     // Derive phase from the state machine
     let machine = state.current_machine_state()?;
@@ -73,7 +70,7 @@ pub fn get_model_status(
     Ok(TranscriptionRuntimeStatus {
         profile: profile.clone(),
         phase,
-        model_dir: model_dir.display().to_string(),
+        model_dir,
     })
 }
 
@@ -213,7 +210,10 @@ pub fn download_model(
                     channel_clone.send(progress);
                 }
                 Err(e) => {
-                    apply(StateAction::Fail { message: e.clone() });
+                    apply(StateAction::Fail {
+                        source: crate::state_machine::FailureSource::Model,
+                        message: e.clone(),
+                    });
                     let progress = models::DownloadProgress {
                         file: "error".into(),
                         downloaded_bytes: 0,
@@ -240,7 +240,7 @@ pub fn load_model(
     selection: TranscriptionProfileSelection,
 ) -> Result<(), String> {
     let profile = resolve_transcription_selection(&selection)?;
-    let model_dir = models::model_dir(&profile);
+    let model_dir = models::model_location(&profile)?;
     if !models::model_exists(&profile) {
         return Err("Model not downloaded yet".into());
     }
@@ -283,9 +283,12 @@ pub fn load_model(
         })?;
     }
 
-    info!(path = %model_dir.display(), "Loading model");
+    info!(location = ?model_dir, "Loading model");
     if let Err(e) = state.engine_actor.load_model(profile, model_dir) {
-        state.apply_transition(StateAction::Fail { message: e.clone() })?;
+        state.apply_transition(StateAction::Fail {
+            source: crate::state_machine::FailureSource::Model,
+            message: e.clone(),
+        })?;
         return Err(e);
     }
 
@@ -295,26 +298,50 @@ pub fn load_model(
     Ok(())
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ModelDeletionError {
+    ManagedAsset,
+    TransitionBusy,
+    ActiveModel,
+    OperationFailed { message: String },
+}
+
+impl std::fmt::Display for ModelDeletionError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::ManagedAsset => formatter.write_str("Apple Speech assets are managed by macOS and cannot be deleted by Soufflé."),
+            Self::TransitionBusy => formatter.write_str("Cannot delete a model while it is downloading, loading, unloading, or recovering from a failed unload."),
+            Self::ActiveModel => formatter.write_str("Cannot delete the currently loaded model. Unload it first or switch to a different model."),
+            Self::OperationFailed { message } => formatter.write_str(message),
+        }
+    }
+}
+
+impl std::error::Error for ModelDeletionError {}
+
+impl From<String> for ModelDeletionError {
+    fn from(message: String) -> Self {
+        Self::OperationFailed { message }
+    }
+}
+
 /// Delete a downloaded model from disk.
 pub fn delete_model(
     state: Arc<AppState>,
     selection: TranscriptionProfileSelection,
-) -> Result<(), String> {
+) -> Result<(), ModelDeletionError> {
     let profile = resolve_transcription_selection(&selection)?;
 
-    let machine = state.current_machine_state()?;
-    if model_delete_blocked_by_transition(&machine) {
-        return Err(
-            "Cannot delete a model while it is downloading, loading, unloading, or recovering from a failed unload."
-                .into(),
-        );
+    if !models::can_delete_model_files(&profile) {
+        return Err(ModelDeletionError::ManagedAsset);
     }
-    if machine.is_model_ready() && machine.active_profile() == Some(&profile) {
-        return Err("Cannot delete the currently loaded model. Unload it first or switch to a different model.".into());
-    }
+
+    let machine = state.machine.acquire()?;
+    validate_model_deletion(&machine, &profile)?;
 
     let model_dir = models::model_dir(&profile);
     models::download::delete_model_files(&model_dir)?;
+    drop(machine);
 
     info!(
         engine = %profile.engine_id,
@@ -325,20 +352,64 @@ pub fn delete_model(
     Ok(())
 }
 
+/// Settings checks the same permission before invoking the destructive command.
+pub fn can_delete_model(
+    state: &AppState,
+    selection: &TranscriptionProfileSelection,
+) -> Result<(), ModelDeletionError> {
+    let profile = resolve_transcription_selection(selection)?;
+    if !models::can_delete_model_files(&profile) {
+        return Err(ModelDeletionError::ManagedAsset);
+    }
+    let machine = match state.machine.try_lock() {
+        Ok(machine) => machine,
+        Err(std::sync::TryLockError::WouldBlock) => return Err(ModelDeletionError::TransitionBusy),
+        Err(std::sync::TryLockError::Poisoned(error)) => {
+            return Err(ModelDeletionError::OperationFailed {
+                message: format!("Lock poisoned: {error}"),
+            });
+        }
+    };
+    validate_model_deletion(&machine, &profile)
+}
+
+fn validate_model_deletion(
+    machine: &AppStateMachine,
+    profile: &TranscriptionProfile,
+) -> Result<(), ModelDeletionError> {
+    if model_delete_blocked_by_transition(machine) {
+        return Err(ModelDeletionError::TransitionBusy);
+    }
+    if machine.is_model_ready() && machine.active_profile() == Some(profile) {
+        return Err(ModelDeletionError::ActiveModel);
+    }
+
+    Ok(())
+}
+
 /// Downloading/loading/unloading all hold model files; Unloading and
 /// RetryFromReady are not `is_model_ready`, so they must be listed here or
 /// delete can race teardown (or delete files still held after a failed unload).
 fn model_delete_blocked_by_transition(machine: &AppStateMachine) -> bool {
-    matches!(
-        machine,
+    match machine {
         AppStateMachine::Downloading { .. }
-            | AppStateMachine::Loading { .. }
-            | AppStateMachine::Unloading { .. }
-            | AppStateMachine::Error {
-                recovery: ErrorRecovery::RetryFromReady { .. },
-                ..
-            }
-    )
+        | AppStateMachine::Loading { .. }
+        | AppStateMachine::Unloading { .. }
+        | AppStateMachine::Error {
+            recovery: ErrorRecovery::RetryFromReady { .. },
+            ..
+        } => true,
+        AppStateMachine::Idle
+        | AppStateMachine::Downloaded { .. }
+        | AppStateMachine::Ready { .. }
+        | AppStateMachine::RecordingDictation { .. }
+        | AppStateMachine::RecordingMeeting { .. }
+        | AppStateMachine::Stopping { .. }
+        | AppStateMachine::Error {
+            recovery: ErrorRecovery::RetryFromIdle | ErrorRecovery::RetryFromDownloaded { .. },
+            ..
+        } => false,
+    }
 }
 
 /// Debug: feed the debug WAV through the engine to test model in isolation.
@@ -451,6 +522,55 @@ mod tests {
     }
 
     #[test]
+    fn deletion_permission_rejects_transitions_and_active_profile_only() {
+        let active = profile();
+        let other = TranscriptionProfile {
+            model_id: "different-fixture-model".into(),
+            ..active.clone()
+        };
+        for machine in [
+            AppStateMachine::Ready {
+                profile: active.clone(),
+            },
+            AppStateMachine::RecordingDictation {
+                profile: active.clone(),
+                session_id: 1,
+            },
+            AppStateMachine::RecordingMeeting {
+                profile: active.clone(),
+                session_id: 1,
+                meeting_id: "fixture".into(),
+            },
+            AppStateMachine::Stopping {
+                profile: active.clone(),
+                was_recording: crate::state_machine::RecordingKind::Dictation,
+            },
+        ] {
+            assert!(super::validate_model_deletion(&machine, &active).is_err());
+            assert_eq!(super::validate_model_deletion(&machine, &other), Ok(()));
+        }
+        for machine in [
+            AppStateMachine::Downloading {
+                profile: active.clone(),
+            },
+            AppStateMachine::Loading {
+                profile: active.clone(),
+            },
+            AppStateMachine::Unloading {
+                profile: active.clone(),
+                next_profile: None,
+            },
+        ] {
+            assert!(super::validate_model_deletion(&machine, &active).is_err());
+            assert!(super::validate_model_deletion(&machine, &other).is_err());
+        }
+        assert_eq!(
+            super::validate_model_deletion(&AppStateMachine::Idle, &active),
+            Ok(())
+        );
+    }
+
+    #[test]
     fn delete_is_blocked_while_downloading_or_loading() {
         assert!(model_delete_blocked_by_transition(
             &AppStateMachine::Downloading { profile: profile() }
@@ -467,6 +587,7 @@ mod tests {
     #[test]
     fn delete_is_blocked_while_retry_from_ready() {
         let failed = AppStateMachine::Error {
+            source: crate::state_machine::FailureSource::Model,
             message: "Recording session active".into(),
             recovery: ErrorRecovery::RetryFromReady { profile: profile() },
         };
@@ -474,6 +595,7 @@ mod tests {
         assert!(!failed.is_model_ready());
         assert!(!model_delete_blocked_by_transition(
             &AppStateMachine::Error {
+                source: crate::state_machine::FailureSource::Model,
                 message: "download failed".into(),
                 recovery: ErrorRecovery::RetryFromIdle,
             }

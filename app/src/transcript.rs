@@ -21,7 +21,7 @@ pub struct MeetingParticipant {
 
 /// Declared in `souffle-schema`: the MCP sidecar reads the same column and
 /// used to restate both shapes on its side.
-pub use souffle_schema::{StructuredActionItem, StructuredSummary};
+pub use souffle_schema::{CompactTranscript, StructuredActionItem, StructuredSummary};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct MeetingRecordingSession {
@@ -83,6 +83,7 @@ pub struct MeetingTranscript {
     pub summary_model: Option<String>,
     pub summary_generated_at: Option<DateTime<Utc>>,
     pub structured_summary: Option<StructuredSummary>,
+    pub compact_transcript: Option<CompactTranscript>,
     pub edited_transcript: Option<String>,
     /// Free-form notes the user typed during the meeting; fed into the
     /// summary prompt.
@@ -133,6 +134,8 @@ struct MeetingTranscriptWire {
     #[serde(default)]
     edited_transcript: Option<String>,
     #[serde(default)]
+    compact_transcript: Option<CompactTranscript>,
+    #[serde(default)]
     notes: Option<String>,
     #[serde(default)]
     calendar_event_id: Option<String>,
@@ -177,6 +180,7 @@ impl<'de> Deserialize<'de> for MeetingTranscript {
             summary_generated_at: wire.summary_generated_at,
             structured_summary: wire.structured_summary,
             edited_transcript: wire.edited_transcript,
+            compact_transcript: wire.compact_transcript,
             notes: wire.notes,
             calendar_event_id: wire.calendar_event_id,
             participants: wire.participants,
@@ -297,6 +301,7 @@ mod tests {
                 speaker: None,
             }],
             summary: Some("A summary".to_string()),
+            compact_transcript: None,
             summary_is_stale: false,
             summary_model: Some("test-model".to_string()),
             summary_generated_at: None,
@@ -339,6 +344,7 @@ mod tests {
             )],
             segments: vec![],
             summary: Some("summary".to_string()),
+            compact_transcript: None,
             summary_is_stale: true,
             summary_model: None,
             summary_generated_at: None,

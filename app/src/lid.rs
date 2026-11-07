@@ -9,7 +9,8 @@
 use crate::settings::MeetingTranscriptionLanguage;
 
 /// BCP-47-ish codes we emit on segments.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum LanguageCode {
     En,
     Fr,

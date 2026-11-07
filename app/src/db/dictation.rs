@@ -1,3 +1,8 @@
+use souffle_schema::sql::{
+    column::{CONTENT, ID, SOURCE_ID, SOURCE_TYPE, TEXT, TIMESTAMP},
+    table::{DICTATION_ENTRIES, TEXT_SEARCH},
+};
+
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
 
@@ -20,7 +25,7 @@ impl Database {
         let conn = self.conn.acquire()?;
 
         let mut stmt = conn
-            .prepare("SELECT id, text, timestamp FROM dictation_entries ORDER BY timestamp DESC LIMIT ?1")
+            .prepare(&format!("SELECT {ID}, {TEXT}, {TIMESTAMP} FROM {DICTATION_ENTRIES} ORDER BY {TIMESTAMP} DESC LIMIT ?1"))
             .map_err(|e| format!("Prepare: {e}"))?;
 
         let entries = stmt
@@ -46,20 +51,20 @@ impl Database {
             .map_err(|e| format!("Transaction: {e}"))?;
 
         tx.execute(
-            "INSERT INTO dictation_entries (id, text, timestamp) VALUES (?1, ?2, ?3)
-             ON CONFLICT(id) DO UPDATE SET text = excluded.text, timestamp = excluded.timestamp",
+            &format!("INSERT INTO {DICTATION_ENTRIES} ({ID}, {TEXT}, {TIMESTAMP}) VALUES (?1, ?2, ?3)
+             ON CONFLICT({ID}) DO UPDATE SET {TEXT} = excluded.{TEXT}, {TIMESTAMP} = excluded.{TIMESTAMP}"),
             params![id, text, timestamp],
         )
         .map_err(|e| format!("Insert/Update dictation: {e}"))?;
 
         tx.execute(
-            "DELETE FROM text_search WHERE source_type = ?1 AND source_id = ?2",
+            &format!("DELETE FROM {TEXT_SEARCH} WHERE {SOURCE_TYPE} = ?1 AND {SOURCE_ID} = ?2"),
             params![SearchSource::Dictation, id],
         )
         .map_err(|e| format!("Delete FTS: {e}"))?;
 
         tx.execute(
-            "INSERT INTO text_search (content, source_type, source_id) VALUES (?1, ?2, ?3)",
+            &format!("INSERT INTO {TEXT_SEARCH} ({CONTENT}, {SOURCE_TYPE}, {SOURCE_ID}) VALUES (?1, ?2, ?3)"),
             params![text, SearchSource::Dictation, id],
         )
         .map_err(|e| format!("FTS insert: {e}"))?;
@@ -80,7 +85,7 @@ impl Database {
 
         let updated = tx
             .execute(
-                "UPDATE dictation_entries SET text = ?2 WHERE id = ?1",
+                &format!("UPDATE {DICTATION_ENTRIES} SET {TEXT} = ?2 WHERE {ID} = ?1"),
                 params![id, text],
             )
             .map_err(|e| format!("Update dictation: {e}"))?;
@@ -90,13 +95,13 @@ impl Database {
         }
 
         tx.execute(
-            "DELETE FROM text_search WHERE source_type = ?1 AND source_id = ?2",
+            &format!("DELETE FROM {TEXT_SEARCH} WHERE {SOURCE_TYPE} = ?1 AND {SOURCE_ID} = ?2"),
             params![SearchSource::Dictation, id],
         )
         .map_err(|e| format!("Delete FTS: {e}"))?;
 
         tx.execute(
-            "INSERT INTO text_search (content, source_type, source_id) VALUES (?1, ?2, ?3)",
+            &format!("INSERT INTO {TEXT_SEARCH} ({CONTENT}, {SOURCE_TYPE}, {SOURCE_ID}) VALUES (?1, ?2, ?3)"),
             params![text, SearchSource::Dictation, id],
         )
         .map_err(|e| format!("FTS insert: {e}"))?;
@@ -111,13 +116,16 @@ impl Database {
         let conn = self.conn.acquire()?;
 
         conn.execute(
-            "DELETE FROM text_search WHERE source_type = ?1 AND source_id = ?2",
+            &format!("DELETE FROM {TEXT_SEARCH} WHERE {SOURCE_TYPE} = ?1 AND {SOURCE_ID} = ?2"),
             params![SearchSource::Dictation, id],
         )
         .map_err(|e| format!("Delete FTS: {e}"))?;
 
-        conn.execute("DELETE FROM dictation_entries WHERE id = ?1", params![id])
-            .map_err(|e| format!("Delete: {e}"))?;
+        conn.execute(
+            &format!("DELETE FROM {DICTATION_ENTRIES} WHERE {ID} = ?1"),
+            params![id],
+        )
+        .map_err(|e| format!("Delete: {e}"))?;
 
         Ok(())
     }
@@ -126,9 +134,11 @@ impl Database {
     pub fn count_dictation_entries(&self) -> Result<u32, String> {
         let conn = self.conn.acquire()?;
         let count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM dictation_entries", [], |row| {
-                row.get(0)
-            })
+            .query_row(
+                &format!("SELECT COUNT(*) FROM {DICTATION_ENTRIES}"),
+                [],
+                |row| row.get(0),
+            )
             .map_err(|e| format!("Count dictation entries: {e}"))?;
         Ok(count.max(0) as u32)
     }
@@ -138,12 +148,12 @@ impl Database {
         let conn = self.conn.acquire()?;
 
         conn.execute(
-            "DELETE FROM text_search WHERE source_type = ?1",
+            &format!("DELETE FROM {TEXT_SEARCH} WHERE {SOURCE_TYPE} = ?1"),
             params![SearchSource::Dictation],
         )
         .map_err(|e| format!("Delete FTS: {e}"))?;
 
-        conn.execute("DELETE FROM dictation_entries", [])
+        conn.execute(&format!("DELETE FROM {DICTATION_ENTRIES}"), [])
             .map_err(|e| format!("Delete: {e}"))?;
 
         Ok(())

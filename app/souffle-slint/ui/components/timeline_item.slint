@@ -1,4 +1,6 @@
+import { AppText, AppTextInput, AppNumericText, Typography, TypographyStyle } from "@typography";
 import { TimelineKind } from "../types.slint";
+import { ActionGuards, MeetingDeletePermission } from "../action_guards.slint";
 import { Theme } from "../theme.slint";
 import { LucideIcon, IconSet } from "lucide_icon.slint";
 
@@ -20,6 +22,8 @@ export component TimelineItemRow inherits Rectangle {
     in property <TimelineEntry> entry;
     in property <bool> is-live: false;
     in property <bool> expanded: false;
+    property <MeetingDeletePermission> delete-permission: ActionGuards.meeting-delete(root.entry.id, ActionGuards.revision);
+    property <bool> delete-blocked: root.entry.kind == TimelineKind.meeting && root.delete-permission.blocked;
 
     // Driven by the parent list (`TimelineSection`), not owned locally: a
     // plain `TouchArea` click doesn't grab keyboard focus in Slint, so a
@@ -50,6 +54,17 @@ export component TimelineItemRow inherits Rectangle {
 
     VerticalLayout {
         alignment: start;
+
+        if root.delete-blocked: HorizontalLayout {
+            padding-left: 48px;
+            padding-right: 16px;
+            AppText {
+                text: ActionGuards.reason(root.delete-permission);
+                typography: Typography.caption;
+                color: Theme.text-muted;
+                wrap: word-wrap;
+            }
+        }
 
         Rectangle {
             height: 1px;
@@ -100,7 +115,7 @@ export component TimelineItemRow inherits Rectangle {
                     // Expanded: same Text unwraps in place, so the hidden
                     // remainder appears under the first line instead of a
                     // second copy of the whole dictation.
-                    Text {
+                    AppText {
                         text: root.entry.title;
                         wrap: root.is-dictation && root.expanded ? word-wrap : no-wrap;
                         overflow: root.is-dictation && root.expanded ? clip : elide;
@@ -108,7 +123,7 @@ export component TimelineItemRow inherits Rectangle {
                         // A collapsed title shares the action row's visual
                         // axis. Expanded dictations still grow downward.
                         vertical-alignment: root.is-dictation && root.expanded ? top : center;
-                        font-size: 13.5px;
+                        typography: Typography.field-label;
                         color: Theme.text-secondary;
                     }
 
@@ -137,23 +152,23 @@ export component TimelineItemRow inherits Rectangle {
                                 y: (parent.height - self.height) / 2;
                             }
 
-                            Text {
+                            AppNumericText {
                                 text: root.entry.duration-label;
                                 width: Theme.row-duration-width;
                                 horizontal-alignment: right;
-                                color: Theme.text-muted;
-                                font-family: "JetBrains Mono";
-                                font-size: 11.5px;
+                                text-color: Theme.text-muted;
+                                typography: Typography.small;
+
                                 vertical-alignment: center;
                             }
 
-                            Text {
+                            AppNumericText {
                                 text: root.entry.time-label;
                                 width: Theme.row-timeline-time-width;
                                 horizontal-alignment: right;
-                                color: Theme.text-muted;
-                                font-family: "JetBrains Mono";
-                                font-size: 11.5px;
+                                text-color: Theme.text-muted;
+                                typography: Typography.small;
+
                                 vertical-alignment: center;
                             }
 
@@ -211,9 +226,9 @@ export component TimelineItemRow inherits Rectangle {
                                         x: 8px;
                                         y: (parent.height - self.height) / 2;
                                     }
-                                    Text {
+                                    AppText {
                                         text: root.copied ? @tr("Copié !") : @tr("Copier");
-                                        font-size: 12.5px;
+                                        typography: Typography.hint;
                                         color: copy-area.has-hover ? Theme.text-primary : Theme.text-muted;
                                         x: 25px;
                                         height: 100%;
@@ -237,12 +252,15 @@ export component TimelineItemRow inherits Rectangle {
                             // request, confirming delete must not linger
                             // once you've clicked away from it.
                             delete-area := TouchArea {
-                                width: root.is-live ? 0px : (root.confirming-delete ? 72px : Theme.row-action-width);
+                                width: root.confirming-delete && !root.delete-blocked ? 72px : Theme.row-action-width;
                                 height: 28px;
-                                mouse-cursor: pointer;
+                                enabled: !root.delete-blocked;
+                                mouse-cursor: root.delete-blocked ? default : pointer;
                                 accessible-role: button;
-                                accessible-label: root.confirming-delete ? @tr("Confirmer la suppression") : @tr("Supprimer");
+                                accessible-enabled: !root.delete-blocked;
+                                accessible-label: root.delete-blocked ? ActionGuards.reason(root.delete-permission) : root.confirming-delete ? @tr("Confirmer la suppression") : @tr("Supprimer");
                                 accessible-action-default => {
+                                    if root.delete-blocked { return; }
                                     if root.confirming-delete {
                                         root.removed();
                                     } else {
@@ -250,6 +268,7 @@ export component TimelineItemRow inherits Rectangle {
                                     }
                                 }
                                 clicked => {
+                                    if root.delete-blocked { return; }
                                     if root.confirming-delete {
                                         root.removed();
                                     } else {
@@ -263,17 +282,17 @@ export component TimelineItemRow inherits Rectangle {
                                         ? (delete-area.has-hover ? Theme.danger.with-alpha(0.15) : transparent)
                                         : (delete-area.has-hover ? Theme.surface-3 : transparent);
 
-                                    if root.confirming-delete: Text {
+                                    if root.confirming-delete && !root.delete-blocked: AppText {
                                         text: @tr("Confirmer");
                                         color: Theme.danger-soft;
-                                        font-family: "Archivo SemiBold";
-                                        font-size: 12px;
+                                        typography: Typography.secondary-emphasis;
+
                                         width: 100%;
                                         height: 100%;
                                         horizontal-alignment: center;
                                         vertical-alignment: center;
                                     }
-                                    if !root.confirming-delete && root.actions-visible: LucideIcon {
+                                    if (!root.confirming-delete || root.delete-blocked) && root.actions-visible: LucideIcon {
                                         icon: IconSet.Trash2;
                                         icon-color: delete-area.has-hover ? Theme.danger-soft : Theme.text-muted;
                                         size: 14px;

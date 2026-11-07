@@ -18,6 +18,7 @@ public func appleIntelligenceUnavailableReason() -> UnsafeMutablePointer<CChar>?
 public func processTextWithSystemPrompt(
     _ systemPrompt: UnsafePointer<CChar>,
     _ userContent: UnsafePointer<CChar>,
+    temperature: Float,
     maxTokens: Int32
 ) -> UnsafeMutablePointer<AppleLLMResponse> {
     let responsePtr = ResponsePointer.allocate(capacity: 1)

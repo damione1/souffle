@@ -98,11 +98,21 @@ struct Harness {
     /// test suite needs to touch it directly anymore now that
     /// `stop_meeting_recording` runs unmodified (see the module doc).
     audio_msg_tx: Sender<AudioMessage>,
-    /// Kept alive so `AppState::audio_cmd_sender.send(...)` never errors with
-    /// "all receivers dropped" — nothing needs to read from it since there is
-    /// no real audio-capture thread in this test.
+    /// The mock consumes queued capture commands before emitting EOS. A
+    /// pending Start owns its meeting until consumed, just like real capture.
     pub audio_cmd_rx: Receiver<AudioCommand>,
     _tmp: TempDir,
+}
+
+impl Harness {
+    fn finish_mock_capture(&self, session_id: u64) {
+        // This fixture has no native capture or Ogg writer. Consuming Start
+        // completes its capture ownership before the mock produces EOS.
+        self.audio_cmd_rx.try_iter().for_each(drop);
+        self.audio_msg_tx
+            .send(AudioMessage::EndOfStream { session_id })
+            .unwrap();
+    }
 }
 
 fn build_harness(mock: MockEngine) -> Harness {
@@ -132,12 +142,9 @@ fn build_harness(mock: MockEngine) -> Harness {
     let (audio_cmd_tx, audio_cmd_rx) = crossbeam_channel::unbounded::<AudioCommand>();
     let audio_rms = Arc::new(AtomicU32::new(0f32.to_bits()));
 
-    let state = Arc::new(AppState::new(
-        audio_cmd_tx,
-        Arc::clone(&actor),
-        Arc::clone(&db),
-        audio_rms,
-    ));
+    let mut state = AppState::new(audio_cmd_tx, Arc::clone(&actor), Arc::clone(&db), audio_rms);
+    state.recordings_root = tmp.path().join("recordings");
+    let state = Arc::new(state);
     bring_to_ready(&state, &actor);
 
     Harness {
@@ -146,6 +153,57 @@ fn build_harness(mock: MockEngine) -> Harness {
         audio_msg_tx,
         audio_cmd_rx,
         _tmp: tmp,
+    }
+}
+
+#[test]
+fn recording_settings_commands_refuse_reset_and_rebind_but_keep_hot_swap() {
+    let h = build_harness(MockEngine::new());
+    let profile = default_transcription_profile();
+    let before = h.db.get_all_settings().unwrap();
+    for machine in [
+        AppStateMachine::RecordingDictation {
+            profile: profile.clone(),
+            session_id: 1,
+        },
+        AppStateMachine::RecordingMeeting {
+            profile: profile.clone(),
+            session_id: 1,
+            meeting_id: "fixture".into(),
+        },
+        AppStateMachine::Stopping {
+            profile: profile.clone(),
+            was_recording: souffle_lib::state_machine::RecordingKind::Dictation,
+        },
+        AppStateMachine::Ready { profile },
+    ] {
+        let starting = !machine.is_recording();
+        *h.state.machine.lock().unwrap() = machine;
+        if starting {
+            h.state.capture_start.begin(1);
+        }
+        assert!(commands::settings_capture_busy(&h.state).unwrap());
+        assert!(
+            commands::save_shortcuts(
+                h.state.clone(),
+                commands::get_shortcuts(h.state.clone()).unwrap()
+            )
+            .is_err()
+        );
+        assert!(
+            souffle_lib::async_runtime::block_on(commands::reset_input_sample_rate(
+                h.state.clone(),
+                "fixture-mic".into()
+            ))
+            .is_err()
+        );
+        assert_eq!(h.db.get_all_settings().unwrap(), before);
+        commands::select_audio_device(h.state.clone(), "fixture-hot-swap".into()).unwrap();
+        assert!(
+            matches!(h.audio_cmd_rx.try_recv().unwrap(), AudioCommand::SelectDevice(uid) if uid == "fixture-hot-swap")
+        );
+        assert!(h.audio_cmd_rx.try_recv().is_err());
+        h.state.capture_start.abandon(1);
     }
 }
 
@@ -196,6 +254,163 @@ fn collecting_channel() -> (
 }
 
 #[tokio::test]
+async fn dictionary_learning_modes_keep_live_session_and_manual_aliases_immediate() {
+    use souffle_lib::engine::Speaker;
+    use souffle_lib::settings::DictionaryLearningMode;
+
+    for mode in DictionaryLearningMode::ALL {
+        let segment = TranscriptionSegment {
+            text: "use Kubernetis".into(),
+            start_time: 3.0,
+            end_time: 4.0,
+            is_final: true,
+            language: Some("en".into()),
+            confidence: Some(0.9),
+            speaker: Some(Speaker::Me),
+        };
+        let h =
+            build_harness(MockEngine::new().with_transcribe_response(Ok(vec![segment.clone()]), 1));
+        let mut settings = AppSettings::load(&h.db).unwrap();
+        settings.dictionary_learning_mode = mode;
+        settings.dictionary_correction = true;
+        settings.save(&h.db).unwrap();
+        let (collected, channel) = collecting_channel();
+        commands::start_meeting_recording(h.state.clone(), "Learning".into(), None, channel)
+            .await
+            .unwrap();
+        let (session_id, meeting_id) = match h.state.current_machine_state().unwrap() {
+            AppStateMachine::RecordingMeeting {
+                session_id,
+                meeting_id,
+                ..
+            } => (session_id, meeting_id),
+            other => panic!("expected recording meeting, got {other:?}"),
+        };
+        let other = TranscriptionSegment {
+            text: "other speaker".into(),
+            start_time: 4.5,
+            end_time: 5.5,
+            speaker: Some(Speaker::Them),
+            ..segment.clone()
+        };
+        {
+            let mut acc = h.state.meeting_accumulator.lock().unwrap();
+            acc.as_mut().unwrap().new_segments = vec![segment.clone(), other.clone()];
+        }
+        let session_started_at = h
+            .state
+            .meeting_accumulator
+            .lock()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .session_started_at;
+        for context in [
+            commands::LiveParagraphEditContext {
+                session_started_at: session_started_at - chrono::Duration::seconds(1),
+                original_text: segment.text.clone(),
+            },
+            commands::LiveParagraphEditContext {
+                session_started_at,
+                original_text: "stale editor text".into(),
+            },
+        ] {
+            assert!(
+                commands::apply_live_paragraph_edit_checked(
+                    h.state.clone(),
+                    meeting_id.clone(),
+                    vec![0],
+                    "bad stale update".into(),
+                    context,
+                )
+                .is_err()
+            );
+        }
+        let updates = commands::apply_live_paragraph_edit_checked(
+            h.state.clone(),
+            meeting_id.clone(),
+            vec![0],
+            "use Kubernetes".into(),
+            commands::LiveParagraphEditContext {
+                session_started_at,
+                original_text: segment.text.clone(),
+            },
+        )
+        .unwrap();
+        assert_eq!(updates, vec![(0, "use Kubernetes".into())]);
+        {
+            let acc = h.state.meeting_accumulator.lock().unwrap();
+            let segments = &acc.as_ref().unwrap().new_segments;
+            assert_eq!(segments[0].text, "use Kubernetes");
+            assert_eq!(
+                (
+                    segments[0].start_time,
+                    segments[0].end_time,
+                    segments[0].speaker
+                ),
+                (segment.start_time, segment.end_time, segment.speaker)
+            );
+            assert_eq!(
+                (
+                    segments[1].text.as_str(),
+                    segments[1].start_time,
+                    segments[1].end_time,
+                    segments[1].speaker
+                ),
+                (
+                    other.text.as_str(),
+                    other.start_time,
+                    other.end_time,
+                    other.speaker
+                )
+            );
+        }
+        assert!(h.db.list_dictionary_entries().unwrap().is_empty());
+        let pending_count = match mode {
+            DictionaryLearningMode::Suggestions => 1,
+            DictionaryLearningMode::Disabled | DictionaryLearningMode::Automatic => 0,
+        };
+        assert_eq!(
+            h.db.list_dictionary_suggestions().unwrap().len(),
+            pending_count
+        );
+        commands::add_dictionary_entry(
+            h.state.clone(),
+            "Manual".into(),
+            Some("manuel".into()),
+            None,
+        )
+        .unwrap();
+        assert_eq!(
+            h.db.list_dictionary_entries().unwrap()[0]
+                .pronunciation
+                .as_deref(),
+            Some("manuel")
+        );
+        h.audio_msg_tx.send(audio_chunk(session_id)).unwrap();
+        h.audio_msg_tx
+            .send(AudioMessage::EndOfStream { session_id })
+            .unwrap();
+        commands::stop_meeting_recording(h.state.clone())
+            .await
+            .unwrap();
+        wait_until_ready(&h.state).await;
+        assert!(
+            collected
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|segment| segment.text == "use Kubernetes"),
+            "session correction must apply immediately in {mode:?}"
+        );
+        assert_eq!(
+            h.db.list_dictionary_suggestions().unwrap().len(),
+            pending_count
+        );
+    }
+}
+
+#[tokio::test]
 async fn meeting_stop_persists_meeting() {
     let mock = MockEngine::new().with_transcribe_response(
         Ok(vec![TranscriptionSegment {
@@ -231,9 +446,7 @@ async fn meeting_stop_persists_meeting() {
     // directly — there's no real AudioCapture thread in this test, so this
     // stands in for the microphone.
     h.audio_msg_tx.send(audio_chunk(session_id)).unwrap();
-    h.audio_msg_tx
-        .send(AudioMessage::EndOfStream { session_id })
-        .unwrap();
+    h.finish_mock_capture(session_id);
 
     let returned_id = commands::stop_meeting_recording(Arc::clone(&state))
         .await
@@ -302,9 +515,7 @@ async fn dictation_round_trip() {
     };
 
     h.audio_msg_tx.send(audio_chunk(session_id)).unwrap();
-    h.audio_msg_tx
-        .send(AudioMessage::EndOfStream { session_id })
-        .unwrap();
+    h.finish_mock_capture(session_id);
 
     commands::stop_transcription(Arc::clone(&state))
         .await
@@ -436,9 +647,7 @@ async fn sleep_paused_meeting_flag_survives_peek_and_clears_on_resume() {
     };
 
     h.audio_msg_tx.send(audio_chunk(session_id)).unwrap();
-    h.audio_msg_tx
-        .send(AudioMessage::EndOfStream { session_id })
-        .unwrap();
+    h.finish_mock_capture(session_id);
 
     // Mirror handle_system_will_sleep: remember the id, then stop through
     // the same command a user-initiated stop takes.
@@ -451,6 +660,11 @@ async fn sleep_paused_meeting_flag_survives_peek_and_clears_on_resume() {
     // Two peeks in a row (matching the UI's wake handling plus a
     // belt-and-braces recheck) must both see the id: neither call may
     // consume it.
+    assert_eq!(
+        commands::get_meeting_delete_block(&state, &meeting_id).unwrap(),
+        None,
+        "mock capture and DB writers must be quiescent before resume"
+    );
     assert_eq!(
         commands::peek_sleep_paused_meeting(Arc::clone(&state)),
         Some(meeting_id.clone())
@@ -471,6 +685,77 @@ async fn sleep_paused_meeting_flag_survives_peek_and_clears_on_resume() {
         commands::peek_sleep_paused_meeting(Arc::clone(&state)),
         None
     );
+}
+
+#[tokio::test]
+async fn queued_capture_start_keeps_delete_and_resume_blocked_after_machine_ready() {
+    let h = build_harness(MockEngine::new());
+    let state = Arc::clone(&h.state);
+    commands::start_meeting_recording(
+        Arc::clone(&state),
+        "Queued capture".into(),
+        None,
+        ProgressChannel::new(|_| {}),
+    )
+    .await
+    .unwrap();
+    let (session_id, meeting_id) = match state.current_machine_state().unwrap() {
+        AppStateMachine::RecordingMeeting {
+            session_id,
+            meeting_id,
+            ..
+        } => (session_id, meeting_id),
+        other => panic!("expected RecordingMeeting, got {other:?}"),
+    };
+    // Deliberately forge actor EOS without consuming capture's queued Start:
+    // the actor/DB may finish first, but this message could still open Ogg.
+    h.audio_msg_tx
+        .send(AudioMessage::EndOfStream { session_id })
+        .unwrap();
+    commands::stop_meeting_recording(Arc::clone(&state))
+        .await
+        .unwrap();
+    wait_until_ready(&state).await;
+    assert_eq!(
+        commands::get_meeting_delete_block(&state, &meeting_id).unwrap(),
+        Some(souffle_lib::meeting_access::MeetingDeleteBlockReason::Finalizing)
+    );
+    let before = serde_json::to_value(state.db.load_meeting(&meeting_id).unwrap()).unwrap();
+    assert!(commands::delete_meeting(Arc::clone(&state), meeting_id.clone()).is_err());
+    assert!(
+        commands::resume_meeting_recording(
+            Arc::clone(&state),
+            meeting_id.clone(),
+            ProgressChannel::new(|_| {}),
+        )
+        .await
+        .is_err()
+    );
+    assert_eq!(
+        serde_json::to_value(state.db.load_meeting(&meeting_id).unwrap()).unwrap(),
+        before
+    );
+    h.audio_cmd_rx.try_iter().for_each(drop);
+    assert_eq!(
+        commands::get_meeting_delete_block(&state, &meeting_id).unwrap(),
+        None
+    );
+    commands::resume_meeting_recording(
+        Arc::clone(&state),
+        meeting_id,
+        ProgressChannel::new(|_| {}),
+    )
+    .await
+    .unwrap();
+    let resumed_session_id = match state.current_machine_state().unwrap() {
+        AppStateMachine::RecordingMeeting { session_id, .. } => session_id,
+        other => panic!("expected resumed meeting, got {other:?}"),
+    };
+    h.finish_mock_capture(resumed_session_id);
+    commands::stop_meeting_recording(Arc::clone(&state))
+        .await
+        .unwrap();
+    wait_until_ready(&state).await;
 }
 
 /// `clear_sleep_paused_meeting` lets the frontend drop the flag on an

@@ -260,6 +260,120 @@ mod tests {
         NaiveDate::from_ymd_opt(y, m, d).expect("valid date")
     }
 
+    fn click(window: &MainWindow, element: &ElementHandle) {
+        let position = slint::LogicalPosition::new(
+            element.absolute_position().x + element.size().width / 2.0,
+            element.absolute_position().y + element.size().height / 2.0,
+        );
+        let button = slint::platform::PointerEventButton::Left;
+        window
+            .window()
+            .dispatch_event(slint::platform::WindowEvent::PointerPressed { position, button });
+        window
+            .window()
+            .dispatch_event(slint::platform::WindowEvent::PointerReleased { position, button });
+    }
+
+    #[test]
+    fn owned_timeline_action_exposes_reason_and_rejects_ax_and_pointer() {
+        use crate::ActionGuards;
+        use souffle_lib::meeting_access::MeetingDeleteBlockReason;
+        let window = timeline_window();
+        window.global::<ActionGuards>().on_meeting_delete(|id, _| {
+            crate::action_guards::permission(
+                (id == "meeting-0").then_some(MeetingDeleteBlockReason::Finalizing),
+            )
+        });
+        window.global::<ActionGuards>().set_revision(1);
+        let removed = Rc::new(std::cell::Cell::new(0));
+        let seen = Rc::clone(&removed);
+        window.on_timeline_item_removed(move |_, _| seen.set(seen.get() + 1));
+        settle();
+        let action = window
+            .root_element()
+            .query_descendants()
+            .match_predicate(|el| {
+                el.accessible_role() == Some(AccessibleRole::Button)
+                    && el.accessible_label().is_some_and(|label| {
+                        label.contains("finalisation") || label.contains("finalizing")
+                    })
+            })
+            .find_first()
+            .expect("disabled delete action with localized reason");
+        assert_eq!(action.accessible_enabled(), Some(false));
+        action.invoke_accessible_default_action();
+        click(&window, &action);
+        settle();
+        assert_eq!(removed.get(), 0);
+        let old_action = window
+            .root_element()
+            .query_descendants()
+            .match_predicate(|el| {
+                el.accessible_role() == Some(AccessibleRole::Button)
+                    && el
+                        .accessible_label()
+                        .is_some_and(|label| label == "Supprimer" || label == "Delete")
+            })
+            .find_first()
+            .unwrap();
+        old_action.invoke_accessible_default_action();
+        settle();
+        let confirm = window
+            .root_element()
+            .query_descendants()
+            .match_predicate(|el| {
+                el.accessible_label().is_some_and(|label| {
+                    label == "Confirmer la suppression" || label == "Confirm deletion"
+                })
+            })
+            .find_first()
+            .unwrap();
+        confirm.invoke_accessible_default_action();
+        assert_eq!(
+            removed.get(),
+            1,
+            "a distinct archived meeting stays deletable"
+        );
+    }
+
+    #[test]
+    fn owned_detail_action_rejects_ax_pointer_and_keyboard() {
+        use crate::ActionGuards;
+        use souffle_lib::meeting_access::MeetingDeleteBlockReason;
+        let window = timeline_window();
+        window.global::<ActionGuards>().on_meeting_delete(|_, _| {
+            crate::action_guards::permission(Some(MeetingDeleteBlockReason::Recording))
+        });
+        window.set_active_meeting_id("meeting-0".into());
+        window.set_meeting_detail_title("Protected meeting".into());
+        let removed = Rc::new(std::cell::Cell::new(0));
+        let seen = Rc::clone(&removed);
+        window.on_meeting_detail_delete(move || seen.set(seen.get() + 1));
+        settle();
+        let action = window
+            .root_element()
+            .query_descendants()
+            .match_predicate(|el| {
+                el.accessible_role() == Some(AccessibleRole::Button)
+                    && el.accessible_label().is_some_and(|label| {
+                        label == "Supprimer la réunion" || label == "Delete meeting"
+                    })
+            })
+            .find_first()
+            .expect("detail delete control");
+        assert_eq!(action.accessible_enabled(), Some(false));
+        action.invoke_accessible_default_action();
+        click(&window, &action);
+        for key in [slint::platform::Key::Return, slint::platform::Key::Space] {
+            window
+                .window()
+                .dispatch_event(slint::platform::WindowEvent::KeyPressed { text: key.into() });
+        }
+        settle();
+        assert_eq!(removed.get(), 0);
+        assert_eq!(window.get_active_meeting_id(), "meeting-0");
+    }
+
     #[test]
     fn day_group_marks_today_and_yesterday_relative_to_today() {
         let today = date(2026, 9, 23);

@@ -1,5 +1,6 @@
 mod audio;
 mod calendar;
+mod compression;
 mod data;
 mod diagnostics;
 mod dictation;
@@ -11,6 +12,7 @@ mod model;
 mod permissions;
 mod pill;
 mod settings;
+mod settings_guard;
 mod snippets;
 pub(crate) mod transcription;
 #[cfg(any(test, feature = "test-support"))]
@@ -19,6 +21,7 @@ pub mod updater;
 
 pub use audio::*;
 pub use calendar::*;
+pub use compression::*;
 pub use data::*;
 pub use diagnostics::*;
 pub use dictation::*;
@@ -30,6 +33,7 @@ pub use model::*;
 pub use permissions::*;
 pub use pill::*;
 pub use settings::*;
+pub use settings_guard::{SettingsCaptureError, settings_capture_busy};
 pub use snippets::*;
 pub use transcription::*;
 pub use updater::*;

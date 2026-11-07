@@ -1,0 +1,21 @@
+import { SummarizationUi } from "../../summarization.slint";
+import { SettingsGroup } from "settings_group.slint";
+import { SettingsField } from "settings_field.slint";
+import { ThemedSwitch } from "../themed_switch.slint";
+
+export component SummarizationSection inherits VerticalLayout {
+    vertical-stretch: 0;
+    SettingsGroup {
+        title: @tr("EXPÉRIMENTAL");
+        SettingsField {
+            show-divider: false;
+            label: @tr("Résumés de réunion");
+            description: @tr("Active les résumés de réunion et la compaction expérimentaux. La qualité des longs résumés locaux reste à évaluer.");
+            ThemedSwitch {
+                control-label: @tr("Résumés de réunion");
+                checked: SummarizationUi.enabled;
+                toggled(value) => { SummarizationUi.enabled-changed(value); }
+            }
+        }
+    }
+}

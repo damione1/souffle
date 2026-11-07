@@ -48,8 +48,7 @@ jobs:
               'Requires macOS 13 or newer on Apple Silicon (M1 or newer).',
             ].join('\n');
 
-            // Hand-written notes live in the annotated tag message (see
-            // CLAUDE.md, "Release changelogs"). Use them as the release body
+            // Hand-written notes live in the annotated tag message. Use them as the release body
             // when present; a lightweight or empty-message tag falls back to
             // GitHub's auto-generated notes (merged PR titles, structured by
             // .github/release.yml) so no release ever ships without notes.

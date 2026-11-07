@@ -15,7 +15,7 @@ use crate::transcript;
 pub const VIEWPORT_HEIGHT: f32 = 140.0;
 pub const SCROLL_MARGIN: f32 = 3.0 * VIEWPORT_HEIGHT;
 
-/// Rough wrap estimate for a 10.5px JetBrains Mono line in the log box
+/// Rough wrap estimate for the Inter micro-detail role in the log box
 /// (see `transcript::CHARS_PER_LINE` for why a fixed count is fine here:
 /// estimation error only skews the spacer/scrollbar proportion, mounted
 /// lines are still laid out for real).

@@ -1,0 +1,44 @@
+import { AppText, Typography } from "@typography";
+import { ModalDialog } from "modal_dialog.slint";
+import { ThemedTextArea } from "themed_text_area.slint";
+import { ThemedButton, ThemedButtonKind } from "themed_button.slint";
+import { Theme } from "../theme.slint";
+
+export component LiveParagraphEditor inherits ModalDialog {
+    in-out property <string> text;
+    in property <bool> busy;
+    in property <bool> failed;
+    callback save-requested(string);
+
+    title: @tr("Corriger le paragraphe");
+    subtitle: @tr("Seul le texte confirmé est modifié. L’enregistrement continue.");
+    panel-height: 380px;
+
+    ThemedTextArea {
+        text <=> root.text;
+        control-label: @tr("Texte du paragraphe");
+        enabled: !root.busy;
+        area-height: 150px;
+    }
+    if root.failed: AppText {
+        text: @tr("Correction impossible. Fermez puis rouvrez le paragraphe pour réessayer.");
+        typography: Typography.body;
+        color: Theme.danger;
+        wrap: word-wrap;
+    }
+    HorizontalLayout {
+        alignment: end;
+        spacing: 8px;
+        ThemedButton {
+            text: @tr("Annuler");
+            enabled: !root.busy;
+            clicked => { root.close-requested(); }
+        }
+        ThemedButton {
+            text: @tr("Enregistrer");
+            kind: ThemedButtonKind.primary;
+            enabled: !root.busy && root.text != "";
+            clicked => { root.save-requested(root.text); }
+        }
+    }
+}

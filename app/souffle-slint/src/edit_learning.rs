@@ -1,4 +1,4 @@
-//! "Learn from my corrections" (`dictation_learn_from_edit`): port of
+//! Post-paste dictionary learning: port of
 //! `scheduleLearnFromEdit` in the Tauri-era
 //! `features/transcription/controller.svelte.ts`. A few seconds after an
 //! auto-paste, the focused field of the app the text went into is read back
@@ -12,6 +12,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use crate::AppHandle;
+use souffle_lib::settings::DictionaryLearningMode;
 
 /// Time the user gets to fix the pasted text before it is read back.
 const LEARN_FROM_EDIT_DELAY: Duration = Duration::from_secs(4);
@@ -29,27 +30,37 @@ pub(crate) fn cancel_pending() {
     GENERATION.fetch_add(1, Ordering::AcqRel);
 }
 
+fn is_current(generation: u64, current: &AtomicU64) -> bool {
+    current.load(Ordering::Acquire) == generation
+}
+
+/// Check at the point where an operation begins. A read already in flight
+/// cannot be interrupted, so its result must be checked again before learning.
+fn while_current<T>(generation: u64, current: &AtomicU64, op: impl FnOnce() -> T) -> Option<T> {
+    is_current(generation, current).then(op)
+}
+
 /// Called after a successful auto-paste of `pasted` into `target_app` (the
 /// frontmost app when the dictation was stopped). Replaces any read still
 /// pending from an earlier paste.
 pub(crate) fn schedule(
     handle: AppHandle,
-    enabled: bool,
+    mode: DictionaryLearningMode,
     pasted: String,
     target_app: Option<String>,
 ) {
     let generation = GENERATION.fetch_add(1, Ordering::AcqRel) + 1;
-    if !enabled || pasted.is_empty() {
+    if !collects_corrections(mode) || pasted.is_empty() {
         return;
     }
     souffle_lib::async_runtime::spawn(async move {
         tokio::time::sleep(LEARN_FROM_EDIT_DELAY).await;
-        if GENERATION.load(Ordering::Acquire) != generation {
+        if !is_current(generation, &GENERATION) {
             return;
         }
-        // The user may have turned the toggle off during the delay.
+        // The policy may have changed during the delay.
         let still_enabled = souffle_lib::commands::get_settings(std::sync::Arc::clone(&handle))
-            .map(|settings| settings.dictation_learn_from_edit)
+            .map(|settings| collects_corrections(settings.dictionary_learning_mode))
             .unwrap_or(false);
         if !still_enabled {
             return;
@@ -59,6 +70,9 @@ pub(crate) fn schedule(
             souffle_lib::commands::frontmost_app_name().unwrap_or(None)
         })
         .await;
+        if !is_current(generation, &GENERATION) {
+            return;
+        }
         if !is_same_app(target_app.as_deref(), current_app.as_deref()) {
             return;
         }
@@ -67,11 +81,22 @@ pub(crate) fn schedule(
         // (the paste itself already talks to AX from a worker). No
         // Accessibility grant reads back as `None`.
         let worker = souffle_lib::async_runtime::spawn_blocking(move || {
-            let focused = souffle_lib::commands::read_focused_text()?;
+            let Some(focused) = while_current(generation, &GENERATION, || {
+                souffle_lib::commands::read_focused_text()
+            }) else {
+                return Ok(0);
+            };
+            let focused = focused?;
+            if !is_current(generation, &GENERATION) {
+                return Ok(0);
+            }
             let Some(corrected) = edited_text_to_learn(&pasted, focused.as_deref()) else {
                 return Ok(0);
             };
-            souffle_lib::commands::learn_from_edit(handle, pasted, corrected)
+            while_current(generation, &GENERATION, || {
+                souffle_lib::commands::learn_from_edit(handle, pasted, corrected)
+            })
+            .unwrap_or(Ok(0))
         });
         match worker.await {
             Ok(Ok(_)) => {}
@@ -79,6 +104,13 @@ pub(crate) fn schedule(
             Err(error) => eprintln!("Learn from edit worker failed: {error}"),
         }
     });
+}
+
+fn collects_corrections(mode: DictionaryLearningMode) -> bool {
+    match mode {
+        DictionaryLearningMode::Disabled => false,
+        DictionaryLearningMode::Suggestions | DictionaryLearningMode::Automatic => true,
+    }
 }
 
 /// The read-back only means something in the app the text was pasted into.
@@ -165,6 +197,61 @@ fn count_correction_pairs(original: &str, corrected: &str) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use std::sync::{Arc, Barrier};
+
+    #[test]
+    fn invalidated_generation_after_wait_skips_ax_read() {
+        let current = AtomicU64::new(1);
+        let (wait_done, resume) = (Arc::new(Barrier::new(2)), Arc::new(Barrier::new(2)));
+        std::thread::scope(|scope| {
+            let wait_done_worker = Arc::clone(&wait_done);
+            let resume_worker = Arc::clone(&resume);
+            let current_worker = &current;
+            let worker = scope.spawn(move || {
+                wait_done_worker.wait();
+                resume_worker.wait();
+                while_current::<()>(1, current_worker, || panic!("stale AX read started"))
+            });
+            wait_done.wait();
+            current.fetch_add(1, Ordering::AcqRel);
+            resume.wait();
+            assert_eq!(worker.join().unwrap(), None::<()>);
+        });
+    }
+
+    #[test]
+    fn invalidation_during_ax_read_skips_learning_write() {
+        let current = AtomicU64::new(1);
+        let read_started = Arc::new(Barrier::new(2));
+        let finish_read = Arc::new(Barrier::new(2));
+        std::thread::scope(|scope| {
+            let read_started_worker = Arc::clone(&read_started);
+            let finish_read_worker = Arc::clone(&finish_read);
+            let current_worker = &current;
+            let worker = scope.spawn(move || {
+                let read = while_current(1, current_worker, || {
+                    read_started_worker.wait();
+                    finish_read_worker.wait();
+                    "corrected"
+                });
+                read.and_then(|_| {
+                    while_current::<()>(1, current_worker, || panic!("stale learning write"))
+                })
+            });
+            read_started.wait();
+            current.fetch_add(1, Ordering::AcqRel);
+            finish_read.wait();
+            assert_eq!(worker.join().unwrap(), None::<()>);
+        });
+    }
+
+    #[test]
+    fn post_paste_observation_runs_only_for_suggestions_and_automatic() {
+        assert!(!collects_corrections(DictionaryLearningMode::Disabled));
+        assert!(collects_corrections(DictionaryLearningMode::Suggestions));
+        assert!(collects_corrections(DictionaryLearningMode::Automatic));
+    }
 
     #[test]
     fn same_app_needs_both_names_and_a_match() {

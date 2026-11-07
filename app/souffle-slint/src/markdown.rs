@@ -6,7 +6,7 @@
 //! runtime expression - dynamic release-note text (from `check_for_updates`)
 //! cannot go through it. This module does block-level parsing instead
 //! (headings, bullet lists, paragraphs, and a whole-line link, which covers
-//! the shape CLAUDE.md's own release-note template produces: `## Fixed`
+//! the shape of the release-note template: `## Fixed`
 //! sections with `-` bullets and a trailing release-page link) and each
 //! block renders with real Slint styling - a genuine renderer, not a
 //! plain-text dump.

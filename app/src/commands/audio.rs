@@ -99,10 +99,31 @@ pub async fn get_input_sample_rate(device_uid: String) -> Result<u32, String> {
 /// Set the device's nominal sample rate to 48 kHz (or the closest supported
 /// rate at or below it). Writes `kAudioDevicePropertyNominalSampleRate` once.
 /// Call only from an explicit Settings click.
-pub async fn reset_input_sample_rate(device_uid: String) -> Result<u32, String> {
-    crate::async_runtime::spawn_blocking(move || sample_rate::reset_input_sample_rate(&device_uid))
-        .await
-        .map_err(|e| format!("Could not reset the sample rate: {e}"))?
+pub async fn reset_input_sample_rate(
+    state: Arc<AppState>,
+    device_uid: String,
+) -> Result<u32, super::SettingsCaptureError> {
+    crate::async_runtime::spawn_blocking(move || {
+        reset_input_sample_rate_with(
+            &state.capture_start,
+            &state.machine,
+            &device_uid,
+            sample_rate::reset_input_sample_rate,
+        )
+    })
+    .await
+    .map_err(|e| super::SettingsCaptureError::OperationFailed {
+        message: format!("Could not reset the sample rate: {e}"),
+    })?
+}
+
+fn reset_input_sample_rate_with(
+    capture_start: &crate::audio::start_gate::CaptureStartGate,
+    machine: &std::sync::Mutex<crate::state_machine::AppStateMachine>,
+    device_uid: &str,
+    reset: impl FnOnce(&str) -> Result<u32, String>,
+) -> Result<u32, super::SettingsCaptureError> {
+    super::settings_guard::with_capture_idle(capture_start, machine, || reset(device_uid))
 }
 
 /// Whether system-audio capture (Core Audio process taps) is available on this OS
@@ -201,4 +222,99 @@ pub fn get_system_audio_status() -> Option<crate::app_events::SystemAudioStatus>
 /// relaunch the app, the only sure way to free a device stuck in the HAL.
 pub fn get_mic_stall_notice() -> Option<crate::audio::capture::MicStallNotice> {
     crate::audio::capture::mic_stall_notice()
+}
+
+#[cfg(test)]
+mod sample_rate_guard_tests {
+    use super::reset_input_sample_rate_with;
+    use crate::audio::start_gate::CaptureStartGate;
+    use crate::engine::default_transcription_profile;
+    use crate::state_machine::{AppStateMachine, RecordingKind};
+    use std::cell::Cell;
+    use std::sync::Mutex;
+
+    #[test]
+    fn idle_ready_download_and_load_allow_explicit_rate_reset() {
+        let profile = default_transcription_profile();
+        for machine in [
+            AppStateMachine::Idle,
+            AppStateMachine::Ready {
+                profile: profile.clone(),
+            },
+            AppStateMachine::Downloading {
+                profile: profile.clone(),
+            },
+            AppStateMachine::Loading { profile },
+        ] {
+            let writes = Cell::new(0);
+            let result = reset_input_sample_rate_with(
+                &CaptureStartGate::new(),
+                &Mutex::new(machine),
+                "fixture-mic",
+                |uid| {
+                    assert_eq!(uid, "fixture-mic");
+                    writes.set(writes.get() + 1);
+                    Ok(48_000)
+                },
+            );
+            assert_eq!(result, Ok(48_000));
+            assert_eq!(writes.get(), 1);
+        }
+    }
+
+    #[test]
+    fn recording_rate_reset_refuses_before_hardware_write() {
+        let profile = default_transcription_profile();
+        for machine in [
+            AppStateMachine::RecordingDictation {
+                profile: profile.clone(),
+                session_id: 1,
+            },
+            AppStateMachine::RecordingMeeting {
+                profile: profile.clone(),
+                session_id: 1,
+                meeting_id: "fixture".into(),
+            },
+            AppStateMachine::Stopping {
+                profile,
+                was_recording: RecordingKind::Dictation,
+            },
+        ] {
+            let writes = Cell::new(0);
+            let result = reset_input_sample_rate_with(
+                &CaptureStartGate::new(),
+                &Mutex::new(machine),
+                "fixture-mic",
+                |_| {
+                    writes.set(writes.get() + 1);
+                    Ok(48_000)
+                },
+            );
+            assert!(result.is_err(), "reset must refuse before hardware access");
+            assert_eq!(writes.get(), 0);
+        }
+    }
+
+    #[test]
+    fn starting_ready_rate_reset_refuses_before_hardware_write() {
+        let gate = CaptureStartGate::new();
+        gate.begin(1);
+        let writes = Cell::new(0);
+        let result = reset_input_sample_rate_with(
+            &gate,
+            &Mutex::new(AppStateMachine::Ready {
+                profile: default_transcription_profile(),
+            }),
+            "fixture-mic",
+            |_| {
+                writes.set(writes.get() + 1);
+                Ok(48_000)
+            },
+        );
+        assert!(
+            result.is_err(),
+            "Ready is busy when a capture start is reserved"
+        );
+        assert_eq!(writes.get(), 0);
+    }
 }

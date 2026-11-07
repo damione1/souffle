@@ -6,6 +6,7 @@
 //! of `features/transcription/catalog.ts`'s pure functions.
 
 use crate::MainWindow;
+use slint::ComponentHandle;
 use souffle_lib::engine::{
     TranscriptionCatalog, TranscriptionModelDescriptor, TranscriptionProfileSelection,
     TranscriptionRuntimeBackendDescriptor, TranscriptionRuntimePhase,
@@ -63,7 +64,11 @@ pub fn list_available_model_options(catalog: &TranscriptionCatalog) -> Vec<FlatM
                         engine_id: engine.id.clone(),
                         model_id: model.id.clone(),
                         backend_id: backend.id.clone(),
-                        label: format!("{} \u{2014} {}", engine.label, model.label),
+                        label: if engine.id == souffle_lib::engine::APPLE_SPEECH_ENGINE_ID {
+                            "__APPLE_SPEECH_SYSTEM__".into()
+                        } else {
+                            format!("{} \u{2014} {}", engine.label, model.label)
+                        },
                     })
                 })
         })
@@ -88,7 +93,13 @@ pub fn model_short_label(
         .iter()
         .find(|engine| engine.id == engine_id)
         .and_then(|engine| engine.models.iter().find(|m| m.id == model_id))
-        .map(|m| m.label.clone())
+        .map(|m| {
+            if engine_id == souffle_lib::engine::APPLE_SPEECH_ENGINE_ID {
+                "__APPLE_SPEECH_SYSTEM__".into()
+            } else {
+                m.label.clone()
+            }
+        })
         .unwrap_or_default()
 }
 
@@ -115,34 +126,6 @@ pub fn download_is_globally_complete(progress: &DownloadProgress) -> bool {
     progress.is_globally_complete()
 }
 
-impl From<TranscriptionRuntimePhase> for crate::TranscriptionPhase {
-    fn from(phase: TranscriptionRuntimePhase) -> Self {
-        match phase {
-            TranscriptionRuntimePhase::DownloadRequired => Self::DownloadRequired,
-            TranscriptionRuntimePhase::Downloading => Self::Downloading,
-            TranscriptionRuntimePhase::LoadRequired => Self::LoadRequired,
-            TranscriptionRuntimePhase::Loading => Self::Loading,
-            TranscriptionRuntimePhase::Ready => Self::Ready,
-            TranscriptionRuntimePhase::Unloading => Self::Unloading,
-            TranscriptionRuntimePhase::Failed => Self::Failed,
-        }
-    }
-}
-
-impl From<crate::TranscriptionPhase> for TranscriptionRuntimePhase {
-    fn from(phase: crate::TranscriptionPhase) -> Self {
-        match phase {
-            crate::TranscriptionPhase::DownloadRequired => Self::DownloadRequired,
-            crate::TranscriptionPhase::Downloading => Self::Downloading,
-            crate::TranscriptionPhase::LoadRequired => Self::LoadRequired,
-            crate::TranscriptionPhase::Loading => Self::Loading,
-            crate::TranscriptionPhase::Ready => Self::Ready,
-            crate::TranscriptionPhase::Unloading => Self::Unloading,
-            crate::TranscriptionPhase::Failed => Self::Failed,
-        }
-    }
-}
-
 pub fn populate_runtime(window: &MainWindow, phase: TranscriptionRuntimePhase) {
     window.set_model_runtime_phase(phase.into());
 }
@@ -157,7 +140,8 @@ pub fn load_is_already_in_progress_or_ready(phase: TranscriptionRuntimePhase) ->
         | TranscriptionRuntimePhase::Downloading
         | TranscriptionRuntimePhase::LoadRequired
         | TranscriptionRuntimePhase::Unloading
-        | TranscriptionRuntimePhase::Failed => false,
+        | TranscriptionRuntimePhase::Failed
+        | TranscriptionRuntimePhase::AudioFailed => false,
     }
 }
 
@@ -190,6 +174,57 @@ pub fn populate_options(
     model_unload_timeout_minutes: u32,
     unload_timeout_options: &[u32],
 ) {
+    let speech_model = catalog
+        .engines
+        .iter()
+        .find(|engine| engine.id == souffle_lib::engine::APPLE_SPEECH_ENGINE_ID)
+        .and_then(|engine| engine.models.first());
+    let unavailable_reason = speech_model.and_then(|model| model.unavailable_reason);
+    let labels = window.global::<crate::TranscriptionLabels>();
+    if let Some(model) = speech_model {
+        let code = model
+            .supported_languages
+            .first()
+            .map(|s| s.replace('_', "-"))
+            .unwrap_or_default();
+        labels.set_speech_locale_code(code.as_str().into());
+        labels.set_speech_name_en(
+            model
+                .localized_labels
+                .get("en")
+                .map_or(code.as_str(), String::as_str)
+                .into(),
+        );
+        labels.set_speech_name_fr(
+            model
+                .localized_labels
+                .get("fr")
+                .map_or(code.as_str(), String::as_str)
+                .into(),
+        );
+    }
+    window.set_settings_apple_speech_unavailable(unavailable_reason.is_some());
+    if let Some(reason) = unavailable_reason {
+        window.set_settings_apple_speech_unavailable_reason(reason.into());
+    }
+    window.set_settings_apple_speech_selected(
+        catalog.selected_engine_id == souffle_lib::engine::APPLE_SPEECH_ENGINE_ID,
+    );
+    let files_deletable = catalog
+        .engines
+        .iter()
+        .find(|e| e.id == catalog.selected_engine_id)
+        .and_then(|e| e.models.iter().find(|m| m.id == catalog.selected_model_id))
+        .and_then(|m| {
+            m.backends
+                .iter()
+                .find(|b| b.id == catalog.selected_backend_id)
+        })
+        .is_some_and(|backend| match &backend.assets {
+            souffle_lib::engine::ModelAssetSource::Files { .. } => true,
+            souffle_lib::engine::ModelAssetSource::SystemSpeech { .. } => false,
+        });
+    window.set_settings_model_files_deletable(files_deletable);
     let options = list_available_model_options(catalog);
     let labels: Vec<slint::SharedString> =
         options.iter().map(|o| o.label.as_str().into()).collect();
@@ -222,6 +257,98 @@ mod tests {
     use souffle_lib::models::DownloadStatus;
 
     #[test]
+    fn speech_settings_project_locale_in_both_languages_and_preserve_timeout() {
+        struct Platform;
+        impl slint::platform::Platform for Platform {
+            fn create_window_adapter(
+                &self,
+            ) -> Result<std::rc::Rc<dyn slint::platform::WindowAdapter>, slint::PlatformError>
+            {
+                Ok(
+                    slint::platform::software_renderer::MinimalSoftwareWindow::new(
+                        Default::default(),
+                    ),
+                )
+            }
+        }
+        let _ = slint::platform::set_platform(Box::new(Platform));
+        let window = MainWindow::new().unwrap();
+        let mut catalog = souffle_lib::commands::transcription_catalog_from_settings(
+            &souffle_lib::settings::AppSettings::default(),
+        )
+        .unwrap();
+        let engine = catalog
+            .engines
+            .iter_mut()
+            .find(|e| e.id == souffle_lib::engine::APPLE_SPEECH_ENGINE_ID)
+            .unwrap();
+        let model = &mut engine.models[0];
+        // A deterministic supported fixture, independent of this test machine.
+        model.available_in_app = true;
+        model.unavailable_reason = None;
+        model.supported_languages = vec!["en_US".into()];
+        model.localized_labels = [
+            ("en".into(), "English (United States)".into()),
+            ("fr".into(), "anglais (États-Unis)".into()),
+        ]
+        .into();
+        model.backends = vec![TranscriptionRuntimeBackendDescriptor {
+            id: souffle_lib::engine::APPLE_SPEECH_BACKEND_ID.into(),
+            label: "SpeechAnalyzer".into(),
+            description: String::new(),
+            recommended: true,
+            available_in_app: true,
+            availability_note: None,
+            assets: souffle_lib::engine::ModelAssetSource::SystemSpeech {
+                locale: "en_US".into(),
+            },
+        }];
+        catalog.selected_engine_id = engine.id.clone();
+        catalog.selected_model_id = model.id.clone();
+        catalog.selected_backend_id = model.backends[0].id.clone();
+        populate_options(&window, &catalog, 15, &[0, 5, 15, 60]);
+        assert!(window.get_settings_apple_speech_selected());
+        assert!(!window.get_settings_model_files_deletable());
+        assert_eq!(window.get_settings_unload_timeout_label(), "15 min");
+        assert_eq!(
+            window.get_settings_selected_model_label(),
+            "__APPLE_SPEECH_SYSTEM__"
+        );
+        let labels = window.global::<crate::TranscriptionLabels>();
+        for (locale, expected) in [
+            (crate::AppLocale::En, "English (United States)"),
+            (crate::AppLocale::Fr, "anglais (États-Unis)"),
+        ] {
+            window.set_settings_locale(locale);
+            slint::platform::update_timers_and_animations();
+            assert!(labels.invoke_speech_label().contains(expected));
+            assert!(labels.invoke_speech_label().contains("en-US"));
+        }
+        let model = &mut catalog
+            .engines
+            .iter_mut()
+            .find(|e| e.id == catalog.selected_engine_id)
+            .unwrap()
+            .models[0];
+        model.available_in_app = false;
+        model.backends.clear();
+        model.unavailable_reason =
+            Some(souffle_lib::engine::TranscriptionUnavailableReason::LocaleUnsupported);
+        populate_options(&window, &catalog, 15, &[0, 5, 15, 60]);
+        assert!(window.get_settings_apple_speech_unavailable());
+        assert_eq!(
+            window.get_settings_apple_speech_unavailable_reason(),
+            crate::TranscriptionUnavailableReason::LocaleUnsupported
+        );
+        assert!(
+            !list_available_model_options(&catalog)
+                .iter()
+                .any(|o| o.engine_id == catalog.selected_engine_id)
+        );
+        assert_eq!(window.get_settings_unload_timeout_label(), "15 min");
+    }
+
+    #[test]
     fn unload_timeout_label_round_trips() {
         for value in [0, 5, 15, 60] {
             let label = unload_timeout_label(value);
@@ -248,6 +375,7 @@ mod tests {
             TranscriptionRuntimePhase::Ready,
             TranscriptionRuntimePhase::Unloading,
             TranscriptionRuntimePhase::Failed,
+            TranscriptionRuntimePhase::AudioFailed,
         ] {
             assert_eq!(
                 TranscriptionRuntimePhase::from(crate::TranscriptionPhase::from(phase)),
@@ -284,6 +412,7 @@ mod tests {
             TranscriptionRuntimePhase::LoadRequired,
             TranscriptionRuntimePhase::Unloading,
             TranscriptionRuntimePhase::Failed,
+            TranscriptionRuntimePhase::AudioFailed,
         ] {
             assert!(!load_is_already_in_progress_or_ready(phase));
         }

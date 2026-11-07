@@ -119,6 +119,15 @@ pub(crate) enum SettingsSnapshotResult {
 enum SettingsSnapshotAudience {
     Startup,
     Open(SettingsLoadToken),
+    CurrentOpen {
+        token: SettingsLoadToken,
+        request: u64,
+    },
+}
+
+struct SettingsSnapshotObserver {
+    audience: SettingsSnapshotAudience,
+    completion: SettingsSnapshotCompletion,
 }
 
 struct SettingsWorkerIo {
@@ -228,6 +237,9 @@ pub(crate) struct SettingsIoCoordinator {
     save_projection: RefCell<Option<SettingsSaveProjection>>,
     cache: SettingsCache,
     session: Cell<SettingsSessionState>,
+    current_open_snapshot: Cell<u64>,
+    snapshot_observers: RefCell<Vec<SettingsSnapshotObserver>>,
+    snapshot_barrier_pending: Cell<bool>,
 }
 
 impl SettingsIoCoordinator {
@@ -290,6 +302,9 @@ impl SettingsIoCoordinator {
             save_projection: RefCell::new(None),
             cache,
             session: Cell::new(SettingsSessionState::Closed { generation: 0 }),
+            current_open_snapshot: Cell::new(0),
+            snapshot_observers: RefCell::new(Vec::new()),
+            snapshot_barrier_pending: Cell::new(false),
         });
         RESPONSE_TARGETS.with(|targets| {
             targets
@@ -321,6 +336,11 @@ impl SettingsIoCoordinator {
     #[cfg(test)]
     pub(crate) fn current_revision(&self) -> u64 {
         self.sequence.borrow().latest_submitted
+    }
+
+    #[cfg(test)]
+    pub(crate) fn current_open_snapshot_request_for_test(&self) -> u64 {
+        self.current_open_snapshot.get()
     }
 
     pub(crate) fn set_save_projection(
@@ -355,6 +375,11 @@ impl SettingsIoCoordinator {
             SettingsSessionState::Open { generation } => Some(SettingsLoadToken(generation)),
             SettingsSessionState::Closed { .. } => None,
         }
+    }
+
+    /// A completed/rejected write must stop acting as an optimistic draft.
+    pub(crate) fn revision_is_observed(&self, revision: u64) -> bool {
+        self.sequence.borrow().latest_observed >= revision
     }
 
     pub(crate) fn accepts_close(&self, token: SettingsCloseToken) -> bool {
@@ -451,11 +476,11 @@ impl SettingsIoCoordinator {
         token: SettingsLoadToken,
         completion: impl FnOnce(AppSettings) + 'static,
     ) {
-        let completion = Rc::new(RefCell::new(Some(Box::new(move |result| {
+        let completion = Box::new(move |result| {
             if let SettingsSnapshotResult::Observed(settings) = result {
                 completion(*settings);
             }
-        }) as SettingsSnapshotCompletion)));
+        });
         self.queue_snapshot_refresh(
             SettingsSaveLane::Autostart,
             SettingsSnapshotAudience::Open(token),
@@ -470,12 +495,34 @@ impl SettingsIoCoordinator {
         self: &Rc<Self>,
         completion: impl FnOnce(SettingsSnapshotResult) + 'static,
     ) {
-        let completion = Rc::new(RefCell::new(Some(
-            Box::new(completion) as SettingsSnapshotCompletion
-        )));
         self.queue_snapshot_refresh(
             SettingsSaveLane::General,
             SettingsSnapshotAudience::Startup,
+            Box::new(completion),
+        );
+    }
+
+    /// Publish the latest requested editor snapshot after queued writes settle.
+    /// A newer editor request replaces the old one. Opening and editor
+    /// observations share a barrier, so they cannot supersede one another
+    /// indefinitely while waiting for the same durable revision.
+    pub(crate) fn observe_current_open_snapshot(
+        self: &Rc<Self>,
+        token: SettingsLoadToken,
+        completion: impl FnOnce(AppSettings) + 'static,
+    ) {
+        if !self.accepts_load(token) {
+            return;
+        }
+        let request = self.current_open_snapshot.get().wrapping_add(1);
+        self.current_open_snapshot.set(request);
+        let completion = Box::new(move |result| {
+            if let SettingsSnapshotResult::Observed(settings) = result {
+                completion(*settings);
+            }
+        });
+        self.queue_snapshot_barrier(
+            SettingsSnapshotAudience::CurrentOpen { token, request },
             completion,
         );
     }
@@ -484,6 +531,9 @@ impl SettingsIoCoordinator {
         match audience {
             SettingsSnapshotAudience::Startup => true,
             SettingsSnapshotAudience::Open(token) => self.accepts_load(token),
+            SettingsSnapshotAudience::CurrentOpen { token, request } => {
+                self.accepts_load(token) && self.current_open_snapshot.get() == request
+            }
         }
     }
 
@@ -496,13 +546,16 @@ impl SettingsIoCoordinator {
                 SettingsSnapshotAudience::Startup,
                 SettingsResponseOrder::LatestVisible | SettingsResponseOrder::LatestHidden,
             )
-            | (SettingsSnapshotAudience::Open(_), SettingsResponseOrder::LatestVisible) => true,
+            | (
+                SettingsSnapshotAudience::Open(_) | SettingsSnapshotAudience::CurrentOpen { .. },
+                SettingsResponseOrder::LatestVisible,
+            ) => true,
             (
                 SettingsSnapshotAudience::Startup,
                 SettingsResponseOrder::Intermediate | SettingsResponseOrder::Stale,
             )
             | (
-                SettingsSnapshotAudience::Open(_),
+                SettingsSnapshotAudience::Open(_) | SettingsSnapshotAudience::CurrentOpen { .. },
                 SettingsResponseOrder::LatestHidden
                 | SettingsResponseOrder::Intermediate
                 | SettingsResponseOrder::Stale,
@@ -514,8 +567,14 @@ impl SettingsIoCoordinator {
         self: &Rc<Self>,
         lane: SettingsSaveLane,
         audience: SettingsSnapshotAudience,
-        completion: Rc<RefCell<Option<SettingsSnapshotCompletion>>>,
+        completion: SettingsSnapshotCompletion,
     ) {
+        self.snapshot_observers
+            .borrow_mut()
+            .push(SettingsSnapshotObserver {
+                audience,
+                completion,
+            });
         let revision = self.sequence.borrow_mut().submit();
         let trace = crate::settings_instrumentation::take_persistence_trace();
         if let Some(trace) = trace.as_ref() {
@@ -523,29 +582,12 @@ impl SettingsIoCoordinator {
                 .borrow_mut()
                 .insert(revision, Arc::clone(trace));
         }
-        let coordinator = Rc::clone(self);
-        let completion_for_response = completion.clone();
+        let weak = Rc::downgrade(self);
         self.callbacks.borrow_mut().insert(
             revision,
             Box::new(move |order, outcome| {
-                if !coordinator.accepts_snapshot_audience(audience) {
-                    return;
-                }
-                if Self::order_publishes_snapshot(audience, order) {
-                    match outcome {
-                        SettingsSaveOutcome::Observed { settings, .. } => {
-                            if let Some(completion) = completion_for_response.borrow_mut().take() {
-                                completion(SettingsSnapshotResult::Observed(settings.clone()));
-                            }
-                        }
-                        SettingsSaveOutcome::Unavailable { .. } => {
-                            if let Some(completion) = completion_for_response.borrow_mut().take() {
-                                completion(SettingsSnapshotResult::Unavailable);
-                            }
-                        }
-                    }
-                } else {
-                    coordinator.queue_snapshot_barrier(audience, completion_for_response);
+                if let Some(coordinator) = weak.upgrade() {
+                    coordinator.settle_snapshot_observers(order, outcome);
                 }
             }),
         );
@@ -569,30 +611,93 @@ impl SettingsIoCoordinator {
     fn queue_snapshot_barrier(
         self: &Rc<Self>,
         audience: SettingsSnapshotAudience,
-        completion: Rc<RefCell<Option<SettingsSnapshotCompletion>>>,
+        completion: SettingsSnapshotCompletion,
     ) {
-        let coordinator = Rc::clone(self);
+        self.snapshot_observers
+            .borrow_mut()
+            .push(SettingsSnapshotObserver {
+                audience,
+                completion,
+            });
+        self.ensure_snapshot_barrier();
+    }
+
+    fn ensure_snapshot_barrier(self: &Rc<Self>) {
+        self.snapshot_observers
+            .borrow_mut()
+            .retain(|observer| self.accepts_snapshot_audience(observer.audience));
+        if self.snapshot_observers.borrow().is_empty()
+            || self.snapshot_barrier_pending.replace(true)
+        {
+            return;
+        }
+        let weak = Rc::downgrade(self);
         self.barrier(move |order, outcome| {
-            if !coordinator.accepts_snapshot_audience(audience) {
+            let Some(coordinator) = weak.upgrade() else {
                 return;
+            };
+            coordinator.snapshot_barrier_pending.set(false);
+            coordinator.settle_snapshot_observers(order, outcome);
+        });
+    }
+
+    fn settle_snapshot_observers(
+        self: &Rc<Self>,
+        order: SettingsResponseOrder,
+        outcome: &SettingsSaveOutcome,
+    ) {
+        let mut observers = std::mem::take(&mut *self.snapshot_observers.borrow_mut());
+        // Core population can reset editor rows/preview. Publish it first,
+        // then the latest editor observation using the very same snapshot.
+        observers.sort_by_key(|observer| match observer.audience {
+            SettingsSnapshotAudience::Startup => 0,
+            SettingsSnapshotAudience::Open(_) => 1,
+            SettingsSnapshotAudience::CurrentOpen { .. } => 2,
+        });
+        for observer in observers {
+            if !self.accepts_snapshot_audience(observer.audience) {
+                continue;
             }
-            if Self::order_publishes_snapshot(audience, order) {
-                match outcome {
-                    SettingsSaveOutcome::Observed { settings, .. } => {
-                        if let Some(completion) = completion.borrow_mut().take() {
-                            completion(SettingsSnapshotResult::Observed(settings.clone()));
-                        }
-                    }
-                    SettingsSaveOutcome::Unavailable { .. } => {
-                        if let Some(completion) = completion.borrow_mut().take() {
-                            completion(SettingsSnapshotResult::Unavailable);
-                        }
+            if !Self::order_publishes_snapshot(observer.audience, order)
+                || !self.snapshot_revision_is_current()
+            {
+                self.snapshot_observers.borrow_mut().push(observer);
+                continue;
+            }
+            match observer.audience {
+                SettingsSnapshotAudience::CurrentOpen { .. } => {
+                    // This barrier also settles another control's superseded
+                    // save, including rollback after a rejected write.
+                    let projection = self.save_projection.borrow().clone();
+                    if let Some(projection) = projection {
+                        projection(order, outcome);
                     }
                 }
-            } else {
-                coordinator.queue_snapshot_barrier(audience, completion);
+                SettingsSnapshotAudience::Startup | SettingsSnapshotAudience::Open(_) => {}
             }
-        });
+            // A preceding callback/projection may submit a newer mutation or
+            // close the sheet. Re-check immediately before publishing.
+            if !self.accepts_snapshot_audience(observer.audience) {
+                continue;
+            }
+            if !self.snapshot_revision_is_current() {
+                self.snapshot_observers.borrow_mut().push(observer);
+                continue;
+            }
+            let result = match outcome {
+                SettingsSaveOutcome::Observed { settings, .. } => {
+                    SettingsSnapshotResult::Observed(settings.clone())
+                }
+                SettingsSaveOutcome::Unavailable { .. } => SettingsSnapshotResult::Unavailable,
+            };
+            (observer.completion)(result);
+        }
+        self.ensure_snapshot_barrier();
+    }
+
+    pub(crate) fn snapshot_revision_is_current(&self) -> bool {
+        let sequence = self.sequence.borrow();
+        sequence.latest_submitted == sequence.latest_observed
     }
 
     fn drain_responses(&self) {
@@ -653,6 +758,13 @@ impl SettingsIoCoordinator {
     #[cfg(test)]
     pub(crate) fn drain_for_test(&self) {
         self.drain_responses();
+    }
+
+    #[cfg(test)]
+    pub(crate) fn drain_one_for_test(&self) {
+        if let Ok(response) = self.responses.try_recv() {
+            self.settle(response);
+        }
     }
 
     #[cfg(test)]
@@ -1517,6 +1629,96 @@ mod tests {
                 .get_settings_save_error()
                 .contains("injected ServiceManagement read failure")
         );
+    }
+
+    #[test]
+    fn snapshot_callbacks_wait_for_mutations_submitted_during_publication() {
+        for mutate_in_projection in [false, true] {
+            let window = test_window();
+            let cache = SettingsCache::with_observed(&window, AppSettings::default());
+            let coordinator = SettingsIoCoordinator::with_io(cache, immediate_io());
+            let token = coordinator.begin_open();
+            let submitted = Rc::new(Cell::new(false));
+            let submitted_by_projection = submitted.clone();
+            let weak = Rc::downgrade(&coordinator);
+            coordinator.set_save_projection(move |order, _| {
+                if mutate_in_projection
+                    && order.publishes_to_open_window()
+                    && !submitted_by_projection.replace(true)
+                {
+                    weak.upgrade().unwrap().submit(
+                        SettingsSaveLane::General,
+                        |settings| settings.paste_delay_ms = 225,
+                        |_, _| {},
+                    );
+                }
+            });
+            let opened = Rc::new(Cell::new(0));
+            let opened_in_callback = opened.clone();
+            let submitted_on_open = submitted.clone();
+            let weak = Rc::downgrade(&coordinator);
+            coordinator.load_effective_snapshot(token, move |_| {
+                opened_in_callback.set(opened_in_callback.get() + 1);
+                if !mutate_in_projection {
+                    submitted_on_open.set(true);
+                    weak.upgrade().unwrap().submit(
+                        SettingsSaveLane::General,
+                        |settings| settings.paste_delay_ms = 225,
+                        |_, _| {},
+                    );
+                }
+            });
+            let observed = Rc::new(RefCell::new(Vec::new()));
+            let published = observed.clone();
+            coordinator.observe_current_open_snapshot(token, move |settings| {
+                published.borrow_mut().push(settings.paste_delay_ms);
+            });
+            let deadline = std::time::Instant::now() + Duration::from_secs(2);
+            while !coordinator.is_idle_for_test() {
+                assert!(
+                    coordinator.current_revision() <= 8 && std::time::Instant::now() < deadline
+                );
+                coordinator.drain_one_for_test();
+                std::thread::yield_now();
+            }
+            assert!(submitted.get());
+            assert_eq!(opened.get(), 1);
+            assert_eq!(
+                *observed.borrow(),
+                [225],
+                "an editor must not publish the pre-callback snapshot"
+            );
+        }
+    }
+
+    #[test]
+    fn shared_snapshot_barrier_cancels_closed_audiences_and_accepts_reopened_session() {
+        let window = test_window();
+        let cache = SettingsCache::with_observed(&window, AppSettings::default());
+        let coordinator = SettingsIoCoordinator::with_io(cache, immediate_io());
+        let first = coordinator.begin_open();
+        coordinator.load_effective_snapshot(first, |_| panic!("closed Open must not publish"));
+        coordinator
+            .observe_current_open_snapshot(first, |_| panic!("closed editor must not publish"));
+        coordinator.close();
+        let second = coordinator.begin_open();
+        let opened = Rc::new(Cell::new(0));
+        let open_count = opened.clone();
+        coordinator.load_effective_snapshot(second, move |_| open_count.set(open_count.get() + 1));
+        let tested = Rc::new(Cell::new(0));
+        let test_count = tested.clone();
+        coordinator
+            .observe_current_open_snapshot(second, move |_| test_count.set(test_count.get() + 1));
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        while !coordinator.is_idle_for_test() {
+            assert!(coordinator.current_revision() <= 8 && std::time::Instant::now() < deadline);
+            coordinator.drain_one_for_test();
+            std::thread::yield_now();
+        }
+        assert_eq!(opened.get(), 1);
+        assert_eq!(tested.get(), 1);
+        assert!(!coordinator.accepts_load(first));
+        assert!(coordinator.accepts_load(second));
     }
 
     #[test]

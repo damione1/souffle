@@ -1,3 +1,4 @@
+import { AppText, AppTextInput, Typography, TypographyStyle } from "@typography";
 import { Theme } from "../theme.slint";
 
 // Multiline counterpart of ThemedLineEdit. Stock TextEdit uses the Fluent
@@ -31,12 +32,12 @@ export component ThemedTextArea inherits Rectangle {
         height: parent.height - 16px;
         content-width: self.width;
 
-        input := TextInput {
+        input := AppTextInput {
             width: parent.width;
             height: max(parent.height, self.preferred-height + 16px);
             text <=> root.text;
-            font-size: 14px;
-            font-family: "Archivo";
+            typography: Typography.body;
+
             color: Theme.text-secondary;
             wrap: word-wrap;
             single-line: false;
@@ -63,12 +64,12 @@ export component ThemedTextArea inherits Rectangle {
         }
     }
 
-    if root.text == "" && !input.has-focus: Text {
+    if root.text == "" && !input.has-focus: AppText {
         x: 12px;
         y: 8px;
         width: parent.width - 24px;
         text: root.placeholder;
-        font-size: 14px;
+        typography: Typography.body;
         color: Theme.text-muted;
         wrap: word-wrap;
     }

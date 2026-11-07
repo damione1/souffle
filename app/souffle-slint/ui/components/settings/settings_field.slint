@@ -1,3 +1,4 @@
+import { AppText, AppTextInput, Typography, TypographyStyle } from "@typography";
 import { Theme } from "../../theme.slint";
 
 // Port of components/ui/SettingsField.svelte + app.css `.setting-label` /
@@ -32,17 +33,17 @@ export component SettingsField inherits VerticalLayout {
             horizontal-stretch: 1;
             vertical-stretch: 0;
 
-            Text {
+            AppText {
                 text: root.label;
-                font-size: 13.5px;
+                typography: Typography.field-label;
                 color: Theme.text-secondary;
                 horizontal-alignment: left;
                 wrap: word-wrap;
             }
 
-            if root.description != "": Text {
+            if root.description != "": AppText {
                 text: root.description;
-                font-size: 12px;
+                typography: Typography.secondary;
                 color: Theme.text-muted;
                 wrap: word-wrap;
                 horizontal-alignment: left;

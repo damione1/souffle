@@ -96,7 +96,10 @@ pub fn collect_bundle(
         data_dir: data_dir.display().to_string(),
         log_dir: log_dir().display().to_string(),
         log_file: log_path.map(|p| p.display().to_string()),
-        db_path: data_dir.join("souffle.db").display().to_string(),
+        db_path: data_dir
+            .join(crate::constants::DB_FILENAME)
+            .display()
+            .to_string(),
         models_dir: data_dir.join("models").display().to_string(),
         machine_state,
         log_level: settings.log_level.as_str().to_string(),

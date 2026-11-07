@@ -58,6 +58,7 @@ pub mod fixtures {
                 },
             ],
             summary: None,
+            compact_transcript: None,
             summary_is_stale: false,
             summary_model: None,
             summary_generated_at: None,

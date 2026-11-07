@@ -1,3 +1,4 @@
+import { AppText, AppTextInput, Typography, TypographyStyle } from "@typography";
 import { ThemedComboBox } from "components/themed_combo.slint";
 import { PermissionsStep, PermissionRow } from "components/onboarding/permissions_step.slint";
 import { ShortcutRecorderButton, ShortcutNoticeText } from "components/settings/interface_section.slint";
@@ -113,17 +114,16 @@ export component OnboardingView inherits Rectangle {
                             height: 64px;
                         }
                     }
-                    Text {
+                    AppText {
                         text: @tr("Soufflé");
-                        font-family: "Archivo SemiBold";
-                        font-size: 24px;
-                        font-weight: 700;
+                        typography: Typography.title;
+
                         color: Theme.text-primary;
                         horizontal-alignment: center;
                     }
-                    Text {
+                    AppText {
                         text: @tr("Transcription vocale locale pour la dictée et les meetings.");
-                        font-size: 14px;
+                        typography: Typography.body;
                         color: Theme.text-secondary;
                         horizontal-alignment: center;
                         wrap: word-wrap;
@@ -137,9 +137,9 @@ export component OnboardingView inherits Rectangle {
                             icon-color: Theme.text-muted;
                             y: (parent.height - self.height) / 2;
                         }
-                        Text {
+                        AppText {
                             text: @tr("100 % local — rien ne quitte votre Mac. Pas de compte, pas de cloud.");
-                            font-size: 12px;
+                            typography: Typography.secondary;
                             color: Theme.text-muted;
                             vertical-alignment: center;
                             wrap: word-wrap;
@@ -176,16 +176,15 @@ export component OnboardingView inherits Rectangle {
 
                 VerticalLayout {
                     spacing: 4px;
-                    Text {
+                    AppText {
                         text: step-title(root.step);
-                        font-family: "Archivo SemiBold";
-                        font-size: 18px;
-                        font-weight: 600;
+                        typography: Typography.dialog-title;
+
                         color: Theme.text-primary;
                     }
-                    Text {
+                    AppText {
                         text: step-subtitle(root.step);
-                        font-size: 14px;
+                        typography: Typography.body;
                         color: Theme.text-muted;
                         wrap: word-wrap;
                     }
@@ -237,9 +236,9 @@ export component OnboardingView inherits Rectangle {
                             clicked => { root.refresh-devices-requested(); }
                         }
                     }
-                    Text {
+                    AppText {
                         text: @tr("Le microphone peut être changé plus tard dans les Réglages.");
-                        font-size: 12px;
+                        typography: Typography.secondary;
                         color: Theme.text-muted;
                         wrap: word-wrap;
                     }
@@ -250,7 +249,7 @@ export component OnboardingView inherits Rectangle {
 
                     if root.model-phase == ModelPhase.downloading: VerticalLayout {
                         spacing: 6px;
-                        Text { text: @tr("Téléchargement du modèle…"); font-size: 14px; color: Theme.text-secondary; }
+                        AppText { text: @tr("Téléchargement du modèle…"); typography: Typography.body; color: Theme.text-secondary; }
                         Rectangle {
                             height: 6px;
                             border-radius: 3px;
@@ -263,24 +262,23 @@ export component OnboardingView inherits Rectangle {
                                 background: Theme.accent;
                             }
                         }
-                        Text { text: root.download-progress-label; font-size: 12px; color: Theme.text-muted; }
+                        AppText { text: root.download-progress-label; typography: Typography.secondary; color: Theme.text-muted; }
                     }
-                    if root.model-phase == ModelPhase.loading: Text {
+                    if root.model-phase == ModelPhase.loading: AppText {
                         text: @tr("Chargement du modèle…");
-                        font-size: 14px;
+                        typography: Typography.body;
                         color: Theme.text-secondary;
                         horizontal-alignment: center;
                     }
-                    if root.model-phase == ModelPhase.ready: Text {
+                    if root.model-phase == ModelPhase.ready: AppText {
                         text: @tr("Modèle prêt.");
-                        font-size: 14px;
+                        typography: Typography.body;
                         color: Theme.text-secondary;
                     }
-                    if root.model-phase == ModelPhase.pick: Text {
+                    if root.model-phase == ModelPhase.pick: AppText {
                         text: @tr("Modèle de transcription");
-                        font-family: "Archivo SemiBold";
-                        font-size: 11px;
-                        font-weight: 600;
+                        typography: Typography.caption-emphasis;
+
                         color: Theme.text-muted;
                     }
                     if root.model-phase == ModelPhase.pick: ThemedComboBox {
@@ -316,24 +314,24 @@ export component OnboardingView inherits Rectangle {
                         }
                     }
 
-                    Text {
+                    AppText {
                         text: @tr("Cliquez sur le raccourci, puis appuyez sur les touches voulues. Échap annule.");
-                        font-size: 12px;
+                        typography: Typography.secondary;
                         color: Theme.text-muted;
                         wrap: word-wrap;
                     }
 
-                    if root.shortcut-error != "": Text {
+                    if root.shortcut-error != "": AppText {
                         text: root.shortcut-error;
                         color: Theme.danger;
-                        font-size: 12px;
+                        typography: Typography.secondary;
                         wrap: word-wrap;
                     }
 
-                    if root.shortcut-notice != ShortcutNotice.none: Text {
+                    if root.shortcut-notice != ShortcutNotice.none: AppText {
                         text: ShortcutNoticeText.text(root.shortcut-notice);
                         color: ShortcutNoticeText.is-warning(root.shortcut-notice) ? Theme.warning : Theme.danger;
-                        font-size: 12px;
+                        typography: Typography.secondary;
                         wrap: word-wrap;
                     }
 
@@ -346,10 +344,10 @@ export component OnboardingView inherits Rectangle {
                             padding-right: 12px;
                             padding-top: 8px;
                             padding-bottom: 8px;
-                            Text {
+                            AppText {
                                 text: @tr("Le collage automatique a besoin de l'Accessibilité, qui n'est pas encore accordée. Le texte ira dans votre historique à la place.");
                                 color: Theme.warning;
-                                font-size: 13px;
+                                typography: Typography.content;
                                 wrap: word-wrap;
                             }
                         }
@@ -373,9 +371,9 @@ export component OnboardingView inherits Rectangle {
                         enabled: !root.busy;
                         clicked => { root.back-requested(); }
                     }
-                    if root.step-index == 0 && root.step == OnboardingStep.permissions: Text {
+                    if root.step-index == 0 && root.step == OnboardingStep.permissions: AppText {
                         text: @tr("Vous pourrez les accorder plus tard.");
-                        font-size: 12px;
+                        typography: Typography.secondary;
                         color: Theme.text-muted;
                         vertical-alignment: center;
                     }

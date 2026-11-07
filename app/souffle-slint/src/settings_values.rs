@@ -313,6 +313,7 @@ impl SettingsValueController {
     /// Publish only the immediate value controls. Do not rebuild catalogues,
     /// refresh providers/devices, or overwrite prompt/URL/list editor drafts.
     fn project(&self, window: &MainWindow, settings: &AppSettings) {
+        crate::compression_ui::populate_settings(window, settings);
         window.set_settings_theme(settings_ui::theme_to_slint(settings.theme));
         window.set_settings_locale(settings_ui::locale_to_slint(&settings.locale));
         window.set_settings_paste_method(settings_ui::paste_method_to_slint(settings.paste_method));
@@ -338,6 +339,7 @@ impl SettingsValueController {
         window.set_settings_meeting_audio_retention(settings_ui::audio_retention_to_slint(
             settings.meeting_audio_retention,
         ));
+        window.set_settings_meeting_audio_diagnostic(settings.meeting_audio_diagnostic);
         let summary = self.summary.borrow();
         let models = summary
             .as_ref()
@@ -353,6 +355,38 @@ impl SettingsValueController {
 }
 
 pub(crate) fn wire(window: &MainWindow, controller: Rc<SettingsValueController>) {
+    let c = controller.clone();
+    window
+        .global::<crate::SummarizationUi>()
+        .on_enabled_changed(move |enabled| {
+            c.apply(SettingsSaveLane::General, move |s| {
+                s.meeting_summaries_enabled = enabled
+            })
+        });
+    let c = controller.clone();
+    window
+        .global::<crate::CompressionUi>()
+        .on_summary_changed(move |enabled| {
+            c.apply(SettingsSaveLane::General, move |s| {
+                s.summary_compression_enabled = enabled
+            })
+        });
+    let c = controller.clone();
+    window
+        .global::<crate::CompressionUi>()
+        .on_alongside_changed(move |enabled| {
+            c.apply(SettingsSaveLane::General, move |s| {
+                s.compact_transcript_enabled = enabled
+            })
+        });
+    let c = controller.clone();
+    window
+        .global::<crate::CompressionUi>()
+        .on_rate_changed(move |percent| {
+            c.apply(SettingsSaveLane::General, move |s| {
+                s.summary_compression_rate = percent as f32 / 100.
+            })
+        });
     let weak_controller = Rc::downgrade(&controller);
     controller.io.set_save_projection(move |order, outcome| {
         if let Some(controller) = weak_controller.upgrade() {
@@ -453,6 +487,12 @@ pub(crate) fn wire(window: &MainWindow, controller: Rc<SettingsValueController>)
     window.on_settings_meeting_audio_retention_changed(move |value| {
         c.apply(SettingsSaveLane::General, move |s| {
             s.meeting_audio_retention = settings_ui::audio_retention_from_slint(value)
+        });
+    });
+    let c = controller.clone();
+    window.on_settings_meeting_audio_diagnostic_changed(move |enabled| {
+        c.apply(SettingsSaveLane::General, move |s| {
+            s.meeting_audio_diagnostic = enabled
         });
     });
     let c = controller.clone();
@@ -710,6 +750,35 @@ mod tests {
         fn wait_for_saves(&self, expected: usize) {
             drain_until(&self.io, &self.saves, expected);
         }
+    }
+
+    #[test]
+    fn summarization_opt_in_roundtrip_preserves_independent_preferences() {
+        let harness = DatabaseHarness::new(AppSettings {
+            dictation_polish_enabled: true,
+            summary_compression_enabled: true,
+            compact_transcript_enabled: true,
+            summary_compression_rate: 0.7,
+            ..AppSettings::default()
+        });
+        let ui = harness.window.global::<crate::SummarizationUi>();
+        assert!(!ui.get_enabled());
+        ui.invoke_enabled_changed(true);
+        harness.wait_for_saves(1);
+        assert!(ui.get_enabled());
+        assert!(
+            AppSettings::load_read_only(&harness.db)
+                .unwrap()
+                .meeting_summaries_enabled
+        );
+        ui.invoke_enabled_changed(false);
+        harness.wait_for_saves(2);
+        assert!(!ui.get_enabled());
+        let settings = AppSettings::load_read_only(&harness.db).unwrap();
+        assert!(!settings.meeting_summaries_enabled);
+        assert!(settings.dictation_polish_enabled);
+        assert!(settings.summary_compression_enabled && settings.compact_transcript_enabled);
+        assert_eq!(settings.summary_compression_rate, 0.7);
     }
 
     #[test]
@@ -1220,6 +1289,34 @@ mod tests {
                 .get_settings_selected_summary_model_label()
                 .as_str(),
             "Model A"
+        );
+    }
+
+    #[test]
+    fn diagnostic_switch_projects_and_persists_without_changing_retention() {
+        let harness = DatabaseHarness::new(AppSettings::default());
+        assert!(!harness.window.get_settings_meeting_audio_diagnostic());
+        harness
+            .window
+            .invoke_settings_meeting_audio_diagnostic_changed(true);
+        assert!(harness.window.get_settings_meeting_audio_diagnostic());
+        harness.wait_for_saves(1);
+        let stored = AppSettings::load(&harness.db).unwrap();
+        assert!(stored.meeting_audio_diagnostic);
+        assert_eq!(
+            stored.meeting_audio_retention,
+            souffle_lib::settings::MeetingAudioRetention::Off
+        );
+        settings_ui::populate(&harness.window, &stored);
+        assert!(harness.window.get_settings_meeting_audio_diagnostic());
+        harness
+            .window
+            .invoke_settings_meeting_audio_diagnostic_changed(false);
+        harness.wait_for_saves(2);
+        assert!(
+            !AppSettings::load(&harness.db)
+                .unwrap()
+                .meeting_audio_diagnostic
         );
     }
 

@@ -1,3 +1,4 @@
+import { AppText, AppTextInput, Typography, TypographyStyle } from "@typography";
 import { PermissionRow, PermissionsStep } from "../onboarding/permissions_step.slint";
 import { ThemedButton, ThemedButtonKind } from "../themed_button.slint";
 import { ModalDialog } from "../modal_dialog.slint";
@@ -50,9 +51,9 @@ export component SettingsPermissionsDialog inherits ModalDialog {
         spacing: 12px;
         vertical-stretch: 0;
 
-        Text {
+        AppText {
             text: @tr("Vous pourrez les accorder plus tard.");
-            font-size: 12px;
+            typography: Typography.secondary;
             color: Theme.text-muted;
             vertical-alignment: center;
             wrap: word-wrap;

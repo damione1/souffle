@@ -1,0 +1,17 @@
+import { AppLocale } from "../types.slint";
+
+// Names are open catalogue data localized by Foundation. Copy and formatting
+// stay here so the picker, popup and header all follow the active UI language.
+export global TranscriptionLabels {
+    in-out property <AppLocale> app-locale;
+    in-out property <string> speech-locale-code;
+    in-out property <string> speech-name-en;
+    in-out property <string> speech-name-fr;
+
+    public pure function speech-label() -> string {
+        return @tr("Apple Speech — {} [{}]", self.app-locale == AppLocale.fr ? self.speech-name-fr : self.speech-name-en, self.speech-locale-code);
+    }
+    public pure function speech-short-label() -> string {
+        return self.speech-locale-code == "" ? @tr("Apple Speech") : @tr("Apple Speech ({})", self.speech-locale-code);
+    }
+}

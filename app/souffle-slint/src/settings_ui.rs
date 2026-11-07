@@ -11,11 +11,42 @@ use crate::{
     PermissionKind as SlintPermissionKind,
 };
 use souffle_lib::calendar::CalendarInfo;
+
+pub(crate) fn project_model_deletion_error(
+    window: &crate::MainWindow,
+    error: &souffle_lib::commands::ModelDeletionError,
+) {
+    use souffle_lib::commands::ModelDeletionError as LibError;
+    let kind = match error {
+        LibError::ManagedAsset => crate::ModelDeletionError::ManagedAsset,
+        LibError::TransitionBusy => crate::ModelDeletionError::TransitionBusy,
+        LibError::ActiveModel => crate::ModelDeletionError::ActiveModel,
+        LibError::OperationFailed { .. } => crate::ModelDeletionError::OperationFailed,
+    };
+    window.set_settings_model_delete_error_kind(kind);
+    window.set_settings_model_delete_error(error.to_string().into());
+}
+
+pub(crate) fn capture_error_to_slint(
+    error: &souffle_lib::commands::SettingsCaptureError,
+) -> crate::SettingsCaptureError {
+    match error {
+        souffle_lib::commands::SettingsCaptureError::CaptureBusy => {
+            crate::SettingsCaptureError::CaptureBusy
+        }
+        souffle_lib::commands::SettingsCaptureError::RuntimeBusy => {
+            crate::SettingsCaptureError::RuntimeBusy
+        }
+        souffle_lib::commands::SettingsCaptureError::OperationFailed { .. } => {
+            crate::SettingsCaptureError::OperationFailed
+        }
+    }
+}
 use souffle_lib::logging::LogLevel;
 use souffle_lib::permissions::{PermState, PermissionKind};
 use souffle_lib::settings::{
-    AppSettings, MeetingAudioRetention, MeetingTranscriptionLanguage, PasteMethod, SettingsOptions,
-    ShortcutSettings, Theme,
+    AppSettings, DictionaryLearningMode, MeetingAudioRetention, MeetingTranscriptionLanguage,
+    PasteMethod, SettingsOptions, ShortcutSettings, Theme,
 };
 
 /// Pushes `settings` into the Slint properties this shell currently wires.
@@ -31,7 +62,18 @@ pub fn populate(window: &MainWindow, settings: &AppSettings) {
     window.set_settings_locale(locale_to_slint(&settings.locale));
     window.set_settings_auto_paste(settings.auto_paste);
     window.set_settings_paste_method(paste_method_to_slint(settings.paste_method));
-    window.set_settings_dictation_learn_from_edit(settings.dictation_learn_from_edit);
+    window.set_settings_dictionary_learning_mode(dictionary_learning_to_slint(
+        settings.dictionary_learning_mode,
+    ));
+    let options = DictionaryLearningMode::ALL
+        .into_iter()
+        .map(|mode| crate::DictionaryLearningOption {
+            mode: dictionary_learning_to_slint(mode),
+        })
+        .collect::<Vec<_>>();
+    window.set_settings_dictionary_learning_options(
+        std::rc::Rc::new(slint::VecModel::from(options)).into(),
+    );
     window.set_settings_paste_delay_ms(settings.paste_delay_ms as i32);
     window.set_settings_pill_hidden(settings.pill_hidden);
     window.set_settings_pill_hidden_in_captures(settings.pill_hidden_in_captures);
@@ -44,6 +86,7 @@ pub fn populate(window: &MainWindow, settings: &AppSettings) {
 
     window.set_settings_allow_bluetooth_mic(settings.allow_bluetooth_mic);
     window.set_settings_capture_system_audio(settings.capture_system_audio);
+    window.set_settings_meeting_audio_diagnostic(settings.meeting_audio_diagnostic);
     window.set_settings_meeting_transcription_language(meeting_language_to_slint(
         settings.meeting_transcription_language,
     ));
@@ -59,7 +102,12 @@ pub fn populate(window: &MainWindow, settings: &AppSettings) {
     window.set_settings_stutter_collapse(settings.stutter_collapse);
     window.set_settings_dictionary_correction(settings.dictionary_correction);
 
+    crate::compression_ui::populate_settings(window, settings);
     let bounds = SettingsOptions::current();
+    window.set_settings_diagnostic_max_minutes(bounds.meeting_diagnostic_max_minutes as i32);
+    window.set_settings_diagnostic_megabytes_per_hour(
+        bounds.meeting_diagnostic_megabytes_per_hour as i32,
+    );
     window.set_settings_paste_delay_min(bounds.paste_delay_ms_min as i32);
     window.set_settings_paste_delay_max(bounds.paste_delay_ms_max as i32);
     window.set_settings_feedback_sounds_volume_min(bounds.feedback_sounds_volume_min as i32);
@@ -86,6 +134,26 @@ pub fn populate_platform_capabilities(
 fn shared_string_model(values: &[String]) -> slint::ModelRc<slint::SharedString> {
     let values: Vec<slint::SharedString> = values.iter().map(|v| v.as_str().into()).collect();
     std::rc::Rc::new(slint::VecModel::from(values)).into()
+}
+
+pub fn dictionary_learning_to_slint(
+    value: DictionaryLearningMode,
+) -> crate::DictionaryLearningMode {
+    match value {
+        DictionaryLearningMode::Disabled => crate::DictionaryLearningMode::Disabled,
+        DictionaryLearningMode::Suggestions => crate::DictionaryLearningMode::Suggestions,
+        DictionaryLearningMode::Automatic => crate::DictionaryLearningMode::Automatic,
+    }
+}
+
+pub fn dictionary_learning_from_slint(
+    value: crate::DictionaryLearningMode,
+) -> DictionaryLearningMode {
+    match value {
+        crate::DictionaryLearningMode::Disabled => DictionaryLearningMode::Disabled,
+        crate::DictionaryLearningMode::Suggestions => DictionaryLearningMode::Suggestions,
+        crate::DictionaryLearningMode::Automatic => DictionaryLearningMode::Automatic,
+    }
 }
 
 pub fn meeting_language_to_slint(value: MeetingTranscriptionLanguage) -> MeetingLanguage {
@@ -305,6 +373,16 @@ pub fn audio_retention_from_slint(value: SlintAudioRetention) -> MeetingAudioRet
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dictionary_learning_mode_conversions_cover_the_backend_catalogue() {
+        for mode in DictionaryLearningMode::ALL {
+            assert_eq!(
+                dictionary_learning_from_slint(dictionary_learning_to_slint(mode)),
+                mode
+            );
+        }
+    }
     use slint::platform::{Platform, WindowAdapter, software_renderer::MinimalSoftwareWindow};
     use std::rc::Rc;
 

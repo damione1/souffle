@@ -1,0 +1,32 @@
+import { MeetingDeleteBlockReason } from "types.slint";
+
+export struct MeetingDeletePermission {
+    blocked: bool,
+    reason: MeetingDeleteBlockReason,
+    // A projection failure blocks conservatively without inventing a phase.
+    check-failed: bool,
+}
+
+// The callback is a pure read of the authoritative Rust policy. A revision
+// changes only when ownership changes; every row/detail binding then rechecks.
+export global ActionGuards {
+    in-out property <int> revision;
+    pure callback meeting-delete(string, int) -> MeetingDeletePermission;
+
+    public pure function reason(permission: MeetingDeletePermission) -> string {
+        if !permission.blocked { return ""; }
+        if permission.check-failed {
+            return @tr("Impossible de vérifier si cette réunion peut être supprimée.");
+        }
+        if permission.reason == MeetingDeleteBlockReason.starting {
+            return @tr("Cette réunion est en cours de démarrage.");
+        }
+        if permission.reason == MeetingDeleteBlockReason.recording {
+            return @tr("Cette réunion est en cours d'enregistrement.");
+        }
+        if permission.reason == MeetingDeleteBlockReason.finalizing {
+            return @tr("Cette réunion est en cours de finalisation.");
+        }
+        return "";
+    }
+}

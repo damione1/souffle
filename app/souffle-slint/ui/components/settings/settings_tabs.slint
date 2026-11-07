@@ -1,3 +1,4 @@
+import { AppText, AppTextInput, Typography, TypographyStyle } from "@typography";
 import { Theme } from "../../theme.slint";
 import { SettingsTab } from "../../types.slint";
 
@@ -43,12 +44,12 @@ component SettingsTabChip inherits Rectangle {
         }
     }
 
-    label := Text {
+    label := AppText {
         x: 12px;
         height: parent.height;
         text: root.title;
-        font-size: 13px;
-        font-weight: root.active ? 600 : 500;
+        typography: root.active ? Typography.section : Typography.label;
+
         color: root.active ? Theme.text-primary : (area.has-hover ? Theme.text-secondary : Theme.text-muted);
         vertical-alignment: center;
     }

@@ -97,6 +97,8 @@ where
         "Map stage still empty after retry; splitting the excerpt in two"
     );
 
+    super::metrics::update(|metrics| metrics.map_splits += 1);
+
     let left_out = map_until_varied(part, total, &left, &generate).await?;
     let right_out = map_until_varied(part, total, &right, &generate).await?;
     match (left_out, right_out) {
@@ -126,6 +128,9 @@ where
 {
     let mut attempt = MapAttempt::First;
     loop {
+        if attempt == MapAttempt::Varied {
+            super::metrics::update(|metrics| metrics.map_retries += 1);
+        }
         let output = generate(
             map_user_prompt(chunk, part, total, attempt),
             attempt.temperature(),
@@ -260,24 +265,31 @@ mod tests {
     #[tokio::test]
     async fn two_vacuous_attempts_split_the_chunk() {
         let calls = AtomicU32::new(0);
-        let result = map_one_chunk(5, 5, "alpha bravo charlie delta", |prompt, _temperature| {
-            let n = calls.fetch_add(1, Ordering::SeqCst);
-            async move {
-                // Whole chunk: First + Varied both empty, then each half succeeds.
-                if n < 2 {
-                    assert!(prompt.contains("alpha bravo charlie delta"));
-                    Ok(vacuous())
-                } else if prompt.contains("alpha bravo") && !prompt.contains("charlie") {
-                    Ok(fact("- first half"))
-                } else {
-                    Ok(fact("- second half"))
+        let (result, metrics) = super::super::metrics::measure(map_one_chunk(
+            5,
+            5,
+            "alpha bravo charlie delta",
+            |prompt, _temperature| {
+                let n = calls.fetch_add(1, Ordering::SeqCst);
+                async move {
+                    // Whole chunk: First + Varied both empty, then each half succeeds.
+                    if n < 2 {
+                        assert!(prompt.contains("alpha bravo charlie delta"));
+                        Ok(vacuous())
+                    } else if prompt.contains("alpha bravo") && !prompt.contains("charlie") {
+                        Ok(fact("- first half"))
+                    } else {
+                        Ok(fact("- second half"))
+                    }
                 }
-            }
-        })
-        .await
-        .unwrap();
+            },
+        ))
+        .await;
+        let result = result.unwrap();
         assert_eq!(result, "- first half\n- second half");
         assert_eq!(calls.load(Ordering::SeqCst), 4);
+        assert_eq!(metrics.map_retries, 1);
+        assert_eq!(metrics.map_splits, 1);
     }
 
     #[tokio::test]

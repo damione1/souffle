@@ -109,6 +109,7 @@ mod tests {
         };
         let ready = AppStateMachine::Ready { profile: profile() };
         let error = AppStateMachine::Error {
+            source: crate::state_machine::FailureSource::Model,
             message: "boom".into(),
             recovery: crate::state_machine::ErrorRecovery::RetryFromReady { profile: profile() },
         };

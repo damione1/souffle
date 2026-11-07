@@ -1,6 +1,84 @@
 use souffle_schema::paragraphs;
 
 use crate::engine::TranscriptionSegment;
+use crate::transcript::MeetingRecordingSession;
+
+/// Stable source metadata, never inferred from a compact row's position.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TurnOrigin {
+    pub session_index: usize,
+    pub seconds: f64,
+}
+
+#[derive(Debug, Clone)]
+pub struct SessionTurn {
+    pub line: String,
+    pub origin: Option<TurnOrigin>,
+}
+
+pub(crate) const SESSION_TAG: &str = "session";
+
+/// Group within recording ranges, in storage order, never across a session
+/// boundary. Gaps and ambiguous ranges retain their text but have no seek target.
+pub fn turns_from_sessions(
+    segments: &[TranscriptionSegment],
+    sessions: &[MeetingRecordingSession],
+) -> Vec<SessionTurn> {
+    let mut ranges: Vec<_> = sessions
+        .iter()
+        .enumerate()
+        .filter_map(|(index, session)| {
+            let start = (session.start_segment_index as usize).min(segments.len());
+            let end = (session.end_segment_index as usize).min(segments.len());
+            (end > start).then_some((index, start, end))
+        })
+        .collect();
+    ranges.sort_by_key(|&(_, start, _)| start);
+    let mut result = Vec::new();
+    let mut append = |start: usize, end: usize, session: Option<usize>| {
+        if end <= start {
+            return;
+        }
+        let verified = session.filter(|&index| {
+            ranges
+                .iter()
+                .all(|&(other, a, b)| other == index || b <= start || a >= end)
+        });
+        let nonempty: Vec<_> = segments[start..end]
+            .iter()
+            .filter(|segment| !segment.text.trim().is_empty())
+            .cloned()
+            .collect();
+        for paragraph in
+            paragraphs::group_into_paragraphs(&nonempty, paragraphs::PAUSE_THRESHOLD_SECONDS)
+        {
+            let mut line = format_turn(&paragraph);
+            if sessions.len() > 1
+                && let Some(index) = verified
+            {
+                let body_start = line.len() - paragraph.text.len();
+                line.insert_str(body_start, &format!("[{SESSION_TAG} {}] ", index + 1));
+            }
+            let origin = verified
+                .filter(|_| paragraph.start_time.is_finite() && paragraph.start_time >= 0.)
+                .map(|session_index| TurnOrigin {
+                    session_index,
+                    seconds: paragraph.start_time,
+                });
+            result.push(SessionTurn { line, origin });
+        }
+    };
+    let mut consumed = 0;
+    for &(index, start, end) in &ranges {
+        if start > consumed {
+            append(consumed, start, None);
+        }
+        append(start.max(consumed), end, Some(index));
+        consumed = consumed.max(end);
+    }
+    append(consumed, segments.len(), None);
+    result
+}
 
 /// Format one grouped paragraph as a labeled turn for the summary LLM.
 fn format_turn(paragraph: &paragraphs::Paragraph) -> String {
@@ -34,6 +112,40 @@ mod tests {
     use super::turns_from_segments;
     use crate::engine::Speaker;
     use crate::test_helpers::fixtures::sample_segment;
+
+    #[test]
+    fn resumed_sessions_preserve_storage_order_and_never_merge_speakers() {
+        let now = chrono::Utc::now();
+        let sessions = [
+            crate::transcript::MeetingRecordingSession::completed("first".into(), now, now, 0, 2),
+            crate::transcript::MeetingRecordingSession::completed("resumed".into(), now, now, 2, 4),
+        ];
+        let turns = super::turns_from_sessions(
+            &[
+                tagged("First decision", 120., 121., Speaker::Me),
+                tagged("accepted", 122., 123., Speaker::Them),
+                tagged("Reversed decision", 0., 1., Speaker::Them),
+                tagged("after resuming", 2., 3., Speaker::Me),
+            ],
+            &sessions,
+        );
+        assert_eq!(turns.len(), 4);
+        assert!(turns[0].line.contains("[session 1] First decision"));
+        assert!(turns[2].line.contains("[session 2] Reversed decision"));
+        assert_eq!(turns[2].origin.unwrap().session_index, 1);
+        assert_eq!(turns[2].origin.unwrap().seconds, 0.);
+        let adjacent = super::turns_from_sessions(
+            &[
+                tagged("A", 0., 1., Speaker::Me),
+                tagged("B", 1., 2., Speaker::Me),
+            ],
+            &[
+                crate::transcript::MeetingRecordingSession::completed("a".into(), now, now, 0, 1),
+                crate::transcript::MeetingRecordingSession::completed("b".into(), now, now, 1, 2),
+            ],
+        );
+        assert_eq!(adjacent.len(), 2);
+    }
 
     fn tagged(
         text: &str,

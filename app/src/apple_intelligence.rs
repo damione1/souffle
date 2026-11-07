@@ -74,11 +74,76 @@ pub struct AppleLLMResponse {
 const HELPER_ARG: &str = "--internal-apple-intelligence-helper";
 const MAX_HELPER_FIELD_BYTES: usize = 64 * 1024 * 1024;
 const MAX_HELPER_STDERR_BYTES: usize = 1024 * 1024;
-const HELPER_DEADLINE: Duration = Duration::from_secs(20);
 const HELPER_POLL_INTERVAL: Duration = Duration::from_millis(10);
-pub(crate) const HELPER_TIMEOUT_PREFIX: &str = "apple_intelligence_helper_timeout:";
-const HELPER_PROCESS_FAILURE_PREFIX: &str = "apple_intelligence_helper_process_failure:";
 static APPLE_AI_BRIDGE_HEALTHY: AtomicBool = AtomicBool::new(true);
+
+/// Classified at the Swift boundary, then preserved through helper transport
+/// and retry policy instead of interpreting diagnostic prose.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, thiserror::Error)]
+pub enum AppleIntelligenceError {
+    #[error("apple_intelligence_helper_timeout: {0}")]
+    Timeout(String),
+    #[error("apple_intelligence_helper_process_failure: {0}")]
+    ProcessFailure(String),
+    #[error("Apple Intelligence bridge unavailable: {0}")]
+    FatalBridge(String),
+    #[error("exceeded_context_window: {0}")]
+    ContextOverflow(String),
+    #[error("guardrail_violation: {0}")]
+    GuardrailViolation(String),
+    #[error("unsupported_language: {0}")]
+    UnsupportedLanguage(String),
+    #[error("{0}")]
+    Provider(String),
+}
+
+impl From<String> for AppleIntelligenceError {
+    fn from(detail: String) -> Self {
+        Self::Provider(detail)
+    }
+}
+
+impl From<&str> for AppleIntelligenceError {
+    fn from(detail: &str) -> Self {
+        Self::Provider(detail.into())
+    }
+}
+
+impl AppleIntelligenceError {
+    fn from_provider(raw: String) -> Self {
+        let (code, detail) = raw.split_once(':').unwrap_or((&raw, ""));
+        let detail = detail.trim().to_string();
+        match code {
+            "exceeded_context_window" => Self::ContextOverflow(detail),
+            "guardrail_violation" => Self::GuardrailViolation(detail),
+            "unsupported_language" => Self::UnsupportedLanguage(detail),
+            _ => Self::Provider(raw),
+        }
+    }
+
+    pub(crate) fn trips_circuit_breaker(&self) -> bool {
+        match self {
+            Self::FatalBridge(_) => true,
+            Self::Timeout(_)
+            | Self::ProcessFailure(_)
+            | Self::ContextOverflow(_)
+            | Self::GuardrailViolation(_)
+            | Self::UnsupportedLanguage(_)
+            | Self::Provider(_) => false,
+        }
+    }
+
+    pub(crate) fn is_retryable(&self) -> bool {
+        match self {
+            Self::Timeout(_) | Self::Provider(_) => true,
+            Self::FatalBridge(_)
+            | Self::ProcessFailure(_)
+            | Self::ContextOverflow(_)
+            | Self::GuardrailViolation(_)
+            | Self::UnsupportedLanguage(_) => false,
+        }
+    }
+}
 
 #[derive(Debug)]
 struct HelperOutput {
@@ -127,6 +192,7 @@ unsafe extern "C" {
     fn process_text_with_system_prompt_apple(
         system_prompt: *const c_char,
         user_content: *const c_char,
+        temperature: f32,
         max_tokens: i32,
     ) -> *mut AppleLLMResponse;
     fn free_apple_llm_response(response: *mut AppleLLMResponse);
@@ -187,71 +253,130 @@ pub fn unavailable_reason() -> Option<AppleIntelligenceUnavailableReason> {
     }
 }
 
+/// Only fatal helper crashes (abnormal signal termination such as `SIGABRT` /
+/// `SIGSEGV` / `SIGBUS` in the Swift bridge, or inability to spawn the helper
+/// binary) trip the process-wide circuit breaker. Request timeouts never
+/// disable the bridge for later calls.
+fn should_trip_bridge_circuit_breaker(
+    status: Option<ExitStatus>,
+    error: Option<&AppleIntelligenceError>,
+) -> bool {
+    if let Some(error) = error {
+        return error.trips_circuit_breaker();
+    }
+    if let Some(status) = status {
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::ExitStatusExt;
+            return status.signal().is_some();
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = status;
+            return false;
+        }
+    }
+    false
+}
+
 /// Run one on-device Foundation Models generation with separate system and user prompts.
 pub fn process_text_with_system_prompt(
     system_prompt: &str,
     user_content: &str,
+    temperature: f32,
     max_tokens: i32,
-) -> Result<String, String> {
+    timeout: Duration,
+) -> Result<String, AppleIntelligenceError> {
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
     {
         if !APPLE_AI_BRIDGE_HEALTHY.load(Ordering::Acquire) {
-            return Err(
-                "Apple Intelligence bridge disabled after a previous process failure".into(),
-            );
+            return Err(AppleIntelligenceError::FatalBridge(
+                "disabled after a previous process failure".into(),
+            ));
         }
-        let executable = std::env::current_exe()
-            .map_err(|e| format!("Resolve Apple Intelligence helper executable: {e}"))?;
-        let request = encode_helper_request(system_prompt, user_content, max_tokens)?;
+        let executable = std::env::current_exe().map_err(|e| {
+            let err =
+                AppleIntelligenceError::FatalBridge(format!("Resolve helper executable: {e}"));
+            if should_trip_bridge_circuit_breaker(None, Some(&err)) {
+                APPLE_AI_BRIDGE_HEALTHY.store(false, Ordering::Release);
+            }
+            err
+        })?;
+        let request = encode_helper_request(system_prompt, user_content, temperature, max_tokens)?;
         let mut command = Command::new(executable);
         command.arg(HELPER_ARG);
-        let output = match run_helper_process(command, &request, HELPER_DEADLINE) {
+        let output = match run_helper_process(command, &request, timeout) {
             Ok(output) => output,
             Err(error) => {
-                APPLE_AI_BRIDGE_HEALTHY.store(false, Ordering::Release);
+                if should_trip_bridge_circuit_breaker(None, Some(&error)) {
+                    APPLE_AI_BRIDGE_HEALTHY.store(false, Ordering::Release);
+                }
                 return Err(error);
             }
         };
         if !output.status.success() {
-            APPLE_AI_BRIDGE_HEALTHY.store(false, Ordering::Release);
+            if should_trip_bridge_circuit_breaker(Some(output.status), None) {
+                APPLE_AI_BRIDGE_HEALTHY.store(false, Ordering::Release);
+            }
             let detail = String::from_utf8_lossy(&output.stderr);
-            return Err(format!(
-                "{HELPER_PROCESS_FAILURE_PREFIX} helper exited unexpectedly{}",
+            return Err(AppleIntelligenceError::ProcessFailure(format!(
+                "helper exited unexpectedly{}",
                 if detail.trim().is_empty() {
                     String::new()
                 } else {
                     format!(": {}", detail.trim())
                 }
-            ));
+            )));
         }
         decode_helper_response(&output.stdout)
     }
 
     #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
     {
-        let _ = (system_prompt, user_content, max_tokens);
+        let _ = (
+            system_prompt,
+            user_content,
+            temperature,
+            max_tokens,
+            timeout,
+        );
         Err("Apple Intelligence is only supported on Apple Silicon macOS".into())
     }
-}
-
-/// Whether a bridge error must stop `generate_guarded` without its usual
-/// retry. A deadline already killed and reaped the helper; launching the same
-/// fragile bridge a second time only repeats the failure and violates the
-/// request's wall-clock budget.
-pub(crate) fn is_terminal_helper_error(error: &str) -> bool {
-    error.starts_with(HELPER_TIMEOUT_PREFIX) || error.starts_with(HELPER_PROCESS_FAILURE_PREFIX)
 }
 
 fn encode_helper_request(
     system_prompt: &str,
     user_content: &str,
+    temperature: f32,
     max_tokens: i32,
 ) -> Result<Vec<u8>, String> {
     let mut request = Vec::new();
     write_field(&mut request, system_prompt.as_bytes())?;
     write_field(&mut request, user_content.as_bytes())?;
+    request.extend_from_slice(&temperature.to_le_bytes());
     request.extend_from_slice(&max_tokens.to_le_bytes());
     Ok(request)
+}
+
+fn decode_helper_request(mut reader: impl Read) -> Result<(String, String, f32, i32), String> {
+    let system = String::from_utf8(read_field(&mut reader)?)
+        .map_err(|e| format!("Invalid helper system prompt: {e}"))?;
+    let user = String::from_utf8(read_field(&mut reader)?)
+        .map_err(|e| format!("Invalid helper user content: {e}"))?;
+    let mut temperature = [0u8; 4];
+    reader
+        .read_exact(&mut temperature)
+        .map_err(|e| format!("Read helper temperature: {e}"))?;
+    let mut max_tokens = [0u8; 4];
+    reader
+        .read_exact(&mut max_tokens)
+        .map_err(|e| format!("Read helper token limit: {e}"))?;
+    Ok((
+        system,
+        user,
+        f32::from_le_bytes(temperature),
+        i32::from_le_bytes(max_tokens),
+    ))
 }
 
 fn read_bounded(
@@ -298,7 +423,10 @@ fn join_input_writer(writer: JoinHandle<Result<(), String>>) -> Result<(), Strin
         .map_err(|_| "Apple Intelligence helper stdin writer panicked".to_string())?
 }
 
-fn spawn_helper_with_deadline(mut command: Command, deadline_at: Instant) -> Result<Child, String> {
+fn spawn_helper_with_deadline(
+    mut command: Command,
+    deadline_at: Instant,
+) -> Result<Child, AppleIntelligenceError> {
     command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -312,12 +440,16 @@ fn spawn_helper_with_deadline(mut command: Command, deadline_at: Instant) -> Res
         .spawn(move || {
             let result = command
                 .spawn()
-                .map_err(|error| format!("Start Apple Intelligence helper: {error}"))
+                .map_err(|error| {
+                    AppleIntelligenceError::FatalBridge(format!("Start helper: {error}"))
+                })
                 .and_then(|mut child| {
                     if Instant::now() >= deadline_at {
                         let _ = child.kill();
                         let _ = child.wait();
-                        Err(format!("{HELPER_TIMEOUT_PREFIX} expired during spawn"))
+                        Err(AppleIntelligenceError::Timeout(
+                            "expired during spawn".into(),
+                        ))
                     } else {
                         Ok(child)
                     }
@@ -329,16 +461,18 @@ fn spawn_helper_with_deadline(mut command: Command, deadline_at: Instant) -> Res
                 let _ = child.wait();
             }
         })
-        .map_err(|error| format!("Start Apple Intelligence spawn supervisor: {error}"))?;
+        .map_err(|error| {
+            AppleIntelligenceError::FatalBridge(format!("Start spawn supervisor: {error}"))
+        })?;
 
     let remaining = deadline_at.saturating_duration_since(Instant::now());
     match receiver.recv_timeout(remaining) {
         Ok(result) => result,
-        Err(RecvTimeoutError::Timeout) => Err(format!(
-            "{HELPER_TIMEOUT_PREFIX} expired while spawning helper"
+        Err(RecvTimeoutError::Timeout) => Err(AppleIntelligenceError::Timeout(
+            "expired while spawning helper".into(),
         )),
-        Err(RecvTimeoutError::Disconnected) => Err(format!(
-            "{HELPER_PROCESS_FAILURE_PREFIX} spawn supervisor disconnected"
+        Err(RecvTimeoutError::Disconnected) => Err(AppleIntelligenceError::ProcessFailure(
+            "spawn supervisor disconnected".into(),
         )),
     }
 }
@@ -347,7 +481,7 @@ fn run_helper_process(
     command: Command,
     request: &[u8],
     deadline: Duration,
-) -> Result<HelperOutput, String> {
+) -> Result<HelperOutput, AppleIntelligenceError> {
     // One wall-clock budget covers process creation, request delivery,
     // generation, response draining and process reaping.
     let started = Instant::now();
@@ -355,10 +489,10 @@ fn run_helper_process(
     let child = spawn_helper_with_deadline(command, deadline_at)?;
     let mut child = ChildReaper(Some(child));
     if started.elapsed() >= deadline {
-        return Err(format!(
-            "{HELPER_TIMEOUT_PREFIX} exceeded {} ms during spawn",
+        return Err(AppleIntelligenceError::Timeout(format!(
+            "exceeded {} ms during spawn",
             deadline.as_millis()
-        ));
+        )));
     }
 
     let stdin = child
@@ -389,7 +523,7 @@ fn run_helper_process(
         let mut stdin = stdin;
         stdin
             .write_all(&request)
-            .map_err(|error| format!("{HELPER_PROCESS_FAILURE_PREFIX} write request: {error}"))
+            .map_err(|error| format!("write request: {error}"))
     }));
     let mut input_written = false;
     let mut status = None;
@@ -405,7 +539,7 @@ fn run_helper_process(
                 child.kill_and_reap();
                 let _ = join_output_reader(stdout_reader, "stdout");
                 let _ = join_output_reader(stderr_reader, "stderr");
-                return Err(error);
+                return Err(AppleIntelligenceError::ProcessFailure(error));
             }
             input_written = true;
         }
@@ -421,9 +555,9 @@ fn run_helper_process(
                     }
                     let _ = join_output_reader(stdout_reader, "stdout");
                     let _ = join_output_reader(stderr_reader, "stderr");
-                    return Err(format!(
-                        "{HELPER_PROCESS_FAILURE_PREFIX} poll process: {error}"
-                    ));
+                    return Err(AppleIntelligenceError::ProcessFailure(format!(
+                        "poll process: {error}"
+                    )));
                 }
             }
         }
@@ -445,10 +579,10 @@ fn run_helper_process(
             }
             let _ = join_output_reader(stdout_reader, "stdout");
             let _ = join_output_reader(stderr_reader, "stderr");
-            return Err(format!(
-                "{HELPER_TIMEOUT_PREFIX} exceeded {} ms",
+            return Err(AppleIntelligenceError::Timeout(format!(
+                "exceeded {} ms",
                 deadline.as_millis()
-            ));
+            )));
         }
 
         std::thread::sleep(HELPER_POLL_INTERVAL.min(deadline.saturating_sub(started.elapsed())));
@@ -468,13 +602,19 @@ fn run_helper_process(
 fn process_text_in_helper(
     system_prompt: &str,
     user_content: &str,
+    temperature: f32,
     max_tokens: i32,
-) -> Result<String, String> {
+) -> Result<String, AppleIntelligenceError> {
     let system_cstr = CString::new(system_prompt).map_err(|e| e.to_string())?;
     let user_cstr = CString::new(user_content).map_err(|e| e.to_string())?;
 
     let response_ptr = unsafe {
-        process_text_with_system_prompt_apple(system_cstr.as_ptr(), user_cstr.as_ptr(), max_tokens)
+        process_text_with_system_prompt_apple(
+            system_cstr.as_ptr(),
+            user_cstr.as_ptr(),
+            temperature,
+            max_tokens,
+        )
     };
 
     if response_ptr.is_null() {
@@ -496,7 +636,9 @@ fn process_text_in_helper(
         } else {
             c"Unknown error"
         };
-        Err(error_c_str.to_string_lossy().into_owned())
+        Err(AppleIntelligenceError::from_provider(
+            error_c_str.to_string_lossy().into_owned(),
+        ))
     };
 
     unsafe { free_apple_llm_response(response_ptr) };
@@ -529,17 +671,22 @@ fn read_field(reader: &mut impl Read) -> Result<Vec<u8>, String> {
     Ok(value)
 }
 
-fn encode_helper_response(result: Result<String, String>) -> Result<Vec<u8>, String> {
+fn encode_helper_response(
+    result: Result<String, AppleIntelligenceError>,
+) -> Result<Vec<u8>, String> {
     let (status, text) = match result {
         Ok(text) => (1u8, text),
-        Err(error) => (0u8, error),
+        Err(error) => (
+            0u8,
+            serde_json::to_string(&error).map_err(|e| e.to_string())?,
+        ),
     };
     let mut encoded = vec![status];
     write_field(&mut encoded, text.as_bytes())?;
     Ok(encoded)
 }
 
-fn decode_helper_response(encoded: &[u8]) -> Result<String, String> {
+fn decode_helper_response(encoded: &[u8]) -> Result<String, AppleIntelligenceError> {
     let Some((&status, payload)) = encoded.split_first() else {
         return Err("Apple Intelligence helper returned an empty response".into());
     };
@@ -547,10 +694,8 @@ fn decode_helper_response(encoded: &[u8]) -> Result<String, String> {
         .map_err(|e| format!("Apple Intelligence helper returned invalid UTF-8: {e}"))?;
     match status {
         1 => Ok(text),
-        0 => Err(text),
-        value => Err(format!(
-            "Apple Intelligence helper returned invalid status {value}"
-        )),
+        0 => Err(serde_json::from_str(&text).map_err(|e| format!("Invalid helper error: {e}"))?),
+        value => Err(format!("Apple Intelligence helper returned invalid status {value}").into()),
     }
 }
 
@@ -562,23 +707,16 @@ pub(crate) fn try_run_helper(args: &[String]) -> Option<i32> {
     if args.get(1).map(String::as_str) != Some(HELPER_ARG) {
         return None;
     }
-    let result = (|| -> Result<String, String> {
-        let mut stdin = std::io::stdin().lock();
-        let system = String::from_utf8(read_field(&mut stdin)?)
-            .map_err(|e| format!("Invalid helper system prompt: {e}"))?;
-        let user = String::from_utf8(read_field(&mut stdin)?)
-            .map_err(|e| format!("Invalid helper user content: {e}"))?;
-        let mut max_tokens = [0u8; 4];
-        stdin
-            .read_exact(&mut max_tokens)
-            .map_err(|e| format!("Read helper token limit: {e}"))?;
+    let result = (|| -> Result<String, AppleIntelligenceError> {
+        let stdin = std::io::stdin().lock();
+        let (system, user, temperature, max_tokens) = decode_helper_request(stdin)?;
         #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
         {
-            process_text_in_helper(&system, &user, i32::from_le_bytes(max_tokens))
+            process_text_in_helper(&system, &user, temperature, max_tokens)
         }
         #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
         {
-            let _ = (system, user, max_tokens);
+            let _ = (system, user, temperature, max_tokens);
             Err("Apple Intelligence helper is unavailable on this platform".into())
         }
     })();
@@ -602,8 +740,9 @@ pub(crate) fn try_run_helper(args: &[String]) -> Option<i32> {
 mod tests {
     use super::{
         AppleIntelligenceUnavailableReason, check_apple_intelligence_availability,
-        decode_helper_response, encode_helper_response, is_stub_linked, read_bounded,
-        run_helper_process, unavailable_reason,
+        decode_helper_request, decode_helper_response, encode_helper_request,
+        encode_helper_response, is_stub_linked, read_bounded, run_helper_process,
+        should_trip_bridge_circuit_breaker, unavailable_reason,
     };
     use std::io::Cursor;
     use std::process::Command;
@@ -654,14 +793,22 @@ mod tests {
     }
 
     #[test]
-    fn helper_protocol_round_trips_success_and_error() {
+    fn helper_protocol_round_trips_request_and_response() {
+        let req = encode_helper_request("sys", "user", 0.25, 700).unwrap();
+        let (system, user, temperature, max_tokens) =
+            decode_helper_request(Cursor::new(req)).unwrap();
+        assert_eq!(system, "sys");
+        assert_eq!(user, "user");
+        assert!((temperature - 0.25).abs() < f32::EPSILON);
+        assert_eq!(max_tokens, 700);
+
         let success = encode_helper_response(Ok("bonjour".into())).unwrap();
         assert_eq!(decode_helper_response(&success).as_deref(), Ok("bonjour"));
 
         let failure = encode_helper_response(Err("provider failed".into())).unwrap();
         assert_eq!(
             decode_helper_response(&failure).unwrap_err(),
-            "provider failed"
+            super::AppleIntelligenceError::Provider("provider failed".into())
         );
     }
 
@@ -682,26 +829,101 @@ mod tests {
             .expect("helper signal is an exit status, not a parent abort");
         assert_eq!(output.status.signal(), Some(libc::SIGABRT));
         assert!(!output.status.success());
-        assert!(super::is_terminal_helper_error(
-            super::HELPER_PROCESS_FAILURE_PREFIX
+        assert!(should_trip_bridge_circuit_breaker(
+            Some(output.status),
+            None
         ));
     }
 
     #[cfg(unix)]
     #[test]
-    fn helper_deadline_kills_and_reaps_the_process() {
+    fn helper_deadline_reaps_child_and_allows_next_request() {
+        let dir = tempfile::tempdir().unwrap();
+        let pid_file = dir.path().join("helper.pid");
         let mut command = Command::new("/bin/sh");
-        command.args(["-c", "sleep 5"]);
+        command.args(["-c", "echo $$ > \"$1\"; exec sleep 5", "helper"]);
+        command.arg(&pid_file);
         let started = Instant::now();
-        let error = run_helper_process(command, &[], Duration::from_millis(40)).unwrap_err();
-        assert!(
-            error.starts_with(super::HELPER_TIMEOUT_PREFIX),
-            "unexpected error: {error}"
+        let error = run_helper_process(command, &[], Duration::from_millis(200)).unwrap_err();
+        assert!(matches!(&error, super::AppleIntelligenceError::Timeout(_)));
+        assert!(started.elapsed() < Duration::from_secs(1));
+        assert!(!should_trip_bridge_circuit_breaker(None, Some(&error)));
+        let pid: libc::pid_t = std::fs::read_to_string(pid_file)
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap();
+        let mut status = 0;
+        // ECHILD proves the supervisor waited, rather than only sending SIGKILL.
+        assert_eq!(
+            unsafe { libc::waitpid(pid, &mut status, libc::WNOHANG) },
+            -1
         );
-        assert!(
-            started.elapsed() < Duration::from_secs(1),
-            "deadline did not terminate the helper promptly"
+        assert_eq!(
+            std::io::Error::last_os_error().raw_os_error(),
+            Some(libc::ECHILD)
         );
+        assert_eq!(unsafe { libc::kill(pid, 0) }, -1);
+        assert_eq!(
+            std::io::Error::last_os_error().raw_os_error(),
+            Some(libc::ESRCH)
+        );
+
+        let output = run_helper_process(
+            Command::new("/bin/cat"),
+            b"next request",
+            Duration::from_secs(2),
+        )
+        .unwrap();
+        assert!(output.status.success());
+        assert_eq!(output.stdout, b"next request");
+    }
+
+    #[test]
+    fn provider_classification_and_typed_error_transport_are_exact() {
+        use super::AppleIntelligenceError as Error;
+        for (raw, expected) in [
+            (
+                "guardrail_violation: refusal",
+                Error::GuardrailViolation("refusal".into()),
+            ),
+            (
+                "exceeded_context_window: full",
+                Error::ContextOverflow("full".into()),
+            ),
+            (
+                "unsupported_language: locale",
+                Error::UnsupportedLanguage("locale".into()),
+            ),
+            (
+                "opaque detail mentions guardrail_violation",
+                Error::Provider("opaque detail mentions guardrail_violation".into()),
+            ),
+        ] {
+            let error = Error::from_provider(raw.into());
+            assert_eq!(error, expected);
+            let encoded = encode_helper_response(Err(error)).unwrap();
+            assert_eq!(decode_helper_response(&encoded).unwrap_err(), expected);
+        }
+    }
+
+    #[test]
+    fn request_errors_do_not_disable_bridge_but_fatal_start_failures_do() {
+        use super::AppleIntelligenceError as Error;
+        for error in [
+            Error::Timeout("expired".into()),
+            Error::ProcessFailure("exit 1".into()),
+            Error::GuardrailViolation("refused".into()),
+            Error::ContextOverflow("full".into()),
+            Error::UnsupportedLanguage("locale".into()),
+            Error::Provider("busy".into()),
+        ] {
+            assert!(!should_trip_bridge_circuit_breaker(None, Some(&error)));
+        }
+        assert!(should_trip_bridge_circuit_breaker(
+            None,
+            Some(&Error::FatalBridge("missing executable".into()))
+        ));
     }
 
     #[cfg(unix)]
@@ -716,7 +938,7 @@ mod tests {
         let started = Instant::now();
         let error = run_helper_process(command, &request, Duration::from_millis(40)).unwrap_err();
         assert!(
-            error.starts_with(super::HELPER_TIMEOUT_PREFIX),
+            matches!(&error, super::AppleIntelligenceError::Timeout(_)),
             "unexpected error: {error}"
         );
         assert!(
@@ -737,7 +959,7 @@ mod tests {
         let started = Instant::now();
         let error = run_helper_process(command, &request, Duration::from_secs(1)).unwrap_err();
         assert!(
-            error.starts_with(super::HELPER_PROCESS_FAILURE_PREFIX),
+            matches!(&error, super::AppleIntelligenceError::ProcessFailure(_)),
             "unexpected error: {error}"
         );
         assert!(

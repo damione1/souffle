@@ -20,11 +20,16 @@
 #   - a .dmg, same layout make nightly-dmg already produced
 #
 # Usage:
-#   scripts/bundle-macos.sh [--debug] [--nightly] [--dmg] [--notarize] [--sign-updater]
+#   scripts/bundle-macos.sh [--debug] [--nightly] [--native-aec] [--slint-mcp] [--dmg] [--notarize] [--sign-updater]
 #
 #   --debug          debug cargo profile (default: release)
 #   --nightly        "Soufflé Nightly" / com.souffle.desktop.nightly, coexists
 #                     with the installed app (mirrors tauri.nightly.conf.json)
+#   --native-aec     experimental Apple meeting microphone; requires --nightly.
+#                     Dictation stays CPAL. Bundle goes under macos-native-aec.
+#   --slint-mcp      local Slint UI inspection; requires --debug --nightly.
+#                     Set SLINT_MCP_PORT at launch to enable the localhost server.
+#                     Bundle goes under macos-slint-mcp or macos-native-aec-mcp.
 #   --dmg            also wrap the signed .app in a .dmg
 #   --notarize       submit to Apple notarization + staple (needs APPLE_ID,
 #                     APPLE_PASSWORD, APPLE_TEAM_ID; release builds only —
@@ -49,10 +54,14 @@ nightly=0
 dmg_mode=0
 notarize=0
 sign_updater=0
+native_aec=0
+slint_mcp=0
 for arg in "$@"; do
   case "$arg" in
     --debug) profile="debug" ;;
     --nightly) nightly=1 ;;
+    --native-aec) native_aec=1 ;;
+    --slint-mcp) slint_mcp=1 ;;
     --dmg) dmg_mode=1 ;;
     --notarize) notarize=1 ;;
     --sign-updater) sign_updater=1 ;;
@@ -62,6 +71,22 @@ for arg in "$@"; do
       ;;
   esac
 done
+
+if [[ "$native_aec" -eq 1 && "$nightly" -ne 1 ]]; then
+  echo "error: --native-aec requires --nightly (experimental meeting capture only)" >&2
+  exit 1
+fi
+
+if [[ "$slint_mcp" -eq 1 ]]; then
+  if [[ "$profile" != "debug" || "$nightly" -ne 1 ]]; then
+    echo "error: --slint-mcp requires --debug --nightly (local UI inspection only)" >&2
+    exit 1
+  fi
+  if [[ "$sign_updater" -eq 1 ]]; then
+    echo "error: --slint-mcp cannot produce an updater artifact" >&2
+    exit 1
+  fi
+fi
 
 if [[ "$notarize" -eq 1 && "$profile" == "debug" ]]; then
   echo "error: --notarize needs --release (a debug build has no quarantine flag to clear anyway)" >&2
@@ -103,15 +128,23 @@ fi
 # ---------------------------------------------------------------------------
 
 echo "==> Building souffle-slint (${profile})"
+cargo_features=()
+if [[ "$native_aec" -eq 1 ]]; then
+  cargo_features=(--features experimental-native-aec)
+fi
+if [[ "$slint_mcp" -eq 1 ]]; then
+  cargo_features+=(--features slint/mcp)
+  export SLINT_EMIT_DEBUG_INFO=1
+fi
 if [[ "$profile" == "release" ]]; then
-  cargo build --manifest-path app/Cargo.toml --release -p souffle-slint
+  cargo build --manifest-path app/Cargo.toml --release -p souffle-slint ${cargo_features[@]+"${cargo_features[@]}"}
   ./scripts/build-mcp-sidecar.sh
 else
-  cargo build --manifest-path app/Cargo.toml -p souffle-slint
+  cargo build --manifest-path app/Cargo.toml -p souffle-slint ${cargo_features[@]+"${cargo_features[@]}"}
   ./scripts/build-mcp-sidecar.sh --debug
 fi
 
-bin_src="app/target/${profile}/souffle-slint"
+bin_src="$(./scripts/build-mcp-sidecar.sh --print-target-dir)/${profile}/souffle-slint"
 target_triple="$(rustc -vV | sed -n 's/^host: //p')"
 sidecar_src="app/binaries/souffle-mcp-${target_triple}"
 
@@ -120,6 +153,17 @@ sidecar_src="app/binaries/souffle-mcp-${target_triple}"
 # ---------------------------------------------------------------------------
 
 bundle_root="app/target/${profile}/bundle/macos"
+if [[ "$native_aec" -eq 1 ]]; then
+  # Keep the reference Nightly artifact available for acoustic comparisons.
+  bundle_root="app/target/${profile}/bundle/macos-native-aec"
+fi
+if [[ "$slint_mcp" -eq 1 ]]; then
+  if [[ "$native_aec" -eq 1 ]]; then
+    bundle_root="app/target/${profile}/bundle/macos-native-aec-mcp"
+  else
+    bundle_root="app/target/${profile}/bundle/macos-slint-mcp"
+  fi
+fi
 app_dir="${bundle_root}/${app_name}.app"
 contents="${app_dir}/Contents"
 
@@ -144,6 +188,9 @@ cp app/resources/sounds/dictation_stop.wav "$contents/Resources/resources/sounds
 cp app/resources/libonnxruntime.dylib "$contents/Frameworks/libonnxruntime.dylib"
 
 cp app/icons/icon.icns "$contents/Resources/icon.icns"
+mkdir -p "$contents/Resources/licenses/Inter"
+cp app/souffle-typography/assets/LICENSE.txt app/souffle-typography/assets/README.md \
+  "$contents/Resources/licenses/Inter/"
 
 # Info.plist: base bundle keys, plus every usage-description key from
 # app/Info.plist (the file `tauri_build::build()` used to merge in
@@ -178,6 +225,16 @@ cat > "$contents/Info.plist" <<PLIST
 </dict>
 </plist>
 PLIST
+
+if [[ "$native_aec" -eq 1 ]]; then
+  /usr/libexec/PlistBuddy -c "Add :SouffleNativeAEC bool true" "$contents/Info.plist"
+fi
+if [[ "$slint_mcp" -eq 1 ]]; then
+  /usr/libexec/PlistBuddy -c "Add :SouffleSlintMCP bool true" "$contents/Info.plist"
+fi
+if [[ "$native_aec" -eq 1 || "$slint_mcp" -eq 1 ]]; then
+  /usr/libexec/PlistBuddy -c "Add :SouffleSourceCommit string $(git rev-parse HEAD)" "$contents/Info.plist"
+fi
 
 if [[ -f "app/Info.plist" ]]; then
   python3 - "app/Info.plist" "$contents/Info.plist" <<'PY'
@@ -247,6 +304,9 @@ fi
 
 if [[ "$dmg_mode" -eq 1 ]]; then
   dmg_dir="app/target/${profile}/bundle/dmg"
+  if [[ "$slint_mcp" -eq 1 ]]; then
+    dmg_dir="${bundle_root}/dmg"
+  fi
   dmg_path="${dmg_dir}/${app_name}.dmg"
   echo "==> Creating ${dmg_path}"
   mkdir -p "$dmg_dir"

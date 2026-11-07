@@ -4,11 +4,11 @@
 
 <h1>Soufflé</h1>
 
-<p><strong>Private speech-to-text for macOS that never leaves your Mac.</strong></p>
+<p><strong>Private speech-to-text for macOS, local by default.</strong></p>
 
 <p>
   Dictate into any app, transcribe meetings that tell your voice from everyone else's, and get<br>
-  on-device summaries with decisions and action items. No cloud, no accounts, no API keys.
+  experimental on-device summaries with decisions and action items. No built-in cloud AI service, accounts or API keys.
 </p>
 
 <p>
@@ -35,14 +35,24 @@
 
 ## Meetings that know who is talking
 
-System-audio capture separates **Me** from **Them** in the live transcript, with no virtual audio device to install. That separation needs a Kyutai model; Whisper and Parakeet transcribe the meeting as one mixed stream. The recording looks after itself: it notifies you when a calendar meeting begins (today's events also get a start button on Home), notices when the meeting seems over and stops on its own after warning you, closes cleanly when the Mac sleeps and offers to resume on wake, and recovers or salvages the session if the engine stalls or the microphone disappears. If a microphone stops responding, a banner offers *Restart Soufflé*.
+System-audio capture separates **Me** from **Them** in the live transcript, with no virtual audio device to install. Kyutai, Whisper and Parakeet all support separate meeting lanes. The recording looks after itself: it notifies you when a calendar meeting begins (today's events also get a start button on Home), notices when the meeting seems over and stops on its own after warning you, closes cleanly when the Mac sleeps and offers to resume on wake, and recovers or salvages the session if the engine stalls or the microphone disappears. If a microphone stops responding, a banner offers *Restart Soufflé*.
 
 - **Live transcript** with editable notes, and the calendar's participants, beside it. Click a word to add a dictionary alias for it.
 - **Resume recording** on a stopped meeting adds another session to the same meeting.
-- **From a meeting's page**: copy the summary or the transcript, export it (Markdown, JSON, SRT/VTT, or the audio as `.ogg`), or delete it. Summary templates are editable in Settings > AI.
+- **From a meeting's page**: copy the transcript, export it (Markdown, JSON, SRT/VTT, or the audio as `.ogg`), or delete it. Experimental summaries and their templates become available after enabling Settings > AI > Summarization.
 - **Optional audio**, kept as compact Opus files for 7 days, 30 days or until you delete them, replayable with click-to-seek from any line. A meeting with system audio is stored as stereo (left = you, right = the other participants) so the two sides can be separated later, for example with `ffmpeg -map_channel 0.0.0` / `0.0.1`; the built-in player plays them mixed. Stereo costs about 1.5x the disk of a mono recording.
 - **Corrections that stick**: fix a misheard name by hand once and Soufflé keeps that spelling, in a custom dictionary you can also edit yourself.
-- **A summary when you want one**, written on-device by Apple Intelligence on macOS 26 or newer, or by a local [Ollama](https://ollama.com/), with the decisions, the action items and their owners, and the questions nobody answered pulled out alongside it.
+- **Experimental summaries and compaction**, off by default. Enable **Summarization** in Settings > AI to reveal provider/model selection, prompt templates, compaction and meeting generation actions. Apple Intelligence or Ollama can attempt summaries, decisions, action items and open questions; long-meeting quality remains under evaluation.
+
+### Experimental meeting summaries and compaction
+
+Accurate local meeting transcription is already demanding. Faithfully summarizing a long transcript with a local model is harder: conditions, negations, owners and deadlines can disappear. Soufflé prioritizes useful transcripts across supported Apple Silicon Macs, including modest configurations. A Mac with 48 GB or more of unified memory can use larger models and may obtain better results, but that hardware should not be required to use the app.
+
+A roughly 15-minute meeting is a more approachable starting point, not a guaranteed cutoff. Apple's on-device model has a [4,096-token context window](https://developer.apple.com/documentation/foundationmodels/managing-the-context-window), shared by instructions, input and output. Context varies across 7–8B models; a large advertised window does not remove memory, speed or long-text reliability constraints. Intermediate summary stages help fit the input but can also lose information.
+
+We are experimenting with Microsoft's LLMLingua-2 MeetingBank model to extract a shorter input from original words before long-summary intermediate stages. The default target retains **65%** of the text, removing roughly a third. A separate option saves a readable compact version; manual compact generation does not require a summary provider. This is lossy extraction, not a validated summary or a substitute for the original transcript. Disabling Summarization hides its settings and meeting actions while preserving preferences and saved data. Dictation polish keeps its own switch and provider configuration.
+
+You can also use the read-only MCP server with a compatible client to let Claude, ChatGPT or another cloud LLM summarize original transcripts and feed your second brain. This works independently of the experimental in-app switch. Soufflé provides a local stdio server, so connection setup depends on the client; it ships no direct cloud AI integration or automatic cloud sync. If you choose that workflow, the external client sends text to its provider and manages your notes. [Experimental feature details](docs/engineering/meeting-compression.md).
 
 ## Dictation, straight into the app you are already in
 
@@ -77,7 +87,7 @@ Meetings and dictations land on one timeline, with today's calendar above it, se
 
 ## Private by design
 
-- 🔒 **Nothing is uploaded.** Transcription, summaries and audio all stay on your Mac, in one local database you can export whenever you like. Delete any meeting or dictation from the app; to wipe everything, quit and delete `~/Library/Application Support/com.souffle.desktop/`.
+- 🔒 **Local by default.** Transcription and storage stay on your Mac. Text processing stays local with Apple Intelligence or localhost Ollama; remote Ollama and external cloud MCP clients are choices you make. Export or delete your local database whenever you like; to wipe it, quit and delete `~/Library/Application Support/com.souffle.desktop/`.
 - ✈️ **Works offline.** Once the speech model is on disk, transcription keeps working with the Wi-Fi off.
 - 🙅 **No account, ever.** No sign-up, no subscription, no API key to paste in. Every outbound connection the app makes is listed [below](#what-touches-the-network).
 - 🚀 **Launch at login** (optional): open Soufflé automatically when you start your Mac. On by default after a fresh setup wizard.
@@ -85,7 +95,7 @@ Meetings and dictations land on one timeline, with today's calendar above it, se
 ## Own your data
 
 - **Export any meeting** as Markdown, JSON, or SRT/VTT subtitles, or the **whole archive** as a plain folder of Markdown and JSON.
-- **MCP server**: the bundled `souffle-mcp` sidecar lets Claude Desktop, Claude Code or any MCP client search and read your transcripts. Read-only, fully local, works even when the app is closed. Setup snippets live in Settings > System > Data.
+- **MCP server**: the bundled `souffle-mcp` sidecar lets Claude Desktop, Claude Code or any MCP client search and read your transcripts. Read-only, fully local, works even when the app is closed. Setup snippets live in Settings > System > Data. Meeting reads also accept `include: ["compact"]` for a lossy first pass, with freshness/provenance and token estimate; use the original transcript for exact citations.
 - **Headless CLI**: `souffle --transcribe-file audio.wav --json` transcribes a file without launching the app, and `--repeat N` doubles as a benchmark harness.
 
   The `souffle` binary ships inside the app bundle and is not added to your `PATH`, so it is not a global command. Invoke it by full path, or symlink it once:
@@ -104,10 +114,10 @@ All models run locally and are downloaded on first use from HuggingFace:
 
 - [Kyutai STT 1B](https://huggingface.co/kyutai/stt-1b-en_fr-candle) (default): French + English, ~2.4 GB, Metal GPU via Candle. Streams text while you speak.
 - [Kyutai STT 2.6B](https://huggingface.co/kyutai/stt-2.6b-en-candle): English only, higher quality, ~5.6 GB. Streams text while you speak. It has no pause detector, so long speech without a quiet gap can lose about 2.5 seconds every 28 seconds.
-- [Whisper Large V3 Turbo](https://huggingface.co/ggerganov/whisper.cpp): multilingual, ~1.6 GB, Metal via whisper.cpp. Transcribes once you stop.
-- [Parakeet TDT 0.6B v3](https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx): 25 languages with punctuation and capitalization, ~670 MB int8, fast CPU inference via ONNX Runtime. Transcribes once you stop.
+- [Whisper Large V3 Turbo](https://huggingface.co/ggerganov/whisper.cpp): multilingual, ~1.6 GB, Metal GPU. Supports progressive transcription and separate Me/Them meeting lanes.
+- [Parakeet TDT 0.6B v3](https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx): 25 languages with punctuation and capitalization, ~670 MB int8, CPU inference. Supports progressive transcription and separate Me/Them meeting lanes.
 
-The two Kyutai models are the streaming ones: text appears while you are still talking. The other two transcribe the whole recording once you stop, which suits a meeting you read afterwards but changes how dictation feels.
+Kyutai streams words as you speak. Whisper and Parakeet show progressive previews and finalize the transcript when you stop.
 
 ## Requirements
 
@@ -115,7 +125,7 @@ The two Kyutai models are the streaming ones: text appears while you are still t
 - **macOS 13 or newer** for dictation.
 - **macOS 14.4 or newer** for meetings that capture the other participants. System-audio capture uses the Core Audio process tap, which does not exist before 14.4; on macOS 13 a meeting still records, but only your microphone, and the app shows *Mic only*.
 - **Disk space for the speech model**, downloaded on first use: ~670 MB for the smallest, ~2.4 GB for the default. See [Speech models](#speech-models).
-- **Summaries** need either Apple Intelligence, which requires macOS 26 or newer, or a local [Ollama](https://ollama.com/) on any supported version. Transcription itself needs neither.
+- **Experimental summaries**, when explicitly enabled, need either Apple Intelligence, which requires macOS 26 or newer, or a local [Ollama](https://ollama.com/) on any supported version. Transcription itself needs neither.
 
 ## Permissions
 
@@ -140,7 +150,7 @@ The privacy claim above is worth checking rather than believing, so here is ever
 - **github.com**, only if you press *Download update*: the signed update is fetched and verified before *Install and restart* is offered, and installing asks you to stop a running meeting first.
 - **Your Ollama instance**, `http://localhost:11434` by default, if you enable summaries with Ollama. It is your machine unless you point it elsewhere. A model you download from Settings > AI is pulled by that instance, not by Soufflé.
 
-Your audio, transcripts, notes and summaries are never sent anywhere. They live in a local SQLite database: Settings > System > Data exports the lot, and deleting the data folder removes it.
+Audio, transcripts, notes and summaries are stored in a local SQLite database: Settings > System > Data exports the lot, and deleting the data folder removes it. Local Apple Intelligence and localhost Ollama keep text processing on this Mac. A remote Ollama server or an external cloud MCP client you choose receives the text needed for its work.
 
 ## Status
 
@@ -168,10 +178,21 @@ cd souffle
 make nightly
 ```
 
-`make nightly` builds and opens **Soufflé Nightly** (`com.souffle.desktop.nightly`), a debug build that sits next to the installed app with its own TCC rows; run it again after a code change. `make nightly-fresh` wipes Nightly's data and permissions first. `./scripts/bundle-macos.sh` builds a signed release bundle (see the script's header for `--dmg`, `--notarize` and the other flags).
+`make nightly` builds and opens **Soufflé Nightly**, which has its own data and permissions and can run alongside the installed app.
+
+Daily PRs run quick formatting, lint and contract tests. Full native validation
+runs when promoting to `master` or launching it manually; see the [CI policy](docs/engineering/ci.md).
+
+## Audio diagnostics
+
+If you need to investigate speaker audio leaking into the microphone, enable **Pre-AEC diagnostic capture** in Settings > Audio > Advanced Audio. Meeting-audio retention must also be enabled in Settings > Data. The setting applies to the next recording.
+
+The extra WAV stores the microphone on the left and system audio on the right. It uses about **1.38 GB per hour**, stops after one hour, and follows your audio-retention setting. Keep it private: it contains the meeting audio.
 
 ## License
 
 Copyright (c) 2026 Damien Goehrig.
 
 Released under the GNU General Public License v3.0 or later (GPL-3.0-or-later). You are free to use, study, modify, and redistribute this software, provided that derivative works are also published under the same license. See [LICENSE.md](LICENSE.md) for the full text.
+
+Meeting summaries and compaction are experimental and off by default behind Settings > AI > Summarization. [Model distribution, CLI and MCP details](docs/engineering/meeting-compression.md).

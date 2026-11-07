@@ -1,4 +1,6 @@
+import { AppText, AppTextInput, Typography, TypographyStyle } from "@typography";
 import { Theme } from "../theme.slint";
+import { TranscriptionLabels } from "transcription_labels.slint";
 import { RecordingMode, TranscriptionPhase } from "../types.slint";
 import { LucideIcon, IconSet } from "lucide_icon.slint";
 
@@ -31,14 +33,15 @@ export component AppHeader inherits Rectangle {
     // keeping its own copy, so it can't drift from the actual palette.
     callback theme-toggle-requested();
 
-    property <string> status-label: root.recording-mode != RecordingMode.idle ? @tr("Enregistrement")
+    property <string> status-label: root.model-phase == TranscriptionPhase.failed ? @tr("Erreur du modèle")
+        : root.model-phase == TranscriptionPhase.audio-failed ? @tr("Erreur de capture audio")
+        : root.recording-mode != RecordingMode.idle ? @tr("Enregistrement")
         : root.model-phase == TranscriptionPhase.download-required ? @tr("Téléchargement requis")
         : root.model-phase == TranscriptionPhase.downloading ? @tr("Téléchargement…")
         : root.model-phase == TranscriptionPhase.load-required ? @tr("Chargement requis")
         : root.model-phase == TranscriptionPhase.loading ? @tr("Chargement…")
         : root.model-phase == TranscriptionPhase.ready ? @tr("Prêt")
         : root.model-phase == TranscriptionPhase.unloading ? @tr("Déchargement…")
-        : root.model-phase == TranscriptionPhase.failed ? @tr("Erreur du modèle")
         : "";
     property <color> status-color: root.recording-mode != RecordingMode.idle ? Theme.danger
         : root.model-phase == TranscriptionPhase.ready ? Theme.accent : Theme.warning;
@@ -85,11 +88,11 @@ export component AppHeader inherits Rectangle {
             }
         }
 
-        Text {
+        AppText {
             text: @tr("Soufflé");
             height: 100%;
-            font-family: "Archivo SemiBold";
-            font-size: 14.5px;
+            typography: Typography.brand;
+
             color: Theme.text-primary;
             vertical-alignment: center;
         }
@@ -126,22 +129,23 @@ export component AppHeader inherits Rectangle {
                     border-radius: 3.5px;
                     background: root.status-color;
                 }
-                status-text := Text {
+                status-text := AppText {
                     x: dot.x + dot.width + 5px;
                     y: 0;
                     height: parent.height;
                     text: root.status-label;
-                    font-size: 11px;
+                    typography: Typography.caption;
                     color: Theme.text-muted;
                     vertical-alignment: center;
                 }
-                model-label-text := Text {
+                model-label-text := AppText {
                     x: status-text.x + status-text.width + 5px;
                     y: 0;
                     height: parent.height;
-                    text: root.show-model-label ? root.model-label : "";
-                    font-family: "JetBrains Mono";
-                    font-size: 11px;
+                    text: !root.show-model-label ? ""
+                        : root.model-label == "__APPLE_SPEECH_SYSTEM__" ? TranscriptionLabels.speech-short-label()
+                        : root.model-label;
+                    typography: Typography.caption;
                     color: Theme.text-muted;
                     vertical-alignment: center;
                 }

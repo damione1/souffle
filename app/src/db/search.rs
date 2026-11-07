@@ -1,3 +1,8 @@
+use souffle_schema::sql::{
+    column::{RANK, SOURCE_ID, SOURCE_TYPE},
+    table::TEXT_SEARCH,
+};
+
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
 
@@ -5,43 +10,8 @@ use crate::lock_ext::MutexExt;
 
 use super::Database;
 
-/// Which table a full-text hit came from.
-///
-/// The strings are the on-disk encoding of the `text_search.source_type`
-/// column, written by every version of the app, so they cannot change without
-/// a migration. Declaring them here is what stops the thirteen SQL sites from
-/// spelling them themselves.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SearchSource {
-    Meeting,
-    Dictation,
-}
-
-impl SearchSource {
-    /// Column encoding. Must stay in step with `#[serde(rename_all)]` above;
-    /// `search_source_wire_encoding_matches_as_str` proves it does.
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            SearchSource::Meeting => "meeting",
-            SearchSource::Dictation => "dictation",
-        }
-    }
-
-    pub fn parse(raw: &str) -> Option<SearchSource> {
-        match raw {
-            "meeting" => Some(SearchSource::Meeting),
-            "dictation" => Some(SearchSource::Dictation),
-            _ => None,
-        }
-    }
-}
-
-impl rusqlite::ToSql for SearchSource {
-    fn to_sql(&self) -> rusqlite::Result<rusqlite::types::ToSqlOutput<'_>> {
-        Ok(rusqlite::types::ToSqlOutput::from(self.as_str()))
-    }
-}
+/// Shared DB/wire source contract, owned by the schema crate.
+pub use souffle_schema::SearchSource;
 
 /// Search result from FTS5 full-text search
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -63,16 +33,16 @@ impl Database {
         let conn = self.conn.acquire()?;
 
         let mut stmt = conn
-            .prepare(
-                "SELECT snippet(text_search, 0, '<mark>', '</mark>', '...', 32),
-                        source_type,
-                        source_id,
-                        rank
-                 FROM text_search
-                 WHERE text_search MATCH ?1
-                 ORDER BY rank
-                 LIMIT ?2",
-            )
+            .prepare(&format!(
+                "SELECT snippet({TEXT_SEARCH}, 0, '<mark>', '</mark>', '...', 32),
+                        {SOURCE_TYPE},
+                        {SOURCE_ID},
+                        {RANK}
+                 FROM {TEXT_SEARCH}
+                 WHERE {TEXT_SEARCH} MATCH ?1
+                 ORDER BY {RANK}
+                 LIMIT ?2"
+            ))
             .map_err(|e| format!("Prepare search: {e}"))?;
 
         let results = stmt

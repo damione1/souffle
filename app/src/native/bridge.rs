@@ -29,6 +29,9 @@ pub enum NativeAction {
     /// The canonical state machine changed. The UI re-reads its snapshot;
     /// no second state or potentially stale event payload is maintained.
     RefreshRuntime,
+    /// A meeting writer reserved, changed phase, or released its final owner.
+    /// Re-read delete permissions without refreshing engine/model catalogues.
+    MeetingDeletePermissionsChanged,
     /// Global shortcut / tray menu: start dictation if idle, stop if
     /// recording a dictation. A no-op while a meeting is recording (SOU-044:
     /// a meeting owns the session).
@@ -47,6 +50,9 @@ pub enum NativeAction {
     ShowMainWindow,
     /// Flush recoverable Settings drafts before terminating the process.
     Quit,
+    /// Engine cleanup failed or exceeded its wait budget. Restore the window
+    /// and display this diagnostic without exiting with live Metal resources.
+    QuitFailed(String),
     /// The capture thread recorded or cleared a stuck microphone (SOU-126
     /// AC5). The UI re-reads `commands::get_mic_stall_notice` once, instead
     /// of polling it (SOU-281).

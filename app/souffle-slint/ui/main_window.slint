@@ -1,4 +1,18 @@
+import { CompressionUi, CompactLine } from "compression.slint";
+export { CompressionUi, CompactLine }
+import { SummarizationUi } from "summarization.slint";
+export { SummarizationUi }
+import { CompressionModelPhase, CompactJobPhase } from "types.slint";
+export { CompressionModelPhase, CompactJobPhase, CompressionFailureReason, SummaryFailureReason } from "types.slint";
+import { AppText, AppTextInput, Typography, TypographyStyle } from "@typography";
+import { TypographySpecimen } from "@typography";
+export { TypographySpecimen }
+import { TypefaceWeight } from "types.slint";
+export { TypefaceWeight }
 import { IdleView } from "idle_view.slint";
+import { ActionGuards, MeetingDeletePermission } from "action_guards.slint";
+import { MeetingDeleteBlockReason } from "types.slint";
+export { ActionGuards, MeetingDeletePermission, MeetingDeleteBlockReason }
 import { RecordingView } from "recording_view.slint";
 import { MeetingDetail, MeetingParticipantChip, MeetingMeta } from "meeting_detail.slint";
 import { SettingsView } from "settings_view.slint";
@@ -10,34 +24,32 @@ import { UpdateAvailableDialog } from "components/onboarding/update_available_di
 import { MarkdownBlock } from "components/onboarding/markdown_block.slint";
 import { CalendarRow } from "components/settings/calendar_section.slint";
 import { MicrophoneRow } from "components/settings/microphone_section.slint";
-import { DictionaryRow } from "components/settings/dictionary_section.slint";
+import { DictionaryRow, DictionarySuggestionRow, DictionaryLearningOption } from "components/settings/dictionary_section.slint";
 import { SnippetRow } from "components/settings/snippets_section.slint";
+import { AppBranchRow } from "components/settings/app_branches_section.slint";
+import { AppBranchFallback, AppBranchTestPhase } from "types.slint";
+export { AppBranchFallback, AppBranchTestPhase }
 import { TimelineDayGroup, UpcomingEvent } from "components/timeline_section.slint";
 import { TranscriptBlock } from "components/transcript_section.slint";
 import { TranscriptWord } from "components/transcript_words.slint";
 import { StructuredActionItem } from "components/summary_section.slint";
-import { RecordingMode, LiveSystemAudio, MicStall, MeetingIdleBanner, WakeResumeNotice,SpeakerRole, TimelineFilter, TimelineKind, NotesSaveState, ModelPhase, TranscriptionPhase, UpcomingPhase, SettingsTab, SettingsInteraction, AppTheme, AppLocale, PasteMethod, MeetingLanguage, LogLevel, AudioRetention, AccessState, PermissionKind, ShortcutField, ShortcutNotice, SummaryProvider, AppleIntelligenceUnavailableReason, OnboardingStep, UpdatePhase, InstallBlockReason, UpdateRowStatus, MeetingExportFormat } from "types.slint";
+import { RecordingMode, LiveSystemAudio, MicStall, MeetingIdleBanner, WakeResumeNotice,SpeakerRole, TimelineFilter, TimelineKind, NotesSaveState, ModelPhase, TranscriptionPhase, UpcomingPhase, SettingsTab, SettingsInteraction, AppTheme, AppLocale, PasteMethod, MeetingLanguage, LogLevel, AudioRetention, AccessState, PermissionKind, ShortcutField, ShortcutNotice, SettingsCaptureError, SummaryProvider, AppleIntelligenceUnavailableReason, OnboardingStep, UpdatePhase, InstallBlockReason, UpdateRowStatus, MeetingExportFormat, DictionaryLearningMode } from "types.slint";
 export { SettingsTab, SettingsInteraction, AppTheme, AppLocale, PasteMethod, MeetingLanguage, LogLevel, AudioRetention, AccessState, PermissionKind, ShortcutField, SummaryProvider, AppleIntelligenceUnavailableReason, SpeakerRole }
 import { Theme } from "theme.slint";
+import { ModelDeletionError } from "types.slint";
+import { TranscriptionLabels } from "components/transcription_labels.slint";
+export { TranscriptionLabels }
+import { TranscriptionUnavailableReason, SystemSettingsPane } from "types.slint";
+export { TranscriptionUnavailableReason, SystemSettingsPane }
 // Re-exported (not just imported) so Slint's codegen generates a Rust
 // accessor for it (`window.global::<Theme>()`) - main.rs sets `Theme.dark`
 // at launch and on every theme toggle. A plain `import` alone is enough for
 // every other `.slint` file to read `Theme.canvas` etc., but not for Rust
 // to reach the global at all.
 export { Theme }
+export { Typography }
 import { AppHeader } from "components/app_header.slint";
-
-// Self-hosted variable fonts from src/app.css, instantiated to static
-// per-weight TTFs (scripts/... none checked in - see the ticket notes: Slint
-// 1.17's renderer wants static instances, not a single variable font) so
-// `font-family: "Archivo SemiBold"` etc. resolve to the right weight instead
-// of the variable font's own default instance (600, SemiBold - which is
-// what every unweighted Text would render as if only one file were embedded).
-import "assets/fonts/archivo-regular.ttf";
-import "assets/fonts/archivo-medium.ttf";
-import "assets/fonts/archivo-semibold.ttf";
-import "assets/fonts/archivo-bold.ttf";
-import "assets/fonts/jetbrains-mono.ttf";
+import { LiveParagraphEditor } from "components/live_paragraph_editor.slint";
 
 export component MainWindow inherits Window {
     title: @tr("Soufflé");
@@ -57,8 +69,9 @@ export component MainWindow inherits Window {
     preferred-height: 1280px;
     min-width: 680px;
     min-height: 560px;
-    default-font-family: "Archivo";
-    default-font-size: 14px;
+    default-font-family: Typography.body.family;
+    default-font-size: Typography.body.size;
+    default-font-weight: Typography.body.weight;
     background: Theme.canvas;
 
     in property <string> dictation-shortcut;
@@ -91,6 +104,10 @@ export component MainWindow inherits Window {
     in-out property <string> dictation-recovery-text;
     in property <[TranscriptBlock]> live-transcript-blocks;
     in property <bool> live-transcript-empty: true;
+    in property <bool> live-edit-open;
+    in property <bool> live-edit-busy;
+    in property <bool> live-edit-failed;
+    in-out property <string> live-edit-text;
     in property <int> live-elapsed-offset-seconds: 0;
     in property <float> audio-level: 0.0;
     // SOU-282: false while the window is closed or fully covered (winit
@@ -169,6 +186,7 @@ export component MainWindow inherits Window {
     in property <[StructuredActionItem]> meeting-detail-summary-action-items;
     in property <[string]> meeting-detail-summary-open-questions;
     in property <bool> meeting-detail-summary-is-generating: false;
+    in property <string> meeting-detail-summary-generation-id;
     in property <string> meeting-detail-summary-generation-progress: "";
     in property <string> meeting-detail-summary-generation-error: "";
     in property <[string]> meeting-detail-summary-available-models;
@@ -227,6 +245,7 @@ export component MainWindow inherits Window {
     in property <bool> settings-native-tap-warning-visible;
     in-out property <ShortcutField> settings-recording-field: ShortcutField.none;
     in-out property <string> settings-shortcut-error: "";
+    in property <SettingsCaptureError> settings-shortcut-error-kind: SettingsCaptureError.operation-failed;
     in-out property <ShortcutNotice> settings-shortcut-notice: ShortcutNotice.none;
     in property <string> settings-save-error;
     in property <bool> settings-save-error-unavailable;
@@ -245,6 +264,7 @@ export component MainWindow inherits Window {
     in property <string> settings-sample-rate-label;
     in property <bool> settings-sample-rate-high;
     in property <bool> settings-resetting-sample-rate;
+    in property <bool> settings-backend-capture-busy: false;
     in property <bool> settings-allow-bluetooth-mic;
     in property <[MicrophoneRow]> settings-microphones;
     in property <bool> settings-has-disconnected-devices;
@@ -253,6 +273,9 @@ export component MainWindow inherits Window {
     in property <string> settings-clamshell-device-label;
     in property <bool> settings-system-audio-supported;
     in property <bool> settings-capture-system-audio;
+    in property <bool> settings-meeting-audio-diagnostic;
+    in property <int> settings-diagnostic-max-minutes;
+    in property <int> settings-diagnostic-megabytes-per-hour;
     in property <MeetingLanguage> settings-meeting-transcription-language;
     in property <bool> settings-meeting-autostop-enabled;
     in property <[string]> settings-meeting-autostop-labels;
@@ -310,8 +333,18 @@ export component MainWindow inherits Window {
     in property <bool> settings-dictation-polish-provider-available;
     in property <[string]> settings-dictation-polish-template-ids;
     in property <[string]> settings-dictation-polish-template-labels;
+    in property <string> settings-active-dictation-polish-id;
     in property <string> settings-active-dictation-polish-label;
     in-out property <string> settings-active-dictation-polish-prompt;
+    in property <[AppBranchRow]> settings-app-branch-rules;
+    in property <[string]> settings-app-branch-target-labels;
+    in property <AppBranchTestPhase> settings-app-branch-test-phase;
+    in property <int> settings-app-branch-test-delay-seconds;
+    in property <bool> settings-app-branch-preview-matched;
+    in property <AppBranchFallback> settings-app-branch-preview-fallback;
+    in property <string> settings-app-branch-preview-app;
+    in property <string> settings-app-branch-preview-pattern;
+    in property <string> settings-app-branch-preview-template;
     in property <[string]> settings-summary-template-ids;
     in property <[string]> settings-summary-template-labels;
     in property <string> settings-default-summary-template-label;
@@ -322,6 +355,11 @@ export component MainWindow inherits Window {
     in-out property <string> settings-new-summary-template-draft: "";
     in property <[string]> settings-model-labels;
     in property <string> settings-selected-model-label;
+    in property <bool> settings-apple-speech-selected;
+    in property <bool> settings-apple-speech-unavailable;
+    in property <TranscriptionUnavailableReason> settings-apple-speech-unavailable-reason;
+    changed settings-locale => { TranscriptionLabels.app-locale = root.settings-locale; }
+    callback settings-open-system-settings-requested(SystemSettingsPane);
     // Bare model label ("STT 1B FR/EN") for AppHeader's status pill - kept
     // separate from `settings-selected-model-label` above, which is the
     // combined "Engine — Model" form the settings picker needs to
@@ -339,7 +377,24 @@ export component MainWindow inherits Window {
     in property <string> settings-unload-timeout-label;
     in property <string> settings-model-error-message;
     in property <string> settings-model-delete-error;
-    in property <bool> settings-dictation-learn-from-edit;
+    in property <ModelDeletionError> settings-model-delete-error-kind: ModelDeletionError.operation-failed;
+    in property <bool> settings-model-files-deletable;
+
+    in property <DictionaryLearningMode> settings-dictionary-learning-mode;
+    in property <[DictionaryLearningOption]> settings-dictionary-learning-options;
+    in property <[DictionarySuggestionRow]> settings-dictionary-suggestions;
+    in property <int> settings-dictionary-suggestion-count;
+    in property <float> settings-dictionary-suggestion-content-height;
+    in property <float> settings-dictionary-suggestion-spacer-before;
+    in property <float> settings-dictionary-suggestion-spacer-after;
+    in-out property <length> settings-dictionary-suggestion-scroll-top;
+    out property <float> settings-dictionary-suggestion-scroll-top-px: root.settings-dictionary-suggestion-scroll-top / 1px;
+    in property <string> settings-dictionary-suggestion-error;
+    in property <bool> settings-dictionary-suggestion-busy;
+    callback settings-dictionary-suggestion-scroll-changed(float);
+    changed settings-dictionary-suggestion-scroll-top => {
+        root.settings-dictionary-suggestion-scroll-changed(self.settings-dictionary-suggestion-scroll-top / 1px);
+    }
     // Windowed slice of the dictionary, not the full list (SOU-229) - same
     // spacer/scroll-mirror plumbing as `meeting-detail-transcript-*` above:
     // `lists_ui.rs` reads the `-px` mirror on `settings-dictionary-scroll-changed`
@@ -422,6 +477,7 @@ export component MainWindow inherits Window {
     callback settings-remove-device-requested(string);
     callback settings-clamshell-device-changed(string);
     callback settings-capture-system-audio-changed(bool);
+    callback settings-meeting-audio-diagnostic-changed(bool);
     callback settings-meeting-transcription-language-changed(MeetingLanguage);
     callback settings-meeting-autostop-enabled-changed(bool);
     callback settings-meeting-autostop-changed(string);
@@ -447,6 +503,13 @@ export component MainWindow inherits Window {
     callback settings-dictation-polish-enabled-changed(bool);
     callback settings-dictation-polish-template-changed(string);
     callback settings-dictation-polish-prompt-changed(string);
+    callback settings-app-branch-added(string, int);
+    callback settings-app-branch-deleted(string);
+    callback settings-app-branch-enabled(string, bool);
+    callback settings-app-branch-pattern-changed(string, string);
+    callback settings-app-branch-target-changed(string, int);
+    callback settings-app-branch-moved(string, int);
+    callback settings-app-branch-test-requested();
     callback settings-summary-template-default-changed(string);
     callback settings-summary-template-edit-target-changed(string);
     callback settings-summary-template-delete-requested();
@@ -456,7 +519,9 @@ export component MainWindow inherits Window {
     callback settings-model-changed(string);
     callback settings-unload-timeout-changed(string);
     callback settings-delete-model-requested();
-    callback settings-dictation-learn-from-edit-changed(bool);
+    callback settings-dictionary-learning-mode-changed(DictionaryLearningMode);
+    callback settings-dictionary-suggestion-accept-requested(int);
+    callback settings-dictionary-suggestion-dismiss-requested(int);
     callback settings-dictionary-add-requested(string, string, string);
     callback settings-dictionary-delete-requested(int);
     callback settings-snippet-add-requested(string, string);
@@ -492,6 +557,9 @@ export component MainWindow inherits Window {
     callback meeting-detail-transcript-alias-save-requested(string, string);
     // Same save as above, from a word clicked in the live meeting view.
     callback live-transcript-alias-save-requested(string, string);
+    callback live-paragraph-edit-requested(int);
+    callback live-paragraph-edit-saved(string);
+    callback live-paragraph-edit-cancelled();
     callback meeting-detail-export-requested(MeetingExportFormat);
     callback meeting-detail-export-audio-requested();
     callback meeting-detail-copy-transcript-requested();
@@ -570,11 +638,37 @@ export component MainWindow inherits Window {
     // (`update_ui::project_install_block`) always writes the pair together.
     in property <bool> update-install-blocked: false;
     in property <InstallBlockReason> update-install-block-reason;
+    out property <bool> current-update-install-blocked: root.recording-starting
+        || root.recording-mode != RecordingMode.idle || root.update-install-blocked;
+    out property <InstallBlockReason> current-update-install-block-reason: root.recording-starting ? InstallBlockReason.starting
+        : root.recording-mode == RecordingMode.dictation ? InstallBlockReason.recording-dictation
+        : root.recording-mode == RecordingMode.meeting ? InstallBlockReason.recording-meeting
+        : root.update-install-block-reason;
     callback update-download-requested();
     callback update-install-requested();
+    callback update-install-permission-refresh-requested();
     callback update-open-release-requested();
     callback update-dismiss-requested();
     callback update-link-clicked(string);
+
+    // Releasing a contended lock emits no runtime transition. Re-read only
+    // this transient refusal while its install control is visible; stable
+    // machine refusals continue to follow the normal runtime events.
+    Timer {
+        interval: 500ms;
+        running: root.window-visible && !root.onboarding-open && (
+            (root.update-available-open && root.update-phase == UpdatePhase.ready
+                && root.current-update-install-blocked
+                && root.current-update-install-block-reason == InstallBlockReason.runtime-busy)
+            || (root.settings-open && root.settings-tab == SettingsTab.system
+                && root.settings-update-row == UpdateRowStatus.ready
+                && ((root.current-update-install-blocked
+                        && root.current-update-install-block-reason == InstallBlockReason.runtime-busy)
+                    || (root.settings-update-blocked
+                        && root.settings-update-block-reason == InstallBlockReason.runtime-busy)))
+        );
+        triggered => { root.update-install-permission-refresh-requested(); }
+    }
 
     // Header + content wrapped together so the gear icon (in `AppHeader`)
     // stays visible and clickable while Settings is open, matching
@@ -586,7 +680,7 @@ export component MainWindow inherits Window {
         AppHeader {
             settings-open: root.settings-open;
             model-phase: root.model-runtime-phase;
-            
+
             recording-mode: root.recording-mode;
             model-label: root.header-model-label;
             settings-toggled => {
@@ -691,6 +785,7 @@ export component MainWindow inherits Window {
         wake-resume-notice: root.wake-resume-notice;
         wake-resume-notice-dismissed => { root.wake-resume-notice-dismissed(); }
         delete-error: root.meeting-detail-delete-error;
+        delete-permission: ActionGuards.meeting-delete(root.active-meeting-id, ActionGuards.revision);
         export-error: root.meeting-detail-export-error;
         audio-export-error: root.meeting-detail-audio-export-error;
         back-requested => { root.meeting-detail-back(); }
@@ -738,8 +833,7 @@ export component MainWindow inherits Window {
         wake-resume-notice-dismissed => { root.wake-resume-notice-dismissed(); }
         stop-requested => { root.stop-requested(); }
         alias-save-requested(term, pronunciation) => { root.live-transcript-alias-save-requested(term, pronunciation); }
-        
-        
+        paragraph-edit-requested(row) => { root.live-paragraph-edit-requested(row); }
     }
 
     // Drawn last so it overlays whatever is behind it, mirroring App.svelte
@@ -765,6 +859,7 @@ export component MainWindow inherits Window {
         log-scroll-top <=> root.settings-log-scroll-top;
         copying-diagnostics: root.settings-copying-diagnostics;
         theme: root.settings-theme;
+        capture-busy: root.settings-backend-capture-busy || root.recording-mode != RecordingMode.idle || root.recording-starting;
         locale: root.settings-locale;
         auto-paste: root.settings-auto-paste;
         paste-method: root.settings-paste-method;
@@ -782,6 +877,7 @@ export component MainWindow inherits Window {
         native-tap-warning-visible: root.settings-native-tap-warning-visible;
         recording-field <=> root.settings-recording-field;
         shortcut-error <=> root.settings-shortcut-error;
+        shortcut-error-kind: root.settings-shortcut-error-kind;
         shortcut-notice: root.settings-shortcut-notice;
         save-error: root.settings-save-error;
         save-error-unavailable: root.settings-save-error-unavailable;
@@ -808,6 +904,9 @@ export component MainWindow inherits Window {
         clamshell-device-label: root.settings-clamshell-device-label;
         system-audio-supported: root.settings-system-audio-supported;
         capture-system-audio: root.settings-capture-system-audio;
+        meeting-audio-diagnostic: root.settings-meeting-audio-diagnostic;
+        diagnostic-max-minutes: root.settings-diagnostic-max-minutes;
+        diagnostic-megabytes-per-hour: root.settings-diagnostic-megabytes-per-hour;
         meeting-transcription-language: root.settings-meeting-transcription-language;
         meeting-autostop-enabled: root.settings-meeting-autostop-enabled;
         meeting-autostop-labels: root.settings-meeting-autostop-labels;
@@ -839,8 +938,8 @@ export component MainWindow inherits Window {
         update-error: root.settings-update-error;
         update-has-progress: root.settings-update-has-progress;
         update-progress: root.settings-update-progress;
-        update-blocked: root.settings-update-blocked;
-        update-block-reason: root.settings-update-block-reason;
+        update-blocked: root.current-update-install-blocked || root.settings-update-blocked;
+        update-block-reason: root.current-update-install-blocked ? root.current-update-install-block-reason : root.settings-update-block-reason;
         summary-provider: root.settings-summary-provider;
         apple-intelligence-available: root.settings-apple-intelligence-available;
         apple-intelligence-reason: root.settings-apple-intelligence-reason;
@@ -865,6 +964,15 @@ export component MainWindow inherits Window {
         dictation-polish-template-labels: root.settings-dictation-polish-template-labels;
         active-dictation-polish-label: root.settings-active-dictation-polish-label;
         active-dictation-polish-prompt <=> root.settings-active-dictation-polish-prompt;
+        app-branch-rules: root.settings-app-branch-rules;
+        app-branch-target-labels: root.settings-app-branch-target-labels;
+        app-branch-test-phase: root.settings-app-branch-test-phase;
+        app-branch-test-delay-seconds: root.settings-app-branch-test-delay-seconds;
+        app-branch-preview-matched: root.settings-app-branch-preview-matched;
+        app-branch-preview-fallback: root.settings-app-branch-preview-fallback;
+        app-branch-preview-app: root.settings-app-branch-preview-app;
+        app-branch-preview-pattern: root.settings-app-branch-preview-pattern;
+        app-branch-preview-template: root.settings-app-branch-preview-template;
         summary-template-ids: root.settings-summary-template-ids;
         summary-template-labels: root.settings-summary-template-labels;
         default-summary-template-label: root.settings-default-summary-template-label;
@@ -877,6 +985,10 @@ export component MainWindow inherits Window {
         model-ready: root.model-ready;
         model-labels: root.settings-model-labels;
         selected-model-label: root.settings-selected-model-label;
+        apple-speech-selected: root.settings-apple-speech-selected;
+        apple-speech-unavailable: root.settings-apple-speech-unavailable;
+        apple-speech-unavailable-reason: root.settings-apple-speech-unavailable-reason;
+        open-system-settings-requested(pane) => { root.settings-open-system-settings-requested(pane); }
         model-busy: root.settings-model-busy;
         model-downloading: root.settings-model-downloading;
         model-download-progress-label: root.settings-model-download-progress-label;
@@ -885,7 +997,19 @@ export component MainWindow inherits Window {
         unload-timeout-label: root.settings-unload-timeout-label;
         model-error-message: root.settings-model-error-message;
         model-delete-error: root.settings-model-delete-error;
-        dictation-learn-from-edit: root.settings-dictation-learn-from-edit;
+        model-delete-error-kind: root.settings-model-delete-error-kind;
+        model-files-deletable: root.settings-model-files-deletable;
+
+        dictionary-learning-mode: root.settings-dictionary-learning-mode;
+        dictionary-learning-options: root.settings-dictionary-learning-options;
+        dictionary-suggestions: root.settings-dictionary-suggestions;
+        dictionary-suggestion-count: root.settings-dictionary-suggestion-count;
+        dictionary-suggestion-content-height: root.settings-dictionary-suggestion-content-height;
+        dictionary-suggestion-spacer-before: root.settings-dictionary-suggestion-spacer-before;
+        dictionary-suggestion-spacer-after: root.settings-dictionary-suggestion-spacer-after;
+        dictionary-suggestion-scroll-top <=> root.settings-dictionary-suggestion-scroll-top;
+        dictionary-suggestion-error: root.settings-dictionary-suggestion-error;
+        dictionary-suggestion-busy: root.settings-dictionary-suggestion-busy;
         dictionary-entries: root.settings-dictionary-entries;
         dictionary-entry-count: root.settings-dictionary-count;
         dictionary-list-content-height: root.settings-dictionary-content-height;
@@ -954,6 +1078,7 @@ export component MainWindow inherits Window {
         remove-device-requested(uid) => { root.settings-remove-device-requested(uid); }
         clamshell-device-changed(value) => { root.settings-clamshell-device-changed(value); }
         capture-system-audio-changed(value) => { root.settings-capture-system-audio-changed(value); }
+        meeting-audio-diagnostic-changed(value) => { root.settings-meeting-audio-diagnostic-changed(value); }
         meeting-transcription-language-changed(value) => { root.settings-meeting-transcription-language-changed(value); }
         meeting-autostop-enabled-changed(value) => { root.settings-meeting-autostop-enabled-changed(value); }
         meeting-autostop-changed(value) => { root.settings-meeting-autostop-changed(value); }
@@ -979,6 +1104,13 @@ export component MainWindow inherits Window {
         dictation-polish-enabled-changed(value) => { root.settings-dictation-polish-enabled-changed(value); }
         dictation-polish-template-changed(value) => { root.settings-dictation-polish-template-changed(value); }
         dictation-polish-prompt-changed(value) => { root.settings-dictation-polish-prompt-changed(value); }
+        app-branch-added(pattern, target) => { root.settings-app-branch-added(pattern, target); }
+        app-branch-deleted(id) => { root.settings-app-branch-deleted(id); }
+        app-branch-enabled(id, value) => { root.settings-app-branch-enabled(id, value); }
+        app-branch-pattern-changed(id, value) => { root.settings-app-branch-pattern-changed(id, value); }
+        app-branch-target-changed(id, target) => { root.settings-app-branch-target-changed(id, target); }
+        app-branch-moved(id, index) => { root.settings-app-branch-moved(id, index); }
+        app-branch-test-requested => { root.settings-app-branch-test-requested(); }
         summary-template-default-changed(value) => { root.settings-summary-template-default-changed(value); }
         summary-template-edit-target-changed(value) => { root.settings-summary-template-edit-target-changed(value); }
         summary-template-delete-requested => { root.settings-summary-template-delete-requested(); }
@@ -988,7 +1120,9 @@ export component MainWindow inherits Window {
         model-changed(value) => { root.settings-model-changed(value); }
         unload-timeout-changed(value) => { root.settings-unload-timeout-changed(value); }
         delete-model-requested => { root.settings-delete-model-requested(); }
-        dictation-learn-from-edit-changed(value) => { root.settings-dictation-learn-from-edit-changed(value); }
+        dictionary-learning-mode-changed(value) => { root.settings-dictionary-learning-mode-changed(value); }
+        dictionary-suggestion-accept-requested(id) => { root.settings-dictionary-suggestion-accept-requested(id); }
+        dictionary-suggestion-dismiss-requested(id) => { root.settings-dictionary-suggestion-dismiss-requested(id); }
         dictionary-add-requested(term, pronunciation, category) => { root.settings-dictionary-add-requested(term, pronunciation, category); }
         dictionary-delete-requested(id) => { root.settings-dictionary-delete-requested(id); }
         snippet-add-requested(trigger, expansion) => { root.settings-snippet-add-requested(trigger, expansion); }
@@ -1048,6 +1182,16 @@ export component MainWindow inherits Window {
         continue-requested => { root.onboarding-continue-requested(); }
     }
 
+    if root.live-edit-open && root.recording-mode == RecordingMode.meeting && !root.recording-stop-pending: LiveParagraphEditor {
+        width: 100%;
+        height: 100%;
+        text <=> root.live-edit-text;
+        busy: root.live-edit-busy;
+        failed: root.live-edit-failed;
+        close-requested => { root.live-paragraph-edit-cancelled(); }
+        save-requested(text) => { root.live-paragraph-edit-saved(text); }
+    }
+
     if root.settings-permissions-dialog-open: SettingsPermissionsDialog {
         width: 100%;
         height: 100%;
@@ -1081,8 +1225,8 @@ export component MainWindow inherits Window {
         release-notes-blocks: root.update-release-notes-blocks;
         phase: root.update-phase;
         error-message: root.update-error-message;
-        install-blocked: root.update-install-blocked;
-        install-block-reason: root.update-install-block-reason;
+        install-blocked: root.current-update-install-blocked;
+        install-block-reason: root.current-update-install-block-reason;
         download-requested => { root.update-download-requested(); }
         install-requested => { root.update-install-requested(); }
         open-release-requested => { root.update-open-release-requested(); }
