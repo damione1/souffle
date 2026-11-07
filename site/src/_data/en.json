@@ -42,7 +42,7 @@
       "mock": "home",
       "flip": false,
       "title": "Meeting transcripts: your voice, separated from the others.",
-      "body": "System-audio capture separates <em class=\"me\">Me</em> from <em class=\"them\">Them</em> in the live transcript on a Kyutai model, with no virtual audio device to install. Recording stays hands-off: it notifies you when a calendar meeting begins, notices when the meeting seems over, and picks back up where it left off when your Mac wakes.",
+      "body": "System-audio capture separates <em class=\"me\">Me</em> from <em class=\"them\">Them</em> with Kyutai, Whisper, Parakeet or available Apple Speech, without a virtual audio device. Recording notifies you when a calendar meeting begins, notices when the meeting seems over, and offers to resume after your Mac wakes.",
       "bullets": [
         "Optional Opus audio with a retention policy, replayable by clicking the transcript",
         "Stop, then Resume later: one meeting can hold several sessions",
@@ -102,7 +102,7 @@
   },
   "models": {
     "title": "Choose your local speech model.",
-    "sub": "All four run locally, downloaded on first use. The two Kyutai models stream text as you speak; the other two transcribe once you stop.",
+    "sub": "Four downloadable checkpoints run locally. Kyutai streams text directly; Whisper and Parakeet show revisable live previews and finalize on stop. Apple Speech is another local option on compatible macOS 26 Macs, using system-managed language assets.",
     "cards": [
       {
         "name": "Kyutai STT 1B",
@@ -128,10 +128,10 @@
       },
       {
         "name": "Whisper Large V3 Turbo",
-        "desc": "Multilingual and familiar, through whisper.cpp on the GPU. Transcribes once you stop.",
+        "desc": "Multilingual, through whisper.cpp on the GPU. Shows live previews and finalizes the transcript when you stop.",
         "chips": [
           "1.6 GB",
-          "On stop",
+          "Live previews",
           "Metal · whisper.cpp",
           "Multilingual"
         ]
@@ -139,10 +139,10 @@
       {
         "name": "Parakeet TDT 0.6B v3",
         "tag": "Smallest",
-        "desc": "25 languages with punctuation and capitalization, fast on the CPU alone. Transcribes once you stop.",
+        "desc": "25 languages with punctuation and capitalization, fast on the CPU. Shows live previews and finalizes when you stop.",
         "chips": [
           "670 MB int8",
-          "On stop",
+          "Live previews",
           "CPU · ONNX",
           "25 languages"
         ]
@@ -589,7 +589,7 @@
         "h": "Meetings",
         "blocks": [
           {
-            "p": "A meeting records your microphone and, on macOS 14.4+, the system audio, so the live transcript separates <em>Me</em> from <em>Them</em> as it goes. That separation needs a Kyutai model; Whisper and Parakeet transcribe the meeting as one mixed stream."
+            "p": "A meeting records your microphone and, on macOS 14.4+, system audio. Kyutai, Whisper, Parakeet and available Apple Speech keep <em>Me</em> and <em>Them</em> separate. This is source separation, not identification of individual remote speakers. Whisper and Parakeet display previews that can be revised before the final text."
           },
           {
             "p": "The lifecycle is meant to be hands-off: the app notifies you when a calendar meeting begins, and today's events have a start button on Home. It detects when the meeting seems over and stops on its own after warning you, and recovers or salvages the session if the engine stalls or the microphone disappears. When the Mac goes to sleep the recording is closed cleanly, and Soufflé offers to resume it on wake. A stopped meeting can also be picked up by hand with <em>Resume recording</em>, which adds another session to the same meeting. If a microphone stops responding, a banner says so and offers <em>Restart Soufflé</em>."
@@ -610,7 +610,7 @@
         "h": "Summaries and compaction — experimental",
         "blocks": [
           {
-            "p": "<strong>This feature is experimental and off by default.</strong> Enable <strong>Summarization</strong> in Settings → AI to reveal provider and model selection, prompt templates, compaction options and generation actions in meetings. Turning it off hides those controls while keeping your preferences and saved results. Transcription, exports and read-only MCP access remain available. Dictation polish has its own switch; its AI provider can still be configured when polish is enabled."
+            "p": "Available since <a href=\"https://github.com/damione1/souffle/releases/tag/v0.17.0\">Soufflé 0.17.0</a>. <strong>This feature is experimental and off by default.</strong> Enable <strong>Summarization</strong> in Settings → AI to reveal provider and model selection, prompt templates, compaction options and generation actions in meetings. Turning it off hides those controls while keeping your preferences and saved results. Transcription, exports and read-only MCP access remain available. Dictation polish has its own switch; its AI provider can still be configured when polish is enabled."
           },
           {
             "p": "Accurately transcribing a meeting locally is already demanding. Producing a faithful summary of a long transcript with a local model is harder still: decisions, conditions, negations, owners and deadlines all need to survive. Soufflé prioritizes a useful transcript across supported Apple Silicon Macs, including modest configurations, rather than assuming everyone owns a large machine."
@@ -649,7 +649,7 @@
         "h": "Speech models",
         "blocks": [
           {
-            "p": "All models run locally and are downloaded on first use from HuggingFace. Switch at any time in Settings → Transcription."
+            "p": "Speech recognition runs locally. Downloadable checkpoints come from Hugging Face; Apple Speech uses language assets installed and managed by macOS. Choose an engine in Settings → Transcription when no recording is active."
           },
           {
             "table": [
@@ -663,16 +663,23 @@
               ],
               [
                 "Whisper Large V3 Turbo",
-                "Multilingual, ~1.6 GB, Metal via whisper.cpp. Transcribes once you stop."
+                "Multilingual, ~1.6 GB, Metal via whisper.cpp. Revisable live previews, then final text when you stop; separate Me/Them in meetings."
               ],
               [
                 "Parakeet TDT 0.6B v3",
-                "25 languages with punctuation and capitalization, ~670 MB int8, fast CPU inference via ONNX Runtime. Transcribes once you stop."
+                "25 languages with punctuation and capitalization, ~670 MB int8, CPU inference via ONNX Runtime. Revisable live previews, then final text on stop; separate Me/Them in meetings."
+              ],
+              [
+                "Apple Speech",
+                "Optional on supported macOS 26 Macs and locales. On-device recognition with macOS-managed language assets, progressive text and separate microphone/system-audio results. Availability and installation guidance appear in Settings → Transcription."
               ]
             ]
           },
           {
-            "p": "The two Kyutai models are the streaming ones: text appears while you are still talking. Whisper and Parakeet transcribe the whole recording once you stop, which is fine for a meeting you read afterwards but changes how dictation feels."
+            "p": "Kyutai streams text directly. Whisper and Parakeet decode audio windows while recording, so previews may change as more context arrives; stopping finalizes the remaining audio. Apple Speech provides progressive recognition on supported systems. All use the same Me/Them source distinction for meetings."
+          },
+          {
+            "p": "Apple Speech transcribes audio. It is separate from Apple Intelligence, which is used for optional dictation polish and experimental meeting summaries."
           },
           {
             "p": "A loaded model is unloaded after an hour of inactivity to give the RAM back, and reloaded on the next recording. Change or disable that in Settings → Transcription."
@@ -1028,7 +1035,7 @@
     "quickStart": "Start here",
     "nextSteps": "Next steps",
     "updated": "Updated",
-    "updatedDate": "November 6, 2026",
+    "updatedDate": "November 7, 2026",
     "readGuide": "Guide:"
   },
   "privacy": {

@@ -84,3 +84,21 @@ compilation. The quick path reduces the work required on daily PRs; it does
 not claim a complete native build can finish in five minutes.
 The native performance target is 8–10 minutes with a restored dependency cache;
 it must be measured with all native checks enabled before being claimed.
+
+## Publishing a release
+
+Promote the validated tree to `master` after both promotion checks pass. Create
+an annotated version tag with hand-written user-facing notes and preserve
+Markdown headings:
+
+```bash
+git tag -a --cleanup=verbatim vX.Y.Z -F release-notes.md
+git push origin vX.Y.Z
+```
+
+The release checkout fetches full history and annotated tags so the updater's
+manifest reads the annotation rather than the merge commit message. The Release
+workflow builds signed/notarized artifacts and leaves a draft: verify the DMG,
+updater signature, manifest version/URL and release notes before publishing it.
+Update version-specific documentation after the release is public, then verify
+the production site and its versioned download links.

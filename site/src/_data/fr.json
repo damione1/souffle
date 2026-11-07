@@ -42,7 +42,7 @@
       "mock": "home",
       "flip": false,
       "title": "Réunions : votre voix séparée de celle des autres.",
-      "body": "La capture de l'audio système sépare <em class=\"me\">Moi</em> de <em class=\"them\">Eux</em> dans la transcription en direct avec un modèle Kyutai, sans pilote audio virtuel à installer. L'enregistrement se débrouille seul : il vous notifie quand une réunion du calendrier commence, remarque quand elle semble terminée, et reprend là où il en était quand votre Mac se réveille.",
+      "body": "La capture de l’audio système sépare <em class=\"me\">Moi</em> de <em class=\"them\">Eux</em> avec Kyutai, Whisper, Parakeet ou Apple Speech lorsqu’il est disponible, sans pilote audio virtuel. L’app vous notifie au début d’une réunion du calendrier, remarque quand elle semble terminée et propose de reprendre après le réveil du Mac.",
       "bullets": [
         "L'enregistrement audio est optionnel : vous choisissez combien de temps le garder, et vous le réécoutez en cliquant dans la transcription",
         "Arrêtez, puis reprenez plus tard : une même réunion peut compter plusieurs sessions",
@@ -102,7 +102,7 @@
   },
   "models": {
     "title": "Choisissez votre modèle de transcription local.",
-    "sub": "Les quatre tournent en local, téléchargés à la première utilisation. Les deux Kyutai affichent le texte au fil de la parole ; les deux autres transcrivent une fois que vous avez fini.",
+    "sub": "Quatre modèles téléchargeables tournent en local. Kyutai affiche le texte en continu ; Whisper et Parakeet proposent des aperçus révisables puis finalisent à l’arrêt. Apple Speech est une autre option locale sur les Mac compatibles sous macOS 26, avec des ressources linguistiques gérées par le système.",
     "cards": [
       {
         "name": "Kyutai STT 1B",
@@ -128,10 +128,10 @@
       },
       {
         "name": "Whisper Large V3 Turbo",
-        "desc": "Multilingue et bien connu, via whisper.cpp sur le GPU. Transcrit une fois que vous avez fini.",
+        "desc": "Multilingue, via whisper.cpp sur le GPU. Affiche des aperçus en direct puis finalise la transcription à l’arrêt.",
         "chips": [
           "1,6 Go",
-          "À la fin",
+          "Aperçus en direct",
           "Metal · whisper.cpp",
           "Multilingue"
         ]
@@ -139,10 +139,10 @@
       {
         "name": "Parakeet TDT 0.6B v3",
         "tag": "Le plus léger",
-        "desc": "25 langues avec ponctuation et majuscules, rapide sur le seul CPU. Transcrit une fois que vous avez fini.",
+        "desc": "25 langues avec ponctuation et majuscules, rapide sur CPU. Affiche des aperçus en direct puis finalise à l’arrêt.",
         "chips": [
           "670 Mo int8",
-          "À la fin",
+          "Aperçus en direct",
           "CPU · ONNX",
           "25 langues"
         ]
@@ -589,7 +589,7 @@
         "h": "Réunions",
         "blocks": [
           {
-            "p": "Une réunion enregistre votre micro et, sur macOS 14.4+, l'audio système : la transcription en direct sépare donc <em>Moi</em> de <em>Eux</em> au fil de l'eau. La séparation Moi/Eux demande un modèle Kyutai ; Whisper et Parakeet transcrivent la réunion en un seul flux."
+            "p": "Une réunion enregistre votre microphone et, sur macOS 14.4+, l’audio système. Kyutai, Whisper, Parakeet et Apple Speech lorsqu’il est disponible conservent <em>Moi</em> et <em>Eux</em> séparément. Cette séparation distingue les sources, sans identifier chaque participant distant. Whisper et Parakeet affichent des aperçus qui peuvent être révisés avant le texte définitif."
           },
           {
             "p": "Le cycle de vie est pensé pour ne rien demander : l'app vous notifie au début d'une réunion du calendrier, et les événements du jour ont un bouton Démarrer sur l'accueil. Elle détecte que la réunion semble terminée et s'arrête d'elle-même après vous avoir prévenu, et récupère ou sauve la session si le moteur cale ou si le micro disparaît. Quand le Mac se met en veille, l'enregistrement est fermé proprement, et Soufflé propose de le reprendre au réveil. Une réunion arrêtée peut aussi être reprise à la main avec <em>Reprendre l'enregistrement</em>, qui ajoute une session à la même réunion. Si un micro ne répond plus, un bandeau le signale et propose <em>Redémarrer Soufflé</em>."
@@ -610,7 +610,7 @@
         "h": "Résumés et compaction — expérimental",
         "blocks": [
           {
-            "p": "<strong>Cette fonctionnalité est expérimentale et désactivée par défaut.</strong> Dans Paramètres → IA, activez <strong>Résumés de réunion</strong> (<strong>Summarization</strong> dans l'interface anglaise) pour afficher le choix du fournisseur et du modèle, les modèles de consignes, les options de compaction et les actions de génération dans les réunions. Désactiver cet interrupteur masque ces éléments tout en conservant vos réglages et les résultats déjà enregistrés. La transcription, les exports et la lecture par MCP restent disponibles. La reformulation des dictées conserve sa configuration indépendante ; son fournisseur IA reste accessible si elle est activée."
+            "p": "Disponible depuis <a href=\"https://github.com/damione1/souffle/releases/tag/v0.17.0\">Soufflé 0.17.0</a>. <strong>Cette fonctionnalité est expérimentale et désactivée par défaut.</strong> Dans Paramètres → IA, activez <strong>Résumés de réunion</strong> (<strong>Summarization</strong> dans l'interface anglaise) pour afficher le choix du fournisseur et du modèle, les modèles de consignes, les options de compaction et les actions de génération dans les réunions. Désactiver cet interrupteur masque ces éléments tout en conservant vos réglages et les résultats déjà enregistrés. La transcription, les exports et la lecture par MCP restent disponibles. La reformulation des dictées conserve sa configuration indépendante ; son fournisseur IA reste accessible si elle est activée."
           },
           {
             "p": "Transcrire correctement une réunion en local est déjà exigeant. Résumer fidèlement une longue transcription avec un modèle local l'est encore davantage : il faut conserver les décisions, leurs conditions, les négations, les responsables et les échéances. La priorité de Soufflé est de fournir une transcription de qualité sur les Mac Apple Silicon pris en charge, y compris les configurations modestes, plutôt que de supposer que chacun dispose d'une grosse machine."
@@ -649,7 +649,7 @@
         "h": "Modèles de transcription",
         "blocks": [
           {
-            "p": "Tous les modèles tournent en local et sont téléchargés depuis HuggingFace à la première utilisation. Vous pouvez en changer à tout moment dans Paramètres → Transcription."
+            "p": "La reconnaissance vocale tourne en local. Les modèles téléchargeables viennent de Hugging Face ; Apple Speech utilise des ressources linguistiques installées et gérées par macOS. Choisissez le moteur dans Paramètres → Transcription lorsqu’aucun enregistrement n’est actif."
           },
           {
             "table": [
@@ -663,16 +663,23 @@
               ],
               [
                 "Whisper Large V3 Turbo",
-                "Multilingue, ~1,6 Go, Metal via whisper.cpp. Transcrit une fois que vous avez fini."
+                "Multilingue, ~1,6 Go, Metal via whisper.cpp. Aperçus révisables en direct puis texte final à l’arrêt ; séparation Moi/Eux en réunion."
               ],
               [
                 "Parakeet TDT 0.6B v3",
-                "25 langues avec ponctuation et majuscules, ~670 Mo en int8, inférence CPU rapide via ONNX Runtime. Transcrit une fois que vous avez fini."
+                "25 langues avec ponctuation et majuscules, ~670 Mo en int8, inférence CPU via ONNX Runtime. Aperçus révisables en direct puis texte final à l’arrêt ; séparation Moi/Eux en réunion."
+              ],
+              [
+                "Apple Speech",
+                "Option disponible sur les Mac et langues compatibles sous macOS 26. Reconnaissance locale avec ressources linguistiques gérées par macOS, texte progressif et résultats distincts pour microphone et audio système. Disponibilité et installation sont indiquées dans Paramètres → Transcription."
               ]
             ]
           },
           {
-            "p": "Les deux Kyutai sont les modèles en flux continu : le texte apparaît pendant que vous parlez encore. Whisper et Parakeet transcrivent tout l'enregistrement une fois que vous avez arrêté, ce qui convient à une réunion qu'on lit après coup mais change la sensation en dictée."
+            "p": "Kyutai produit le texte en continu. Whisper et Parakeet décodent des fenêtres audio pendant l’enregistrement : les aperçus peuvent changer avec le contexte, puis l’arrêt finalise l’audio restant. Apple Speech fournit une reconnaissance progressive sur les systèmes compatibles. Tous distinguent les sources Moi/Eux en réunion."
+          },
+          {
+            "p": "Apple Speech transcrit l’audio. C’est une fonction distincte d’Apple Intelligence, utilisé pour la reformulation facultative des dictées et les résumés de réunion expérimentaux."
           },
           {
             "p": "Un modèle chargé est déchargé après une heure d'inactivité pour rendre la RAM, puis rechargé au prochain enregistrement. Ce délai se change, ou se désactive, dans Paramètres → Transcription."
@@ -1028,7 +1035,7 @@
     "quickStart": "Pour commencer",
     "nextSteps": "Pour aller plus loin",
     "updated": "Mis à jour le",
-    "updatedDate": "6 novembre 2026",
+    "updatedDate": "7 novembre 2026",
     "readGuide": "Guide :"
   },
   "privacy": {

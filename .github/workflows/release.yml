@@ -107,6 +107,9 @@ jobs:
       HAS_APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE != '' }}
     steps:
       - uses: actions/checkout@v5
+        with:
+          # The updater reads annotated tag notes, not the merge commit message.
+          fetch-depth: 0
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
