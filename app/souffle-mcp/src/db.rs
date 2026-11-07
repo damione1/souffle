@@ -429,7 +429,8 @@ impl McpDb {
                             generated_at: row.get(3)?,
                             is_stale: row.get(4)?,
                             source_sha256: row.get(5)?,
-                        })
+                        }
+                        .with_source_policy_freshness())
                     })
                     .transpose()
                 },

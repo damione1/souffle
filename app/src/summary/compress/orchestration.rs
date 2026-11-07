@@ -6,6 +6,56 @@ use super::{
 use crate::{models::compression, state::AppState, transcript::CompactTranscript};
 use std::sync::{Arc, atomic::Ordering};
 
+struct GenerationRequest {
+    service: Arc<CompressionService>,
+    id: String,
+    job: super::CompactJob,
+    epoch: u64,
+    _guard: tokio::sync::OwnedMutexGuard<()>,
+}
+impl Drop for GenerationRequest {
+    fn drop(&mut self) {
+        let mut jobs = self.service.jobs.lock().unwrap_or_else(|p| p.into_inner());
+        if let Some(job) = jobs
+            .get_mut(&self.id)
+            .filter(|job| job.generation == self.job.generation)
+        {
+            match job.status {
+                CompactJobStatus::WaitingForModel
+                | CompactJobStatus::Queued
+                | CompactJobStatus::Compressing { .. } => {
+                    job.cancel.store(true, Ordering::Relaxed);
+                    job.status = CompactJobStatus::Idle;
+                }
+                CompactJobStatus::Idle
+                | CompactJobStatus::Failed { .. }
+                | CompactJobStatus::SourceChanged
+                | CompactJobStatus::InterruptedByRecording => {}
+            }
+        }
+    }
+}
+
+/// Only queue waits may be abandoned. Submitted Metal work must drain before
+/// releasing its compute permit, and checks the same flag between batches.
+async fn cancellable<T>(
+    service: &CompressionService,
+    epoch: u64,
+    cancel: &std::sync::atomic::AtomicBool,
+    future: impl std::future::Future<Output = Result<T, CompressionError>>,
+) -> Result<T, CompressionError> {
+    tokio::select! {
+        biased;
+        error = async {
+            loop {
+                if let Err(error) = check_cancel(service, epoch, cancel) { return error; }
+                tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+            }
+        } => Err(error),
+        result = future => result,
+    }
+}
+
 /// Why local compaction could not complete. Keep these causes typed until an
 /// existing CLI, generic summary, or native presentation boundary formats them.
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
@@ -32,6 +82,10 @@ pub enum CompressionError {
     ModelUnavailable,
     #[error("Compression already in progress; summary uses original input")]
     AlreadyRunning,
+    #[error("Compression model is busy; retry after the current operation")]
+    ModelBusy,
+    #[error("Compression cache removal failed: {detail}")]
+    ModelRemoval { detail: String },
     #[error("Compression model preparation failed: {detail}")]
     ModelPreparation { detail: String },
     #[error("Compression model validation failed: {detail}")]
@@ -49,6 +103,7 @@ pub enum CompressionError {
 #[derive(Debug, Clone, Copy)]
 pub enum CompressionAdmission {
     InstallIfNeeded,
+    Native { intent: super::NativeInstallIntent },
     ReadyOnly,
 }
 
@@ -214,72 +269,113 @@ impl CompressionService {
 
     /// Generate/reuse a compact through one admitted worker, persist it with a
     /// source/generation CAS, and release all model resources before returning.
-    pub async fn generate(
+    pub fn generate(
         self: &Arc<Self>,
         state: Arc<AppState>,
         id: String,
         rate: Option<f32>,
         regenerate: bool,
         admission: CompressionAdmission,
-    ) -> Result<CompactTranscript, CompressionError> {
-        let epoch = self.recording_epoch();
-        wait_capture_idle(&state, self, epoch).await?;
-        let request = self.meeting_request(&id);
-        let (_request_guard, coalesced) = match request.clone().try_lock_owned() {
-            Ok(guard) => (guard, false),
-            Err(_) => match admission {
-                CompressionAdmission::InstallIfNeeded => (request.lock_owned().await, true),
-                CompressionAdmission::ReadyOnly => return Err(CompressionError::AlreadyRunning),
-            },
+    ) -> impl std::future::Future<Output = Result<CompactTranscript, CompressionError>>
+    + Send
+    + 'static
+    + use<> {
+        // Reservation is synchronous: Cancel owns this identity even before its
+        // future is first polled. Duplicate submissions never wait invisibly.
+        let lifecycle = self.install.lock().unwrap_or_else(|p| p.into_inner());
+        let request = if self.model_status() == compression::ModelStatus::Deleting {
+            Err(CompressionError::ModelBusy)
+        } else {
+            self.meeting_request(&id)
+                .try_lock_owned()
+                .map_err(|_| CompressionError::AlreadyRunning)
+                .map(|guard| GenerationRequest {
+                    service: self.clone(),
+                    id: id.clone(),
+                    job: self.start_job(&id),
+                    epoch: self.recording_epoch(),
+                    _guard: guard,
+                })
         };
-        if self.recording_epoch() != epoch {
-            return Err(CompressionError::InterruptedByRecording);
+        drop(lifecycle);
+        let service = self.clone();
+        async move {
+            let request = request?;
+            service
+                .generate_reserved(state, id, rate, regenerate, admission, &request)
+                .await
         }
-        if !state.db.meeting_exists(&id).map_err(database)? {
-            return Err(CompressionError::Deleted);
-        }
-        let initial = state.db.load_meeting(&id).map_err(database)?;
-        if initial.ended_at.is_none() {
-            return Err(CompressionError::Ongoing);
-        }
-        let input = CompressionInput::from_meeting(&initial);
-        // Empty source is rejected before any network, cache preparation or queue.
-        if input.lines.iter().all(|line| line.trim().is_empty()) {
-            return Err(CompressionError::EmptyTranscript);
-        }
-        let rate = CompressionRate::new(match rate {
-            Some(rate) => rate,
-            None => {
-                crate::settings::AppSettings::load(&state.db)
-                    .map_err(database)?
-                    .summary_compression_rate
-            }
-        })?;
-        if (!regenerate || coalesced)
-            && let Some(compact) = &initial.compact_transcript
-            && self.compatible(compact, &input, rate)
-        {
-            return Ok(compact.clone());
-        }
-        if let CompressionAdmission::ReadyOnly = admission {
-            let ready = match self.model_status() {
-                compression::ModelStatus::Ready { .. } => {
-                    compression::installed(&self.model_dir).is_some()
-                }
-                compression::ModelStatus::NotDownloaded
-                | compression::ModelStatus::Downloading { .. }
-                | compression::ModelStatus::Preparing
-                | compression::ModelStatus::Failed { .. } => false,
-            };
-            if !ready {
-                return Err(CompressionError::ModelUnavailable);
-            }
-        }
-        let job = self.start_job(&id);
+    }
+
+    async fn generate_reserved(
+        self: &Arc<Self>,
+        state: Arc<AppState>,
+        id: String,
+        rate: Option<f32>,
+        regenerate: bool,
+        admission: CompressionAdmission,
+        request: &GenerationRequest,
+    ) -> Result<CompactTranscript, CompressionError> {
+        let job = &request.job;
+        let epoch = request.epoch;
         let result = async {
+            cancellable(
+                self,
+                epoch,
+                &job.cancel,
+                wait_capture_idle(&state, self, epoch),
+            )
+            .await?;
+            if self.recording_epoch() != epoch {
+                return Err(CompressionError::InterruptedByRecording);
+            }
+            if !state.db.meeting_exists(&id).map_err(database)? {
+                return Err(CompressionError::Deleted);
+            }
+            let initial = state.db.load_meeting(&id).map_err(database)?;
+            if initial.ended_at.is_none() {
+                return Err(CompressionError::Ongoing);
+            }
+            let input = CompressionInput::from_meeting(&initial);
+            // Empty source is rejected before any network, cache preparation or queue.
+            if input.lines.iter().all(|line| line.trim().is_empty()) {
+                return Err(CompressionError::EmptyTranscript);
+            }
+            let rate = CompressionRate::new(match rate {
+                Some(rate) => rate,
+                None => {
+                    crate::settings::AppSettings::load(&state.db)
+                        .map_err(database)?
+                        .summary_compression_rate
+                }
+            })?;
+            if !regenerate
+                && let Some(compact) = &initial.compact_transcript
+                && self.compatible(compact, &input, rate)
+            {
+                return Ok(compact.clone());
+            }
+            if let CompressionAdmission::ReadyOnly = admission {
+                let ready = match self.model_status() {
+                    compression::ModelStatus::Ready { .. } => {
+                        compression::installed(&self.model_dir).is_some()
+                    }
+                    compression::ModelStatus::NotDownloaded
+                    | compression::ModelStatus::Queued
+                    | compression::ModelStatus::Deleting
+                    | compression::ModelStatus::Downloading { .. }
+                    | compression::ModelStatus::Preparing
+                    | compression::ModelStatus::Failed { .. } => false,
+                };
+                if !ready {
+                    return Err(CompressionError::ModelUnavailable);
+                }
+            }
             let retry = match self.model_status() {
                 compression::ModelStatus::Failed { .. } => true,
                 compression::ModelStatus::NotDownloaded
+                | compression::ModelStatus::Queued
+                | compression::ModelStatus::Deleting
                 | compression::ModelStatus::Downloading { .. }
                 | compression::ModelStatus::Preparing
                 | compression::ModelStatus::Ready { .. } => false,
@@ -288,7 +384,22 @@ impl CompressionService {
                 self.update_job(&id, &job.generation, CompactJobStatus::WaitingForModel);
                 match admission {
                     CompressionAdmission::InstallIfNeeded => {
-                        self.ensure_model(Arc::downgrade(&state)).await?
+                        cancellable(
+                            self,
+                            epoch,
+                            &job.cancel,
+                            self.ensure_model(Arc::downgrade(&state)),
+                        )
+                        .await?
+                    }
+                    CompressionAdmission::Native { intent } => {
+                        cancellable(
+                            self,
+                            epoch,
+                            &job.cancel,
+                            self.ensure_model_native(Arc::downgrade(&state), intent),
+                        )
+                        .await?
                     }
                     CompressionAdmission::ReadyOnly => {
                         return Err(CompressionError::ModelUnavailable);
@@ -297,14 +408,14 @@ impl CompressionService {
             }
             check_cancel(self, epoch, &job.cancel)?;
             self.update_job(&id, &job.generation, CompactJobStatus::Queued);
-            let permit = self
-                .compute
-                .clone()
-                .acquire_owned()
-                .await
-                .map_err(|error| CompressionError::Runtime {
-                    detail: error.to_string(),
-                })?;
+            let permit = cancellable(self, epoch, &job.cancel, async {
+                self.compute.clone().acquire_owned().await.map_err(|error| {
+                    CompressionError::Runtime {
+                        detail: error.to_string(),
+                    }
+                })
+            })
+            .await?;
             check_cancel(self, epoch, &job.cancel)?;
             wait_capture_idle(&state, self, epoch).await?;
             let snapshot = state.db.begin_compaction(&id)?;
@@ -323,6 +434,7 @@ impl CompressionService {
                 },
             );
             let compact = tokio::task::spawn_blocking(move || {
+                let _permit = permit;
                 super::compress(&dir, input, rate, &cancel, |completed, total| {
                     worker.update_job(
                         &worker_id,
@@ -349,7 +461,7 @@ impl CompressionService {
                 }
             };
             // The blocking scope has dropped its device, mappings, tokenizer and tensors.
-            drop(permit);
+
             check_cancel(self, epoch, &job.cancel)?;
             match state
                 .db
@@ -379,6 +491,8 @@ impl CompressionService {
                 | CompressionError::InvalidRate
                 | CompressionError::ModelUnavailable
                 | CompressionError::AlreadyRunning
+                | CompressionError::ModelBusy
+                | CompressionError::ModelRemoval { .. }
                 | CompressionError::ModelPreparation { .. }
                 | CompressionError::ModelValidation { .. }
                 | CompressionError::Inference { .. }
@@ -388,7 +502,15 @@ impl CompressionService {
                 },
             },
         };
-        self.update_job(&id, &job.generation, status);
+        if let Some(current) = self
+            .jobs
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .get_mut(&id)
+            .filter(|current| current.generation == job.generation)
+        {
+            current.status = status;
+        }
         result
     }
 }
@@ -446,6 +568,143 @@ mod tests {
         (Arc::new(state), dir)
     }
     #[tokio::test]
+    async fn compression_reserves_cancel_identity_before_poll_and_rejects_duplicate() {
+        let (state, _dir) = fixture();
+        state
+            .db
+            .save_meeting(&crate::test_helpers::fixtures::sample_meeting("cancel"))
+            .unwrap();
+        let first = state.compression.generate(
+            state.clone(),
+            "cancel".into(),
+            None,
+            true,
+            CompressionAdmission::InstallIfNeeded,
+        );
+        let generation = state.compression.job("cancel").unwrap().generation;
+        let duplicate = state.compression.generate(
+            state.clone(),
+            "cancel".into(),
+            None,
+            true,
+            CompressionAdmission::InstallIfNeeded,
+        );
+        assert_eq!(duplicate.await, Err(CompressionError::AlreadyRunning));
+        assert_eq!(
+            state.compression.job("cancel").unwrap().generation,
+            generation
+        );
+        state.compression.cancel("cancel");
+        assert_eq!(
+            state.compression.job("cancel").unwrap().status,
+            CompactJobStatus::Queued
+        );
+        assert_eq!(first.await, Err(CompressionError::Cancelled));
+        assert_eq!(
+            state.compression.job("cancel").unwrap().status,
+            CompactJobStatus::Idle
+        );
+        assert!(!state.compression.model_dir.exists());
+        assert!(
+            state
+                .db
+                .load_compact_transcript("cancel")
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[tokio::test]
+    async fn compression_cancel_abandons_compute_and_shared_install_waits() {
+        let (state, _dir) = fixture();
+        let service = &state.compression;
+        let job = service.start_job("wait");
+        let permit = service.compute.clone().acquire_owned().await.unwrap();
+        let mut queued = Box::pin(cancellable(service, 0, &job.cancel, async {
+            service
+                .compute
+                .clone()
+                .acquire_owned()
+                .await
+                .map_err(|_| CompressionError::RuntimeBusy)
+        }));
+        assert!(futures_util::poll!(queued.as_mut()).is_pending());
+        service.cancel("wait");
+        assert!(matches!(
+            tokio::time::timeout(std::time::Duration::from_secs(1), queued)
+                .await
+                .unwrap(),
+            Err(CompressionError::Cancelled)
+        ));
+        drop(permit);
+        let job = service.start_job("install-wait");
+        let mut pending = Box::pin(cancellable(
+            service,
+            0,
+            &job.cancel,
+            std::future::pending::<Result<(), CompressionError>>(),
+        ));
+        assert!(futures_util::poll!(pending.as_mut()).is_pending());
+        service.cancel("install-wait");
+        assert_eq!(
+            tokio::time::timeout(std::time::Duration::from_secs(1), pending)
+                .await
+                .unwrap(),
+            Err(CompressionError::Cancelled)
+        );
+    }
+
+    #[tokio::test]
+    async fn compression_native_delayed_intent_cannot_install_after_opt_out() {
+        let (state, _dir) = fixture();
+        let mut settings = crate::settings::AppSettings {
+            meeting_summaries_enabled: true,
+            ..Default::default()
+        };
+        settings.save(&state.db).unwrap();
+        let intent = state.compression.native_install_intent();
+        settings.meeting_summaries_enabled = false;
+        settings.save(&state.db).unwrap();
+        state.compression.cancel_install_if_disabled(&state);
+        assert_eq!(
+            state
+                .compression
+                .ensure_model_native(Arc::downgrade(&state), intent)
+                .await,
+            Err(CompressionError::Cancelled)
+        );
+        settings.meeting_summaries_enabled = true;
+        settings.save(&state.db).unwrap();
+        assert_eq!(
+            state
+                .compression
+                .ensure_model_native(Arc::downgrade(&state), intent)
+                .await,
+            Err(CompressionError::Cancelled)
+        );
+        assert!(!state.compression.model_dir.exists());
+    }
+
+    #[tokio::test]
+    async fn compression_install_capture_busy_is_terminal_and_observable() {
+        let (state, _dir) = fixture();
+        state.capture_start.begin(1);
+        assert_eq!(
+            state.compression.ensure_model(Arc::downgrade(&state)).await,
+            Err(CompressionError::CaptureBusy)
+        );
+        assert_eq!(
+            state.compression.model_error(),
+            Some(CompressionError::CaptureBusy)
+        );
+        assert_eq!(
+            state.compression.model_status(),
+            compression::ModelStatus::NotDownloaded
+        );
+        assert!(!state.compression.model_dir.exists());
+    }
+
+    #[tokio::test]
     async fn compression_empty_and_edited_source_admission_stays_typed_without_download() {
         let (state, _dir) = fixture();
         let mut meeting = crate::test_helpers::fixtures::sample_meeting("empty");
@@ -465,7 +724,12 @@ mod tests {
             Err(CompressionError::EmptyTranscript)
         );
         assert!(!state.compression.model_dir.exists());
-        assert!(state.compression.job("empty").is_none());
+        assert!(matches!(
+            state.compression.job("empty").unwrap().status,
+            CompactJobStatus::Failed {
+                error: CompressionError::EmptyTranscript
+            }
+        ));
         state
             .db
             .save_edited_transcript("empty", Some("Plain edited source remains valid"))

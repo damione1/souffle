@@ -7,7 +7,9 @@ use candle_core::{DType, Device, Tensor};
 use candle_nn::{Module, VarBuilder};
 use candle_transformers::models::bert::{BertEncoder, Config};
 use sha2::{Digest, Sha256};
+mod model_lifecycle;
 mod orchestration;
+pub use model_lifecycle::NativeInstallIntent;
 pub use orchestration::{
     CompressionAdmission, CompressionCapture, CompressionError, observe_capture,
 };
@@ -47,7 +49,7 @@ impl std::fmt::Display for CompressionFailure {
 }
 impl std::error::Error for CompressionFailure {}
 
-pub const POLICY: &str = "mbert-offset-spans-v1";
+pub const POLICY: &str = "mbert-offset-spans-v2";
 #[derive(Debug, Clone, Copy, PartialEq)]
 /// A checked finite fraction of words to retain; no unchecked construction.
 pub struct CompressionRate(f32);
@@ -72,6 +74,7 @@ impl CompressionRate {
 /// Immutable effective source shared by fingerprinting, compression and reuse.
 pub struct CompressionInput {
     pub lines: Vec<String>,
+    pub origins: Vec<Option<crate::summary::TurnOrigin>>,
     pub participants: Vec<String>,
     pub source_sha256: String,
     pub segmented: bool,
@@ -80,15 +83,9 @@ impl CompressionInput {
     /// Prefer edited prose; otherwise preserve canonical grouped, timed turns.
     /// Fingerprints bind that effective text to forcing names and recording sessions.
     pub fn from_meeting(meeting: &MeetingTranscript) -> Self {
-        let edited = meeting
-            .edited_transcript
-            .as_deref()
-            .filter(|s| !s.is_empty());
-        let lines = edited
-            .map(|s| s.split('\n').map(str::to_owned).collect())
-            .unwrap_or_else(|| crate::summary::turns_from_segments(&meeting.segments));
-        Self::new(
-            lines,
+        Self::from_parts(
+            &meeting.segments,
+            meeting.edited_transcript.as_deref(),
             meeting
                 .participants
                 .iter()
@@ -96,8 +93,29 @@ impl CompressionInput {
                 .collect(),
             &meeting.recording_sessions,
             meeting.ended_at.is_none(),
-            edited.is_none(),
         )
+    }
+    pub(crate) fn from_parts(
+        segments: &[crate::engine::TranscriptionSegment],
+        edited: Option<&str>,
+        participants: Vec<String>,
+        sessions: &[crate::transcript::MeetingRecordingSession],
+        ongoing: bool,
+    ) -> Self {
+        let edited = edited.filter(|s| !s.is_empty());
+        let turns = if edited.is_none() {
+            crate::summary::turns_from_sessions(segments, sessions)
+        } else {
+            Vec::new()
+        };
+        let lines = edited
+            .map(|s| s.split('\n').map(str::to_owned).collect())
+            .unwrap_or_else(|| turns.iter().map(|turn| turn.line.clone()).collect());
+        let mut input = Self::new(lines, participants, &sessions, ongoing, edited.is_none());
+        if edited.is_none() {
+            input.origins = turns.into_iter().map(|turn| turn.origin).collect();
+        }
+        input
     }
     /// Canonicalize all source facts that can change extraction or forcing.
     pub(crate) fn new(
@@ -107,9 +125,11 @@ impl CompressionInput {
         ongoing: bool,
         segmented: bool,
     ) -> Self {
-        let canonical = serde_json::to_vec(&(&lines, &participants, sessions, ongoing, segmented))
-            .expect("serializable source");
+        let canonical =
+            serde_json::to_vec(&(POLICY, &lines, &participants, sessions, ongoing, segmented))
+                .expect("serializable source");
         Self {
+            origins: vec![None; lines.len()],
             lines,
             participants,
             source_sha256: format!("{:x}", Sha256::digest(canonical)),
@@ -149,6 +169,8 @@ pub struct CompressionService {
     jobs: Mutex<HashMap<String, CompactJob>>,
     requests: Mutex<HashMap<String, std::sync::Weak<tokio::sync::Mutex<()>>>>,
     recording_epoch: AtomicU64,
+    native_install_epoch: AtomicU64,
+    model_error: Mutex<Option<CompressionError>>,
     pub model_dir: PathBuf,
 }
 impl CompressionService {
@@ -171,6 +193,8 @@ impl CompressionService {
             jobs: Mutex::new(HashMap::new()),
             requests: Mutex::new(HashMap::new()),
             recording_epoch: AtomicU64::new(0),
+            native_install_epoch: AtomicU64::new(0),
+            model_error: Mutex::new(None),
             model_dir,
         }
     }
@@ -234,17 +258,13 @@ impl CompressionService {
             .get_mut(id)
         {
             job.cancel.store(true, Ordering::Relaxed);
-            job.status = CompactJobStatus::Idle;
         }
     }
     /// Cancel the shared installation attempt; every overlapping waiter sees its outcome.
     pub fn cancel_install(&self) {
-        if let Some(attempt) = self
-            .install
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .as_ref()
-        {
+        let slot = self.install.lock().unwrap_or_else(|p| p.into_inner());
+        self.native_install_epoch.fetch_add(1, Ordering::SeqCst);
+        if let Some(attempt) = slot.as_ref() {
             attempt.cancel.store(true, Ordering::Relaxed);
         }
     }
@@ -273,137 +293,6 @@ impl CompressionService {
                 | CompactJobStatus::Failed { .. }
                 | CompactJobStatus::SourceChanged
                 | CompactJobStatus::InterruptedByRecording => {}
-            }
-        }
-    }
-    /// Join/install on explicit user intent; ready cache checks remain cheap and
-    /// transient capture-observation contention does not cancel model preparation.
-    pub async fn ensure_model(
-        self: &Arc<Self>,
-        state: std::sync::Weak<crate::state::AppState>,
-    ) -> Result<(), CompressionError> {
-        // An existing ready installation is checked on inference; toggling a
-        // setting must not synchronously rehash 355 MB or flicker to Preparing.
-        let ready = match self.model_status() {
-            ModelStatus::Ready { .. } => compression::installed(&self.model_dir).is_some(),
-            ModelStatus::NotDownloaded
-            | ModelStatus::Downloading { .. }
-            | ModelStatus::Preparing
-            | ModelStatus::Failed { .. } => false,
-        };
-        if ready {
-            return Ok(());
-        }
-        // Every caller overlapping this attempt observes its same outcome. A failed or
-        // cancelled attempt is only retried by a later explicit action.
-        let (attempt, start) = {
-            let mut installed = self.install.lock().unwrap_or_else(|p| p.into_inner());
-            match installed.as_ref().filter(|attempt| {
-                attempt
-                    .result
-                    .lock()
-                    .unwrap_or_else(|p| p.into_inner())
-                    .is_none()
-            }) {
-                Some(attempt) => (attempt.clone(), false),
-                None => {
-                    let attempt = Arc::new(InstallationAttempt {
-                        cancel: Arc::new(AtomicBool::new(false)),
-                        result: Mutex::new(None),
-                        done: tokio::sync::Notify::new(),
-                        recording_epoch: self.recording_epoch(),
-                    });
-                    *installed = Some(attempt.clone());
-                    (attempt, true)
-                }
-            }
-        };
-        if start {
-            let service = self.clone();
-            let attempt = attempt.clone();
-            crate::async_runtime::spawn(async move {
-                let result = service.run_install(state, &attempt).await;
-                *attempt.result.lock().unwrap_or_else(|p| p.into_inner()) = Some(result);
-                attempt.done.notify_waiters();
-            });
-        }
-        loop {
-            let notified = attempt.done.notified();
-            if let Some(result) = attempt
-                .result
-                .lock()
-                .unwrap_or_else(|p| p.into_inner())
-                .clone()
-            {
-                return result;
-            }
-            notified.await;
-        }
-    }
-    async fn run_install(
-        self: &Arc<Self>,
-        state: std::sync::Weak<crate::state::AppState>,
-        attempt: &InstallationAttempt,
-    ) -> Result<(), CompressionError> {
-        let state = state.upgrade().ok_or(CompressionError::Cancelled)?;
-        orchestration::wait_capture_idle(&state, self, attempt.recording_epoch).await?;
-        if attempt.cancel.load(Ordering::Relaxed) {
-            return Err(CompressionError::Cancelled);
-        }
-        self.set_model(if compression::installed(&self.model_dir).is_some() {
-            ModelStatus::Preparing
-        } else {
-            ModelStatus::Downloading {
-                downloaded: 0,
-                total: compression::download_bytes(),
-            }
-        });
-        let worker_state = Arc::downgrade(&state);
-        let service = self.clone();
-        let cancel = attempt.cancel.clone();
-        let worker_cancel = cancel.clone();
-        let result = tokio::task::spawn_blocking(move || {
-            compression::install(&service.model_dir, &worker_cancel, |status| {
-                if let Some(state) = worker_state.upgrade() {
-                    match observe_capture(&state) {
-                        CompressionCapture::Capturing => {
-                            worker_cancel.store(true, Ordering::Relaxed)
-                        }
-                        CompressionCapture::Idle | CompressionCapture::Unknown => {}
-                    }
-                } else {
-                    worker_cancel.store(true, Ordering::Relaxed);
-                }
-                service.set_model(status);
-            })
-        })
-        .await
-        .map_err(|error| CompressionError::Runtime {
-            detail: error.to_string(),
-        })?;
-        match result {
-            Ok(meta) => {
-                self.set_model(ModelStatus::Ready { bytes: meta.bytes });
-                Ok(())
-            }
-            Err(detail) => {
-                if cancel.load(Ordering::Relaxed) {
-                    self.set_model(
-                        compression::installed(&self.model_dir)
-                            .map(|meta| ModelStatus::Ready { bytes: meta.bytes })
-                            .unwrap_or(ModelStatus::NotDownloaded),
-                    );
-                    if self.recording_epoch() != attempt.recording_epoch {
-                        Err(CompressionError::InterruptedByRecording)
-                    } else {
-                        Err(CompressionError::Cancelled)
-                    }
-                } else {
-                    self.set_model(ModelStatus::Failed {
-                        detail: detail.clone(),
-                    });
-                    Err(CompressionError::ModelPreparation { detail })
-                }
             }
         }
     }
@@ -500,7 +389,8 @@ struct Word {
     forced: bool,
     keep: bool,
 }
-fn split_prefix(line: &str) -> (&str, &str) {
+/// Canonical timestamp/speaker/session prefix, shared by extraction and seek validation.
+pub fn split_prefix(line: &str) -> (&str, &str) {
     static PREFIX: OnceLock<regex::Regex> = OnceLock::new();
     let re = PREFIX.get_or_init(|| regex::Regex::new(r"^\[\d+:\d{2}\][ \t]*").unwrap());
     let Some(found) = re.find(line) else {
@@ -512,6 +402,17 @@ fn split_prefix(line: &str) -> (&str, &str) {
     {
         end += label.len() + 1;
         end += line[end..].len() - line[end..].trim_start_matches([' ', '\t']).len();
+    }
+    static SESSION: OnceLock<regex::Regex> = OnceLock::new();
+    let session = SESSION.get_or_init(|| {
+        regex::Regex::new(&format!(
+            r"^\[{} [1-9][0-9]*\][ \t]*",
+            super::turns::SESSION_TAG
+        ))
+        .unwrap()
+    });
+    if let Some(marker) = session.find(&line[end..]) {
+        end += marker.end();
     }
     line.split_at(end)
 }
@@ -609,6 +510,8 @@ pub fn compress(
     cancel: &AtomicBool,
     progress: impl Fn(usize, usize),
 ) -> Result<CompactTranscript, CompressionFailure> {
+    let _lifecycle = compression::lock_for_read(dir, cancel)
+        .map_err(|detail| CompressionFailure::ModelValidation { detail })?;
     let meta = compression::verify(dir, cancel)
         .map_err(|detail| CompressionFailure::ModelValidation { detail })?;
     let config: Config = serde_json::from_reader(
@@ -795,7 +698,7 @@ mod tests {
         );
         assert_eq!(
             service.job("cancelled").unwrap().status,
-            CompactJobStatus::Idle
+            CompactJobStatus::Queued
         );
         let active = service.start_job("active");
         let completed = service.start_job("completed");
@@ -820,6 +723,10 @@ mod tests {
     }
     #[test]
     fn rate_and_unicode_protection() {
+        assert_eq!(
+            split_prefix("[0:12] Me: [session 2] Decision reversed"),
+            ("[0:12] Me: [session 2] ", "Decision reversed")
+        );
         assert!(CompressionRate::new(f32::NAN).is_err());
         assert!(CompressionRate::new(0.1).is_err());
         let body = "Élodie Martin n’approuve pas les 42 dépenses, néanmoins.";

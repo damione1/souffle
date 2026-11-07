@@ -3515,3 +3515,119 @@ msgstr "Modèle de dictée IA"
 msgctxt "SummaryTemplatesSection"
 msgid "Le modèle par défaut est utilisé lorsque vous générez le résumé d'une réunion terminée."
 msgstr "Le modèle par défaut est utilisé lorsque vous générez le résumé d'une réunion terminée."
+
+msgctxt "CompressionUi"
+msgid "Compression annulée."
+msgstr "Compression annulée."
+
+msgctxt "CompressionUi"
+msgid "Compression interrompue par un enregistrement. Réessayez après l'enregistrement."
+msgstr "Compression interrompue par un enregistrement. Réessayez après l'enregistrement."
+
+msgctxt "CompressionUi"
+msgid "Enregistrement en cours. Réessayez après l'enregistrement."
+msgstr "Enregistrement en cours. Réessayez après l'enregistrement."
+
+msgctxt "CompressionUi"
+msgid "Le moteur est occupé. Réessayez dans un instant."
+msgstr "Le moteur est occupé. Réessayez dans un instant."
+
+msgctxt "CompressionUi"
+msgid "La transcription a changé. Relancez la compression."
+msgstr "La transcription a changé. Relancez la compression."
+
+msgctxt "CompressionUi"
+msgid "Cette réunion a été supprimée."
+msgstr "Cette réunion a été supprimée."
+
+msgctxt "CompressionUi"
+msgid "Disponible une fois l'enregistrement terminé."
+msgstr "Disponible une fois l'enregistrement terminé."
+
+msgctxt "CompressionUi"
+msgid "La transcription ne contient aucun texte."
+msgstr "La transcription ne contient aucun texte."
+
+msgctxt "CompressionUi"
+msgid "Pourcentage de texte à conserver invalide."
+msgstr "Pourcentage de texte à conserver invalide."
+
+msgctxt "CompressionUi"
+msgid "Modèle de compression indisponible. Le résumé utilise le texte original."
+msgstr "Modèle de compression indisponible. Le résumé utilise le texte original."
+
+msgctxt "CompressionUi"
+msgid "Une compression est déjà en cours pour cette réunion."
+msgstr "Une compression est déjà en cours pour cette réunion."
+
+msgctxt "CompressionUi"
+msgid "Le modèle de compression est occupé. Réessayez après l'opération en cours."
+msgstr "Le modèle de compression est occupé. Réessayez après l'opération en cours."
+
+msgctxt "CompressionUi"
+msgid "Impossible de supprimer le modèle : {}"
+msgstr "Impossible de supprimer le modèle : {}"
+
+msgctxt "CompressionUi"
+msgid "Impossible de préparer le modèle : {}"
+msgstr "Impossible de préparer le modèle : {}"
+
+msgctxt "CompressionUi"
+msgid "Modèle de compression invalide : {}"
+msgstr "Modèle de compression invalide : {}"
+
+msgctxt "CompressionUi"
+msgid "La compression a échoué : {}"
+msgstr "La compression a échoué : {}"
+
+msgctxt "CompressionUi"
+msgid "Erreur de base de données : {}"
+msgstr "Erreur de base de données : {}"
+
+msgctxt "CompressionUi"
+msgid "Erreur du moteur de compression : {}"
+msgstr "Erreur du moteur de compression : {}"
+
+msgctxt "CompressionUi"
+msgid "Fournisseur de résumé indisponible : {}"
+msgstr "Fournisseur de résumé indisponible : {}"
+
+msgctxt "CompressionUi"
+msgid "La génération du résumé a échoué : {}"
+msgstr "La génération du résumé a échoué : {}"
+
+msgctxt "CompressionStatus"
+msgid "Installation du modèle en attente…"
+msgstr "Installation du modèle en attente…"
+
+msgctxt "CompressionStatus"
+msgid "Suppression du modèle…"
+msgstr "Suppression du modèle…"
+
+msgctxt "CompressionStatus"
+msgid "Le modèle de compression doit être réinstallé."
+msgstr "Le modèle de compression doit être réinstallé."
+
+msgctxt "CompressionStatus"
+msgid "Confirmer la suppression"
+msgstr "Confirmer la suppression"
+
+msgctxt "CompressionStatus"
+msgid "Supprimer le modèle de compression"
+msgstr "Supprimer le modèle de compression"
+
+msgctxt "CompressionStatus"
+msgid "Les versions compactes et les préférences seront conservées. Le modèle pourra être téléchargé à nouveau."
+msgstr "Les versions compactes et les préférences seront conservées. Le modèle pourra être téléchargé à nouveau."
+
+msgctxt "CompressionStorageSection"
+msgid "MODÈLE DE COMPRESSION LOCAL"
+msgstr "MODÈLE DE COMPRESSION LOCAL"
+
+msgctxt "CompressionStorageSection"
+msgid "LLMLingua-2 de Microsoft, local et hors ligne après installation."
+msgstr "LLMLingua-2 de Microsoft, local et hors ligne après installation."
+
+msgctxt "CompressionStatus"
+msgid "Annuler"
+msgstr "Annuler"

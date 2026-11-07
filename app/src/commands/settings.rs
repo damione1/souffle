@@ -140,10 +140,6 @@ fn save_settings_in_lane(
     // Native/window effects remain outside both locks.
     let previous = AppSettings::load_read_only(&state.db).ok();
     let enable = compression_install_requested(previous.as_ref(), &settings);
-    let disable_summaries = previous
-        .as_ref()
-        .is_some_and(|previous| previous.meeting_summaries_enabled)
-        && !settings.meeting_summaries_enabled;
     let result = save_settings_with_effects(
         &state.db,
         &state.machine,
@@ -155,14 +151,15 @@ fn save_settings_in_lane(
         .as_ref()
         .map(|_| true)
         .unwrap_or_else(|error| error.committed());
-    if committed && disable_summaries {
-        state.compression.cancel_install();
+    if committed {
+        state.compression.cancel_install_if_disabled(&state);
     }
     if committed && enable {
         let service = state.compression.clone();
-        let state = Arc::downgrade(&state);
+        let installation =
+            service.ensure_model_native(Arc::downgrade(&state), service.native_install_intent());
         crate::async_runtime::spawn(async move {
-            let _ = service.ensure_model(state).await;
+            let _ = installation.await;
         });
     }
     result

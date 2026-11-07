@@ -42,39 +42,35 @@ pub(crate) fn source(
     let sessions: Vec<MeetingRecordingSession> =
         serde_json::from_str(&sessions).map_err(|e| e.to_string())?;
     let edited = edited.filter(|s| !s.is_empty());
-    let segmented = edited.is_none();
-    let lines = match edited {
-        Some(text) => text.split('\n').map(str::to_owned).collect(),
-        None => {
-            let mut stmt=conn.prepare(&format!("SELECT {TEXT},{START_TIME},{END_TIME},{IS_FINAL},{LANGUAGE},{CONFIDENCE},{SPEAKER} FROM {SEGMENTS} WHERE {MEETING_ID}=?1 ORDER BY {SORT_ORDER}")).map_err(|e|e.to_string())?;
-            let segments = stmt
-                .query_map([id], |r| {
-                    Ok(TranscriptionSegment {
-                        text: r.get(0)?,
-                        start_time: r.get(1)?,
-                        end_time: r.get(2)?,
-                        is_final: r.get(3)?,
-                        language: r.get(4)?,
-                        confidence: r.get(5)?,
-                        speaker: r
-                            .get::<_, Option<String>>(6)?
-                            .as_deref()
-                            .and_then(Speaker::parse),
-                    })
-                })
-                .map_err(|e| e.to_string())?
-                .collect::<Result<Vec<_>, _>>()
-                .map_err(|e| e.to_string())?;
-            crate::summary::turns_from_segments(&segments)
-        }
+    let segments = if edited.is_none() {
+        let mut stmt=conn.prepare(&format!("SELECT {TEXT},{START_TIME},{END_TIME},{IS_FINAL},{LANGUAGE},{CONFIDENCE},{SPEAKER} FROM {SEGMENTS} WHERE {MEETING_ID}=?1 ORDER BY {SORT_ORDER}")).map_err(|e|e.to_string())?;
+        stmt.query_map([id], |r| {
+            Ok(TranscriptionSegment {
+                text: r.get(0)?,
+                start_time: r.get(1)?,
+                end_time: r.get(2)?,
+                is_final: r.get(3)?,
+                language: r.get(4)?,
+                confidence: r.get(5)?,
+                speaker: r
+                    .get::<_, Option<String>>(6)?
+                    .as_deref()
+                    .and_then(Speaker::parse),
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?
+    } else {
+        Vec::new()
     };
     Ok(Some((
-        CompressionInput::new(
-            lines,
+        CompressionInput::from_parts(
+            &segments,
+            edited.as_deref(),
             participants.into_iter().map(|p| p.name).collect(),
             &sessions,
             ended.is_none(),
-            segmented,
         ),
         ended.is_none(),
     )))
@@ -121,7 +117,7 @@ pub(crate) fn read_compact(
 ) -> Result<Option<CompactTranscript>, String> {
     conn.query_row(&format!("SELECT {COMPACT_TRANSCRIPT},{COMPACT_MODEL},{COMPACT_RATE},{COMPACT_GENERATED_AT},{COMPACT_IS_STALE},{COMPACT_SOURCE_SHA256} FROM {MEETINGS} WHERE {ID}=?1"),[id],|row|{
         let text:Option<String>=row.get(0)?;
-        text.map(|text|Ok(CompactTranscript{approx_tokens:souffle_schema::estimate_tokens(&text),text,model:row.get(1)?,rate:row.get(2)?,generated_at:row.get(3)?,is_stale:row.get(4)?,source_sha256:row.get(5)?})).transpose()
+        text.map(|text|Ok(CompactTranscript{approx_tokens:souffle_schema::estimate_tokens(&text),text,model:row.get(1)?,rate:row.get(2)?,generated_at:row.get(3)?,is_stale:row.get(4)?,source_sha256:row.get(5)?}.with_source_policy_freshness())).transpose()
     }).optional().map(|o|o.flatten()).map_err(|e|e.to_string())
 }
 pub(crate) fn write_compact(
@@ -234,6 +230,40 @@ mod tests {
         assert_eq!(
             db.commit_compaction(id, &s, &compact(&s)).unwrap(),
             CompactCommit::Committed
+        );
+    }
+    #[test]
+    fn compact_snapshot_matches_in_memory_sessions_and_legacy_policy_is_stale() {
+        let (db, _dir) = test_db();
+        let mut meeting = sample_meeting("sessions");
+        let now = chrono::Utc::now();
+        meeting.segments = vec![
+            sample_segment("First decision", 100., 101.),
+            sample_segment("Reversed on resume", 0., 1.),
+        ];
+        meeting.recording_sessions = vec![
+            crate::transcript::MeetingRecordingSession::completed("first".into(), now, now, 0, 1),
+            crate::transcript::MeetingRecordingSession::completed("second".into(), now, now, 1, 2),
+        ];
+        db.save_meeting(&meeting).unwrap();
+        let memory = CompressionInput::from_meeting(&meeting);
+        let snapshot = db.begin_compaction(&meeting.id).unwrap();
+        assert_eq!(snapshot.input.source_sha256, memory.source_sha256);
+        assert_eq!(snapshot.input.lines, memory.lines);
+        assert_eq!(snapshot.input.origins, memory.origins);
+        let mut saved = compact(&snapshot);
+        // Test a historical provenance without duplicating the legacy policy literal.
+        saved.model = format!(
+            "synthetic;{}",
+            crate::summary::compress::POLICY.replace("v2", "v1")
+        );
+        db.commit_compaction(&meeting.id, &snapshot, &saved)
+            .unwrap();
+        assert!(
+            db.load_compact_transcript(&meeting.id)
+                .unwrap()
+                .unwrap()
+                .is_stale
         );
     }
     #[test]

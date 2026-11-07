@@ -40,11 +40,20 @@ export component CompactTranscriptSection inherits VerticalLayout {
     if CompressionUi.has-compact: ListView {
         height: CompressionUi.expanded ? 320px : 160px;
         for line in CompressionUi.lines: Rectangle {
-            height: 72px;
+            height: CompressionUi.expanded ? row-text.preferred-height + 12px : 72px;
             background: area.has-hover && line.timed ? Theme.surface-2 : transparent;
             accessible-role: list-item;
             accessible-label: line.text;
-            AppText { x: 8px; y: 6px; width: parent.width - 16px; height: 60px; text: line.text; typography: Typography.secondary; color: Theme.text-secondary; wrap: word-wrap; overflow: elide; }
+            accessible-action-default => { if line.timed { CompressionUi.seek(line.session-index, line.seconds); } }
+            forward-focus: row-focus;
+            row-focus := FocusScope {
+                enabled: line.timed;
+                key-pressed(event) => {
+                    if event.text == Key.Return || event.text == Key.Space { CompressionUi.seek(line.session-index, line.seconds); return accept; }
+                    return reject;
+                }
+            }
+            row-text := AppText { x: 8px; y: 6px; width: parent.width - 16px; height: CompressionUi.expanded ? self.preferred-height : 60px; text: line.text; typography: Typography.secondary; color: Theme.text-secondary; wrap: word-wrap; overflow: CompressionUi.expanded ? clip : elide; }
             area := TouchArea { mouse-cursor: line.timed ? pointer : default; clicked => { if line.timed { CompressionUi.seek(line.session-index, line.seconds); } } }
         }
     }

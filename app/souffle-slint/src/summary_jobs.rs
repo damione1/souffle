@@ -1,11 +1,22 @@
 //! Per-meeting summary lifecycle independent of which detail happens to be open.
 //! Owned values are cloned under a short lock before any UI dispatch or await.
+use slint::ComponentHandle;
 use souffle_lib::{commands::SummaryCommandError, summary::SummarizeProgress};
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex, OnceLock},
 };
 use uuid::Uuid;
+
+fn failure_projection(error: &SummaryCommandError) -> (crate::SummaryFailureReason, &str) {
+    use crate::SummaryFailureReason as Reason;
+    match error {
+        SummaryCommandError::Database { detail } => (Reason::Database, detail),
+        SummaryCommandError::EmptyTranscript => (Reason::EmptyTranscript, ""),
+        SummaryCommandError::Provider { detail } => (Reason::Provider, detail),
+        SummaryCommandError::Generation { detail } => (Reason::Generation, detail),
+    }
+}
 
 /// A generation carries only the payload valid in its current lifecycle phase.
 #[derive(Debug, Clone)]
@@ -140,7 +151,12 @@ pub fn project(window: &crate::MainWindow, id: &str) {
             window.set_meeting_detail_summary_generation_id(generation.to_string().into());
             window.set_meeting_detail_summary_is_generating(false);
             window.set_meeting_detail_summary_generation_progress("".into());
-            window.set_meeting_detail_summary_generation_error(error.to_string().into());
+            let (reason, detail) = failure_projection(&error);
+            window.set_meeting_detail_summary_generation_error(
+                window
+                    .global::<crate::CompressionUi>()
+                    .invoke_summary_failure_text(reason, detail.into()),
+            );
         }
         None => {
             window.set_meeting_detail_summary_generation_id("".into());

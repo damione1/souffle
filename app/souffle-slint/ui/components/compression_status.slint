@@ -1,31 +1,45 @@
 import { AppText, Typography } from "@typography";
 import { Theme } from "../theme.slint";
 import { CompressionUi } from "../compression.slint";
-import { CompressionModelPhase, CompactJobPhase } from "../types.slint";
+import { SummarizationUi } from "../summarization.slint";
+import { CompressionModelPhase } from "../types.slint";
 import { ThemedButton } from "themed_button.slint";
 export component CompressionStatus inherits VerticalLayout {
+    in property <bool> allow-removal: false;
+    property <bool> confirming: false;
     spacing: 6px;
     vertical-stretch: 0;
     AppText {
         text: CompressionUi.model-phase == CompressionModelPhase.not-downloaded ? @tr("Modèle de compression non téléchargé ({})", CompressionUi.model-size)
+            : CompressionUi.model-phase == CompressionModelPhase.queued ? @tr("Installation du modèle en attente…")
+            : CompressionUi.model-phase == CompressionModelPhase.deleting ? @tr("Suppression du modèle…")
             : CompressionUi.model-phase == CompressionModelPhase.downloading ? @tr("Téléchargement du modèle : {}", CompressionUi.download-progress)
             : CompressionUi.model-phase == CompressionModelPhase.preparing ? @tr("Préparation locale du modèle fp16…")
             : CompressionUi.model-phase == CompressionModelPhase.ready ? @tr("Modèle local prêt ({})", CompressionUi.model-size)
-            : @tr("Le téléchargement a échoué : {}", CompressionUi.model-error);
+            : @tr("Le modèle de compression doit être réinstallé.");
         typography: Typography.secondary;
         color: Theme.text-muted;
         wrap: word-wrap;
     }
+    if CompressionUi.model-error != "": AppText { text: CompressionUi.model-error; typography: Typography.secondary; color: Theme.text-muted; wrap: word-wrap; }
     HorizontalLayout {
         alignment: start;
-        if CompressionUi.model-phase == CompressionModelPhase.not-downloaded || CompressionUi.model-phase == CompressionModelPhase.failed: ThemedButton {
+        spacing: 8px;
+        if SummarizationUi.enabled && (CompressionUi.model-phase == CompressionModelPhase.not-downloaded || CompressionUi.model-phase == CompressionModelPhase.failed): ThemedButton {
             text: CompressionUi.model-phase == CompressionModelPhase.failed ? @tr("Réessayer le téléchargement") : @tr("Télécharger le modèle");
             compact: true;
             clicked => { CompressionUi.download(); }
         }
-        if CompressionUi.model-phase == CompressionModelPhase.downloading || CompressionUi.model-phase == CompressionModelPhase.preparing: ThemedButton {
+        if CompressionUi.model-phase == CompressionModelPhase.queued || CompressionUi.model-phase == CompressionModelPhase.downloading || CompressionUi.model-phase == CompressionModelPhase.preparing: ThemedButton {
             text: @tr("Annuler le téléchargement"); compact: true;
             clicked => { CompressionUi.cancel-download(); }
         }
+        if root.allow-removal && CompressionUi.cache-present && CompressionUi.model-phase != CompressionModelPhase.deleting: ThemedButton {
+            text: root.confirming ? @tr("Confirmer la suppression") : @tr("Supprimer le modèle de compression");
+            compact: true;
+            clicked => { if root.confirming { CompressionUi.remove-model(); root.confirming = false; } else { root.confirming = true; } }
+        }
+        if root.confirming: ThemedButton { text: @tr("Annuler"); compact: true; clicked => { root.confirming = false; } }
     }
+    if root.confirming: AppText { text: @tr("Les versions compactes et les préférences seront conservées. Le modèle pourra être téléchargé à nouveau."); typography: Typography.hint; color: Theme.text-muted; wrap: word-wrap; }
 }

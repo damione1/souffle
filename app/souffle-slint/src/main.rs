@@ -8115,6 +8115,120 @@ mod tests {
     }
 
     #[test]
+    fn expanded_compact_preview_keeps_long_rows_readable_at_narrow_and_wide_sizes() {
+        use i_slint_backend_testing::ElementHandle;
+        let window = test_window();
+        window.set_active_meeting_id("preview-fixture".into());
+        window.global::<super::SummarizationUi>().set_enabled(true);
+        let ui = window.global::<super::CompressionUi>();
+        ui.set_meeting_id("preview-fixture".into());
+        ui.set_has_compact(true);
+        ui.set_has_source(true);
+        ui.set_expanded(true);
+        use super::{CompressionFailureReason as C, SummaryFailureReason as S};
+        let reasons = [
+            C::Cancelled,
+            C::InterruptedByRecording,
+            C::CaptureBusy,
+            C::RuntimeBusy,
+            C::SourceChanged,
+            C::Deleted,
+            C::Ongoing,
+            C::EmptyTranscript,
+            C::InvalidRate,
+            C::ModelUnavailable,
+            C::AlreadyRunning,
+            C::ModelBusy,
+            C::ModelRemoval,
+            C::ModelPreparation,
+            C::ModelValidation,
+            C::Inference,
+            C::Database,
+            C::Runtime,
+        ];
+        let summary_reasons = [S::Database, S::EmptyTranscript, S::Provider, S::Generation];
+        slint::select_bundled_translation("fr").unwrap();
+        let french: Vec<_> = reasons
+            .iter()
+            .map(|reason| ui.invoke_failure_text(*reason, "external diagnostic".into()))
+            .chain(summary_reasons.iter().map(|reason| {
+                ui.invoke_summary_failure_text(*reason, "external diagnostic".into())
+            }))
+            .collect();
+        slint::select_bundled_translation("en").unwrap();
+        let english: Vec<_> = reasons
+            .iter()
+            .map(|reason| ui.invoke_failure_text(*reason, "external diagnostic".into()))
+            .chain(summary_reasons.iter().map(|reason| {
+                ui.invoke_summary_failure_text(*reason, "external diagnostic".into())
+            }))
+            .collect();
+        assert!(
+            french
+                .iter()
+                .zip(&english)
+                .all(|(fr, en)| !fr.is_empty() && !en.is_empty() && fr != en),
+            "every owned failure explanation must translate"
+        );
+
+        ui.set_lines(
+            Rc::new(slint::VecModel::from(vec![
+                super::CompactLine {
+                    text: format!(
+                        "[0:12] Me: {}FINAL TIMED FACT",
+                        "Long timed source paragraph. ".repeat(90)
+                    )
+                    .into(),
+                    timed: true,
+                    seconds: 12.,
+                    session_index: 1,
+                },
+                super::CompactLine {
+                    text: format!(
+                        "{}FINAL EDITED FACT",
+                        "Long edited source paragraph. ".repeat(90)
+                    )
+                    .into(),
+                    timed: false,
+                    ..Default::default()
+                },
+            ]))
+            .into(),
+        );
+        crate::typography::initialize(&window).unwrap();
+        let adapter = TEST_SOFTWARE_WINDOW
+            .with(|slot| slot.borrow().clone())
+            .unwrap();
+        for width in [720, 1200] {
+            window
+                .window()
+                .set_size(slint::PhysicalSize::new(width, 2400));
+            let mut pixels = vec![
+                slint::platform::software_renderer::Rgb565Pixel::default();
+                width as usize * 2400
+            ];
+            for _ in 0..3 {
+                slint::platform::update_timers_and_animations();
+                adapter.request_redraw();
+                adapter.draw_if_needed(|renderer| {
+                    renderer.render(&mut pixels, width as usize);
+                });
+            }
+            let rows: Vec<_> =
+                ElementHandle::find_by_element_id(&window, "CompactTranscriptSection::row-text")
+                    .collect();
+            assert!(!rows.is_empty(), "compact rows must be rendered");
+            for row in rows {
+                assert!(
+                    row.size().height > 72.,
+                    "expanded long rows must grow instead of clipping, width {width}: {:?}",
+                    row.size()
+                );
+            }
+        }
+    }
+
+    #[test]
     fn update_install_controls_follow_live_capture_and_model_transitions() {
         use crate::update_ui::{self, UpdateRow};
         use i_slint_backend_testing::ElementHandle;

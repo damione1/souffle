@@ -12,9 +12,41 @@ use souffle_lib::{
 };
 use std::{rc::Rc, sync::Arc, time::Duration};
 
+fn failure_projection(error: &CompressionError) -> (crate::CompressionFailureReason, &str) {
+    use crate::CompressionFailureReason as Reason;
+    match error {
+        CompressionError::Cancelled => (Reason::Cancelled, ""),
+        CompressionError::InterruptedByRecording => (Reason::InterruptedByRecording, ""),
+        CompressionError::CaptureBusy => (Reason::CaptureBusy, ""),
+        CompressionError::RuntimeBusy => (Reason::RuntimeBusy, ""),
+        CompressionError::SourceChanged => (Reason::SourceChanged, ""),
+        CompressionError::Deleted => (Reason::Deleted, ""),
+        CompressionError::Ongoing => (Reason::Ongoing, ""),
+        CompressionError::EmptyTranscript => (Reason::EmptyTranscript, ""),
+        CompressionError::InvalidRate => (Reason::InvalidRate, ""),
+        CompressionError::ModelUnavailable => (Reason::ModelUnavailable, ""),
+        CompressionError::AlreadyRunning => (Reason::AlreadyRunning, ""),
+        CompressionError::ModelBusy => (Reason::ModelBusy, ""),
+        CompressionError::ModelRemoval { detail } => (Reason::ModelRemoval, detail),
+        CompressionError::ModelPreparation { detail } => (Reason::ModelPreparation, detail),
+        CompressionError::ModelValidation { detail } => (Reason::ModelValidation, detail),
+        CompressionError::Inference { detail } => (Reason::Inference, detail),
+        CompressionError::Database { detail } => (Reason::Database, detail),
+        CompressionError::Runtime { detail } => (Reason::Runtime, detail),
+    }
+}
+fn failure_text(window: &MainWindow, error: &CompressionError) -> slint::SharedString {
+    let (reason, detail) = failure_projection(error);
+    window
+        .global::<CompressionUi>()
+        .invoke_failure_text(reason, detail.into())
+}
+
 fn model_phase(status: &ModelStatus) -> CompressionModelPhase {
     match status {
         ModelStatus::NotDownloaded => CompressionModelPhase::NotDownloaded,
+        ModelStatus::Queued => CompressionModelPhase::Queued,
+        ModelStatus::Deleting => CompressionModelPhase::Deleting,
         ModelStatus::Downloading { .. } => CompressionModelPhase::Downloading,
         ModelStatus::Preparing => CompressionModelPhase::Preparing,
         ModelStatus::Ready { .. } => CompressionModelPhase::Ready,
@@ -51,85 +83,33 @@ fn preview(
     meeting: &MeetingTranscript,
     compact: &souffle_lib::transcript::CompactTranscript,
 ) -> Vec<CompactLine> {
-    use souffle_schema::paragraphs::{
-        PAUSE_THRESHOLD_SECONDS, SegmentLike, group_into_paragraph_segments,
-    };
-    struct Indexed<'a> {
-        index: usize,
-        segment: &'a souffle_lib::engine::TranscriptionSegment,
-    }
-    impl SegmentLike for Indexed<'_> {
-        fn text(&self) -> &str {
-            &self.segment.text
-        }
-        fn start_time(&self) -> f64 {
-            self.segment.start_time
-        }
-        fn end_time(&self) -> f64 {
-            self.segment.end_time
-        }
-        fn speaker(&self) -> Option<souffle_lib::engine::Speaker> {
-            self.segment.speaker
-        }
-    }
     let source = CompressionInput::from_meeting(meeting);
     let trusted =
         !compact.is_stale && source.segmented && source.source_sha256 == compact.source_sha256;
-    let indexed: Vec<_> = meeting
-        .segments
-        .iter()
-        .enumerate()
-        .filter(|(_, s)| !s.text.trim().is_empty())
-        .map(|(index, segment)| Indexed { index, segment })
-        .collect();
-    let groups = if trusted {
-        group_into_paragraph_segments(&indexed, PAUSE_THRESHOLD_SECONDS)
-    } else {
-        Vec::new()
-    };
     let count = compact.text.lines().count();
     compact
         .text
         .lines()
         .enumerate()
         .map(|(line_index, line)| {
-            let seek = if trusted && groups.len() == count {
-                groups.get(line_index).and_then(|group| {
-                    let first = group.first()?;
-                    let session_for =
-                        |index| {
-                            let mut matches = meeting.recording_sessions.iter().enumerate().filter(
-                                |(_, session)| {
-                                    index >= session.start_segment_index as usize
-                                        && index < session.end_segment_index as usize
-                                },
-                            );
-                            let (session, _) = matches.next()?;
-                            if matches.next().is_some() {
-                                None
-                            } else {
-                                Some(session)
-                            }
-                        };
-                    let session = session_for(first.index)?;
-                    if !group
-                        .iter()
-                        .all(|segment| session_for(segment.index) == Some(session))
-                    {
-                        return None;
-                    }
-                    let original = source.lines.get(line_index)?;
-                    if line.split_once(']').map(|(prefix, _)| prefix)
-                        != original.split_once(']').map(|(prefix, _)| prefix)
-                    {
-                        return None;
-                    }
-                    let seconds = first.segment.start_time;
-                    if !seconds.is_finite() || seconds < 0. {
-                        return None;
-                    }
-                    Some((i32::try_from(session).ok()?, seconds as f32))
-                })
+            let seek = if trusted && source.lines.len() == count {
+                source
+                    .origins
+                    .get(line_index)
+                    .copied()
+                    .flatten()
+                    .and_then(|origin| {
+                        let original = source.lines.get(line_index)?;
+                        if souffle_lib::summary::compress::split_prefix(line).0
+                            != souffle_lib::summary::compress::split_prefix(original).0
+                        {
+                            return None;
+                        }
+                        Some((
+                            i32::try_from(origin.session_index).ok()?,
+                            origin.seconds as f32,
+                        ))
+                    })
             } else {
                 None
             };
@@ -164,7 +144,10 @@ pub fn populate(window: &MainWindow, meeting: &MeetingTranscript) {
     );
     ui.set_has_compact(meeting.compact_transcript.is_some());
     if let Some(compact) = &meeting.compact_transcript {
-        ui.set_stale(compact.is_stale);
+        ui.set_stale(
+            compact.is_stale
+                || CompressionInput::from_meeting(meeting).source_sha256 != compact.source_sha256,
+        );
         ui.set_generated_at(compact.generated_at.clone().into());
         ui.set_compact_rate((compact.rate * 100.).round() as i32);
         ui.set_approx_tokens(compact.approx_tokens.min(i32::MAX as usize) as i32);
@@ -194,6 +177,8 @@ pub fn install(window: &MainWindow, state: Arc<AppState>) -> slint::Timer {
                     match status {
                         ModelStatus::Ready { bytes } => bytes,
                         ModelStatus::NotDownloaded
+                        | ModelStatus::Queued
+                        | ModelStatus::Deleting
                         | ModelStatus::Downloading { .. }
                         | ModelStatus::Preparing
                         | ModelStatus::Failed { .. } =>
@@ -213,9 +198,13 @@ pub fn install(window: &MainWindow, state: Arc<AppState>) -> slint::Timer {
                     .into(),
                 );
             }
-            if let ModelStatus::Failed { detail } = &status {
-                ui.set_model_error(detail.clone().into());
-            }
+            ui.set_cache_present(service.model_dir.exists());
+            ui.set_model_error(
+                service
+                    .model_error()
+                    .map(|error| failure_text(&w, &error))
+                    .unwrap_or_default(),
+            );
             if w.get_active_meeting_id() == ui.get_meeting_id() {
                 let job = service.job(ui.get_meeting_id().as_str());
                 let generation = job.as_ref().map(|job| job.generation.clone());
@@ -268,7 +257,7 @@ pub fn install(window: &MainWindow, state: Arc<AppState>) -> slint::Timer {
                             .min(100) as i32,
                     ),
                     CompactJobStatus::Failed { error } => {
-                        ui.set_job_error(error.to_string().into())
+                        ui.set_job_error(failure_text(&w, &error))
                     }
                     CompactJobStatus::Idle
                     | CompactJobStatus::WaitingForModel
@@ -287,9 +276,12 @@ pub fn install(window: &MainWindow, state: Arc<AppState>) -> slint::Timer {
             return;
         }
         let service = download_state.compression.clone();
-        let state = Arc::downgrade(&download_state);
+        let installation = service.ensure_model_native(
+            Arc::downgrade(&download_state),
+            service.native_install_intent(),
+        );
         souffle_lib::async_runtime::spawn(async move {
-            let _ = service.ensure_model(state).await;
+            let _ = installation.await;
         });
     });
     let service = state.compression.clone();
@@ -322,14 +314,14 @@ pub fn install(window: &MainWindow, state: Arc<AppState>) -> slint::Timer {
         ui.set_job_error("".into());
         let state = generate_state.clone();
         let weak = weak.clone();
+        let generation = souffle_lib::commands::generate_compact_transcript_native(
+            state.clone(),
+            id.clone(),
+            None,
+            true,
+        );
         souffle_lib::async_runtime::spawn(async move {
-            let result = souffle_lib::commands::generate_compact_transcript(
-                state.clone(),
-                id.clone(),
-                None,
-                true,
-            )
-            .await;
+            let result = generation.await;
             let meeting = state.db.load_meeting(&id);
             let _ = weak.upgrade_in_event_loop(move |w| {
                 if w.get_active_meeting_id().as_str() != id
@@ -340,29 +332,20 @@ pub fn install(window: &MainWindow, state: Arc<AppState>) -> slint::Timer {
                 if let Ok(meeting) = meeting {
                     populate(&w, &meeting);
                 }
-                if let Err(error) = result {
-                    match error {
-                        CompressionError::Cancelled => {}
-                        CompressionError::InterruptedByRecording
-                        | CompressionError::CaptureBusy
-                        | CompressionError::RuntimeBusy
-                        | CompressionError::SourceChanged
-                        | CompressionError::Deleted
-                        | CompressionError::Ongoing
-                        | CompressionError::EmptyTranscript
-                        | CompressionError::InvalidRate
-                        | CompressionError::ModelUnavailable
-                        | CompressionError::AlreadyRunning
-                        | CompressionError::ModelPreparation { .. }
-                        | CompressionError::ModelValidation { .. }
-                        | CompressionError::Inference { .. }
-                        | CompressionError::Database { .. }
-                        | CompressionError::Runtime { .. } => w
-                            .global::<CompressionUi>()
-                            .set_job_error(error.to_string().into()),
-                    }
+                if let Err(error) = result
+                    && error != CompressionError::Cancelled
+                {
+                    w.global::<CompressionUi>()
+                        .set_job_error(failure_text(&w, &error));
                 }
             });
+        });
+    });
+    let removal_service = state.compression.clone();
+    window.global::<CompressionUi>().on_remove_model(move || {
+        let removal = removal_service.remove_model();
+        souffle_lib::async_runtime::spawn(async move {
+            let _ = removal.await;
         });
     });
     let copy_state = state.clone();
@@ -494,7 +477,14 @@ mod tests {
         meeting.segments[1].end_time = 13.5;
         saved = compact(&meeting);
         let cross_session = preview(&meeting, &saved);
-        assert_eq!(cross_session.len(), 1);
-        assert!(!cross_session[0].timed);
+        assert_eq!(cross_session.len(), 2);
+        assert!(cross_session.iter().all(|row| row.timed));
+        assert_eq!(
+            (
+                cross_session[0].session_index,
+                cross_session[1].session_index
+            ),
+            (0, 1)
+        );
     }
 }

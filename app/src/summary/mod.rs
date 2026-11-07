@@ -41,7 +41,7 @@ pub use templates::{
     default_summary_templates, is_builtin_summary_template, merge_summary_templates,
     resolve_summary_template_prompt,
 };
-pub use turns::turns_from_segments;
+pub use turns::{SessionTurn, TurnOrigin, turns_from_segments, turns_from_sessions};
 
 pub const APPLE_INTELLIGENCE_MODEL_ID: &str = "apple-intelligence";
 const APPLE_INTELLIGENCE_MODEL_LABEL: &str = "Apple Intelligence";

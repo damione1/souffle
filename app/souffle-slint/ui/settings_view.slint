@@ -1,4 +1,5 @@
-import { CompressionSection } from "components/settings/compression_section.slint";
+import { CompressionUi } from "compression.slint";
+import { CompressionSection, CompressionStorageSection } from "components/settings/compression_section.slint";
 import { SummarizationSection } from "components/settings/summarization_section.slint";
 import { SummarizationUi } from "summarization.slint";
 import { AppText, AppTextInput, Typography, TypographyStyle } from "@typography";
@@ -540,6 +541,7 @@ export component SettingsView inherits Rectangle {
                         }
 
                         if SummarizationUi.enabled: CompressionSection { }
+                        if SummarizationUi.enabled || CompressionUi.cache-present || CompressionUi.model-error != "": CompressionStorageSection { }
 
                         if SummarizationUi.enabled: SummaryTemplatesSection {
                             template-ids: root.summary-template-ids;

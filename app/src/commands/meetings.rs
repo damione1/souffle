@@ -799,7 +799,6 @@ pub async fn summarize_meeting_with_settings(
         .db
         .load_meeting(&id)
         .map_err(|detail| SummaryCommandError::Database { detail })?;
-    let generated_from_edited = transcript.edited_transcript.clone();
     let generated_from_notes = transcript.notes.clone();
 
     let source = crate::summary::compress::CompressionInput::from_meeting(&transcript);
@@ -876,7 +875,7 @@ pub async fn summarize_meeting_with_settings(
         &summary,
         structured.as_ref(),
         &model,
-        generated_from_edited.as_deref(),
+        &source.source_sha256,
         generated_from_notes.as_deref(),
     )
     .map_err(|detail| SummaryCommandError::Database { detail })?;

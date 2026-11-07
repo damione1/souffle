@@ -31,10 +31,17 @@ export component CompressionSection inherits VerticalLayout {
                 AppText { text: @tr("{} %", CompressionUi.rate); typography: Typography.secondary; color: Theme.text-muted; vertical-alignment: center; }
             }
         }
+    }
+}
+
+export component CompressionStorageSection inherits VerticalLayout {
+    vertical-stretch: 0;
+    SettingsGroup {
+        title: @tr("MODÈLE DE COMPRESSION LOCAL");
         VerticalLayout {
             padding: Theme.settings-inset;
             spacing: 8px;
-            CompressionStatus { }
+            CompressionStatus { allow-removal: true; }
             AppText { text: @tr("LLMLingua-2 de Microsoft, local et hors ligne après installation."); typography: Typography.secondary; color: Theme.text-muted; wrap: word-wrap; }
         }
     }

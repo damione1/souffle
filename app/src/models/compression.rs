@@ -80,6 +80,8 @@ pub struct Installation {
 /// Installation lifecycle with only the progress/error payload valid in each state.
 pub enum ModelStatus {
     NotDownloaded,
+    Queued,
+    Deleting,
     Downloading { downloaded: u64, total: u64 },
     Preparing,
     Ready { bytes: u64 },
@@ -224,13 +226,73 @@ fn convert(stage: &Path, cancel: &AtomicBool) -> Result<Installation, String> {
     fs::remove_file(source).map_err(|e| e.to_string())?;
     Ok(meta)
 }
-struct InstallLock(File);
+pub struct InstallLock(File);
 impl Drop for InstallLock {
     fn drop(&mut self) {
         unsafe {
             libc::flock(self.0.as_raw_fd(), libc::LOCK_UN);
         }
     }
+}
+fn open_lock(dir: &Path) -> Result<InstallLock, std::io::Error> {
+    let parent = dir
+        .parent()
+        .ok_or_else(|| std::io::Error::other("Invalid model path"))?;
+    fs::create_dir_all(parent)?;
+    Ok(InstallLock(
+        OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(parent.join("install.lock"))?,
+    ))
+}
+fn try_lock(lock: &InstallLock, mode: i32) -> Result<bool, std::io::Error> {
+    if unsafe { libc::flock(lock.0.as_raw_fd(), mode | libc::LOCK_NB) } == 0 {
+        return Ok(true);
+    }
+    let error = std::io::Error::last_os_error();
+    if error.kind() == std::io::ErrorKind::WouldBlock {
+        Ok(false)
+    } else {
+        Err(error)
+    }
+}
+/// Keep cache files alive through model mappings and GPU inference in any process.
+pub fn lock_for_read(dir: &Path, cancel: &AtomicBool) -> Result<InstallLock, String> {
+    let lock = open_lock(dir).map_err(|e| e.to_string())?;
+    loop {
+        cancelled(cancel)?;
+        if try_lock(&lock, libc::LOCK_SH).map_err(|e| e.to_string())? {
+            return Ok(lock);
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    }
+}
+#[derive(Debug, thiserror::Error)]
+pub enum RemovalError {
+    #[error("Compression cache is busy")]
+    Busy,
+    #[error("{0}")]
+    Io(#[from] std::io::Error),
+}
+/// Explicit removal never waits behind another process or deletes unrelated cache entries.
+pub fn remove(dir: &Path) -> Result<(), RemovalError> {
+    let lock = open_lock(dir)?;
+    if !try_lock(&lock, libc::LOCK_EX)? {
+        return Err(RemovalError::Busy);
+    }
+    match fs::symlink_metadata(dir) {
+        Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {
+            fs::remove_dir_all(dir)?
+        }
+        Ok(_) => fs::remove_file(dir)?,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error.into()),
+    }
+    clean_abandoned_staging(dir.parent().expect("open_lock validated parent"))
+        .map_err(std::io::Error::other)?;
+    Ok(())
 }
 /// Remove only abandoned directories created by this installer, while its exclusive
 /// filesystem lock is held. Symlinks and unrelated directory names are never followed.
@@ -268,17 +330,10 @@ pub fn install(
 ) -> Result<Installation, String> {
     let parent = dir.parent().ok_or("Invalid model path")?;
     fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-    let lock = InstallLock(
-        OpenOptions::new()
-            .create(true)
-            .truncate(false)
-            .write(true)
-            .open(parent.join("install.lock"))
-            .map_err(|e| e.to_string())?,
-    );
+    let lock = open_lock(dir).map_err(|e| e.to_string())?;
     loop {
         cancelled(cancel)?;
-        if unsafe { libc::flock(lock.0.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0 {
+        if try_lock(&lock, libc::LOCK_EX).map_err(|e| e.to_string())? {
             break;
         }
         std::thread::sleep(Duration::from_millis(100));
@@ -393,6 +448,31 @@ mod tests {
         assert!(unrelated.is_dir() && noncanonical.is_dir());
         assert!(symlink.symlink_metadata().unwrap().file_type().is_symlink());
         assert_eq!(fs::read(outside.path().join("keep")).unwrap(), b"preserved");
+    }
+    #[test]
+    fn compression_cache_removal_coordinates_with_readers_and_installers() {
+        let temp = tempfile::tempdir().unwrap();
+        let dir = temp.path().join("revision");
+        fs::create_dir(&dir).unwrap();
+        fs::write(dir.join("weights"), b"fake cache").unwrap();
+        let unrelated = temp.path().join("user-file");
+        fs::write(&unrelated, b"preserve").unwrap();
+        let reader = lock_for_read(&dir, &AtomicBool::new(false)).unwrap();
+        assert!(matches!(remove(&dir), Err(RemovalError::Busy)));
+        assert!(dir.exists());
+        drop(reader);
+        let installer = open_lock(&dir).unwrap();
+        assert!(try_lock(&installer, libc::LOCK_EX).unwrap());
+        assert!(matches!(remove(&dir), Err(RemovalError::Busy)));
+        drop(installer);
+        remove(&dir).unwrap();
+        assert!(!dir.exists());
+        assert!(unrelated.exists());
+        assert!(temp.path().join("install.lock").exists());
+        remove(&dir).unwrap();
+        // A later explicit install can acquire the same lock and repopulate.
+        let reinstall = open_lock(&dir).unwrap();
+        assert!(try_lock(&reinstall, libc::LOCK_EX).unwrap());
     }
     #[test]
     fn manifest_refuses_partial_wrong_hash_and_cancel() {

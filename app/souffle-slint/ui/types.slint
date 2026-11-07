@@ -147,5 +147,7 @@ export enum AppleIntelligenceUnavailableReason {
     unknown,
 }
 
-export enum CompressionModelPhase { not-downloaded, downloading, preparing, ready, failed }
+export enum CompressionModelPhase { not-downloaded, queued, deleting, downloading, preparing, ready, failed }
+export enum CompressionFailureReason { cancelled, interrupted-by-recording, capture-busy, runtime-busy, source-changed, deleted, ongoing, empty-transcript, invalid-rate, model-unavailable, already-running, model-busy, model-removal, model-preparation, model-validation, inference, database, runtime }
+export enum SummaryFailureReason { database, empty-transcript, provider, generation }
 export enum CompactJobPhase { idle, waiting-for-model, queued, compressing, failed, source-changed, interrupted-by-recording }

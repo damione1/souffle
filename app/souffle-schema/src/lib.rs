@@ -147,6 +147,16 @@ pub struct CompactTranscript {
     pub source_sha256: String,
     pub approx_tokens: usize,
 }
+impl CompactTranscript {
+    /// The pre-session policy could reorder resumed recordings. Preserve its
+    /// text for inspection, but never present that derived artifact as current.
+    pub fn with_source_policy_freshness(mut self) -> Self {
+        if self.model.rsplit(';').next() == Some("mbert-offset-spans-v1") {
+            self.is_stale = true;
+        }
+        self
+    }
+}
 /// Conservative estimate shared by summary budgets and MCP responses.
 pub fn estimate_tokens(text: &str) -> usize {
     (text.split_whitespace().count() as f32 * 1.8).ceil() as usize

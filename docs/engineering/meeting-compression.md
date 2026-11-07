@@ -90,13 +90,13 @@ Cancellation cleans this job's staging only; a retry can repair an invalid cache
 
 ## Inference and persistence
 
-`mbert-offset-spans-v1` uses the real pinned encoder and learned 768→2 token
+`mbert-offset-spans-v2` uses the real pinned encoder and learned 768→2 token
 classifier in Candle, fp16 on Metal. Dynamic batches contain up to eight windows
 of at most 512 pieces including CLS/SEP. The local embedding wrapper avoids
 Candle 0.9.2's fp16 negative-infinity attention-mask bug by using finite -10000
 padding masks. All keep scores must be finite. Original byte spans preserve
 Unicode/spelling and WordPiece groups; words are ranked deterministically,
-protected spans are retained, and retained words stay in source order.
+protected spans are retained, and retained words stay in source order. Turns are grouped within each recording session, in stored session order; protected session markers distinguish local timestamps after a resume. Legacy v1 compacts remain readable but are marked stale.
 
 This is not byte-for-byte filtering parity with the official Python package:
 that package substitutes some force tokens and uses a cl100k-weighted strict
@@ -115,6 +115,8 @@ count. Transactional UUID generation and source compare-and-update reject old
 jobs after edits, resume, deletion or newer generation. Full saves preserve
 existing compact columns. Compact text is not added to FTS a second time.
 Deleting a meeting deletes its derived compact as part of the same row.
+
+Settings → AI exposes explicit compression-model removal even with Summarization disabled. Removal preserves preferences and saved compacts; it refuses active installation or inference rather than queuing behind them. Shared inference and exclusive installation/removal locks protect the cache across processes. The model is downloaded again only on a later explicit action.
 
 ## CLI and MCP
 

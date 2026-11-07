@@ -3507,3 +3507,119 @@ msgstr "Dictation AI model"
 msgctxt "SummaryTemplatesSection"
 msgid "Le modèle par défaut est utilisé lorsque vous générez le résumé d'une réunion terminée."
 msgstr "The default template is used when you generate a completed meeting's summary."
+
+msgctxt "CompressionUi"
+msgid "Compression annulée."
+msgstr "Compression cancelled."
+
+msgctxt "CompressionUi"
+msgid "Compression interrompue par un enregistrement. Réessayez après l'enregistrement."
+msgstr "Compression interrupted by recording. Retry after recording."
+
+msgctxt "CompressionUi"
+msgid "Enregistrement en cours. Réessayez après l'enregistrement."
+msgstr "Recording is active. Retry after recording."
+
+msgctxt "CompressionUi"
+msgid "Le moteur est occupé. Réessayez dans un instant."
+msgstr "The engine is busy. Retry shortly."
+
+msgctxt "CompressionUi"
+msgid "La transcription a changé. Relancez la compression."
+msgstr "The transcript changed. Generate the compact again."
+
+msgctxt "CompressionUi"
+msgid "Cette réunion a été supprimée."
+msgstr "This meeting was deleted."
+
+msgctxt "CompressionUi"
+msgid "Disponible une fois l'enregistrement terminé."
+msgstr "Available after recording ends."
+
+msgctxt "CompressionUi"
+msgid "La transcription ne contient aucun texte."
+msgstr "The transcript has no text."
+
+msgctxt "CompressionUi"
+msgid "Pourcentage de texte à conserver invalide."
+msgstr "Invalid percentage of text to retain."
+
+msgctxt "CompressionUi"
+msgid "Modèle de compression indisponible. Le résumé utilise le texte original."
+msgstr "Compression model unavailable. The summary uses the original text."
+
+msgctxt "CompressionUi"
+msgid "Une compression est déjà en cours pour cette réunion."
+msgstr "Compression is already running for this meeting."
+
+msgctxt "CompressionUi"
+msgid "Le modèle de compression est occupé. Réessayez après l'opération en cours."
+msgstr "The compression model is busy. Retry after the current operation."
+
+msgctxt "CompressionUi"
+msgid "Impossible de supprimer le modèle : {}"
+msgstr "Could not remove the model: {}"
+
+msgctxt "CompressionUi"
+msgid "Impossible de préparer le modèle : {}"
+msgstr "Could not prepare the model: {}"
+
+msgctxt "CompressionUi"
+msgid "Modèle de compression invalide : {}"
+msgstr "Invalid compression model: {}"
+
+msgctxt "CompressionUi"
+msgid "La compression a échoué : {}"
+msgstr "Compression failed: {}"
+
+msgctxt "CompressionUi"
+msgid "Erreur de base de données : {}"
+msgstr "Database error: {}"
+
+msgctxt "CompressionUi"
+msgid "Erreur du moteur de compression : {}"
+msgstr "Compression engine error: {}"
+
+msgctxt "CompressionUi"
+msgid "Fournisseur de résumé indisponible : {}"
+msgstr "Summary provider unavailable: {}"
+
+msgctxt "CompressionUi"
+msgid "La génération du résumé a échoué : {}"
+msgstr "Summary generation failed: {}"
+
+msgctxt "CompressionStatus"
+msgid "Installation du modèle en attente…"
+msgstr "Model installation queued…"
+
+msgctxt "CompressionStatus"
+msgid "Suppression du modèle…"
+msgstr "Removing model…"
+
+msgctxt "CompressionStatus"
+msgid "Le modèle de compression doit être réinstallé."
+msgstr "The compression model needs to be reinstalled."
+
+msgctxt "CompressionStatus"
+msgid "Confirmer la suppression"
+msgstr "Confirm removal"
+
+msgctxt "CompressionStatus"
+msgid "Supprimer le modèle de compression"
+msgstr "Remove compression model"
+
+msgctxt "CompressionStatus"
+msgid "Les versions compactes et les préférences seront conservées. Le modèle pourra être téléchargé à nouveau."
+msgstr "Saved compacts and preferences will be kept. You can download the model again."
+
+msgctxt "CompressionStorageSection"
+msgid "MODÈLE DE COMPRESSION LOCAL"
+msgstr "LOCAL COMPRESSION MODEL"
+
+msgctxt "CompressionStorageSection"
+msgid "LLMLingua-2 de Microsoft, local et hors ligne après installation."
+msgstr "Microsoft LLMLingua-2, local and offline after installation."
+
+msgctxt "CompressionStatus"
+msgid "Annuler"
+msgstr "Cancel"
