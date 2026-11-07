@@ -887,8 +887,8 @@ msgstr "Summary"
 
 #: app/souffle-slint/ui/components/summary_section.slint:76
 msgctxt "SummarySection"
-msgid "Générer le résumé"
-msgstr "Generate summary"
+msgid "Générer le résumé (expérimental)"
+msgstr "Generate summary (experimental)"
 
 #: app/souffle-slint/ui/components/summary_section.slint:120
 msgctxt "SummarySection"
@@ -2208,8 +2208,8 @@ msgstr "Apple Intelligence is not available."
 
 #: app/souffle-slint/ui/components/settings/intelligence_section.slint:66
 msgctxt "IntelligenceSection"
-msgid "RÉSUMÉS"
-msgstr "SUMMARIES"
+msgid "RÉSUMÉS (EXPÉRIMENTAUX)"
+msgstr "SUMMARIES (EXPERIMENTAL)"
 
 #: app/souffle-slint/ui/components/settings/intelligence_section.slint:70
 msgctxt "IntelligenceSection"
@@ -3369,8 +3369,8 @@ msgid "LLMLingua-2 de Microsoft, local et hors ligne après installation."
 msgstr "Microsoft LLMLingua-2 runs locally and offline after installation."
 
 msgctxt "CompactTranscriptSection"
-msgid "Version compacte"
-msgstr "Compact version"
+msgid "Version compacte (expérimentale)"
+msgstr "Compact version (experimental)"
 
 msgctxt "CompactTranscriptSection"
 msgid "Régénérer"
@@ -3475,3 +3475,35 @@ msgstr "Cancel download"
 msgctxt "CompactTranscriptSection"
 msgid "L'opération a échoué : {}"
 msgstr "Operation failed: {}"
+
+msgctxt "SummarizationSection"
+msgid "EXPÉRIMENTAL"
+msgstr "EXPERIMENTAL"
+
+msgctxt "SummarizationSection"
+msgid "Résumés de réunion"
+msgstr "Summarization"
+
+msgctxt "SummarizationSection"
+msgid "Active les résumés de réunion et la compaction expérimentaux. La qualité des longs résumés locaux reste à évaluer."
+msgstr "Enable experimental meeting summaries and compaction. Long local summaries are still being evaluated."
+
+msgctxt "IntelligenceSection"
+msgid "FOURNISSEUR IA DE LA DICTÉE"
+msgstr "DICTATION AI PROVIDER"
+
+msgctxt "IntelligenceSection"
+msgid "Le moteur qui nettoie la dictée."
+msgstr "The engine that polishes dictation."
+
+msgctxt "IntelligenceSection"
+msgid "Moteur de dictée IA"
+msgstr "Dictation AI engine"
+
+msgctxt "IntelligenceSection"
+msgid "Modèle de dictée IA"
+msgstr "Dictation AI model"
+
+msgctxt "SummaryTemplatesSection"
+msgid "Le modèle par défaut est utilisé lorsque vous générez le résumé d'une réunion terminée."
+msgstr "The default template is used when you generate a completed meeting's summary."

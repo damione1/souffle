@@ -1,6 +1,48 @@
-# Local meeting compression
+# Experimental meeting summaries and compaction
 
-Settings → IA provides two independent, default-off options: compress long
+Meeting summarization and compaction are experimental, **off by default**, and
+enabled with **Settings → AI → Summarization** (French: **Résumés de réunion**).
+`AppSettings.meeting_summaries_enabled` persists the opt-in. It gates the summary
+provider/model/template settings, compaction settings, and meeting generation
+UI. The shared AI provider remains configurable for independently enabled
+dictation polish. Disabling the feature preserves its subordinate preferences,
+saved summaries and compacts, and cancels a pending compression-model download.
+Already submitted generation may finish. Startup restores the flag without
+starting downloads. Native generation callbacks also reject disabled actions.
+
+Transcription, exports, and read-only MCP access do not require this switch.
+Explicit headless summary/compact commands remain available as experimental
+invocations without changing the persisted UI preference.
+
+## Why this is experimental
+
+Reliable local transcription is already demanding; faithful summaries of long
+transcripts require preserving relationships, decisions and negations as well.
+Soufflé targets supported Apple Silicon Macs, including modest configurations.
+Machines with 48 GB or more can run larger models and may do better, but that
+must not become a requirement for obtaining a useful transcript.
+
+A roughly 15-minute meeting is a more approachable test case, not a fixed cutoff
+or a quality guarantee. Apple's on-device Foundation Model has a
+[4,096-token session context](https://developer.apple.com/documentation/foundationmodels/managing-the-context-window),
+including instructions, input and output. Context windows vary across 7–8B
+models, and a large advertised window does not remove practical memory,
+latency or long-text faithfulness constraints. Intermediate summary stages and
+word extraction are experiments to work within those limits, not semantic
+quality guarantees.
+
+For users comfortable with cloud processing, a compatible MCP client can read
+original transcripts and ask Claude, ChatGPT or another cloud LLM to summarize
+them or maintain an external second brain. Soufflé ships a local, read-only
+stdio server, not a direct cloud AI connector or automatic synchronization.
+Connection support depends on the client. The client chooses what text leaves
+the Mac and where its output is written; Soufflé's MCP server does not write
+those notes. This workflow does not require enabling local summarization.
+
+## Local generation options
+
+Once Summarization is enabled, Settings → AI provides two independent,
+default-off options: compress long
 summary map input, and create a compact transcript alongside a summary. A
 standalone Generate/Regenerate action in meeting detail works without any LLM
 provider. Short summary input always uses the original text. Missing/downloading
@@ -77,7 +119,7 @@ Deleting a meeting deletes its derived compact as part of the same row.
 ## CLI and MCP
 
 ```sh
-souffle --compact-meeting MEETING_ID --compression-rate 0.5 --json
+souffle --compact-meeting MEETING_ID --compression-rate 0.65 --json
 souffle --summarize-meeting MEETING_ID --summary-compression on \
   --summary-provider ollama --summary-model qwen2.5:7b --json
 # Use --database /path/to/fixture.db (or SOUFFLE_DB) for an alternate database.
@@ -100,6 +142,8 @@ databases without referencing missing compact columns.
 the production compression controller without bootstrap, capture or TCC.
 `COMPRESSION_FIXTURE_CACHE` selects a verified prepared cache and
 `COMPRESSION_FIXTURE_DB` optionally retains the synthetic database between runs.
+Its Summarization switch uses the same persisted settings path as the real app;
+enable it before testing generation controls.
 Rename edits the meeting title by default. For a deliberate source-edit/stale
 regeneration test, set `COMPRESSION_FIXTURE_EDIT_SOURCE_ON_RENAME=1`; only this
 fixture then routes Rename text to the edited transcript.

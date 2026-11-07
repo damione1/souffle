@@ -10,7 +10,7 @@ export component CompactTranscriptSection inherits VerticalLayout {
     vertical-stretch: 0;
     HorizontalLayout {
         spacing: 8px;
-        AppText { text: @tr("Version compacte"); typography: Typography.section; color: Theme.text-primary; vertical-alignment: center; horizontal-stretch: 1; }
+        AppText { text: @tr("Version compacte (expérimentale)"); typography: Typography.section; color: Theme.text-primary; vertical-alignment: center; horizontal-stretch: 1; }
         if !CompressionUi.busy: ThemedButton {
             text: CompressionUi.has-compact ? @tr("Régénérer") : @tr("Générer");
             kind: ThemedButtonKind.primary;

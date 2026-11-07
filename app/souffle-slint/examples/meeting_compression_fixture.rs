@@ -71,7 +71,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     show(&window, &state, "compression-fixture");
     // Same persisted command + after-commit installer used by the production settings coordinator.
-    for kind in 0..3 {
+    for kind in 0..4 {
         let state = state.clone();
         let weak = window.as_weak();
         let callback = move |value: i32| {
@@ -84,6 +84,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     0 => settings.summary_compression_enabled = value != 0,
                     1 => settings.compact_transcript_enabled = value != 0,
                     2 => settings.summary_compression_rate = value as f32 / 100.,
+                    3 => settings.meeting_summaries_enabled = value != 0,
                     _ => unreachable!(),
                 }
                 let outcome = souffle_lib::commands::save_settings_observed_in_lane(
@@ -108,6 +109,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .global::<CompressionUi>()
                 .on_alongside_changed(move |enabled| callback(i32::from(enabled))),
             2 => window.global::<CompressionUi>().on_rate_changed(callback),
+            3 => window
+                .global::<SummarizationUi>()
+                .on_enabled_changed(move |enabled| callback(i32::from(enabled))),
             _ => unreachable!(),
         }
     }

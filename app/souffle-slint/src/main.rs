@@ -4738,6 +4738,9 @@ fn wire_callbacks(
         let Some(window) = weak_sum.upgrade() else {
             return;
         };
+        if !window.global::<SummarizationUi>().get_enabled() {
+            return;
+        }
         let id = window.get_active_meeting_id().to_string();
         if id.is_empty() {
             return;
@@ -6446,6 +6449,11 @@ fn wire_callbacks(
     let settings_drafts_for_ollama_url = settings_drafts.clone();
     window.on_settings_ollama_url_changed(move |value| {
         let submitted_generation = summary_refresh_state_for_ollama_url.mark_url_edited();
+        // Keep the draft on the window when the experimental toggle moves the
+        // shared provider editor between summary and dictation settings.
+        if let Some(window) = weak.upgrade() {
+            window.set_settings_ollama_url(value.clone());
+        }
         let value = value.to_string();
         let weak = weak.clone();
         let handle = handle.clone();
@@ -7600,6 +7608,7 @@ fn main() {
     }
 
     let window = MainWindow::new().expect("failed to create Slint window");
+    compression_ui::populate_settings(&window, &initial_settings);
     typography::initialize(&window).expect("Inter renderer font resolution failed");
     action_guards::install(&window, &handle);
     settings_instrumentation::install(&window);

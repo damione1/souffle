@@ -1,5 +1,7 @@
 //! Native compression projection shared by the app and synthetic QA fixture.
-use crate::{CompactJobPhase, CompactLine, CompressionModelPhase, CompressionUi, MainWindow};
+use crate::{
+    CompactJobPhase, CompactLine, CompressionModelPhase, CompressionUi, MainWindow, SummarizationUi,
+};
 use slint::ComponentHandle;
 use souffle_lib::{
     models::compression::ModelStatus,
@@ -31,6 +33,9 @@ fn job_phase(status: &CompactJobStatus) -> CompactJobPhase {
     }
 }
 pub fn populate_settings(window: &MainWindow, settings: &AppSettings) {
+    window
+        .global::<SummarizationUi>()
+        .set_enabled(settings.meeting_summaries_enabled);
     let ui = window.global::<CompressionUi>();
     let options = SettingsOptions::current();
     ui.set_summary_enabled(settings.summary_compression_enabled);
@@ -275,7 +280,12 @@ pub fn install(window: &MainWindow, state: Arc<AppState>) -> slint::Timer {
         },
     );
     let download_state = state.clone();
+    let weak = window.as_weak();
     window.global::<CompressionUi>().on_download(move || {
+        let Some(w) = weak.upgrade() else { return };
+        if !w.global::<SummarizationUi>().get_enabled() {
+            return;
+        }
         let service = download_state.compression.clone();
         let state = Arc::downgrade(&download_state);
         souffle_lib::async_runtime::spawn(async move {
@@ -297,6 +307,9 @@ pub fn install(window: &MainWindow, state: Arc<AppState>) -> slint::Timer {
     let weak = window.as_weak();
     window.global::<CompressionUi>().on_generate(move || {
         let Some(w) = weak.upgrade() else { return };
+        if !w.global::<SummarizationUi>().get_enabled() {
+            return;
+        }
         let id = w.get_active_meeting_id().to_string();
         if id.is_empty() {
             return;

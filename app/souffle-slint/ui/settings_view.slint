@@ -1,4 +1,6 @@
 import { CompressionSection } from "components/settings/compression_section.slint";
+import { SummarizationSection } from "components/settings/summarization_section.slint";
+import { SummarizationUi } from "summarization.slint";
 import { AppText, AppTextInput, Typography, TypographyStyle } from "@typography";
 import { AutostartSection } from "components/settings/autostart_section.slint";
 import { PermissionsSection } from "components/settings/permissions_section.slint";
@@ -508,7 +510,9 @@ export component SettingsView inherits Rectangle {
                     height: parent.height;
                     active: root.tab == SettingsTab.ai;
 
-                        IntelligenceSection {
+                        SummarizationSection { }
+
+                        if SummarizationUi.enabled: IntelligenceSection {
                             summary-provider: root.summary-provider;
                             apple-intelligence-available: root.apple-intelligence-available;
                             apple-intelligence-reason: root.apple-intelligence-reason;
@@ -535,7 +539,24 @@ export component SettingsView inherits Rectangle {
                             open-apple-intelligence-settings-requested => { root.open-apple-intelligence-settings-requested(); }
                         }
 
-                        CompressionSection { }
+                        if SummarizationUi.enabled: CompressionSection { }
+
+                        if SummarizationUi.enabled: SummaryTemplatesSection {
+                            template-ids: root.summary-template-ids;
+                            template-labels: root.summary-template-labels;
+                            default-template-label: root.default-summary-template-label;
+                            editing-template-label: root.editing-summary-template-label;
+                            editing-is-builtin: root.editing-summary-template-is-builtin;
+                            editing-name <=> root.editing-summary-template-name;
+                            editing-prompt <=> root.editing-summary-template-prompt;
+                            new-template-draft <=> root.new-summary-template-draft;
+                            default-changed(value) => { root.summary-template-default-changed(value); }
+                            edit-target-changed(value) => { root.summary-template-edit-target-changed(value); }
+                            delete-requested => { root.summary-template-delete-requested(); }
+                            name-changed(value) => { root.summary-template-name-changed(value); }
+                            prompt-changed(value) => { root.summary-template-prompt-changed(value); }
+                            add-requested(name) => { root.summary-template-add-requested(name); }
+                        }
 
                         DictationPolishSection {
                             enabled: root.dictation-polish-enabled;
@@ -569,21 +590,32 @@ export component SettingsView inherits Rectangle {
                             test-requested => { root.app-branch-test-requested(); }
                         }
 
-                        SummaryTemplatesSection {
-                            template-ids: root.summary-template-ids;
-                            template-labels: root.summary-template-labels;
-                            default-template-label: root.default-summary-template-label;
-                            editing-template-label: root.editing-summary-template-label;
-                            editing-is-builtin: root.editing-summary-template-is-builtin;
-                            editing-name <=> root.editing-summary-template-name;
-                            editing-prompt <=> root.editing-summary-template-prompt;
-                            new-template-draft <=> root.new-summary-template-draft;
-                            default-changed(value) => { root.summary-template-default-changed(value); }
-                            edit-target-changed(value) => { root.summary-template-edit-target-changed(value); }
-                            delete-requested => { root.summary-template-delete-requested(); }
-                            name-changed(value) => { root.summary-template-name-changed(value); }
-                            prompt-changed(value) => { root.summary-template-prompt-changed(value); }
-                            add-requested(name) => { root.summary-template-add-requested(name); }
+                        if !SummarizationUi.enabled && root.dictation-polish-enabled: IntelligenceSection {
+                            for-dictation: true;
+                            summary-provider: root.summary-provider;
+                            apple-intelligence-available: root.apple-intelligence-available;
+                            apple-intelligence-reason: root.apple-intelligence-reason;
+                            ollama-url: root.ollama-url;
+                            ollama-available: root.ollama-available;
+                            ollama-checking: root.ollama-checking;
+                            summary-model-count: root.summary-model-count;
+                            model-picker-visible: root.summary-model-picker-visible;
+                            model-ids: root.summary-model-ids;
+                            model-labels: root.summary-model-labels;
+                            selected-model-label: root.selected-summary-model-label;
+                            show-ollama-setup: root.show-ollama-setup;
+                            ollama-pulling: root.ollama-pulling;
+                            ollama-pull-status: root.ollama-pull-status;
+                            ollama-pull-error: root.ollama-pull-error;
+                            recommended-model: root.recommended-ollama-model;
+                            refresh-error: root.summary-refresh-error;
+                            unusable-message: root.summary-unusable-message;
+                            summary-provider-changed(value) => { root.summary-provider-changed(value); }
+                            ollama-url-changed(value) => { root.ollama-url-changed(value); }
+                            ollama-model-changed(value) => { root.ollama-model-changed(value); }
+                            retry-requested => { root.summary-providers-retry-requested(); }
+                            download-recommended-requested => { root.download-recommended-ollama-model-requested(); }
+                            open-apple-intelligence-settings-requested => { root.open-apple-intelligence-settings-requested(); }
                         }
                 }
 

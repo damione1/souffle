@@ -239,6 +239,10 @@ pub struct AppSettings {
     /// applies when this resolves to Ollama.
     pub summary_provider: SummaryProviderChoice,
     pub ollama_model: String,
+    /// Opt-in for experimental meeting summarization and compaction in the app.
+    /// Dictation polish and explicit CLI/read-only MCP access stay independent.
+    #[serde(default)]
+    pub meeting_summaries_enabled: bool,
     #[serde(default)]
     pub summary_compression_enabled: bool,
     #[serde(default)]
@@ -430,6 +434,7 @@ impl Default for AppSettings {
             ollama_url: OLLAMA_DEFAULT_URL.to_string(),
             summary_provider: SummaryProviderChoice::default(),
             ollama_model: String::new(),
+            meeting_summaries_enabled: false,
             summary_compression_enabled: false,
             compact_transcript_enabled: false,
             summary_compression_rate: default_compression_rate(),
@@ -536,6 +541,8 @@ impl AppSettings {
             settings.ollama_model = ollama_model;
         }
         let stored_provider = read_json_setting::<SummaryProviderChoice>(db, SUMMARY_PROVIDER_KEY)?;
+        settings.meeting_summaries_enabled =
+            read_json_setting(db, "meeting_summaries_enabled")?.unwrap_or(false);
         settings.summary_compression_enabled =
             read_json_setting(db, "summary_compression_enabled")?.unwrap_or(false);
         settings.compact_transcript_enabled =
@@ -1069,6 +1076,11 @@ impl AppSettings {
                 &normalized.paste_method,
             )?;
             write_json_setting_in_transaction(transaction, OLLAMA_URL_KEY, &normalized.ollama_url)?;
+            write_json_setting_in_transaction(
+                transaction,
+                "meeting_summaries_enabled",
+                &normalized.meeting_summaries_enabled,
+            )?;
             write_json_setting_in_transaction(
                 transaction,
                 "summary_compression_enabled",
@@ -1625,6 +1637,7 @@ mod tests {
             ollama_url: "http://example.test:11434".into(),
             summary_provider: SummaryProviderChoice::Ollama,
             ollama_model: "qwen2.5".into(),
+            meeting_summaries_enabled: true,
             summary_compression_enabled: false,
             compact_transcript_enabled: false,
             summary_compression_rate: super::default_compression_rate(),
@@ -2585,7 +2598,16 @@ mod compression_tests {
     fn compression_defaults_bounds_and_roundtrip() {
         let (db, _dir) = crate::test_helpers::fixtures::test_db();
         let mut s = AppSettings::default();
-        assert!(!s.summary_compression_enabled && !s.compact_transcript_enabled);
+        assert!(
+            !s.meeting_summaries_enabled
+                && !s.summary_compression_enabled
+                && !s.compact_transcript_enabled
+        );
+        assert!(
+            !AppSettings::load_read_only(&db)
+                .unwrap()
+                .meeting_summaries_enabled
+        );
         assert_eq!(s.summary_compression_rate, 0.65);
         assert_eq!(
             AppSettings::load_read_only(&db)
@@ -2593,13 +2615,24 @@ mod compression_tests {
                 .summary_compression_rate,
             0.65
         );
+        s.meeting_summaries_enabled = true;
         s.summary_compression_enabled = true;
         s.compact_transcript_enabled = true;
         s.summary_compression_rate = 0.7;
         s.save(&db).unwrap();
         let loaded = AppSettings::load_read_only(&db).unwrap();
-        assert!(loaded.summary_compression_enabled && loaded.compact_transcript_enabled);
+        assert!(
+            loaded.meeting_summaries_enabled
+                && loaded.summary_compression_enabled
+                && loaded.compact_transcript_enabled
+        );
         assert_eq!(loaded.summary_compression_rate, 0.7);
+        s.meeting_summaries_enabled = false;
+        s.save(&db).unwrap();
+        let disabled = AppSettings::load_read_only(&db).unwrap();
+        assert!(!disabled.meeting_summaries_enabled);
+        assert!(disabled.summary_compression_enabled && disabled.compact_transcript_enabled);
+        assert_eq!(disabled.summary_compression_rate, 0.7);
         s.summary_compression_rate = f32::NAN;
         assert_eq!(
             s.sanitize_for_save().unwrap().summary_compression_rate,

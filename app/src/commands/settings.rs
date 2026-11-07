@@ -139,10 +139,11 @@ fn save_settings_in_lane(
     // This boundary covers the real audio start while the machine is Ready.
     // Native/window effects remain outside both locks.
     let previous = AppSettings::load_read_only(&state.db).ok();
-    let enable = previous.as_ref().is_some_and(|previous| {
-        (!previous.summary_compression_enabled && settings.summary_compression_enabled)
-            || (!previous.compact_transcript_enabled && settings.compact_transcript_enabled)
-    });
+    let enable = compression_install_requested(previous.as_ref(), &settings);
+    let disable_summaries = previous
+        .as_ref()
+        .is_some_and(|previous| previous.meeting_summaries_enabled)
+        && !settings.meeting_summaries_enabled;
     let result = save_settings_with_effects(
         &state.db,
         &state.machine,
@@ -154,6 +155,9 @@ fn save_settings_in_lane(
         .as_ref()
         .map(|_| true)
         .unwrap_or_else(|error| error.committed());
+    if committed && disable_summaries {
+        state.compression.cancel_install();
+    }
     if committed && enable {
         let service = state.compression.clone();
         let state = Arc::downgrade(&state);
@@ -162,6 +166,18 @@ fn save_settings_in_lane(
         });
     }
     result
+}
+
+/// Remember subordinate preferences while opted out, but only an explicit
+/// enabled change can authorize an installation. Startup never calls this.
+fn compression_install_requested(previous: Option<&AppSettings>, next: &AppSettings) -> bool {
+    next.meeting_summaries_enabled
+        && (next.summary_compression_enabled || next.compact_transcript_enabled)
+        && previous.is_some_and(|previous| {
+            !previous.meeting_summaries_enabled
+                || (!previous.summary_compression_enabled && next.summary_compression_enabled)
+                || (!previous.compact_transcript_enabled && next.compact_transcript_enabled)
+        })
 }
 
 fn save_settings_with_effects(
@@ -381,6 +397,43 @@ mod tests {
     use crate::settings::{AppSettings, MeetingTranscriptionLanguage, ShortcutSettings, Theme};
     use crate::state_machine::AppStateMachine;
     use crate::test_helpers::fixtures::test_db;
+
+    #[test]
+    fn summarization_opt_in_controls_compression_installation() {
+        let mut previous = AppSettings::default();
+        let mut next = previous.clone();
+        next.summary_compression_enabled = true;
+        assert!(!super::compression_install_requested(
+            Some(&previous),
+            &next
+        ));
+        previous = next.clone();
+        next.meeting_summaries_enabled = true;
+        assert!(super::compression_install_requested(Some(&previous), &next));
+        previous = next.clone();
+        // Unrelated saves and startup snapshots must not authorize downloads.
+        assert!(!super::compression_install_requested(
+            Some(&previous),
+            &next
+        ));
+        assert!(!super::compression_install_requested(None, &next));
+        next.meeting_summaries_enabled = false;
+        assert!(!super::compression_install_requested(
+            Some(&previous),
+            &next
+        ));
+        next.summary_compression_enabled = false;
+        next.compact_transcript_enabled = false;
+        previous = next.clone();
+        next.meeting_summaries_enabled = true;
+        assert!(!super::compression_install_requested(
+            Some(&previous),
+            &next
+        ));
+        previous = next.clone();
+        next.compact_transcript_enabled = true;
+        assert!(super::compression_install_requested(Some(&previous), &next));
+    }
 
     fn recording_machine() -> AppStateMachine {
         AppStateMachine::RecordingDictation {

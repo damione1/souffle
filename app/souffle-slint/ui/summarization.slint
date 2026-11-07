@@ -1,0 +1,6 @@
+// Persisted opt-in for experimental meeting generation. Dictation polish and
+// read-only access to existing meeting data are independent of this switch.
+export global SummarizationUi {
+    in property <bool> enabled;
+    callback enabled-changed(bool);
+}

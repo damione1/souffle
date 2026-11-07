@@ -90,7 +90,7 @@ export component SummarySection inherits VerticalLayout {
                 alignment: center;
 
                 AppText {
-                    text: @tr("Générer le résumé");
+                    text: @tr("Générer le résumé (expérimental)");
                     typography: Typography.body-emphasis;
 
                     color: Theme.text-primary;
@@ -144,7 +144,7 @@ export component SummarySection inherits VerticalLayout {
                 background: gen-area.pressed ? Theme.accent.darker(0.2) : gen-area.has-hover ? Theme.accent.darker(0.1) : Theme.accent;
 
                 accessible-role: button;
-                accessible-label: @tr("Générer le résumé");
+                accessible-label: @tr("Générer le résumé (expérimental)");
                 accessible-action-default => { root.generate-requested(); }
 
                 forward-focus: gen-focus;

@@ -16,6 +16,7 @@ import { StatusIndicator } from "status_indicator.slint";
 // follow-up pass. Summary models keep their open-set ids paired with labels
 // through the picker so duplicate labels remain distinct.
 export component IntelligenceSection inherits VerticalLayout {
+    in property <bool> for-dictation: false;
     in property <SummaryProvider> summary-provider;
     in property <bool> apple-intelligence-available;
     in property <AppleIntelligenceUnavailableReason> apple-intelligence-reason;
@@ -64,15 +65,15 @@ export component IntelligenceSection inherits VerticalLayout {
     alignment: start;
 
     SettingsGroup {
-        title: @tr("RÉSUMÉS");
+        title: root.for-dictation ? @tr("FOURNISSEUR IA DE LA DICTÉE") : @tr("RÉSUMÉS (EXPÉRIMENTAUX)");
 
     SettingsField {
         show-divider: false;
         label: @tr("Moteur");
-        description: @tr("Le moteur qui rédige les résumés et nettoie la dictée.");
+        description: root.for-dictation ? @tr("Le moteur qui nettoie la dictée.") : @tr("Le moteur qui rédige les résumés et nettoie la dictée.");
 
         ThemedComboBox {
-            control-label: @tr("Moteur de résumé");
+            control-label: root.for-dictation ? @tr("Moteur de dictée IA") : @tr("Moteur de résumé");
             model: [
                 root.provider-label(SummaryProvider.auto),
                 root.provider-label(SummaryProvider.apple-intelligence),
@@ -203,10 +204,10 @@ export component IntelligenceSection inherits VerticalLayout {
     }
 
     if root.model-picker-visible: SettingsField {
-        label: @tr("Modèle de résumé");
+        label: root.for-dictation ? @tr("Modèle de dictée IA") : @tr("Modèle de résumé");
 
         ThemedComboBox {
-            control-label: @tr("Modèle de résumé");
+            control-label: root.for-dictation ? @tr("Modèle de dictée IA") : @tr("Modèle de résumé");
             model: root.model-labels;
             option-values: root.model-ids;
             current-value: root.selected-model-label;

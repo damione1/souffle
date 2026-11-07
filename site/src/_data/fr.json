@@ -2,10 +2,10 @@
   "htmlLang": "fr",
   "meta": {
     "title": "Soufflé : reconnaissance vocale privée pour macOS",
-    "description": "Dictée et transcription de réunions sur Mac, gratuites et open source. Modèles vocaux locaux, français et anglais, résumés sans service cloud imposé.",
+    "description": "Dictée et transcription de réunions sur Mac, gratuites et open source. Modèles vocaux locaux, français et anglais, résumés locaux expérimentaux.",
     "docsTitle": "Documentation Soufflé : guides pour Mac",
     "imageAlt": "Soufflé sur macOS : une fenêtre de réunion en direct avec sa transcription, à côté du slogan « Votre voix ne quitte jamais votre Mac. »",
-    "ogDescription": "Dictée et transcription de réunions sur Mac, gratuites et open source. Modèles vocaux locaux, français et anglais, résumés sans service cloud imposé.",
+    "ogDescription": "Dictée et transcription de réunions sur Mac, gratuites et open source. Modèles vocaux locaux, français et anglais, résumés locaux expérimentaux.",
     "docsDescription": "Installez Soufflé, configurez la dictée et les réunions sur Mac, choisissez un modèle local et retrouvez les guides de confidentialité et de dépannage."
   },
   "nav": {
@@ -27,7 +27,7 @@
       "Votre voix ne quitte",
       "jamais votre Mac."
     ],
-    "sub": "Soufflé dicte dans vos apps, transcrit les réunions et prépare leurs résumés sur votre Mac. Gratuit et open source, sans compte ni clé d'API. Le texte reste local avec les réglages par défaut.",
+    "sub": "Soufflé dicte dans vos apps et transcrit les réunions sur votre Mac, avec des résumés expérimentaux facultatifs. Gratuit et open source, sans compte ni clé d'API. Le texte reste local avec les réglages par défaut.",
     "cta": "Télécharger sur GitHub",
     "note": "Gratuit et open source",
     "caption": "Une transcription de réunion en direct : votre voix d'un côté, celle des autres de l'autre. Sans pilote audio virtuel, sans rien envoyer.",
@@ -71,16 +71,16 @@
     },
     {
       "id": "summaries",
-      "badge": "Résumés",
+      "badge": "Expérimental",
       "tone": "accent",
       "icon": "bulb",
       "mock": "outcomes",
       "flip": false,
-      "title": "Des résumés de réunion sur votre Mac.",
-      "body": "Décisions, tâches avec responsables, et les questions restées sans réponse : le tout extrait en même temps que le résumé, par Apple Intelligence ou par un Ollama local quand votre Mac ne l'offre pas. La transcription, elle, n'a besoin ni de l'un ni de l'autre.",
+      "title": "Résumés locaux et compaction, en expérimentation.",
+      "body": "Une synthèse fidèle d'une longue réunion reste difficile avec un petit modèle local. Soufflé expérimente Apple Intelligence, Ollama et la compaction LLMLingua-2 pour explorer ce qui fonctionne sur différents Mac Apple Silicon. La priorité reste une transcription exploitable ; les résumés ne sont pas présentés comme une fonction validée.",
       "bullets": [
-        "Notes modifiables et participants du calendrier, à côté de la transcription",
-        "Rien à configurer quand Apple Intelligence est disponible"
+        "Résumés et compaction désactivés par défaut, à activer dans Paramètres → IA",
+        "Conservation cible de 65 % du texte avant les étapes intermédiaires des longs résumés"
       ]
     }
   ],
@@ -601,28 +601,46 @@
             "p": "L'enregistrement audio est inactif par défaut. Activez-le dans Paramètres → Système → Données et le son de la réunion est conservé en fichiers Opus compacts, pendant 7 jours, 30 jours ou jusqu'à ce que vous les effaciez, rejouables en cliquant n'importe quelle ligne de la transcription. Avec l'audio système, le fichier est en stéréo, vous à gauche et les autres à droite, pour environ 1,5 fois le disque d'un fichier mono."
           },
           {
-            "p": "Depuis la page d'une réunion, vous pouvez copier le résumé ou la transcription, exporter la réunion, ou la supprimer. Les modèles de résumé se modifient dans Paramètres → IA."
+            "p": "Depuis la page d'une réunion, vous pouvez copier la transcription, exporter la réunion ou la supprimer. Les actions de résumé et de compaction apparaissent après activation des résumés expérimentaux dans Paramètres → IA → Résumés de réunion."
           }
         ]
       },
       {
         "id": "summaries",
-        "h": "Résumés",
+        "h": "Résumés et compaction — expérimental",
         "blocks": [
           {
-            "p": "Les résumés sont générés en local : par Apple Intelligence sur macOS 26 ou plus récent, sans rien à installer, et sinon par un Ollama local. À côté du résumé rédigé, Soufflé extrait les décisions, les tâches avec leur responsable, et les questions restées ouvertes."
+            "p": "<strong>Cette fonctionnalité est expérimentale et désactivée par défaut.</strong> Dans Paramètres → IA, activez <strong>Résumés de réunion</strong> (<strong>Summarization</strong> dans l'interface anglaise) pour afficher le choix du fournisseur et du modèle, les modèles de consignes, les options de compaction et les actions de génération dans les réunions. Désactiver cet interrupteur masque ces éléments tout en conservant vos réglages et les résultats déjà enregistrés. La transcription, les exports et la lecture par MCP restent disponibles. La reformulation des dictées conserve sa configuration indépendante ; son fournisseur IA reste accessible si elle est activée."
           },
           {
-            "p": "Installez et démarrez Ollama, puis téléchargez un modèle :"
+            "p": "Transcrire correctement une réunion en local est déjà exigeant. Résumer fidèlement une longue transcription avec un modèle local l'est encore davantage : il faut conserver les décisions, leurs conditions, les négations, les responsables et les échéances. La priorité de Soufflé est de fournir une transcription de qualité sur les Mac Apple Silicon pris en charge, y compris les configurations modestes, plutôt que de supposer que chacun dispose d'une grosse machine."
+          },
+          {
+            "p": "Une réunion d'environ 15 minutes constitue généralement un point de départ plus accessible pour les essais de résumé. Ce n'est ni une limite automatique ni une garantie : la densité des échanges, la langue et le modèle comptent aussi. Au-delà, le volume du texte et les liens à préserver rendent la synthèse plus difficile. Avec 48 Go de mémoire unifiée ou davantage, un Mac peut faire tourner des modèles plus volumineux et obtenir de meilleurs résultats ; cette possibilité ne doit pas devenir un prérequis pour utiliser Soufflé."
+          },
+          {
+            "p": "Le modèle local d'Apple Intelligence dispose d'une <a href=\"https://developer.apple.com/documentation/foundationmodels/managing-the-context-window\">fenêtre de 4 096 tokens par session</a>, partagée entre les instructions, l'entrée et la réponse. On ne peut donc pas lui confier une longue transcription entière en une seule passe. Les modèles autour de 7–8B accessibles sur davantage de Mac ont des fenêtres variables : le nombre de paramètres ne fixe pas à lui seul le contexte. Même avec une grande fenêtre annoncée, la mémoire, le temps de calcul et la fidélité sur un long texte restent des contraintes. Soufflé utilise des étapes intermédiaires pour les longues sources, mais ce découpage peut lui aussi perdre de l'information."
+          },
+          {
+            "p": "<strong>Expérimentation LLMLingua-2.</strong> Le modèle Microsoft <code>llmlingua-2-bert-base-multilingual-cased-meetingbank</code> classe les mots pour retenir des fragments de la transcription originale. Il raccourcit l'entrée ; il ne produit pas lui-même un résumé rédigé et n'augmente pas la fenêtre physique du modèle de résumé. Le réglage par défaut conserve une cible de <strong>65 % du texte</strong>, soit environ un tiers de mots en moins. Des éléments protégés peuvent faire dépasser cette cible. Sous 65 %, l'interface affiche « Une valeur basse omet des mots. ». Une compaction peut néanmoins perdre des détails ou des relations : gardez la transcription comme référence."
+          },
+          {
+            "p": "Deux options sont indépendantes : <strong>compresser les longues transcriptions avant le résumé</strong>, pour réduire l'entrée des étapes intermédiaires, et <strong>créer aussi une version compacte lors du résumé</strong>, pour conserver un texte consultable à côté de la source. Les résumés courts utilisent le texte original. Vous pouvez aussi générer ou régénérer la version compacte depuis une réunion, sans lancer de résumé. Le premier téléchargement représente environ 713 Mo, puis les poids sont préparés localement en fp16 d'environ 355 Mo. Après installation, ce traitement est local et hors ligne. Modifier la source marque le compact comme obsolète."
+          },
+          {
+            "p": "Les résumés expérimentaux utilisent Apple Intelligence, lorsqu'il est disponible sur macOS 26 ou plus récent, ou Ollama. Pour essayer Ollama, installez le serveur et téléchargez un modèle de conversation ; sa disponibilité ne garantit pas la qualité des longs résumés :"
           },
           {
             "code": "brew install ollama\nbrew services start ollama\nollama pull qwen2.5:7b"
           },
           {
-            "p": "Ensuite, dans Paramètres → IA, laissez le serveur sur <code>http://localhost:11434</code> et choisissez le modèle. N'importe quel modèle de conversation généraliste fait l'affaire ; <code>qwen2.5:7b</code> est celui que Soufflé recommande. C'est le même fournisseur qui sert au polish de la dictée."
+            "p": "Une fois Résumés de réunion activé dans Paramètres → IA, laissez le serveur sur <code>http://localhost:11434</code> et choisissez votre modèle. <code>qwen2.5:7b</code> est une option de départ proposée par l'app, pas une validation de qualité sur les réunions longues. Vous pouvez modifier les modèles de consignes et comparer les résultats à la transcription. Le fournisseur est partagé avec la reformulation des dictées, qui reste utilisable sans activer les résumés."
           },
           {
             "p": "Avec Apple Intelligence ou Ollama sur <code>localhost</code>, le texte est traité sur votre Mac. Si vous remplacez l'adresse par un serveur Ollama distant, Soufflé lui envoie le texte nécessaire au résumé ou à la reformulation. Choisissez ce serveur en connaissance de cause."
+          },
+          {
+            "p": "<strong>Votre LLM cloud reste une autre voie.</strong> Le serveur MCP local de Soufflé permet à un client compatible de lire les transcriptions originales, même lorsque les résumés intégrés sont désactivés. Vous pouvez confier cette source à Claude, ChatGPT ou un autre LLM cloud, avec la connexion MCP adaptée au client, pour obtenir une synthèse plus aboutie et alimenter votre second cerveau. Le serveur fourni par Soufflé est local, en lecture seule et utilise stdio ; la configuration dépend du client, et tous les clients n'acceptent pas directement ce transport. Soufflé ne fournit ni intégration directe à ces services ni synchronisation cloud automatique. Si vous choisissez ce flux de travail, le client externe transmet le texte au fournisseur choisi et gère vos notes selon ses propres réglages. Voir <a href=\"/fr/docs/privacy-and-data/#mcp\">la configuration MCP</a>."
           }
         ]
       },
@@ -727,8 +745,8 @@
                 "Inactif tant que vous ne l'activez pas. Liste les événements du jour des calendriers que vous gardez cochés, vous rappelle un événement quelques minutes avant (2 par défaut), et vous notifie quand l'un commence pendant qu'un appel utilise le micro."
               ],
               [
-                "Résumés<br><span class=\"docs-tab\">IA</span>",
-                "Fournisseur, serveur et modèle Ollama, et les modèles de résumé."
+                "Résumés de réunion — expérimental<br><span class=\"docs-tab\">IA</span>",
+                "Interrupteur désactivé par défaut. Affiche le fournisseur, le modèle Ollama, les consignes de résumé et les options de compaction. La reformulation des dictées reste indépendante."
               ],
               [
                 "Lancer à l'ouverture de session<br><span class=\"docs-tab\">Système</span>",
@@ -898,7 +916,7 @@
             "p": "La commande lit la même base et les mêmes modèles téléchargés que l'app : ce qui est déjà installé est réutilisé."
           },
           {
-            "code": "souffle --compact-meeting MEETING_ID --compression-rate 0.5 --json\nsouffle --summarize-meeting MEETING_ID --summary-compression on --summary-model qwen2.5:7b --json\n# --database /path/to/fixture.db"
+            "code": "souffle --compact-meeting MEETING_ID --compression-rate 0.65 --json\nsouffle --summarize-meeting MEETING_ID --summary-compression on --summary-model qwen2.5:7b --json\n# --database /path/to/fixture.db"
           }
         ]
       },
@@ -1010,7 +1028,7 @@
     "quickStart": "Pour commencer",
     "nextSteps": "Pour aller plus loin",
     "updated": "Mis à jour le",
-    "updatedDate": "27 octobre 2026",
+    "updatedDate": "6 novembre 2026",
     "readGuide": "Guide :"
   },
   "privacy": {
