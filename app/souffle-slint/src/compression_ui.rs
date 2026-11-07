@@ -38,6 +38,7 @@ pub fn populate_settings(window: &MainWindow, settings: &AppSettings) {
     ui.set_rate((settings.summary_compression_rate * 100.).round() as i32);
     ui.set_rate_min((options.compression_rate_min * 100.).round() as i32);
     ui.set_rate_max((options.compression_rate_max * 100.).round() as i32);
+    ui.set_rate_default((options.compression_rate_default * 100.).round() as i32);
 }
 /// Associate a compact turn with its exact original recording session. Edited,
 /// stale, cross-session or unverified source spans deliberately have no seek target.

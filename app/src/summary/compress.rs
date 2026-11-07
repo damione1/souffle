@@ -54,7 +54,7 @@ pub struct CompressionRate(f32);
 impl CompressionRate {
     pub const MIN: f32 = 0.3;
     pub const MAX: f32 = 0.9;
-    pub const DEFAULT: f32 = 0.5;
+    pub const DEFAULT: f32 = 0.65;
     /// Accept only finite fractions in MIN..=MAX; settings normalize invalid persisted values.
     pub fn new(rate: f32) -> Result<Self, CompressionError> {
         if rate.is_finite() && (Self::MIN..=Self::MAX).contains(&rate) {

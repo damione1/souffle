@@ -52,5 +52,5 @@ export component CompactTranscriptSection inherits VerticalLayout {
         alignment: start;
         ThemedButton { text: CompressionUi.expanded ? @tr("Réduire l'aperçu") : @tr("Développer l'aperçu"); compact: true; clicked => { CompressionUi.expand(); } }
     }
-    AppText { text: @tr("Extraction avec perte. Consultez la transcription pour les citations exactes."); typography: Typography.hint; color: Theme.text-muted; wrap: word-wrap; }
+    if CompressionUi.has-compact && CompressionUi.compact-rate < CompressionUi.rate-default: AppText { text: @tr("Une valeur basse omet des mots."); typography: Typography.hint; color: Theme.text-muted; wrap: word-wrap; }
 }

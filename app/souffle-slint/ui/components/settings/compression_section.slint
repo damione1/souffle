@@ -23,7 +23,7 @@ export component CompressionSection inherits VerticalLayout {
         }
         SettingsField {
             label: @tr("Texte à conserver");
-            description: @tr("Une valeur plus basse omet davantage de mots. Les noms, nombres et négations protégés peuvent augmenter ce pourcentage.");
+            description: CompressionUi.rate < CompressionUi.rate-default ? @tr("Une valeur basse omet des mots.") : "";
             HorizontalLayout {
                 horizontal-stretch: 0;
                 spacing: 10px;
@@ -35,7 +35,7 @@ export component CompressionSection inherits VerticalLayout {
             padding: Theme.settings-inset;
             spacing: 8px;
             CompressionStatus { }
-            AppText { text: @tr("LLMLingua-2 de Microsoft, local et hors ligne après installation. La version compacte est une extraction avec perte : utilisez la transcription pour les citations exactes."); typography: Typography.secondary; color: Theme.text-muted; wrap: word-wrap; }
+            AppText { text: @tr("LLMLingua-2 de Microsoft, local et hors ligne après installation."); typography: Typography.secondary; color: Theme.text-muted; wrap: word-wrap; }
         }
     }
 }

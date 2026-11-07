@@ -3361,8 +3361,8 @@ msgid "Texte à conserver"
 msgstr "Texte à conserver"
 
 msgctxt "CompressionSection"
-msgid "Une valeur plus basse omet davantage de mots. Les noms, nombres et négations protégés peuvent augmenter ce pourcentage."
-msgstr "Une valeur plus basse omet davantage de mots. Les noms, nombres et négations protégés peuvent augmenter ce pourcentage."
+msgid "Une valeur basse omet des mots."
+msgstr "Une valeur basse omet des mots."
 
 msgctxt "CompressionSection"
 msgid "Pourcentage de texte à conserver"
@@ -3373,8 +3373,8 @@ msgid "{} %"
 msgstr "{} %"
 
 msgctxt "CompressionSection"
-msgid "LLMLingua-2 de Microsoft, local et hors ligne après installation. La version compacte est une extraction avec perte : utilisez la transcription pour les citations exactes."
-msgstr "LLMLingua-2 de Microsoft, local et hors ligne après installation. La version compacte est une extraction avec perte : utilisez la transcription pour les citations exactes."
+msgid "LLMLingua-2 de Microsoft, local et hors ligne après installation."
+msgstr "LLMLingua-2 de Microsoft, local et hors ligne après installation."
 
 msgctxt "CompactTranscriptSection"
 msgid "Version compacte"
@@ -3445,8 +3445,8 @@ msgid "Développer l'aperçu"
 msgstr "Développer l'aperçu"
 
 msgctxt "CompactTranscriptSection"
-msgid "Extraction avec perte. Consultez la transcription pour les citations exactes."
-msgstr "Extraction avec perte. Consultez la transcription pour les citations exactes."
+msgid "Une valeur basse omet des mots."
+msgstr "Une valeur basse omet des mots."
 
 msgctxt "CompressionStatus"
 msgid "Modèle de compression non téléchargé ({})"

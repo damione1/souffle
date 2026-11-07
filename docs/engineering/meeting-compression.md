@@ -9,6 +9,9 @@ wait for a model download. A successful compact is saved before summary calls,
 even if the later summary fails.
 
 The compact is **lossy extraction**, not a summary or a verbatim citation source.
+The default target retains **65%** of the text. Settings show “A low value omits
+words” only below that default; the compact preview uses the saved compact's
+target rate for the same warning, independently of the current settings.
 The retained percentage is a target: protected participant names, numbers and
 French negations may increase it. Edited transcript text takes precedence over
 segments, including plain edited prose. Original timestamp/speaker prefixes and

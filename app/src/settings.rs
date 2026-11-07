@@ -2586,7 +2586,13 @@ mod compression_tests {
         let (db, _dir) = crate::test_helpers::fixtures::test_db();
         let mut s = AppSettings::default();
         assert!(!s.summary_compression_enabled && !s.compact_transcript_enabled);
-        assert_eq!(s.summary_compression_rate, 0.5);
+        assert_eq!(s.summary_compression_rate, 0.65);
+        assert_eq!(
+            AppSettings::load_read_only(&db)
+                .unwrap()
+                .summary_compression_rate,
+            0.65
+        );
         s.summary_compression_enabled = true;
         s.compact_transcript_enabled = true;
         s.summary_compression_rate = 0.7;
@@ -2595,6 +2601,9 @@ mod compression_tests {
         assert!(loaded.summary_compression_enabled && loaded.compact_transcript_enabled);
         assert_eq!(loaded.summary_compression_rate, 0.7);
         s.summary_compression_rate = f32::NAN;
-        assert_eq!(s.sanitize_for_save().unwrap().summary_compression_rate, 0.5);
+        assert_eq!(
+            s.sanitize_for_save().unwrap().summary_compression_rate,
+            0.65
+        );
     }
 }
