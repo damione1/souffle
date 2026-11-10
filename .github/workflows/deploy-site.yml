@@ -62,6 +62,9 @@ jobs:
       - name: Check the build produced a page
         run: test -s site/_site/index.html
 
+      - name: Validate contact Worker bundle
+        run: npx --yes wrangler@4.154.0 deploy --dry-run --config site/cloudflare/wrangler.toml
+
       - name: Deploy to Cloudflare Pages
         uses: cloudflare/wrangler-action@v3
         with:
@@ -71,10 +74,3 @@ jobs:
           # direct-upload project; without it the upload lands as a preview
           # and usesouffle.app keeps serving the previous build.
           command: pages deploy site/_site --project-name souffle --branch master
-
-      - name: Deploy contact Worker
-        uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: deploy --config site/cloudflare/wrangler.toml
