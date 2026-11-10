@@ -55,7 +55,7 @@ jobs:
         run: |
           test -n "$GA_MEASUREMENT_ID"
           npm ci
-          npm run build
+          npm test
 
       # A build that silently produced nothing would otherwise be published
       # over a working site as an empty directory.
@@ -71,3 +71,10 @@ jobs:
           # direct-upload project; without it the upload lands as a preview
           # and usesouffle.app keeps serving the previous build.
           command: pages deploy site/_site --project-name souffle --branch master
+
+      - name: Deploy contact Worker
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: deploy --config site/cloudflare/wrangler.toml

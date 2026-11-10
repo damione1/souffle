@@ -1,0 +1,80 @@
+{
+  "en": {
+    "eyebrow": "Get in touch",
+    "title": "Contact Soufflé",
+    "intro": "Have a question, feedback or a project to discuss? Send me a message here.",
+    "name": "Your name",
+    "email": "Your email",
+    "topic": "What would you like to discuss?",
+    "message": "Your message",
+    "topics": {
+      "project": "Project or collaboration",
+      "support": "Help and support",
+      "feedback": "Feedback",
+      "other": "Something else"
+    },
+    "messageHelp": "10–5,000 characters. Please leave out passwords, credentials and confidential source code.",
+    "privacy": "Your name, email and message are sent to the project author to answer your request. This form uses Cloudflare Turnstile to prevent spam.",
+    "submit": "Send message",
+    "sending": "Sending…",
+    "loading": "Preparing the form…",
+    "checking": "Complete the spam check before sending.",
+    "sent": "Your message has been sent. Thank you — I will reply by email.",
+    "challenge": "The spam check expired or could not be verified. Please complete it again.",
+    "unavailable": "The form is temporarily unavailable. Your text has been kept. Please try again later or use GitHub issues.",
+    "rate": "Too many attempts. Please wait a minute before trying again. Your text has been kept.",
+    "invalid": "Please check the highlighted fields.",
+    "tooLarge": "The message is too long. Please shorten it and try again.",
+    "fields": {
+      "name": "Enter your name (up to 100 characters).",
+      "email": "Enter a valid email address.",
+      "topic": "Choose a topic from the list.",
+      "message": "Write between 10 and 5,000 characters."
+    },
+    "fallback": "You can also open a GitHub issue.",
+    "noScript": "JavaScript is needed for the spam check. You can also open a GitHub issue.",
+    "asideTitle": "A useful starting point",
+    "asideText": "Share some context and what you would like to accomplish. For technical problems, include your operating system and version.",
+    "issues": "Found a reproducible bug?",
+    "issueLink": "Open a GitHub issue"
+  },
+  "fr": {
+    "eyebrow": "Parlons de votre projet",
+    "title": "Contacter Soufflé",
+    "intro": "Une question, un commentaire ou un projet à discuter ? Écrivez-moi ici.",
+    "name": "Votre nom",
+    "email": "Votre courriel",
+    "topic": "De quoi souhaitez-vous parler ?",
+    "message": "Votre message",
+    "topics": {
+      "project": "Projet ou collaboration",
+      "support": "Aide et assistance",
+      "feedback": "Commentaire",
+      "other": "Autre sujet"
+    },
+    "messageHelp": "10 à 5 000 caractères. Évitez les mots de passe, identifiants secrets et code source confidentiel.",
+    "privacy": "Votre nom, votre courriel et votre message sont transmis à l’auteur du projet pour répondre à votre demande. Ce formulaire utilise Cloudflare Turnstile contre le spam.",
+    "submit": "Envoyer le message",
+    "sending": "Envoi en cours…",
+    "loading": "Préparation du formulaire…",
+    "checking": "Terminez la vérification antispam avant l’envoi.",
+    "sent": "Votre message a été envoyé. Merci — je vous répondrai par courriel.",
+    "challenge": "La vérification antispam a expiré ou n’a pas pu être validée. Veuillez la refaire.",
+    "unavailable": "Le formulaire est temporairement indisponible. Votre texte est conservé. Réessayez plus tard ou utilisez les issues GitHub.",
+    "rate": "Trop de tentatives. Patientez une minute avant de réessayer. Votre texte est conservé.",
+    "invalid": "Vérifiez les champs indiqués.",
+    "tooLarge": "Le message est trop long. Raccourcissez-le puis réessayez.",
+    "fields": {
+      "name": "Saisissez votre nom (100 caractères maximum).",
+      "email": "Saisissez une adresse courriel valide.",
+      "topic": "Choisissez un sujet dans la liste.",
+      "message": "Écrivez entre 10 et 5 000 caractères."
+    },
+    "fallback": "Vous pouvez aussi ouvrir une issue sur GitHub.",
+    "noScript": "JavaScript est nécessaire à la vérification antispam. Vous pouvez aussi ouvrir une issue sur GitHub.",
+    "asideTitle": "Pour démarrer la discussion",
+    "asideText": "Précisez le contexte et ce que vous souhaitez réaliser. Pour un problème technique, indiquez votre système et la version utilisée.",
+    "issues": "Vous avez trouvé un bug reproductible ?",
+    "issueLink": "Ouvrir une issue GitHub"
+  }
+}

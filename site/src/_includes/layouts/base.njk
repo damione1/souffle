@@ -57,6 +57,7 @@
   } %}
   <script type="application/ld+json">{{ app | jsonld | safe }}</script>
   {%- endif %}
+  {% if isContact %}<link rel="stylesheet" href="{{ '/css/contact.css' | bust }}">{% endif %}
 </head>
 <body>
   {% include "partials/nav.njk" %}
@@ -64,5 +65,6 @@
   {% include "partials/footer.njk" %}
   <script src="{{ '/js/site.js' | bust }}" defer></script>
   {% if isHome %}<script src="{{ '/js/mocks.js' | bust }}" defer></script>{% endif %}
+  {% if isContact %}<script src="{{ '/js/contact.js' | bust }}" defer></script>{% endif %}
 </body>
 </html>

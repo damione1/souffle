@@ -1,0 +1,22 @@
+name = "souffle-contact"
+main = "worker.js"
+compatibility_date = "2026-11-09"
+workers_dev = false
+preview_urls = false
+
+[vars]
+TURNSTILE_SITE_KEY = "0x4AAAAAAF64lwAjk0FRErQb"
+
+# CONTACT_TO, CONTACT_FROM and TURNSTILE_SECRET_KEY are Worker secrets.
+# Addresses are never supplied by the static build or CI.
+[[send_email]]
+name = "CONTACT_EMAIL"
+
+[[ratelimits]]
+name = "CONTACT_RATE_LIMITER"
+namespace_id = "202611094"
+simple = { limit = 3, period = 60 }
+
+[[routes]]
+pattern = "usesouffle.app/api/contact*"
+zone_name = "usesouffle.app"

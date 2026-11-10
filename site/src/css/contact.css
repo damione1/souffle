@@ -1,0 +1,17 @@
+.contact-page{--bg:var(--ground);--line:var(--rule);--muted:var(--fg-2);--accent:var(--ox);--on-accent:var(--paper);--focus:var(--ox);padding-block:64px}.contact-page h1{font-size:clamp(2.5rem,7vw,6rem);line-height:1.05;margin-bottom:24px}.contact-page .contact-field :is(input,select,textarea),.contact-page .contact-submit{border-radius:0}
+/* SPDX-License-Identifier: GPL-3.0-or-later */
+.contact-layout{display:grid;grid-template-columns:minmax(0,1fr) minmax(180px,.55fr);gap:36px;margin-top:32px}
+.contact-form{min-width:0}.contact-field{margin-bottom:20px}.contact-field label{display:block;font-size:.9rem;font-weight:650;margin-bottom:6px}
+.contact-field input,.contact-field select,.contact-field textarea{display:block;width:100%;min-width:0;font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:10px 12px}.contact-field textarea{resize:vertical;min-height:160px}
+.contact-field small,.contact-privacy,.contact-fallback{display:block;font-size:.8rem;color:var(--muted)}.contact-field small{margin-top:6px}
+.contact-field-error{display:block;color:var(--ink);font-size:.8rem;font-weight:600}.contact-field-error:empty{display:none}.contact-field [aria-invalid=true]{border:2px solid var(--accent)}
+.contact-form :is(input,select,textarea,button):focus-visible{outline:3px solid var(--focus);outline-offset:3px}
+.contact-honeypot{position:absolute;left:-10000px;width:1px;height:1px;overflow:hidden}
+.contact-challenge{min-height:65px;max-width:100%}.contact-status{font-size:.9rem;overflow-wrap:anywhere}.contact-status:empty{display:none}
+.contact-submit{font:inherit;font-weight:650;padding:12px 20px;border:1px solid var(--accent);border-radius:6px;background:var(--accent);color:var(--on-accent);cursor:pointer;max-width:100%;white-space:normal}.contact-submit:hover:not(:disabled){filter:brightness(.9)}.contact-submit:disabled{opacity:.55;cursor:not-allowed}
+.contact-aside{border-left:1px solid var(--line);padding-left:24px;font-size:.85rem;color:var(--muted);align-self:start}.contact-aside h2{font-size:1rem;color:var(--ink);margin:24px 0 8px}.contact-aside h2:first-child{margin-top:0}
+@media(max-width:1100px){.contact-layout{grid-template-columns:1fr}.contact-aside{padding:24px 0 0;border-left:0;border-top:1px solid var(--line)}}
+
+.contact-page :is(input,select,textarea){box-sizing:border-box}.contact-page .contact-status{margin:16px 0}.contact-page .contact-privacy{margin-bottom:20px}.contact-page .contact-fallback{margin-top:16px}
+
+.contact-page{overflow-wrap:anywhere}

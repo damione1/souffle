@@ -1,0 +1,32 @@
+---
+layout: layouts/base.njk
+pagination: { data: locales, size: 1, alias: loc, addAllPagesToCollections: true }
+permalink: "{{ loc.dir }}contact/index.html"
+isContact: true
+tags: sitemap
+---
+{% set copy = contact[loc.code] %}
+{% set contactRepository = site.repo %}
+<article class="band"><div class="sheet contact-page">
+<h1>{{ copy.title }}</h1>
+<p>{{ copy.intro }}</p>
+<div class="contact-layout">
+<form class="contact-form" action="/api/contact" method="post" data-contact-form>
+  <input type="hidden" name="locale" value="{{ loc.code }}">
+  <div class="contact-honeypot" aria-hidden="true" inert><label for="contact-website">Website</label><input id="contact-website" name="website" type="text" tabindex="-1" autocomplete="off"></div>
+  <div class="contact-field"><label for="contact-name">{{ copy.name }}</label><input id="contact-name" name="name" type="text" autocomplete="name" maxlength="100" required aria-describedby="contact-name-error"><span class="contact-field-error" id="contact-name-error"></span></div>
+  <div class="contact-field"><label for="contact-email">{{ copy.email }}</label><input id="contact-email" name="email" type="email" autocomplete="email" maxlength="254" required aria-describedby="contact-email-error"><span class="contact-field-error" id="contact-email-error"></span></div>
+  <div class="contact-field"><label for="contact-topic">{{ copy.topic }}</label><select id="contact-topic" name="topic" required aria-describedby="contact-topic-error">{% for value, label in copy.topics %}<option value="{{ value }}">{{ label }}</option>{% endfor %}</select><span class="contact-field-error" id="contact-topic-error"></span></div>
+  <div class="contact-field"><label for="contact-message">{{ copy.message }}</label><textarea id="contact-message" name="message" rows="8" minlength="10" maxlength="5000" required aria-describedby="contact-message-help contact-message-error"></textarea><small id="contact-message-help">{{ copy.messageHelp }}</small><span class="contact-field-error" id="contact-message-error"></span></div>
+  <p class="contact-privacy">{{ copy.privacy }}</p>
+  <div class="contact-challenge" data-contact-challenge></div>
+  <p class="contact-status" role="status" aria-live="polite" aria-atomic="true" data-contact-status></p>
+  <button class="contact-submit" type="submit" disabled>{{ copy.submit }}</button>
+  <noscript><p>{{ copy.noScript }}</p></noscript>
+  <p class="contact-fallback"><a href="{{ contactRepository }}/issues">{{ copy.fallback }}</a></p>
+</form>
+<aside class="contact-aside" aria-labelledby="contact-aside-title"><h2 id="contact-aside-title">{{ copy.asideTitle }}</h2><p>{{ copy.asideText }}</p><p>{{ copy.issues }} <a href="{{ contactRepository }}/issues">{{ copy.issueLink }}</a>.</p></aside>
+</div>
+<script type="application/json" id="contact-copy">{{ copy | jsonld | safe }}</script>
+
+</div></article>
