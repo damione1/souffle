@@ -103,6 +103,12 @@ export enum LogLevel { error, warn, info, debug, trace }
 @rust-attr(derive(strum::VariantArray))
 export enum AudioRetention { off, keep-7d, keep-30d, keep-forever }
 
+// Host-owned outcomes of the System page actions. The window shows each one
+// with its own localized sentence, so Rust never authors display copy.
+export enum McpStatus { absent, idle, testing, succeeded, failed }
+export enum ExportStatus { idle, choosing, running, succeeded, failed }
+export enum UpdateCheckStatus { idle, checking, up-to-date, available, failed }
+
 export enum AccessState { granted, denied, unknown, unsupported, no-device }
 
 // Mirrors souffle_lib::permissions::PermissionKind at the UI boundary.

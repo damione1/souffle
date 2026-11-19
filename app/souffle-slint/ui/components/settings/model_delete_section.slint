@@ -1,86 +1,70 @@
-import { ButtonIntent, KitButton, KitFieldSet, KitThemeContext, KitFieldRow, KitMetrics } from "@kit";
+import { AlertSeverity, ButtonIntent, FocusRequest, KitAlert, KitAlertDialog, KitButton, KitFieldRow, KitFieldSet, KitMetrics, KitThemeContext, KitThemes } from "@kit";
 import { Theme } from "../../theme.slint";
 import { TranscriptionPhase } from "../../types.slint";
 
-// Destructive "delete the downloaded model" action for Settings > Système
-// (SOU-195-slice: the section itself was entirely missing from the Slint
-// port). Two-step inline confirm rather than a modal - the sandbox blocks
-// `confirm()`/`alert()`, and `timeline_item.slint`'s hover-reveal delete
-// already established the same "click again to confirm" pattern for a
-// destructive action in this codebase.
-//
-// The state machine (whether delete is even legal right now) is not
-// reimplemented here: `commands::model::delete_model` in Rust is the single
-// source of truth and refuses a currently-loaded or mid-transition model
-// with a clear error string that `delete-error` surfaces verbatim.
-// `can-delete` below only decides whether to invite the click - it narrows
-// to the one phase (downloaded, not loaded) that can never race that guard.
-export component ModelDeleteSection inherits VerticalLayout {
+// The destructive action is confirmed in a dialog mounted at the window root
+// (`ModelDeleteDialog`). Whether a delete is legal is decided by the host
+// command, which refuses a loaded or mid-transition model with its own text;
+// `can-delete` only decides whether to invite the click.
+export component ModelDeleteSection inherits KitFieldSet {
     in property <TranscriptionPhase> model-phase;
     in property <string> model-label;
     in property <string> delete-error;
+    in property <int> modal-layer: 0;
+    in property <FocusRequest> focus-request;
+    in property <int> focus-token: 2;
 
     callback delete-requested();
 
-    property <bool> confirming: false;
-    property <bool> can-delete: root.model-phase == TranscriptionPhase.load-required;
+    private property <bool> can-delete: root.model-phase == TranscriptionPhase.load-required;
 
-    spacing: 22px;
-    alignment: start;
+    theme: KitThemeContext.current;
+    legend: @tr("STOCKAGE DU MODÈLE");
+    changed focus-request => {
+        if root.focus-request.present && root.focus-request.token == root.focus-token { delete-button.take-focus(); }
+    }
 
-    KitFieldSet {
-        theme: KitThemeContext.current;
-        legend: @tr("STOCKAGE DU MODÈLE");
+    delete-row := KitFieldRow {
+        theme: root.theme;
+        modal-layer: root.modal-layer;
+        orientation: Theme.settings-field-orientation(self.width);
+        padding: KitMetrics.field-gap(self.theme);
+        show-divider: false;
+        focus-requested => { delete-button.take-focus(); }
+        label: @tr("Supprimer le mod\u{e8}le t\u{e9}l\u{e9}charg\u{e9}");
+        description: root.can-delete
+            ? @tr("Supprime les fichiers de {} du disque. Il faudra le t\u{e9}l\u{e9}charger \u{e0} nouveau pour l'utiliser.", root.model-label)
+            : @tr("Le mod\u{e8}le doit \u{ea}tre t\u{e9}l\u{e9}charg\u{e9} et d\u{e9}charg\u{e9} (pas en cours d'utilisation) pour \u{ea}tre supprim\u{e9}.");
 
-        KitFieldRow {
-            theme: KitThemeContext.current;
-            modal-layer: 0;
-            orientation: Theme.settings-field-orientation(self.width);
-            padding: KitMetrics.field-gap(self.theme);
-            show-divider: false;
-            label: @tr("Supprimer le mod\u{e8}le t\u{e9}l\u{e9}charg\u{e9}");
-            description: root.can-delete
-                ? @tr("Supprime les fichiers de {} du disque. Il faudra le t\u{e9}l\u{e9}charger \u{e0} nouveau pour l'utiliser.", root.model-label)
-                : @tr("Le mod\u{e8}le doit \u{ea}tre t\u{e9}l\u{e9}charg\u{e9} et d\u{e9}charg\u{e9} (pas en cours d'utilisation) pour \u{ea}tre supprim\u{e9}.");
-
-            HorizontalLayout {
-                spacing: 8px;
-                horizontal-stretch: 0;
-
-                if !root.confirming: KitButton {
-                    text: @tr("Supprimer");
-                    intent: ButtonIntent.destructive;
-                    disabled: !root.can-delete;
-                    activated => { root.confirming = true; }
-                }
-
-                if root.confirming: KitButton {
-                    text: @tr("Confirmer");
-                    intent: ButtonIntent.destructive;
-                    activated => {
-                        root.confirming = false;
-                        root.delete-requested();
-                    }
-                }
-
-                if root.confirming: KitButton {
-                    text: @tr("Annuler");
-                    intent: ButtonIntent.quiet;
-                    activated => { root.confirming = false; }
-                }
-            }
-        }
-
-        if root.delete-error != "": VerticalLayout {
-            padding-left: Theme.settings-inset;
-            padding-right: Theme.settings-inset;
-            padding-bottom: 12px;
-            Text {
-                text: root.delete-error;
-                color: Theme.danger;
-                font-size: 11.5px;
-                wrap: word-wrap;
+        delete-button := KitButton {
+            theme: root.theme;
+            modal-layer: delete-row.modal-layer;
+            text: @tr("Supprimer");
+            intent: ButtonIntent.destructive;
+            disabled: !root.can-delete;
+            accessible-description: delete-row.description;
+            activated => { root.delete-requested(); }
+            focus-observed(focused) => {
+                if focused { delete-row.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
             }
         }
     }
+
+    if root.delete-error != "": KitAlert {
+        theme: root.theme;
+        severity: AlertSeverity.error;
+        message: root.delete-error;
+    }
+}
+
+// Cancel takes the initial focus, so a stray Return never deletes.
+export component ModelDeleteDialog inherits KitAlertDialog {
+    in property <string> model-label;
+
+    title: @tr("Supprimer le mod\u{e8}le t\u{e9}l\u{e9}charg\u{e9}");
+    description: @tr("Supprime les fichiers de {} du disque. Il faudra le t\u{e9}l\u{e9}charger \u{e0} nouveau pour l'utiliser.", root.model-label);
+    confirm-text: @tr("Confirmer");
+    cancel-text: @tr("Annuler");
+    confirm-intent: ButtonIntent.destructive;
+    modal-layer: 2;
 }

@@ -91,6 +91,8 @@ export global Theme {
         return available < 2 * root.settings-control-width * KitThemeContext.current.text-scale
             ? Orientation.vertical : Orientation.horizontal;
     }
+    // Viewport of the live log: a handful of lines, and larger text still shows them.
+    out property <length> settings-log-height: 160px * KitThemeContext.current.text-scale;
     out property <length> settings-control-height: KitMetrics.control-height(KitThemeContext.current, ControlSize.compact);
     out property <length> settings-inset: KitMetrics.field-gap(KitThemeContext.current) - KitThemeContext.current.spacing.unit;
 }

@@ -1,152 +1,136 @@
-import { ChoiceLabelPosition, ControlWidth, KitButton, KitSwitch, Ownership, KitFieldSet, KitThemeContext, KitThemes, KitFieldRow, KitMetrics } from "@kit";
 import { Theme } from "../../theme.slint";
+import { UpdateCheckStatus } from "../../types.slint";
+import { AlertSeverity, ChoiceLabelPosition, ControlWidth, KitAlert, KitButton, KitFieldRow, KitFieldSet, KitMetrics, KitSwitch, KitText, KitThemeContext, KitThemes, Ownership } from "@kit";
 
-// Port of AboutSettingsSection.svelte. `UpdateAction` (the download-progress
-// + install button shown once an update is found) is not built here - a
-// full updater UI is a standalone feature disproportionate to this tab, and
-// is left for a follow-up ticket. "Check for updates" itself is real
-// (`check_for_updates`), it just reports the result as text rather than
-// offering to install it.
-export component AboutSection inherits VerticalLayout {
+// A trailing value: the row's label names it and the text sits in the
+// control column, elided when it is long.
+component ValueText inherits KitText {
+    role: control;
+    tone: neutral;
+    wrap: no-wrap;
+    overflow: elide;
+    horizontal-alignment: right;
+    width: Theme.settings-control-width;
+}
+
+// The version and the labels come from the host. `update-status` is the
+// outcome of the last manual check, shown with its own sentence.
+export component AboutSection inherits KitFieldSet {
     in property <string> app-version;
     in property <string> transcription-label;
     in property <string> summary-label;
     in property <bool> auto-update-check;
-    in property <bool> checking-updates;
-    in property <string> update-status;
+    in property <UpdateCheckStatus> update-status;
+    in property <string> update-detail;
+    in property <int> modal-layer: 0;
 
     callback check-updates-requested();
     callback auto-update-check-changed(bool);
 
-    spacing: 22px;
-    alignment: start;
+    theme: KitThemeContext.current;
+    legend: @tr("À PROPOS");
 
-    KitFieldSet {
-        theme: KitThemeContext.current;
-        legend: @tr("À PROPOS");
+    KitFieldRow {
+        theme: root.theme;
+        modal-layer: root.modal-layer;
+        orientation: Theme.settings-field-orientation(self.width);
+        padding: KitMetrics.field-gap(self.theme);
+        show-divider: false;
+        label: @tr("Version");
+        ValueText { theme: root.theme; text: root.app-version == "local build" ? @tr("Build local") : @tr("v{}", root.app-version); }
+    }
 
-        KitFieldRow {
-            theme: KitThemeContext.current;
-            modal-layer: 0;
-            orientation: Theme.settings-field-orientation(self.width);
-            padding: KitMetrics.field-gap(self.theme);
-            show-divider: false;
-            label: @tr("Version");
+    KitFieldRow {
+        theme: root.theme;
+        modal-layer: root.modal-layer;
+        orientation: Theme.settings-field-orientation(self.width);
+        padding: KitMetrics.field-gap(self.theme);
+        show-divider: true;
+        label: @tr("Transcription");
+        ValueText { theme: root.theme; text: root.transcription-label; }
+    }
 
-            Text {
-                text: root.app-version == "local build" ? @tr("Build local") : @tr("v{}", root.app-version);
-                font-size: 13px;
-                color: Theme.text-secondary;
-                horizontal-alignment: right;
-                overflow: elide;
-                width: Theme.settings-control-width;
-                vertical-alignment: center;
+    KitFieldRow {
+        theme: root.theme;
+        modal-layer: root.modal-layer;
+        orientation: Theme.settings-field-orientation(self.width);
+        padding: KitMetrics.field-gap(self.theme);
+        show-divider: true;
+        label: @tr("Résumés");
+        ValueText { theme: root.theme; text: root.summary-label; }
+    }
+
+    KitFieldRow {
+        theme: root.theme;
+        modal-layer: root.modal-layer;
+        orientation: Theme.settings-field-orientation(self.width);
+        padding: KitMetrics.field-gap(self.theme);
+        show-divider: true;
+        label: @tr("Confidentialité");
+        ValueText { theme: root.theme; text: @tr("100% local"); }
+    }
+
+    update-row := KitFieldRow {
+        theme: root.theme;
+        modal-layer: root.modal-layer;
+        orientation: Theme.settings-field-orientation(self.width);
+        padding: KitMetrics.field-gap(self.theme);
+        show-divider: true;
+        focus-requested => { update-button.take-focus(); }
+        label: @tr("Mises à jour");
+
+        update-button := KitButton {
+            theme: root.theme;
+            modal-layer: update-row.modal-layer;
+            text: root.update-status == UpdateCheckStatus.checking ? @tr("Vérification…") : @tr("Vérifier les mises à jour");
+            text-wrap: word-wrap;
+            disabled: root.update-status == UpdateCheckStatus.checking;
+            activated => { root.check-updates-requested(); }
+            focus-observed(focused) => {
+                if focused { update-row.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
             }
         }
+    }
 
-        KitFieldRow {
-            theme: KitThemeContext.current;
-            modal-layer: 0;
-            orientation: Theme.settings-field-orientation(self.width);
-            padding: KitMetrics.field-gap(self.theme);
-            show-divider: true;
-            label: @tr("Transcription");
+    if root.update-status == UpdateCheckStatus.up-to-date: KitAlert {
+        theme: root.theme;
+        severity: AlertSeverity.success;
+        message: @tr("À jour.");
+    }
+    if root.update-status == UpdateCheckStatus.available: KitAlert {
+        theme: root.theme;
+        severity: AlertSeverity.information;
+        message: @tr("Mise à jour disponible : v{}", root.update-detail);
+    }
+    if root.update-status == UpdateCheckStatus.failed: KitAlert {
+        theme: root.theme;
+        severity: AlertSeverity.error;
+        message: root.update-detail;
+    }
 
-            Text {
-                text: root.transcription-label;
-                font-size: 13px;
-                color: Theme.text-secondary;
-                horizontal-alignment: right;
-                overflow: elide;
-                width: Theme.settings-control-width;
-                vertical-alignment: center;
-            }
-        }
+    update-switch-row := KitFieldRow {
+        theme: root.theme;
+        modal-layer: root.modal-layer;
+        orientation: Theme.settings-field-orientation(self.width);
+        padding: KitMetrics.field-gap(self.theme);
+        show-divider: true;
+        focus-requested => { update-switch.take-focus(); }
+        label: @tr("Vérification automatique");
+        description: @tr("Vérifier les mises à jour au démarrage.");
 
-        KitFieldRow {
-            theme: KitThemeContext.current;
-            modal-layer: 0;
-            orientation: Theme.settings-field-orientation(self.width);
-            padding: KitMetrics.field-gap(self.theme);
-            show-divider: true;
-            label: @tr("Résumés");
-
-            Text {
-                text: root.summary-label;
-                font-size: 13px;
-                color: Theme.text-secondary;
-                horizontal-alignment: right;
-                overflow: elide;
-                width: Theme.settings-control-width;
-                vertical-alignment: center;
-            }
-        }
-
-        KitFieldRow {
-            theme: KitThemeContext.current;
-            modal-layer: 0;
-            orientation: Theme.settings-field-orientation(self.width);
-            padding: KitMetrics.field-gap(self.theme);
-            show-divider: true;
-            label: @tr("Confidentialité");
-
-            Text {
-                text: @tr("100% local");
-                font-size: 13px;
-                color: Theme.text-secondary;
-                horizontal-alignment: right;
-                width: Theme.settings-control-width;
-                vertical-alignment: center;
-            }
-        }
-
-        KitFieldRow {
-            theme: KitThemeContext.current;
-            modal-layer: 0;
-            orientation: Theme.settings-field-orientation(self.width);
-            padding: KitMetrics.field-gap(self.theme);
-            show-divider: true;
-            focus-requested => { update-button.take-focus(); }
-            private property <bool> control-focused: update-button.has-focus;
-            changed control-focused => {
-                if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
-            }
-            label: @tr("Mises à jour");
-            description: root.update-status;
-
-            update-button := KitButton {
-                theme: KitThemeContext.current;
-                modal-layer: 0;
-                text: root.checking-updates ? @tr("Vérification…") : @tr("Vérifier les mises à jour");
-                disabled: root.checking-updates;
-                activated => { root.check-updates-requested(); }
-            }
-        }
-
-        KitFieldRow {
-            theme: KitThemeContext.current;
-            modal-layer: 0;
-            orientation: Theme.settings-field-orientation(self.width);
-            padding: KitMetrics.field-gap(self.theme);
-            show-divider: true;
-            focus-requested => { update-switch.take-focus(); }
-            private property <bool> control-focused: update-switch.has-focus;
-            changed control-focused => {
-                if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
-            }
-            label: @tr("Vérification automatique");
-            description: @tr("Vérifier les mises à jour au démarrage.");
-
-            update-switch := KitSwitch {
-                theme: KitThemeContext.current;
-                modal-layer: 0;
-                label-position: ChoiceLabelPosition.start;
-                padding-inline: 0px;
-                ownership: Ownership.controlled;
-                control-width: ControlWidth.intrinsic;
-                accessible-label: @tr("Vérification automatique des mises à jour");
-                checked: root.auto-update-check;
-                toggled(new) => { root.auto-update-check-changed(new); }
+        update-switch := KitSwitch {
+            theme: root.theme;
+            modal-layer: update-switch-row.modal-layer;
+            label-position: ChoiceLabelPosition.start;
+            padding-inline: 0px;
+            ownership: Ownership.controlled;
+            control-width: ControlWidth.intrinsic;
+            accessible-name: @tr("Vérification automatique des mises à jour");
+            accessible-description: update-switch-row.description;
+            checked: root.auto-update-check;
+            toggled(new) => { root.auto-update-check-changed(new); }
+            focus-observed(focused) => {
+                if focused { update-switch-row.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
             }
         }
     }

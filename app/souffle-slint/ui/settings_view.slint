@@ -6,7 +6,7 @@ import { FeedbackSoundsSection } from "components/settings/feedback_sounds_secti
 import { CalendarSection, CalendarRow } from "components/settings/calendar_section.slint";
 import { MicrophoneSection, MicrophoneRow } from "components/settings/microphone_section.slint";
 import { AudioSection } from "components/settings/audio_section.slint";
-import { DataSection } from "components/settings/data_section.slint";
+import { DataSection, McpSection } from "components/settings/data_section.slint";
 import { AboutSection } from "components/settings/about_section.slint";
 import { IntelligenceSection } from "components/settings/intelligence_section.slint";
 import { DictationPolishSection } from "components/settings/dictation_polish_section.slint";
@@ -16,11 +16,11 @@ import { ModelDeleteSection } from "components/settings/model_delete_section.sli
 import { DictionarySection, DictionaryRow } from "components/settings/dictionary_section.slint";
 import { SnippetsSection, SnippetRow } from "components/settings/snippets_section.slint";
 import { Theme } from "theme.slint";
-import { KitButton, KitAppShell, KitStack, KitFocusBackground, KitAlert, KitText, KitRouter, ButtonIntent } from "@kit";
+import { KitButton, KitAppShell, KitStack, KitFocusBackground, KitAlert, KitText, KitRouter, ButtonIntent, FocusRequest } from "@kit";
 import { LucideArrows } from "@kit-icons/arrows.slint";
 import { SettingsOptions } from "components/settings/settings_options.slint";
 import { SettingsTabBar, SettingsTabPage } from "components/settings/settings_tabs.slint";
-import { TranscriptionPhase, AppTheme, AppLocale, PasteMethod, MeetingLanguage, LogLevel, AudioRetention, AccessState, ShortcutField, SummaryProvider, AppleIntelligenceUnavailableReason, SettingsTab } from "types.slint";
+import { ExportStatus, McpStatus, UpdateCheckStatus, TranscriptionPhase, AppTheme, AppLocale, PasteMethod, MeetingLanguage, LogLevel, AudioRetention, AccessState, ShortcutField, SummaryProvider, AppleIntelligenceUnavailableReason, SettingsTab } from "types.slint";
 
 // The six tab pages share one overlay and mount their sections on first visit.
 export component SettingsView inherits KitAppShell {
@@ -28,15 +28,14 @@ export component SettingsView inherits KitAppShell {
     in property <bool> autostart-enabled;
     in property <bool> debug-transcription;
     in property <LogLevel> log-level;
-    // Virtualized live-log slice + spacers, owned by main.rs (SOU-224).
+    // The whole log tail, owned by the host; the list builds only the rows in view.
     in property <[string]> log-lines;
-    in property <int> log-line-count;
-    in property <float> log-spacer-before: 0.0;
-    in property <float> log-spacer-after: 0.0;
-    in-out property <length> log-scroll-top: 0px;
     in property <bool> copying-diagnostics: false;
     in property <AppTheme> app-theme;
     in property <AppLocale> locale;
+    // Published by the window when a root dialog closes, so the page can put
+    // the focus back on the control that opened it (token 1: permissions, 2: model).
+    in property <FocusRequest> focus-request;
     in property <bool> auto-paste;
     in property <PasteMethod> paste-method;
     in property <int> paste-delay-ms;
@@ -105,21 +104,19 @@ export component SettingsView inherits KitAppShell {
     in property <string> data-stats-line;
     in property <string> data-recordings-line;
     in property <AudioRetention> meeting-audio-retention;
-    in property <bool> data-exporting;
-    in property <string> data-export-status;
-    in property <bool> data-export-status-is-error;
+    in property <ExportStatus> data-export-status;
+    in property <string> data-export-detail;
     in property <string> mcp-binary-path;
-    in property <bool> mcp-exists;
     in property <string> mcp-claude-desktop-snippet;
     in property <string> mcp-claude-code-command;
-    in property <bool> testing-mcp;
-    in property <string> mcp-test-status;
+    in property <McpStatus> mcp-status;
+    in property <string> mcp-status-detail;
     in property <string> app-version;
     in property <string> about-transcription-label;
     in property <string> about-summary-label;
     in property <bool> auto-update-check;
-    in property <bool> checking-updates;
-    in property <string> update-status;
+    in property <UpdateCheckStatus> update-status;
+    in property <string> update-detail;
     in property <SummaryProvider> summary-provider;
     in property <bool> apple-intelligence-available;
     in property <AppleIntelligenceUnavailableReason> apple-intelligence-reason;
@@ -595,6 +592,7 @@ export component SettingsView inherits KitAppShell {
                         }
 
                         if system-page.mounted: PermissionsSection {
+                            focus-request: root.focus-request;
                             review-requested => { root.permissions-review-requested(); }
                         }
 
@@ -602,10 +600,6 @@ export component SettingsView inherits KitAppShell {
                             debug-transcription: root.debug-transcription;
                             log-level: root.log-level;
                             log-lines: root.log-lines;
-                            log-line-count: root.log-line-count;
-                            log-spacer-before: root.log-spacer-before;
-                            log-spacer-after: root.log-spacer-after;
-                            log-scroll-top <=> root.log-scroll-top;
                             copying-diagnostics: root.copying-diagnostics;
                             debug-transcription-changed(value) => { root.debug-transcription-changed(value); }
                             log-level-changed(value) => { root.log-level-changed(value); }
@@ -616,27 +610,29 @@ export component SettingsView inherits KitAppShell {
                             stats-line: root.data-stats-line;
                             recordings-line: root.data-recordings-line;
                             retention: root.meeting-audio-retention;
-                            exporting: root.data-exporting;
                             export-status: root.data-export-status;
-                            export-status-is-error: root.data-export-status-is-error;
-                            mcp-binary-path: root.mcp-binary-path;
-                            mcp-exists: root.mcp-exists;
-                            mcp-claude-desktop-snippet: root.mcp-claude-desktop-snippet;
-                            mcp-claude-code-command: root.mcp-claude-code-command;
-                            testing-mcp: root.testing-mcp;
-                            mcp-test-status: root.mcp-test-status;
+                            export-detail: root.data-export-detail;
                             retention-changed(value) => { root.meeting-audio-retention-changed(value); }
                             export-requested => { root.data-export-requested(); }
                             reveal-requested => { root.data-reveal-requested(); }
+                        }
+
+                        if system-page.mounted: McpSection {
+                            binary-path: root.mcp-binary-path;
+                            status: root.mcp-status;
+                            status-detail: root.mcp-status-detail;
+                            claude-desktop-snippet: root.mcp-claude-desktop-snippet;
+                            claude-code-command: root.mcp-claude-code-command;
                             copy-desktop-snippet-requested => { root.mcp-copy-desktop-snippet-requested(); }
                             copy-code-command-requested => { root.mcp-copy-code-command-requested(); }
-                            test-mcp-requested => { root.mcp-test-requested(); }
+                            test-requested => { root.mcp-test-requested(); }
                         }
 
                         if system-page.mounted: ModelDeleteSection {
                             model-phase: root.model-phase;
                             model-label: root.selected-model-label;
                             delete-error: root.model-delete-error;
+                            focus-request: root.focus-request;
                             delete-requested => { root.delete-model-requested(); }
                         }
 
@@ -645,8 +641,8 @@ export component SettingsView inherits KitAppShell {
                             transcription-label: root.about-transcription-label;
                             summary-label: root.about-summary-label;
                             auto-update-check: root.auto-update-check;
-                            checking-updates: root.checking-updates;
                             update-status: root.update-status;
+                            update-detail: root.update-detail;
                             check-updates-requested => { root.check-updates-requested(); }
                             auto-update-check-changed(value) => { root.auto-update-check-changed(value); }
                         }

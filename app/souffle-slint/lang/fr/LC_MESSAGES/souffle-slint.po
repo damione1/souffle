@@ -3058,3 +3058,98 @@ msgctxt "ShortcutRecorderButton"
 msgid "Effacer le raccourci « {} »"
 msgstr "Effacer le raccourci « {} »"
 
+
+#: app/souffle-slint/ui/components/settings
+msgctxt "ModelDeleteDialog"
+msgid "Supprimer le modèle téléchargé"
+msgstr "Supprimer le modèle téléchargé"
+
+#: app/souffle-slint/ui/components/settings
+msgctxt "ModelDeleteDialog"
+msgid "Supprime les fichiers de {} du disque. Il faudra le télécharger à nouveau pour l'utiliser."
+msgstr "Supprime les fichiers de {} du disque. Il faudra le télécharger à nouveau pour l'utiliser."
+
+#: app/souffle-slint/ui/components/settings
+msgctxt "ModelDeleteDialog"
+msgid "Confirmer"
+msgstr "Confirmer"
+
+#: app/souffle-slint/ui/components/settings
+msgctxt "ModelDeleteDialog"
+msgid "Annuler"
+msgstr "Annuler"
+
+#: app/souffle-slint/ui/components/settings
+msgctxt "AboutSection"
+msgid "À jour."
+msgstr "À jour."
+
+#: app/souffle-slint/ui/components/settings
+msgctxt "AboutSection"
+msgid "Mise à jour disponible : v{}"
+msgstr "Mise à jour disponible : v{}"
+
+#: app/souffle-slint/ui/components/settings
+msgctxt "DataSection"
+msgid "Export en cours vers {}…"
+msgstr "Export en cours vers {}…"
+
+#: app/souffle-slint/ui/components/settings
+msgctxt "McpSection"
+msgid "SERVEUR MCP"
+msgstr "SERVEUR MCP"
+
+#: app/souffle-slint/ui/components/settings
+msgctxt "McpSection"
+msgid "Permet à Claude Desktop, Claude Code ou un autre client MCP de lire vos transcriptions et résumés. Tout reste sur ce Mac."
+msgstr "Permet à Claude Desktop, Claude Code ou un autre client MCP de lire vos transcriptions et résumés. Tout reste sur ce Mac."
+
+#: app/souffle-slint/ui/components/settings
+msgctxt "McpSection"
+msgid "Binaire sidecar"
+msgstr "Binaire sidecar"
+
+#: app/souffle-slint/ui/components/settings
+msgctxt "McpSection"
+msgid "Binaire introuvable. Compilez souffle-mcp pour le développement local."
+msgstr "Binaire introuvable. Compilez souffle-mcp pour le développement local."
+
+#: app/souffle-slint/ui/components/settings
+msgctxt "McpSection"
+msgid "Config Claude Desktop"
+msgstr "Config Claude Desktop"
+
+#: app/souffle-slint/ui/components/settings
+msgctxt "McpSection"
+msgid "À coller dans claude_desktop_config.json sous mcpServers."
+msgstr "À coller dans claude_desktop_config.json sous mcpServers."
+
+#: app/souffle-slint/ui/components/settings
+msgctxt "McpSection"
+msgid "Copier"
+msgstr "Copier"
+
+#: app/souffle-slint/ui/components/settings
+msgctxt "McpSection"
+msgid "Claude Code"
+msgstr "Claude Code"
+
+#: app/souffle-slint/ui/components/settings
+msgctxt "McpSection"
+msgid "À exécuter une fois dans un terminal pour enregistrer le serveur."
+msgstr "À exécuter une fois dans un terminal pour enregistrer le serveur."
+
+#: app/souffle-slint/ui/components/settings
+msgctxt "McpSection"
+msgid "Tester la connexion"
+msgstr "Tester la connexion"
+
+#: app/souffle-slint/ui/components/settings
+msgctxt "McpSection"
+msgid "Test en cours…"
+msgstr "Test en cours…"
+
+#: app/souffle-slint/ui/components/settings
+msgctxt "McpSection"
+msgid "Connexion réussie ({})."
+msgstr "Connexion réussie ({})."

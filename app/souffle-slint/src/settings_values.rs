@@ -313,6 +313,10 @@ impl SettingsValueController {
     /// Publish only the immediate value controls. Do not rebuild catalogues,
     /// refresh providers/devices, or overwrite prompt/URL/list editor drafts.
     fn project(&self, window: &MainWindow, settings: &AppSettings) {
+        window.set_settings_autostart_enabled(settings.autostart_enabled);
+        window.set_settings_debug_transcription(settings.debug_transcription);
+        window.set_settings_log_level(settings_ui::log_level_to_slint(settings.log_level));
+        window.set_settings_auto_update_check(settings.auto_update_check_enabled);
         window.set_settings_theme(settings_ui::theme_to_slint(settings.theme));
         window.set_settings_locale(settings_ui::locale_to_slint(&settings.locale));
         window.set_settings_paste_method(settings_ui::paste_method_to_slint(settings.paste_method));
@@ -475,6 +479,33 @@ pub(crate) fn wire(window: &MainWindow, controller: Rc<SettingsValueController>)
                 s.ollama_model = id.clone()
             });
         }
+    });
+    let c = controller.clone();
+    window.on_settings_autostart_changed(move |enabled| {
+        c.apply(SettingsSaveLane::Autostart, move |s| {
+            s.autostart_enabled = enabled
+        });
+    });
+    let c = controller.clone();
+    window.on_settings_debug_transcription_changed(move |enabled| {
+        c.apply(SettingsSaveLane::General, move |s| {
+            s.debug_transcription = enabled
+        });
+    });
+    let c = controller.clone();
+    window.on_settings_log_level_changed(move |value| {
+        crate::settings_instrumentation::handler(
+            crate::settings_instrumentation::SettingsScenario::Menu,
+        );
+        c.apply(SettingsSaveLane::General, move |s| {
+            s.log_level = settings_ui::log_level_from_slint(value)
+        });
+    });
+    let c = controller.clone();
+    window.on_settings_auto_update_check_changed(move |enabled| {
+        c.apply(SettingsSaveLane::General, move |s| {
+            s.auto_update_check_enabled = enabled
+        });
     });
     let c = controller;
     window.on_settings_unload_timeout_changed(move |label| {

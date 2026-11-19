@@ -25,11 +25,11 @@ mod settings_drafts;
 mod settings_instrumentation;
 mod settings_io;
 mod settings_kit;
-mod settings_log;
 mod settings_ui;
 mod settings_values;
 mod shortcut_capture;
 mod summary;
+mod system_ui;
 mod timeline;
 mod transcript;
 mod update_ui;
@@ -78,11 +78,6 @@ const NOTES_DEBOUNCE: Duration = Duration::from_millis(800);
 const TRANSCRIPT_VIEWPORT_HEIGHT: f32 = 260.0;
 const TRANSCRIPT_SCROLL_MARGIN: f32 = 3.0 * TRANSCRIPT_VIEWPORT_HEIGHT;
 
-/// Matches `DiagnosticsSettingsSection.svelte`'s `TAIL_LINES`/`POLL_MS`.
-const SETTINGS_LOG_TAIL_LINES: u32 = 80;
-const SETTINGS_LOG_POLL: Duration = Duration::from_millis(2000);
-const ARCHIVE_EXPORT_POLL: Duration = Duration::from_millis(150);
-
 /// Backing data for the virtualized transcript list: the full block list
 /// plus precomputed cumulative height estimates (see
 /// `transcript::compute_offsets`). `MeetingDetail`'s `transcript-blocks`
@@ -129,82 +124,6 @@ fn persist_shortcut_candidate(
     persist(candidate.clone())?;
     *shortcuts_state.borrow_mut() = Some(candidate.clone());
     Ok(Some(candidate))
-}
-
-/// Shared by the diagnostics and MCP snippet "Copy" buttons - no webview
-/// clipboard API to fall back on in this headless shell (see the `arboard`
-/// dependency comment in Cargo.toml).
-fn copy_to_clipboard(text: &str) {
-    match arboard::Clipboard::new() {
-        Ok(mut clipboard) => {
-            if let Err(e) = clipboard.set_text(text) {
-                eprintln!("Failed to write to clipboard: {e}");
-            }
-        }
-        Err(e) => eprintln!("Failed to open clipboard: {e}"),
-    }
-}
-
-fn choose_archive_export_folder() -> Result<Option<String>, String> {
-    let output = std::process::Command::new("osascript")
-        .arg("-e")
-        .arg("POSIX path of (choose folder with prompt \"Choisir un dossier d'export\")")
-        .output()
-        .map_err(|error| format!("Ouvrir le sélecteur de dossier : {error}"))?;
-
-    if output.status.success() {
-        let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        return Ok((!path.is_empty()).then_some(path));
-    }
-
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    if stderr.contains("-128") || stderr.contains("User canceled") {
-        Ok(None)
-    } else {
-        Err(stderr.trim().to_string())
-    }
-}
-
-fn monitor_archive_export(weak: slint::Weak<MainWindow>, destination: String) {
-    let worker = souffle_lib::async_runtime::spawn(async move {
-        loop {
-            if let Some(progress) = souffle_lib::commands::get_archive_export_progress()
-                && progress.finished
-            {
-                return progress;
-            }
-            tokio::time::sleep(ARCHIVE_EXPORT_POLL).await;
-        }
-    });
-
-    slint::spawn_local(async move {
-        let result = worker
-            .await
-            .map_err(|error| format!("Suivi de l'export interrompu : {error}"));
-        let Some(window) = weak.upgrade() else {
-            return;
-        };
-        window.set_settings_data_exporting(false);
-        match result {
-            Ok(progress) => match progress.error {
-                Some(error) => {
-                    window.set_settings_data_export_status(error.into());
-                    window.set_settings_data_export_status_is_error(true);
-                }
-                None => {
-                    window.set_settings_data_export_status(
-                        format!("Export terminé vers {destination}.").into(),
-                    );
-                    window.set_settings_data_export_status_is_error(false);
-                }
-            },
-            Err(error) => {
-                window.set_settings_data_export_status(error.into());
-                window.set_settings_data_export_status_is_error(true);
-            }
-        }
-    })
-    .expect("slint event loop not running");
 }
 
 fn log_settings_save_outcome(context: &str, outcome: &SettingsSaveOutcome) {
@@ -838,129 +757,6 @@ fn stop_audio_progress_timer(progress_timer: &Rc<RefCell<Option<slint::Timer>>>)
     if let Some(timer) = progress_timer.borrow().as_ref() {
         timer.stop();
     }
-}
-
-/// Pushes a freshly fetched log tail into the virtualized state + window
-/// (SOU-224). A tick where the tail did not change is a full no-op. When it
-/// did change, the mounted slice is only rebuilt if the lines inside the
-/// current window actually differ - a poll that merely appends lines past
-/// the viewport leaves the rendered rows and the scroll position untouched
-/// (AC2), only the trailing spacer/line count grow.
-fn apply_settings_log_tail(
-    window: &MainWindow,
-    log_state: &Rc<RefCell<settings_log::SettingsLogState>>,
-    tail: &str,
-) {
-    let mut state = log_state.borrow_mut();
-    let lines = settings_log::split_tail(tail);
-    if lines == state.lines {
-        return;
-    }
-    let scroll_top = -window.get_settings_log_scroll_top_px();
-    let offsets = settings_log::compute_offsets(&lines);
-    let win = settings_log::visible_window(&offsets, scroll_top);
-    let slice_unchanged = win.start == state.mounted_start
-        && win.end == state.mounted_end
-        && state.mounted_end <= state.lines.len()
-        && lines[win.start..win.end] == state.lines[state.mounted_start..state.mounted_end];
-    state.lines = lines;
-    state.offsets = offsets;
-    state.mounted_start = win.start;
-    state.mounted_end = win.end;
-    window.set_settings_log_line_count(state.lines.len() as i32);
-    window.set_settings_log_spacer_before(win.spacer_before);
-    window.set_settings_log_spacer_after(win.spacer_after);
-    if !slice_unchanged {
-        window.set_settings_log_lines(
-            std::rc::Rc::new(slint::VecModel::from(
-                state.lines[win.start..win.end].to_vec(),
-            ))
-            .into(),
-        );
-    }
-}
-
-/// Re-windows the mounted log slice for a new scroll position - the log
-/// counterpart of `update_transcript_window`, and equally a no-op while the
-/// slice indices are unchanged.
-fn update_settings_log_window(
-    window: &MainWindow,
-    log_state: &Rc<RefCell<settings_log::SettingsLogState>>,
-    scroll_top: f32,
-) {
-    let mut state = log_state.borrow_mut();
-    let win = settings_log::visible_window(&state.offsets, scroll_top);
-    if win.start == state.mounted_start && win.end == state.mounted_end {
-        return;
-    }
-    state.mounted_start = win.start;
-    state.mounted_end = win.end;
-    window.set_settings_log_lines(
-        std::rc::Rc::new(slint::VecModel::from(
-            state.lines[win.start..win.end].to_vec(),
-        ))
-        .into(),
-    );
-    window.set_settings_log_spacer_before(win.spacer_before);
-    window.set_settings_log_spacer_after(win.spacer_after);
-}
-
-/// Re-fetches the log tail and pushes it into the Settings window - mirrors
-/// `DiagnosticsSettingsSection.svelte`'s `refreshTail()`.
-fn refresh_settings_log_tail(
-    window: &MainWindow,
-    settings_io: Rc<settings_io::SettingsIoCoordinator>,
-    log_state: Rc<RefCell<settings_log::SettingsLogState>>,
-) {
-    let Some(token) = settings_io.current_load_token() else {
-        return;
-    };
-    let weak = window.as_weak();
-    let worker = souffle_lib::async_runtime::spawn_blocking(move || {
-        souffle_lib::commands::get_log_tail(SETTINGS_LOG_TAIL_LINES)
-    });
-    slint::spawn_local(async move {
-        match worker.await {
-            Ok(Ok(tail)) => {
-                if settings_io.accepts_load(token)
-                    && let Some(window) = weak.upgrade()
-                    && window.get_settings_log_active()
-                {
-                    apply_settings_log_tail(&window, &log_state, &tail);
-                }
-            }
-            Ok(Err(error)) => eprintln!("Failed to read log tail: {error}"),
-            Err(error) => eprintln!("Failed to join log tail worker: {error}"),
-        }
-    })
-    .expect("slint event loop not running");
-}
-
-/// Starts or stops the live-log tail poll to match reality: it runs only
-/// while the Settings sheet is open AND the Système tab is the active one
-/// (SOU-224 AC5) - not for the whole life of the sheet, since the other
-/// five tabs are keep-alive and would otherwise relayout the log rows on
-/// every real tail change while invisible. Entering the tab also does one
-/// immediate refresh so the module is not blank for up to 2s.
-fn wire_settings_log_poll(window: &MainWindow, refresh: impl Fn(&MainWindow) + 'static) {
-    let timer = slint::Timer::default();
-    let weak = window.as_weak();
-    let refresh = Rc::new(refresh);
-    window.on_settings_log_activity_changed(move |active| {
-        timer.stop();
-        if active && let Some(window) = weak.upgrade() {
-            refresh(&window);
-            let refresh = refresh.clone();
-            let weak = window.as_weak();
-            timer.start(slint::TimerMode::Repeated, SETTINGS_LOG_POLL, move || {
-                if let Some(window) = weak.upgrade()
-                    && window.get_settings_log_active()
-                {
-                    refresh(&window);
-                }
-            });
-        }
-    });
 }
 
 fn spawn_settings_load_stage<T: Send + 'static>(
@@ -4421,21 +4217,6 @@ fn wire_callbacks(
     // `wire_update_dialogs` (SOU-226) so the updater's "Install and restart"
     // flushes through the same controller instance as quit, rather than a
     // second one that could drift out of sync.
-    // Full line list + window bookkeeping behind the virtualized live log
-    // (SOU-224) - `MainWindow.settings-log-lines` only ever holds the
-    // visible slice of this.
-    let settings_log_state: Rc<RefCell<settings_log::SettingsLogState>> =
-        Rc::new(RefCell::new(settings_log::SettingsLogState::default()));
-    // SOU-283: re-window the log on actual scroll changes, not an 80ms
-    // poll. Flickable's content-y is negative-going-down, same as the
-    // transcript's `transcript-scroll-changed`.
-    let weak_log_scroll = window.as_weak();
-    let log_state_for_scroll = settings_log_state.clone();
-    window.on_settings_log_scroll_changed(move |scroll_top_px| {
-        if let Some(window) = weak_log_scroll.upgrade() {
-            update_settings_log_window(&window, &log_state_for_scroll, -scroll_top_px);
-        }
-    });
     let settings_drafts_for_quit = settings_drafts.clone();
     let weak_quit = window.as_weak();
     let io_quit = settings_io.clone();
@@ -4510,11 +4291,6 @@ fn wire_callbacks(
     let model_options_state_for_open = model_options_state.clone();
     let snippets_list_state_for_open = snippets_list_state.clone();
     let snippet_editing_for_open = snippet_editing.clone();
-    let log_io = settings_io.clone();
-    let log_state = settings_log_state.clone();
-    wire_settings_log_poll(window, move |window| {
-        refresh_settings_log_tail(window, log_io.clone(), log_state.clone());
-    });
     let settings_drafts_for_open = settings_drafts.clone();
     let settings_io_for_open = settings_io.clone();
     let settings_values_for_open = settings_values.clone();
@@ -4770,47 +4546,6 @@ fn wire_callbacks(
             completion(order, outcome);
         });
     }
-
-    let weak = window.as_weak();
-    let settings_io_for_autostart = settings_io.clone();
-    window.on_settings_autostart_changed(move |enabled| {
-        save_settings_field(
-            &settings_io_for_autostart,
-            souffle_lib::commands::SettingsSaveLane::Autostart,
-            move |settings| settings.autostart_enabled = enabled,
-        );
-        if let Some(window) = weak.upgrade() {
-            window.set_settings_autostart_enabled(enabled);
-        }
-    });
-
-    let weak = window.as_weak();
-    let settings_io_for_debug = settings_io.clone();
-    window.on_settings_debug_transcription_changed(move |enabled| {
-        save_settings_field(
-            &settings_io_for_debug,
-            souffle_lib::commands::SettingsSaveLane::General,
-            move |settings| settings.debug_transcription = enabled,
-        );
-        if let Some(window) = weak.upgrade() {
-            window.set_settings_debug_transcription(enabled);
-        }
-    });
-
-    let weak = window.as_weak();
-    let settings_io_for_log_level = settings_io.clone();
-    window.on_settings_log_level_changed(move |value| {
-        settings_instrumentation::handler(settings_instrumentation::SettingsScenario::Menu);
-        let level = settings_ui::log_level_from_slint(value);
-        save_settings_field(
-            &settings_io_for_log_level,
-            souffle_lib::commands::SettingsSaveLane::General,
-            move |settings| settings.log_level = level,
-        );
-        if let Some(window) = weak.upgrade() {
-            window.set_settings_log_level(settings_ui::log_level_to_slint(level));
-        }
-    });
 
     let weak = window.as_weak();
     let settings_io_for_auto_paste = settings_io.clone();
@@ -5323,150 +5058,6 @@ fn wire_callbacks(
                     }
                     Err(e) => eprintln!("Failed to reset sample rate: {e}"),
                 }
-            }
-        })
-        .expect("slint event loop not running");
-    });
-
-    let weak = window.as_weak();
-    let handle = tauri_handle.clone();
-    window.on_settings_data_export_requested(move || {
-        let Some(window) = weak.upgrade() else {
-            return;
-        };
-        window.set_settings_data_exporting(true);
-        window.set_settings_data_export_status("".into());
-        window.set_settings_data_export_status_is_error(false);
-        let weak = weak.clone();
-        let state = Arc::clone(&handle);
-        let picker = souffle_lib::async_runtime::spawn_blocking(choose_archive_export_folder);
-        slint::spawn_local(async move {
-            let selection = picker
-                .await
-                .map_err(|error| format!("Sélecteur de dossier interrompu : {error}"))
-                .and_then(|result| result);
-            let Some(window) = weak.upgrade() else {
-                return;
-            };
-            let directory = match selection {
-                Ok(Some(directory)) => directory,
-                Ok(None) => {
-                    window.set_settings_data_exporting(false);
-                    return;
-                }
-                Err(error) => {
-                    window.set_settings_data_exporting(false);
-                    window.set_settings_data_export_status(error.into());
-                    window.set_settings_data_export_status_is_error(true);
-                    return;
-                }
-            };
-
-            match souffle_lib::commands::export_archive(state, directory.clone()) {
-                Ok(()) => {
-                    window.set_settings_data_export_status(
-                        format!("Export en cours vers {directory}…").into(),
-                    );
-                    monitor_archive_export(weak, directory);
-                }
-                Err(error) => {
-                    window.set_settings_data_exporting(false);
-                    window.set_settings_data_export_status(error.into());
-                    window.set_settings_data_export_status_is_error(true);
-                }
-            }
-        })
-        .expect("slint event loop not running");
-    });
-
-    window.on_settings_data_reveal_requested(move || {
-        if let Err(e) = souffle_lib::commands::reveal_data_dir() {
-            eprintln!("Failed to reveal data directory: {e}");
-        }
-    });
-
-    let weak = window.as_weak();
-    window.on_settings_mcp_copy_desktop_snippet_requested(move || {
-        let Some(window) = weak.upgrade() else {
-            return;
-        };
-        copy_to_clipboard(&window.get_settings_mcp_claude_desktop_snippet());
-    });
-
-    let weak = window.as_weak();
-    window.on_settings_mcp_copy_code_command_requested(move || {
-        let Some(window) = weak.upgrade() else {
-            return;
-        };
-        copy_to_clipboard(&window.get_settings_mcp_claude_code_command());
-    });
-
-    let weak = window.as_weak();
-    window.on_settings_mcp_test_requested(move || {
-        let Some(window) = weak.upgrade() else {
-            return;
-        };
-        window.set_settings_testing_mcp(true);
-        window.set_settings_mcp_test_status("".into());
-        let weak = weak.clone();
-        let worker =
-            souffle_lib::async_runtime::spawn_blocking(souffle_lib::commands::test_mcp_connection);
-        slint::spawn_local(async move {
-            let result = worker
-                .await
-                .map_err(|error| format!("Test MCP interrompu : {error}"))
-                .and_then(|result| result);
-            let Some(window) = weak.upgrade() else {
-                return;
-            };
-            match result {
-                Ok(tools) => window
-                    .set_settings_mcp_test_status(format!("Connexion réussie ({tools}).").into()),
-                Err(error) => window.set_settings_mcp_test_status(error.into()),
-            }
-            window.set_settings_testing_mcp(false);
-        })
-        .expect("slint event loop not running");
-    });
-
-    let weak = window.as_weak();
-    let settings_io_for_auto_update = settings_io.clone();
-    window.on_settings_auto_update_check_changed(move |enabled| {
-        save_settings_field(
-            &settings_io_for_auto_update,
-            souffle_lib::commands::SettingsSaveLane::General,
-            move |settings| settings.auto_update_check_enabled = enabled,
-        );
-        if let Some(window) = weak.upgrade() {
-            window.set_settings_auto_update_check(enabled);
-        }
-    });
-
-    let weak = window.as_weak();
-    window.on_settings_check_updates_requested(move || {
-        let Some(window) = weak.upgrade() else {
-            return;
-        };
-        window.set_settings_checking_updates(true);
-        window.set_settings_update_status("".into());
-        slint::spawn_local(async move {
-            let result = souffle_lib::commands::check_for_updates().await;
-            window.set_settings_checking_updates(false);
-            match result {
-                Ok(update) => {
-                    let status = if let Some(err) = update.check_error {
-                        err
-                    } else if update.update_available {
-                        format!(
-                            "Mise à jour disponible : v{}",
-                            update.latest_version.unwrap_or_default()
-                        )
-                    } else {
-                        "À jour.".to_string()
-                    };
-                    window.set_settings_update_status(status.into());
-                }
-                Err(e) => window.set_settings_update_status(e.into()),
             }
         })
         .expect("slint event loop not running");
@@ -5992,36 +5583,6 @@ fn wire_callbacks(
         );
     });
 
-    // Delete-model "danger zone" (SOU-195-slice, Système tab). Synchronous
-    // and main-thread-only like `rename_meeting` - a filesystem removal, no
-    // save panel involved, so no `run_on_main_thread` needed here.
-    // `commands::model::delete_model` is the sole guard against deleting a
-    // loaded or mid-transition model; a refusal surfaces its error text
-    // verbatim rather than re-deciding the state machine in the UI.
-    let weak_delete_model = window.as_weak();
-    let handle_delete_model = tauri_handle.clone();
-    window.on_settings_delete_model_requested(move || {
-        let Some(window) = weak_delete_model.upgrade() else {
-            return;
-        };
-        let handle = handle_delete_model.clone();
-        let catalog = match souffle_lib::commands::get_transcription_catalog(handle.clone()) {
-            Ok(catalog) => catalog,
-            Err(e) => {
-                window.set_settings_model_delete_error(e.into());
-                return;
-            }
-        };
-        let selection = model_ui::selected_profile(&catalog);
-        match souffle_lib::commands::delete_model(handle.clone(), selection) {
-            Ok(()) => {
-                window.set_settings_model_delete_error("".into());
-                refresh_model_runtime(weak_delete_model.clone(), handle);
-            }
-            Err(e) => window.set_settings_model_delete_error(e.into()),
-        }
-    });
-
     let weak = window.as_weak();
     let settings_io_for_learn = settings_io.clone();
     window.on_settings_dictation_learn_from_edit_changed(move |enabled| {
@@ -6249,44 +5810,30 @@ fn wire_callbacks(
         Rc::new(ShortcutBackend::live(&tauri_handle)),
     );
 
-    let weak = window.as_weak();
     let permissions_for_dialog = permissions.clone();
     window.on_permissions_dialog_changed(move || permissions_for_dialog.sync_activity());
-    window.on_settings_permissions_review_requested(move || {
-        let Some(window) = weak.upgrade() else {
-            return;
-        };
-        window.set_settings_permissions_dialog_open(true);
-    });
 
-    let weak = window.as_weak();
-    let handle = tauri_handle.clone();
-    window.on_settings_copy_diagnostics_requested(move || {
-        let Some(window) = weak.upgrade() else {
-            return;
-        };
-        window.set_settings_copying_diagnostics(true);
-        let state = Arc::clone(&handle);
-        let weak = weak.clone();
-        let worker = souffle_lib::async_runtime::spawn_blocking(move || {
-            souffle_lib::commands::get_diagnostics_text(state)
-        });
-        slint::spawn_local(async move {
-            let text = worker
-                .await
-                .map_err(|error| format!("Join diagnostics worker: {error}"))
-                .and_then(|result| result);
-            let Some(window) = weak.upgrade() else {
-                return;
-            };
-            window.set_settings_copying_diagnostics(false);
-            match text {
-                Ok(text) => copy_to_clipboard(&text),
-                Err(error) => eprintln!("Failed to build diagnostics text: {error}"),
-            }
-        })
-        .expect("slint event loop not running");
-    });
+    let system_host = {
+        let delete_handle = tauri_handle.clone();
+        let refresh_handle = tauri_handle.clone();
+        let refresh_weak = window.as_weak();
+        system_ui::SystemHost::new(
+            window,
+            system_ui::SystemBackend::live(
+                Arc::clone(&tauri_handle),
+                move || {
+                    let catalog =
+                        souffle_lib::commands::get_transcription_catalog(delete_handle.clone())?;
+                    souffle_lib::commands::delete_model(
+                        delete_handle.clone(),
+                        model_ui::selected_profile(&catalog),
+                    )
+                },
+                move || refresh_model_runtime(refresh_weak.clone(), refresh_handle.clone()),
+            ),
+        )
+    };
+    system_ui::wire(window, &system_host);
 
     let weak = window.as_weak();
     window.on_dismiss_transcription_status(move || {
@@ -7249,6 +6796,8 @@ fn quit_after_finalizing_recording(handle: &AppHandle) {
 
 #[cfg(test)]
 mod shortcut_ui_tests;
+#[cfg(test)]
+mod system_ui_tests;
 
 #[cfg(test)]
 mod tests {
@@ -7568,49 +7117,6 @@ mod tests {
         window.invoke_close_settings();
         assert!(window.get_settings_open());
         assert_ne!(ticket, fields.invoke_begin_shortcut_session());
-    }
-
-    #[test]
-    fn log_poll_ticks_only_on_the_visible_system_page_and_resumes_after_reopen() {
-        i_slint_backend_testing::init_no_event_loop();
-        let window = crate::settings_kit::new_window().unwrap();
-        let polls = Rc::new(Cell::new(0));
-        let seen = polls.clone();
-        super::wire_settings_log_poll(&window, move |_| seen.set(seen.get() + 1));
-        let tick = || {
-            i_slint_backend_testing::mock_elapsed_time(
-                super::SETTINGS_LOG_POLL + Duration::from_millis(1),
-            )
-        };
-        window.set_settings_open(true);
-        tick();
-        assert_eq!(polls.get(), 0);
-        window.set_settings_tab(crate::SettingsTab::System);
-        tick();
-        let started = polls.get();
-        tick();
-        assert_eq!(polls.get(), started + 1);
-        window.set_settings_tab(crate::SettingsTab::Ai);
-        tick();
-        let stopped = polls.get();
-        tick();
-        assert_eq!(polls.get(), stopped);
-        window.set_settings_tab(crate::SettingsTab::System);
-        tick();
-        assert!(polls.get() > stopped);
-        window.set_settings_open(false);
-        tick();
-        let closed = polls.get();
-        tick();
-        assert_eq!(polls.get(), closed);
-        window.set_settings_open(true);
-        tick();
-        assert!(polls.get() > closed);
-        window.set_window_visible(false);
-        tick();
-        let hidden = polls.get();
-        tick();
-        assert_eq!(polls.get(), hidden);
     }
 
     // SOU-226 AC2: a save-error banner from a closed Settings session must

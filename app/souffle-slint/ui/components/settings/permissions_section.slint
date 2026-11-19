@@ -1,36 +1,39 @@
 import { Theme } from "../../theme.slint";
-import { KitButton, KitFieldSet, KitThemeContext, KitThemes, KitFieldRow, KitMetrics } from "@kit";
+import { FocusRequest, KitButton, KitFieldSet, KitThemeContext, KitThemes, KitFieldRow, KitMetrics } from "@kit";
 
-// Port of PermissionsSettingsSection.svelte.
-export component PermissionsSection inherits VerticalLayout {
+// The dialog that reviews the permissions is mounted at the window root. When
+// it closes, the window publishes a request for this trigger's token.
+export component PermissionsSection inherits KitFieldSet {
+    in property <int> modal-layer: 0;
+    in property <FocusRequest> focus-request;
+    in property <int> focus-token: 1;
+
     callback review-requested();
 
-    spacing: 22px;
-    alignment: start;
+    theme: KitThemeContext.current;
+    legend: @tr("PERMISSIONS");
+    changed focus-request => {
+        if root.focus-request.present && root.focus-request.token == root.focus-token { permissions-button.take-focus(); }
+    }
 
-    KitFieldSet {
-        theme: KitThemeContext.current;
-        legend: @tr("PERMISSIONS");
+    permissions-row := KitFieldRow {
+        theme: root.theme;
+        modal-layer: root.modal-layer;
+        orientation: Theme.settings-field-orientation(self.width);
+        padding: KitMetrics.field-gap(self.theme);
+        focus-requested => { permissions-button.take-focus(); }
+        show-divider: false;
+        label: @tr("Permissions");
+        description: @tr("Revérifier les permissions macOS si le collage ou l'enregistrement cesse de fonctionner.");
 
-        KitFieldRow {
-            theme: KitThemeContext.current;
-            modal-layer: 0;
-            orientation: Theme.settings-field-orientation(self.width);
-            padding: KitMetrics.field-gap(self.theme);
-            focus-requested => { permissions-button.take-focus(); }
-            private property <bool> control-focused: permissions-button.has-focus;
-            changed control-focused => {
-                if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
-            }
-            show-divider: false;
-            label: @tr("Permissions");
-            description: @tr("Revérifier les permissions macOS si le collage ou l'enregistrement cesse de fonctionner.");
-
-            permissions-button := KitButton {
-                theme: KitThemeContext.current;
-                modal-layer: 0;
-                text: @tr("Vérifier les permissions");
-                activated => { root.review-requested(); }
+        permissions-button := KitButton {
+            theme: root.theme;
+            modal-layer: permissions-row.modal-layer;
+            text: @tr("Vérifier les permissions");
+            accessible-description: permissions-row.description;
+            activated => { root.review-requested(); }
+            focus-observed(focused) => {
+                if focused { permissions-row.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
             }
         }
     }

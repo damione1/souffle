@@ -1,177 +1,158 @@
-import { ChoiceLabelPosition, ControlWidth, KitButton, KitSwitch, Ownership, ScrollFrame, KitFieldSet, KitThemeContext, KitThemes, KitFieldRow, KitMetrics } from "@kit";
+import { ChoiceLabelPosition, ControlSize, ControlWidth, FieldAccess, KitButton, KitFieldRow, KitFieldSet, KitInline, KitMetrics, KitStack, LayoutSpace, KitModalContext, KitSurface, KitSwitch, KitText, KitTextArea, KitThemeContext, KitThemes, ListView, Ownership, TypographyRole } from "@kit";
 import { SettingsOptions, ClosedSettingsPicker } from "settings_options.slint";
 import { Theme } from "../../theme.slint";
 import { LogLevel } from "../../types.slint";
 
-// Port of DiagnosticsSettingsSection.svelte. The live log is virtualized
-// (SOU-224): main.rs owns the full tail and only pushes the visible slice
-// (`log-lines`) plus estimated spacers, same pattern as TranscriptSection.
-// The refresh/scroll timers only run while the Système tab is actually
-// active (see `sync_settings_log_timers` in main.rs), not for the whole
-// life of the Settings sheet.
-export component DiagnosticsSection inherits VerticalLayout {
-    in-out property <bool> debug-transcription;
+// One read-only editor per log line: the native editor selects and copies any
+// substring of its line, and the line wraps to its real height. The row keeps
+// the focus ring's margin so the list viewport does not clip it.
+component LogLine inherits KitTextArea {
+    access: FieldAccess.read-only;
+    min-lines: 1;
+    max-lines: 100000;
+    show-description: false;
+    control-size: ControlSize.compact;
+    corner-radius: 0px;
+    text-size: KitMetrics.font-size(root.theme, TypographyRole.caption);
+    text-font-family: root.theme.typography.family-monospace;
+}
+
+component LogRow inherits KitStack {
+    in property <string> line;
+    in property <string> label;
+    in property <length> row-width;
+    in property <int> modal-layer;
+    callback focus-observed(bool);
+
+    width: root.row-width;
+    gap: LayoutSpace.none;
+    padding: KitThemes.focus-outset(root.theme.focus);
+
+    LogLine {
+        theme: root.theme;
+        modal-layer: root.modal-layer;
+        text: root.line;
+        accessible-name: root.label;
+        focus-observed(focused) => { root.focus-observed(focused); }
+    }
+}
+
+// `log-lines` is the whole tail the host keeps. The ListView only builds the
+// rows near its viewport, so the page does not mount every line, and a refresh
+// that appends leaves the rows already shown, and the reader's place, alone.
+// The host polls only while this page is the visible one.
+export component DiagnosticsSection inherits KitFieldSet {
+    in property <bool> debug-transcription;
     in property <LogLevel> log-level;
-    // Only the currently visible slice of the log tail - main.rs owns the
-    // full line list and re-windows it as `log-scroll-top` moves (SOU-224).
     in property <[string]> log-lines;
-    in property <int> log-line-count;
-    // Estimated px height of the lines scrolled past above/below the
-    // mounted slice - plain `float` for the same set_*/get_* reason as
-    // TranscriptSection's spacers.
-    in property <float> log-spacer-before: 0.0;
-    in property <float> log-spacer-after: 0.0;
-    // Two-way bound up to MainWindow so main.rs can react to the real scroll
-    // position and decide the next slice.
-    in-out property <length> log-scroll-top: 0px;
     in property <bool> copying-diagnostics: false;
+    in property <int> modal-layer: 0;
 
     callback debug-transcription-changed(bool);
     callback log-level-changed(LogLevel);
     callback copy-diagnostics-requested();
 
+    theme: KitThemeContext.current;
+    legend: @tr("DIAGNOSTICS");
 
+    level-row := KitFieldRow {
+        theme: root.theme;
+        modal-layer: root.modal-layer;
+        orientation: Theme.settings-field-orientation(self.width);
+        padding: KitMetrics.field-gap(self.theme);
+        focus-requested => { level-picker.take-focus(); }
+        show-divider: false;
+        label: @tr("Niveau de journal");
+        description: @tr("Quantité de détails que Soufflé écrit dans le fichier journal.");
 
-    spacing: 22px;
-    alignment: start;
-
-    KitFieldSet {
-        theme: KitThemeContext.current;
-        legend: @tr("DIAGNOSTICS");
-
-        KitFieldRow {
-            theme: KitThemeContext.current;
-            modal-layer: 0;
-            orientation: Theme.settings-field-orientation(self.width);
-            padding: KitMetrics.field-gap(self.theme);
-            focus-requested => { level-picker.take-focus(); }
-            private property <bool> control-focused: level-picker.has-focus;
-            changed control-focused => {
-                if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
-            }
-            show-divider: false;
+        level-picker := ClosedSettingsPicker {
+            theme: root.theme;
+            modal-layer: level-row.modal-layer;
             label: @tr("Niveau de journal");
-            description: @tr("Quantité de détails que Soufflé écrit dans le fichier journal.");
+            choices: SettingsOptions.log-level-options(root.log-level);
+            chosen(row) => { root.log-level-changed(SettingsOptions.log-level-value(row, root.log-level)); }
+        }
+    }
 
-            level-picker := ClosedSettingsPicker {
-                theme: KitThemeContext.current;
-                modal-layer: 0;
-                label: @tr("Niveau de journal");
-                choices: SettingsOptions.log-level-options(root.log-level);
-                chosen(row) => { root.log-level-changed(SettingsOptions.log-level-value(row, root.log-level)); }
+    logging-row := KitFieldRow {
+        theme: root.theme;
+        modal-layer: root.modal-layer;
+        orientation: Theme.settings-field-orientation(self.width);
+        padding: KitMetrics.field-gap(self.theme);
+        show-divider: true;
+        focus-requested => { logging-switch.take-focus(); }
+        label: @tr("Journaux détaillés de transcription");
+        description: @tr("Enregistre des détails supplémentaires sur la reconnaissance vocale pour le dépannage.");
+
+        logging-switch := KitSwitch {
+            theme: root.theme;
+            modal-layer: logging-row.modal-layer;
+            label-position: ChoiceLabelPosition.start;
+            padding-inline: 0px;
+            ownership: Ownership.controlled;
+            control-width: ControlWidth.intrinsic;
+            accessible-name: logging-row.label;
+            accessible-description: logging-row.description;
+            checked: root.debug-transcription;
+            toggled(new) => { root.debug-transcription-changed(new); }
+            focus-observed(focused) => {
+                if focused { logging-row.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
             }
         }
+    }
 
-        KitFieldRow {
-            theme: KitThemeContext.current;
-            modal-layer: 0;
-            orientation: Theme.settings-field-orientation(self.width);
-            padding: KitMetrics.field-gap(self.theme);
-            show-divider: true;
-            focus-requested => { logging-switch.take-focus(); }
-            private property <bool> control-focused: logging-switch.has-focus;
-            changed control-focused => {
-                if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
+    log-row := KitFieldRow {
+        theme: root.theme;
+        modal-layer: root.modal-layer;
+        orientation: Orientation.vertical;
+        padding: KitMetrics.field-gap(self.theme);
+        show-divider: true;
+        label: @tr("Journal en direct");
+        description: @tr("Fin du fichier journal actuel, actualisé toutes les quelques secondes.");
+
+        log-surface := KitSurface {
+            theme: root.theme;
+            inset: LayoutSpace.tight;
+            gap: LayoutSpace.none;
+            clip: true;
+            accessible-role: groupbox;
+            accessible-label: log-row.label;
+
+            if root.log-lines.length == 0: KitText {
+                theme: root.theme;
+                role: caption;
+                text: @tr("Aucune entrée de journal pour l'instant.");
             }
-            label: @tr("Journaux détaillés de transcription");
-            description: @tr("Enregistre des détails supplémentaires sur la reconnaissance vocale pour le dépannage.");
-
-            logging-switch := KitSwitch {
-                theme: KitThemeContext.current;
-                modal-layer: 0;
-                label-position: ChoiceLabelPosition.start;
-                padding-inline: 0px;
-                ownership: Ownership.controlled;
-                control-width: ControlWidth.intrinsic;
-                accessible-label: @tr("Journaux détaillés de transcription");
-                checked: root.debug-transcription;
-                toggled(new) => { root.debug-transcription-changed(new); }
-            }
-        }
-
-        VerticalLayout {
-            padding-top: 15px;
-            padding-bottom: 8px;
-            padding-left: Theme.settings-inset;
-            padding-right: Theme.settings-inset;
-            spacing: 8px;
-            alignment: start;
-
-            Text {
-                text: @tr("Journal en direct");
-                font-size: 13.5px;
-                color: Theme.text-secondary;
-            }
-            Text {
-                text: @tr("Fin du fichier journal actuel, actualisé toutes les quelques secondes.");
-                font-size: 12px;
-                color: Theme.text-muted;
-                wrap: word-wrap;
-            }
-
-            Rectangle {
-                height: 140px;
-                border-width: 1px;
-                border-color: Theme.ghost-border;
-                background: Theme.input;
-                vertical-stretch: 0;
-                clip: true;
-
-                accessible-role: groupbox;
-                accessible-label: @tr("Journal en direct");
-
-                log-viewport := ScrollFrame {
-                    width: 100%;
-                    height: 100%;
-                    horizontal-scrollbar-policy: always-off;
-                    content-width: self.visible-width;
-                    content-height: lines.preferred-height;
-                    content-y <=> root.log-scroll-top;
-
-                    lines := VerticalLayout {
-                        width: log-viewport.visible-width;
-                        padding: 8px;
-                        spacing: 0px;
-                        alignment: start;
-
-                        Rectangle { height: root.log-spacer-before * 1px; }
-
-                        if root.log-line-count == 0: Text {
-                            text: @tr("Aucune entrée de journal pour l'instant.");
-                            font-family: "JetBrains Mono";
-                            font-size: 10.5px;
-                            color: Theme.text-secondary;
-                            wrap: word-wrap;
-                        }
-
-                        // One read-only TextInput per mounted line rather
-                        // than one for the whole tail, so a 2s poll that
-                        // appends lines never relayouts the already-rendered
-                        // ones (SOU-224). Selection/copy still works within
-                        // a line; the "Copier les diagnostics" button below
-                        // remains the way to grab the full text.
-                        for line in root.log-lines: TextInput {
-                            text: line;
-                            font-family: "JetBrains Mono";
-                            font-size: 10.5px;
-                            color: Theme.text-secondary;
-                            wrap: word-wrap;
-                            single-line: false;
-                            read-only: true;
-                            selection-background-color: Theme.accent.with-alpha(0.28);
-                        }
-
-                        Rectangle { height: root.log-spacer-after * 1px; }
+            log := ListView {
+                theme: root.theme;
+                height: root.log-lines.length == 0 ? 0px : Theme.settings-log-height;
+                enabled: !KitModalContext.inert(root.modal-layer);
+                for line in root.log-lines: LogRow {
+                    theme: root.theme;
+                    modal-layer: root.modal-layer;
+                    row-width: log.visible-width;
+                    line: line;
+                    label: log-row.label;
+                    focus-observed(focused) => {
+                        if focused { log-surface.ensure-visible(KitThemes.scroll-behavior(root.theme)); }
                     }
                 }
             }
+        }
 
-            HorizontalLayout {
-                alignment: end;
-                KitButton {
-                    text: root.copying-diagnostics ? @tr("Copie…") : @tr("Copier les diagnostics");
-                    disabled: root.copying-diagnostics;
-                    activated => { root.copy-diagnostics-requested(); }
+        KitInline {
+            theme: root.theme;
+            alignment: end;
+            inset: compact;
+            copy-button := KitButton {
+                theme: root.theme;
+                modal-layer: log-row.modal-layer;
+                text: root.copying-diagnostics ? @tr("Copie…") : @tr("Copier les diagnostics");
+                text-wrap: word-wrap;
+                disabled: root.copying-diagnostics;
+                activated => { root.copy-diagnostics-requested(); }
+                focus-observed(focused) => {
+                    if focused { copy-button.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
                 }
             }
         }

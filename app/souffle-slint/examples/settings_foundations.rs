@@ -27,6 +27,11 @@ mod settings_pages;
 #[allow(dead_code)]
 #[path = "../src/shortcut_capture.rs"]
 mod shortcut_capture;
+#[path = "settings_foundations/system_page.rs"]
+mod system_page;
+#[allow(dead_code)]
+#[path = "../src/system_ui.rs"]
+mod system_ui;
 
 fn settle(w: &MainWindow) {
     for _ in 0..3 {
@@ -257,17 +262,29 @@ fn visit_tabs(w: &MainWindow) {
     assert_eq!(delete.accessible_enabled(), Some(true));
     delete.invoke_accessible_default_action();
     settle(w);
-    let confirm = action("Confirmer");
-    let cancel = action("Annuler");
     assert!(
-        confirm.absolute_position().x + confirm.size().width <= cancel.absolute_position().x + 1.
+        w.get_settings_model_delete_confirm_open(),
+        "the confirmation is a modal dialog"
+    );
+    let dialog_action = |label: &str| {
+        ElementQuery::from_root(w)
+            .match_accessible_role(AccessibleRole::Button)
+            .match_accessible_label(label)
+            .find_first()
+            .expect("dialog action")
+    };
+    let confirm = dialog_action("Confirmer");
+    let cancel = dialog_action("Annuler");
+    assert!(
+        cancel.absolute_position().x + cancel.size().width <= confirm.absolute_position().x + 1.
     );
     assert!(
-        cancel.absolute_position().x + cancel.size().width
+        confirm.absolute_position().x + confirm.size().width
             <= w.window().size().width as f32 / w.window().scale_factor() + 1.
     );
     cancel.invoke_accessible_default_action();
     settle(w);
+    assert!(!w.get_settings_model_delete_confirm_open());
     assert!(action("Supprimer").is_valid());
     w.set_settings_save_error("fixture save".into());
     settle(w);
@@ -285,7 +302,7 @@ fn visit_tabs(w: &MainWindow) {
             .next()
             .is_some()
     );
-    println!("disabled delete, conditional confirm/cancel, and retained draft alert verified");
+    println!("disabled delete, modal confirm/cancel, and retained draft alert verified");
     w.set_settings_save_error("".into());
     w.set_settings_draft_save_error("".into());
     settle(w);

@@ -269,6 +269,10 @@ pub(super) async fn exercise(w: &MainWindow, path: &Path) {
         meetings_scale(w, path).await;
         return;
     }
+    if mode == "system" {
+        super::system_page::system(w, path).await;
+        return;
+    }
     let en = w.get_settings_locale() == crate::AppLocale::En;
     let mut settings = AppSettings {
         dictation_polish_enabled: true,

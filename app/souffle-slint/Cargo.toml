@@ -36,7 +36,7 @@ workspace = true
 slint = { version = "=1.19.0", default-features = false, features = ["std", "compat-1-18", "backend-winit", "renderer-skia", "accessibility", "gettext", "unstable-winit-030"] }
 # Iterate the exported Slint enums for fixed settings option lists.
 strum = { version = "0.28", features = ["derive"] }
-slint-kit = { git = "https://github.com/damione1/slint-kit.git", rev = "e66dfed84e268f4803bcbb20a9d473326eba73c2" }
+slint-kit = { git = "https://github.com/damione1/slint-kit.git", rev = "e66dfed84e268f4803bcbb20a9d473326eba73c2", features = ["native"] }
 souffle_lib = { path = "..", package = "souffle" }
 # SOU-137: the paragraph grouper and its pause threshold, declared once for
 # the export, the summary, this UI and the MCP sidecar.

@@ -1,299 +1,282 @@
 import { SettingsOptions, ClosedSettingsPicker } from "settings_options.slint";
-import { KitButton, KitTextArea, FieldAccess, KitFieldSet, KitThemeContext, KitThemes, KitFieldRow, KitMetrics } from "@kit";
+import { AlertSeverity, FieldAccess, KitAlert, KitButton, KitFieldRow, KitFieldSet, KitInline, KitMetrics, KitStack, KitTextArea, KitThemeContext, KitThemes, TypographyRole } from "@kit";
 import { Theme } from "../../theme.slint";
-import { AudioRetention } from "../../types.slint";
+import { AudioRetention, ExportStatus, McpStatus } from "../../types.slint";
 
+// A selectable, read-only block for a path, a JSON document or a command. The
+// text is the host's exact string: the native editor selects and copies it.
 component CodeBlock inherits KitTextArea {
-    in property <string> body;
-    text: root.body;
     access: FieldAccess.read-only;
-    accessible-name: @tr("Bloc de code sélectionnable");
-    height: 88px;
+    min-lines: 1;
+    max-lines: 6;
+    show-description: false;
+    text-size: KitMetrics.font-size(root.theme, TypographyRole.caption);
+    text-font-family: root.theme.typography.family-monospace;
 }
 
-// Port of DataSettingsSection.svelte. "Export archive" opens a native
-// macOS folder picker (osascript `choose folder`) rather than the
-// `@tauri-apps/plugin-dialog` the Svelte version uses - the ticket's own
-// out-of-scope note defers the native-dialog abstraction to SOU-191 and
-// allows consuming existing commands meanwhile. `export_archive` itself
-// runs the real export on a background thread and returns immediately;
-// this shell does not listen for the `ArchiveExportProgress` Tauri event,
-// so there is no live progress bar or completion toast here (documented
-// gap, not a placeholder - the export itself is real).
-export component DataSection inherits VerticalLayout {
+// The destination comes from the native folder dialog and the export itself
+// runs in the host; this page shows the retention choice, the outcome and the
+// stored sizes the host reports.
+export component DataSection inherits KitFieldSet {
     in property <string> stats-line;
     in property <string> recordings-line;
     in property <AudioRetention> retention;
-    in property <bool> exporting;
-    in property <string> export-status;
-    in property <bool> export-status-is-error;
-    in property <string> mcp-binary-path;
-    in property <bool> mcp-exists;
-    in property <string> mcp-claude-desktop-snippet;
-    in property <string> mcp-claude-code-command;
-    in property <bool> testing-mcp;
-    in property <string> mcp-test-status;
+    in property <ExportStatus> export-status;
+    in property <string> export-detail;
+    in property <int> modal-layer: 0;
 
     callback retention-changed(AudioRetention);
     callback export-requested();
     callback reveal-requested();
-    callback copy-desktop-snippet-requested();
-    callback copy-code-command-requested();
-    callback test-mcp-requested();
 
+    theme: KitThemeContext.current;
+    legend: @tr("DONNÉES");
 
-
-    spacing: 22px;
-    alignment: start;
-
-    KitFieldSet {
-        theme: KitThemeContext.current;
-        legend: @tr("DONNÉES");
-
-    if root.stats-line != "": VerticalLayout {
-        padding-left: Theme.settings-inset;
-        padding-right: Theme.settings-inset;
-        padding-top: 12px;
-        Text {
-            text: root.stats-line;
-            font-size: 12px;
-            color: Theme.text-muted;
-            wrap: word-wrap;
-        }
-    }
-    if root.recordings-line != "": VerticalLayout {
-        padding-left: Theme.settings-inset;
-        padding-right: Theme.settings-inset;
-        padding-bottom: 4px;
-        Text {
-            text: root.recordings-line;
-            font-size: 12px;
-            color: Theme.text-muted;
-            wrap: word-wrap;
-        }
+    if root.stats-line != "" || root.recordings-line != "": stats-row := KitFieldRow {
+        theme: root.theme;
+        modal-layer: root.modal-layer;
+        padding: KitMetrics.field-gap(self.theme);
+        description: root.recordings-line == "" ? root.stats-line : root.stats-line == "" ? root.recordings-line : root.stats-line + "\n" + root.recordings-line;
     }
 
-    KitFieldRow {
-        theme: KitThemeContext.current;
-        modal-layer: 0;
+    retention-row := KitFieldRow {
+        theme: root.theme;
+        modal-layer: root.modal-layer;
         orientation: Theme.settings-field-orientation(self.width);
         padding: KitMetrics.field-gap(self.theme);
         focus-requested => { retention-picker.take-focus(); }
-        private property <bool> control-focused: retention-picker.has-focus;
-        changed control-focused => {
-            if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
-        }
         show-divider: root.stats-line != "" || root.recordings-line != "";
         label: @tr("Conservation audio des réunions");
         description: @tr("Durée de conservation des enregistrements audio bruts.");
 
         retention-picker := ClosedSettingsPicker {
-            theme: KitThemeContext.current;
-            modal-layer: 0;
+            theme: root.theme;
+            modal-layer: retention-row.modal-layer;
             label: @tr("Conservation audio des réunions");
             choices: SettingsOptions.retention-options(root.retention);
             chosen(row) => { root.retention-changed(SettingsOptions.retention-value(row, root.retention)); }
         }
     }
 
-    KitFieldRow {
-        theme: KitThemeContext.current;
-        modal-layer: 0;
+    export-row := KitFieldRow {
+        theme: root.theme;
+        modal-layer: root.modal-layer;
         orientation: Theme.settings-field-orientation(self.width);
         padding: KitMetrics.field-gap(self.theme);
         show-divider: true;
         focus-requested => { export-button.take-focus(); }
-        private property <bool> control-focused: export-button.has-focus;
-        changed control-focused => {
-            if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
-        }
         label: @tr("Exporter les données");
         description: @tr("Exporter réunions, dictées et journal dans un dossier.");
 
         export-button := KitButton {
-            theme: KitThemeContext.current;
-            modal-layer: 0;
-            text: root.exporting ? @tr("Export en cours…") : @tr("Exporter…");
-            disabled: root.exporting;
+            theme: root.theme;
+            modal-layer: export-row.modal-layer;
+            private property <bool> exporting: root.export-status == ExportStatus.choosing || root.export-status == ExportStatus.running;
+            text: self.exporting ? @tr("Export en cours…") : @tr("Exporter…");
+            text-wrap: word-wrap;
+            disabled: self.exporting;
+            accessible-description: export-row.description;
             activated => { root.export-requested(); }
+            focus-observed(focused) => {
+                if focused { export-row.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
+            }
         }
     }
 
-    KitFieldRow {
-        theme: KitThemeContext.current;
-        modal-layer: 0;
+    reveal-row := KitFieldRow {
+        theme: root.theme;
+        modal-layer: root.modal-layer;
         orientation: Theme.settings-field-orientation(self.width);
         padding: KitMetrics.field-gap(self.theme);
         show-divider: true;
         focus-requested => { reveal-button.take-focus(); }
-        private property <bool> control-focused: reveal-button.has-focus;
-        changed control-focused => {
-            if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
-        }
         label: @tr("Afficher le dossier de données");
 
         reveal-button := KitButton {
-            theme: KitThemeContext.current;
-            modal-layer: 0;
+            theme: root.theme;
+            modal-layer: reveal-row.modal-layer;
             text: @tr("Afficher dans le Finder");
+            text-wrap: word-wrap;
             activated => { root.reveal-requested(); }
+            focus-observed(focused) => {
+                if focused { reveal-row.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
+            }
         }
     }
 
-    if root.export-status != "": VerticalLayout {
-        padding-left: Theme.settings-inset;
-        padding-right: Theme.settings-inset;
-        padding-bottom: 12px;
-        Text {
-            text: root.export-status-is-error ? root.export-status : @tr("Export terminé vers {}" , root.export-status);
-            color: root.export-status-is-error ? Theme.danger : Theme.text-muted;
-            font-size: 11.5px;
-            wrap: word-wrap;
+    if root.export-status == ExportStatus.running: KitAlert {
+        theme: root.theme;
+        severity: AlertSeverity.information;
+        message: @tr("Export en cours vers {}…", root.export-detail);
+    }
+    if root.export-status == ExportStatus.succeeded: KitAlert {
+        theme: root.theme;
+        severity: AlertSeverity.success;
+        message: @tr("Export terminé vers {}", root.export-detail);
+    }
+    if root.export-status == ExportStatus.failed: KitAlert {
+        theme: root.theme;
+        severity: AlertSeverity.error;
+        message: root.export-detail;
+    }
+}
+
+export component McpSection inherits KitFieldSet {
+    in property <string> binary-path;
+    in property <McpStatus> status;
+    in property <string> status-detail;
+    in property <string> claude-desktop-snippet;
+    in property <string> claude-code-command;
+    in property <int> modal-layer: 0;
+
+    callback copy-desktop-snippet-requested();
+    callback copy-code-command-requested();
+    callback test-requested();
+
+    theme: KitThemeContext.current;
+    legend: @tr("SERVEUR MCP");
+
+    KitFieldRow {
+        theme: root.theme;
+        modal-layer: root.modal-layer;
+        padding: KitMetrics.field-gap(self.theme);
+        description: @tr("Permet à Claude Desktop, Claude Code ou un autre client MCP de lire vos transcriptions et résumés. Tout reste sur ce Mac.");
+    }
+
+    binary-row := KitFieldRow {
+        theme: root.theme;
+        modal-layer: root.modal-layer;
+        orientation: Orientation.vertical;
+        padding: KitMetrics.field-gap(self.theme);
+        show-divider: true;
+        focus-requested => { binary-block.take-focus(); }
+        label: @tr("Binaire sidecar");
+
+        binary-block := CodeBlock {
+            theme: root.theme;
+            modal-layer: binary-row.modal-layer;
+            text: root.binary-path;
+            accessible-name: binary-row.label;
+            focus-observed(focused) => {
+                if focused { binary-row.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
+            }
         }
     }
+
+    if root.status == McpStatus.absent: KitAlert {
+        theme: root.theme;
+        severity: AlertSeverity.warning;
+        message: @tr("Binaire introuvable. Compilez souffle-mcp pour le développement local.");
     }
 
-    KitFieldSet {
-        theme: KitThemeContext.current;
-        legend: @tr("SERVEUR MCP");
+    desktop-row := KitFieldRow {
+        theme: root.theme;
+        modal-layer: root.modal-layer;
+        orientation: Orientation.vertical;
+        padding: KitMetrics.field-gap(self.theme);
+        show-divider: true;
+        focus-requested => { desktop-block.take-focus(); }
+        label: @tr("Config Claude Desktop");
+        description: @tr("À coller dans claude_desktop_config.json sous mcpServers.");
 
-        VerticalLayout {
-            padding-left: Theme.settings-inset;
-            padding-right: Theme.settings-inset;
-            padding-top: 15px;
-            padding-bottom: 8px;
-            Text {
-                text: @tr("Permet à Claude Desktop, Claude Code ou un autre client MCP de lire vos transcriptions et résumés. Tout reste sur ce Mac.");
-                font-size: 12px;
-                color: Theme.text-muted;
-                wrap: word-wrap;
-            }
-        }
-
-        VerticalLayout {
-            padding-left: Theme.settings-inset;
-            padding-right: Theme.settings-inset;
-            padding-top: 8px;
-            padding-bottom: 12px;
-            spacing: 8px;
-
-            Text {
-                text: @tr("Binaire sidecar");
-                font-size: 13.5px;
-                color: Theme.text-secondary;
-            }
-            CodeBlock {
-                body: root.mcp-binary-path;
-            }
-            if !root.mcp-exists: Text {
-                text: @tr("Binaire introuvable. Compilez souffle-mcp pour le développement local.");
-                color: Theme.warning;
-                font-size: 12px;
-                wrap: word-wrap;
-            }
-        }
-
-        Rectangle {
-            height: 1px;
-            background: Theme.border-soft;
-            vertical-stretch: 0;
-        }
-
-        VerticalLayout {
-            padding-left: Theme.settings-inset;
-            padding-right: Theme.settings-inset;
-            padding-top: 15px;
-            padding-bottom: 12px;
-            spacing: 8px;
-
-            HorizontalLayout {
-                spacing: 16px;
-                VerticalLayout {
-                    spacing: 2px;
-                    horizontal-stretch: 1;
-                    Text {
-                        text: @tr("Config Claude Desktop");
-                        font-size: 13.5px;
-                        color: Theme.text-secondary;
-                    }
-                    Text {
-                        text: @tr("À coller dans claude_desktop_config.json sous mcpServers.");
-                        font-size: 12px;
-                        color: Theme.text-muted;
-                        wrap: word-wrap;
-                    }
+        KitStack {
+            theme: root.theme;
+            gap: compact;
+            desktop-block := CodeBlock {
+                theme: root.theme;
+                modal-layer: desktop-row.modal-layer;
+                text: root.claude-desktop-snippet;
+                accessible-name: desktop-row.label;
+                focus-observed(focused) => {
+                    if focused { desktop-row.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
                 }
-                KitButton {
+            }
+            KitInline {
+                theme: root.theme;
+                alignment: end;
+                desktop-copy := KitButton {
+                    theme: root.theme;
+                    modal-layer: desktop-row.modal-layer;
                     text: @tr("Copier");
+                    accessible-description: desktop-row.label;
                     activated => { root.copy-desktop-snippet-requested(); }
-                }
-            }
-            CodeBlock {
-                body: root.mcp-claude-desktop-snippet;
-            }
-        }
-
-        Rectangle {
-            height: 1px;
-            background: Theme.border-soft;
-            vertical-stretch: 0;
-        }
-
-        VerticalLayout {
-            padding-left: Theme.settings-inset;
-            padding-right: Theme.settings-inset;
-            padding-top: 15px;
-            padding-bottom: 12px;
-            spacing: 8px;
-
-            HorizontalLayout {
-                spacing: 16px;
-                VerticalLayout {
-                    spacing: 2px;
-                    horizontal-stretch: 1;
-                    Text {
-                        text: @tr("Claude Code");
-                        font-size: 13.5px;
-                        color: Theme.text-secondary;
-                    }
-                    Text {
-                        text: @tr("À exécuter une fois dans un terminal pour enregistrer le serveur.");
-                        font-size: 12px;
-                        color: Theme.text-muted;
-                        wrap: word-wrap;
+                    focus-observed(focused) => {
+                        if focused { desktop-row.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
                     }
                 }
-                KitButton {
+            }
+        }
+    }
+
+    code-row := KitFieldRow {
+        theme: root.theme;
+        modal-layer: root.modal-layer;
+        orientation: Orientation.vertical;
+        padding: KitMetrics.field-gap(self.theme);
+        show-divider: true;
+        focus-requested => { code-block.take-focus(); }
+        label: @tr("Claude Code");
+        description: @tr("À exécuter une fois dans un terminal pour enregistrer le serveur.");
+
+        KitStack {
+            theme: root.theme;
+            gap: compact;
+            code-block := CodeBlock {
+                theme: root.theme;
+                modal-layer: code-row.modal-layer;
+                text: root.claude-code-command;
+                accessible-name: code-row.label;
+                focus-observed(focused) => {
+                    if focused { code-row.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
+                }
+            }
+            KitInline {
+                theme: root.theme;
+                alignment: end;
+                code-copy := KitButton {
+                    theme: root.theme;
+                    modal-layer: code-row.modal-layer;
                     text: @tr("Copier");
+                    accessible-description: code-row.label;
                     activated => { root.copy-code-command-requested(); }
+                    focus-observed(focused) => {
+                        if focused { code-row.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
+                    }
                 }
             }
-            CodeBlock {
-                body: root.mcp-claude-code-command;
+        }
+    }
+
+    test-row := KitFieldRow {
+        theme: root.theme;
+        modal-layer: root.modal-layer;
+        orientation: Theme.settings-field-orientation(self.width);
+        padding: KitMetrics.field-gap(self.theme);
+        show-divider: true;
+        focus-requested => { connection-button.take-focus(); }
+        label: @tr("Tester la connexion");
+
+        connection-button := KitButton {
+            theme: root.theme;
+            modal-layer: test-row.modal-layer;
+            text: root.status == McpStatus.testing ? @tr("Test en cours…") : @tr("Tester la connexion");
+            text-wrap: word-wrap;
+            disabled: root.status == McpStatus.absent || root.status == McpStatus.testing;
+            activated => { root.test-requested(); }
+            focus-observed(focused) => {
+                if focused { test-row.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
             }
         }
+    }
 
-        KitFieldRow {
-            theme: KitThemeContext.current;
-            modal-layer: 0;
-            orientation: Theme.settings-field-orientation(self.width);
-            padding: KitMetrics.field-gap(self.theme);
-            show-divider: true;
-            focus-requested => { connection-button.take-focus(); }
-            private property <bool> control-focused: connection-button.has-focus;
-            changed control-focused => {
-                if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
-            }
-            label: @tr("Tester la connexion");
-            description: root.mcp-test-status;
-
-            connection-button := KitButton {
-                theme: KitThemeContext.current;
-                modal-layer: 0;
-                text: root.testing-mcp ? @tr("Test en cours…") : @tr("Tester la connexion");
-                disabled: !(root.mcp-exists && !root.testing-mcp);
-                activated => { root.test-mcp-requested(); }
-            }
-        }
+    if root.status == McpStatus.succeeded: KitAlert {
+        theme: root.theme;
+        severity: AlertSeverity.success;
+        message: @tr("Connexion réussie ({}).", root.status-detail);
+    }
+    if root.status == McpStatus.failed: KitAlert {
+        theme: root.theme;
+        severity: AlertSeverity.error;
+        message: root.status-detail;
     }
 }

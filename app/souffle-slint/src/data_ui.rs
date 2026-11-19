@@ -2,7 +2,7 @@
 //! `data_section.slint`'s doc comment for why "Export archive" uses a
 //! native `osascript` folder picker instead of a Tauri dialog plugin.
 
-use crate::MainWindow;
+use crate::{MainWindow, McpStatus};
 use souffle_lib::archive::DataStats;
 use souffle_lib::commands::McpSetupInfo;
 use souffle_lib::settings::AppSettings;
@@ -70,7 +70,12 @@ pub fn populate_stats(window: &MainWindow, stats: &DataStats) {
 
 pub fn populate_mcp(window: &MainWindow, info: &McpSetupInfo) {
     window.set_settings_mcp_binary_path(info.binary_path.as_str().into());
-    window.set_settings_mcp_exists(info.exists);
+    window.set_settings_mcp_status(if info.exists {
+        McpStatus::Idle
+    } else {
+        McpStatus::Absent
+    });
+    window.set_settings_mcp_status_detail("".into());
     window.set_settings_mcp_claude_desktop_snippet(info.claude_desktop_snippet.as_str().into());
     window.set_settings_mcp_claude_code_command(info.claude_code_command.as_str().into());
 }

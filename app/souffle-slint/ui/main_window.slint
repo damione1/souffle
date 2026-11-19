@@ -1,4 +1,4 @@
-import { KitFieldService, KitAppShell, KitRouter, KitScreen } from "@kit";
+import { FocusRequest, KitFieldService, KitAppShell, KitRouter, KitScreen } from "@kit";
 export { MeetingExportMenu } from "meeting_detail.slint";
 export { SettingsOptions, SettingsOptionList } from "components/settings/settings_options.slint";
 export { CatalogChoices } from "components/catalog_picker.slint";
@@ -10,6 +10,9 @@ import { SettingsView } from "settings_view.slint";
 import { OnboardingView } from "onboarding_view.slint";
 import { PermissionRow } from "components/onboarding/permissions_step.slint";
 import { SettingsPermissionsDialog } from "components/settings/settings_permissions_dialog.slint";
+import { ModelDeleteDialog } from "components/settings/model_delete_section.slint";
+import { ExportStatus, McpStatus, UpdateCheckStatus } from "types.slint";
+export { ExportStatus, McpStatus, UpdateCheckStatus }
 import { WhatsNewDialog } from "components/onboarding/whats_new_dialog.slint";
 import { UpdateAvailableDialog } from "components/onboarding/update_available_dialog.slint";
 import { MarkdownBlock } from "components/onboarding/markdown_block.slint";
@@ -194,27 +197,16 @@ export component MainWindow inherits Window {
     // needs no such round trip, so `settings-open` alone is enough there.
     in-out property <bool> settings-open: false;
     in-out property <bool> settings-permissions-dialog-open: false;
+    in-out property <bool> settings-model-delete-confirm-open: false;
+    // Asks the System page to focus the control that opened a root dialog.
+    in-out property <FocusRequest> settings-focus-request;
     // The gear opens Transcription; the homepage calendar CTA opens Meetings.
     in-out property <SettingsTab> settings-tab: SettingsTab.transcription;
     in property <bool> settings-autostart-enabled;
     in property <bool> settings-debug-transcription;
     in property <LogLevel> settings-log-level;
-    // SOU-224: virtualized live-log tail. Rust owns the full line list and
-    // only pushes the visible slice + estimated spacers, same pattern as
-    // `meeting-detail-transcript-*` above.
+    // The whole live-log tail; the page builds only the rows in view.
     in property <[string]> settings-log-lines;
-    in property <int> settings-log-line-count;
-    in property <float> settings-log-spacer-before: 0.0;
-    in property <float> settings-log-spacer-after: 0.0;
-    in-out property <length> settings-log-scroll-top: 0px;
-    // Same float-conversion trick as `meeting-detail-transcript-scroll-top-px`.
-    out property <float> settings-log-scroll-top-px: root.settings-log-scroll-top / 1px;
-    // SOU-283: `main.rs` re-windows the log slice on actual scroll changes,
-    // same as `transcript-scroll-changed`.
-    callback settings-log-scroll-changed(float);
-    changed settings-log-scroll-top => {
-        root.settings-log-scroll-changed(self.settings-log-scroll-top / 1px);
-    }
     in property <bool> settings-copying-diagnostics;
     in property <AppTheme> settings-theme;
     in property <AppLocale> settings-locale;
@@ -278,21 +270,19 @@ export component MainWindow inherits Window {
     in property <string> settings-data-stats-line;
     in property <string> settings-data-recordings-line;
     in property <AudioRetention> settings-meeting-audio-retention;
-    in property <bool> settings-data-exporting;
-    in property <string> settings-data-export-status;
-    in property <bool> settings-data-export-status-is-error;
+    in property <ExportStatus> settings-data-export-status;
+    in property <string> settings-data-export-detail;
     in property <string> settings-mcp-binary-path;
-    in property <bool> settings-mcp-exists;
     in property <string> settings-mcp-claude-desktop-snippet;
     in property <string> settings-mcp-claude-code-command;
-    in property <bool> settings-testing-mcp;
-    in property <string> settings-mcp-test-status;
+    in property <McpStatus> settings-mcp-status;
+    in property <string> settings-mcp-status-detail;
     in property <string> settings-app-version;
     in property <string> settings-about-transcription-label;
     in property <string> settings-about-summary-label;
     in property <bool> settings-auto-update-check;
-    in property <bool> settings-checking-updates;
-    in property <string> settings-update-status;
+    in property <UpdateCheckStatus> settings-update-status;
+    in property <string> settings-update-detail;
     in property <SummaryProvider> settings-summary-provider;
     in property <bool> settings-apple-intelligence-available;
     in property <AppleIntelligenceUnavailableReason> settings-apple-intelligence-reason: AppleIntelligenceUnavailableReason.unknown;
@@ -492,6 +482,8 @@ export component MainWindow inherits Window {
     callback settings-summary-template-add-requested(string);
     callback settings-model-changed(string);
     callback settings-unload-timeout-changed(string);
+    // The confirmation dialog opened; `settings-delete-model-requested` is its confirmation.
+    callback settings-delete-model-armed();
     callback settings-delete-model-requested();
     callback settings-dictation-learn-from-edit-changed(bool);
     callback settings-dictionary-add-requested(string, string, string);
@@ -823,10 +815,6 @@ export component MainWindow inherits Window {
         debug-transcription: root.settings-debug-transcription;
         log-level: root.settings-log-level;
         log-lines: root.settings-log-lines;
-        log-line-count: root.settings-log-line-count;
-        log-spacer-before: root.settings-log-spacer-before;
-        log-spacer-after: root.settings-log-spacer-after;
-        log-scroll-top <=> root.settings-log-scroll-top;
         copying-diagnostics: root.settings-copying-diagnostics;
         app-theme: root.settings-theme;
         locale: root.settings-locale;
@@ -892,21 +880,20 @@ export component MainWindow inherits Window {
         data-stats-line: root.settings-data-stats-line;
         data-recordings-line: root.settings-data-recordings-line;
         meeting-audio-retention: root.settings-meeting-audio-retention;
-        data-exporting: root.settings-data-exporting;
         data-export-status: root.settings-data-export-status;
-        data-export-status-is-error: root.settings-data-export-status-is-error;
+        data-export-detail: root.settings-data-export-detail;
         mcp-binary-path: root.settings-mcp-binary-path;
-        mcp-exists: root.settings-mcp-exists;
         mcp-claude-desktop-snippet: root.settings-mcp-claude-desktop-snippet;
         mcp-claude-code-command: root.settings-mcp-claude-code-command;
-        testing-mcp: root.settings-testing-mcp;
-        mcp-test-status: root.settings-mcp-test-status;
+        mcp-status: root.settings-mcp-status;
+        mcp-status-detail: root.settings-mcp-status-detail;
         app-version: root.settings-app-version;
         about-transcription-label: root.settings-about-transcription-label;
         about-summary-label: root.settings-about-summary-label;
         auto-update-check: root.settings-auto-update-check;
-        checking-updates: root.settings-checking-updates;
         update-status: root.settings-update-status;
+        update-detail: root.settings-update-detail;
+        focus-request: root.settings-focus-request;
         summary-provider: root.settings-summary-provider;
         apple-intelligence-available: root.settings-apple-intelligence-available;
         apple-intelligence-reason: root.settings-apple-intelligence-reason;
@@ -1057,7 +1044,10 @@ export component MainWindow inherits Window {
         summary-template-add-requested(name) => { root.settings-summary-template-add-requested(name); }
         model-changed(value) => { root.settings-model-changed(value); }
         unload-timeout-changed(value) => { root.settings-unload-timeout-changed(value); }
-        delete-model-requested => { root.settings-delete-model-requested(); }
+        delete-model-requested => {
+            root.settings-model-delete-confirm-open = true;
+            root.settings-delete-model-armed();
+        }
         dictation-learn-from-edit-changed(value) => { root.settings-dictation-learn-from-edit-changed(value); }
         dictionary-add-requested(term, pronunciation, category) => { root.settings-dictionary-add-requested(term, pronunciation, category); }
         dictionary-delete-requested(id) => { root.settings-dictionary-delete-requested(id); }
@@ -1135,9 +1125,24 @@ export component MainWindow inherits Window {
         repair-success: root.onboarding-repair-success;
         repair-cooldown: root.onboarding-repair-cooldown;
         close-requested => { root.settings-permissions-dialog-open = false; }
+        restore-focus => { root.settings-focus-request = { present: true, token: 1, generation: 1, request: root.settings-focus-request.request + 1 }; }
         grant-requested(kind) => { root.onboarding-grant-requested(kind); }
         hint-action-requested(kind) => { root.onboarding-hint-action-requested(kind); }
         repair-requested => { root.onboarding-repair-requested(); }
+    }
+
+    ModelDeleteDialog {
+        state: { open: root.settings-model-delete-confirm-open, topmost: root.settings-model-delete-confirm-open && !root.whats-new-open && !root.update-available-open, busy: false };
+        width: 100%;
+        height: 100%;
+        model-label: root.settings-selected-model-label;
+        confirmed => {
+            root.settings-model-delete-confirm-open = false;
+            root.settings-delete-model-requested();
+        }
+        cancelled => { root.settings-model-delete-confirm-open = false; }
+        dismiss(reason) => { root.settings-model-delete-confirm-open = false; }
+        restore-focus => { root.settings-focus-request = { present: true, token: 2, generation: 1, request: root.settings-focus-request.request + 1 }; }
     }
 
     private property <bool> whats-new-visited;
