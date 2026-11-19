@@ -1,28 +1,24 @@
-import { AlertSeverity, ButtonIntent, ControlSize, KitAlert, KitButton, KitIcon, KitProgress, KitScrollArea, ProgressMode } from "@kit";
-import { LucideDevelopment } from "@kit-icons/development.slint";
-import { LucideCommunication } from "@kit-icons/communication.slint";
+import {
+    AlertSeverity, ButtonIntent, ControlSize, FieldAccess, KitAlert, KitAppShell, KitButton, KitContainer,
+    KitDivider, KitFieldRow, KitFooter, KitIcon, KitImage, KitInline, KitMetrics, KitProgress,
+    KitScrollArea, KitSection, KitSegmentedControl, KitStack, KitText, KitThemes, KitWrap,
+    LayoutSpace, Ownership, ProgressMode, TypographyRole
+} from "@kit";
 import { LucideSecurity } from "@kit-icons/security.slint";
 import { CatalogPicker } from "components/catalog_picker.slint";
 import { PermissionsStep, PermissionRow } from "components/onboarding/permissions_step.slint";
 import { ShortcutMessages, ShortcutRecorderButton, ShortcutRejection } from "components/settings/interface_section.slint";
+import { SettingsOptions } from "components/settings/settings_options.slint";
 import { StatusBanner } from "components/status_banner.slint";
 import { AppLocale, ModelPhase, OnboardingStep, PermissionKind } from "types.slint";
 import { Theme } from "theme.slint";
 
-// Port of OnboardingView.svelte (+ PermissionsStep.svelte inlined as the
-// first step). Model download and shortcut capture reuse the same Rust
-// modules (`model_ui.rs`, `shortcut_capture.rs`) the Settings tab uses, but
-// through their own `onboarding-*` window properties - this overlay and the
-// Settings overlay are never visible at the same time, but keeping their
-// state separate avoids one leaking into the other's fields.
-//
-// Layout follows the reference's `flex h-screen items-center justify-center
-// p-8` > `w-full max-w-lg gap-6` card: a Slint `VerticalLayout` child that
-// only has a `max-width` is pinned to the layout's left edge (there is no
-// cross-axis alignment), which is what made the wizard hug the left of a
-// wide window - the card takes an explicit width and a `HorizontalLayout {
-// alignment: center }` centers it.
-export component OnboardingView inherits Rectangle {
+// The first-run wizard. Rust owns the steps, the model and the shortcut; this
+// view only shows the current one. Model download and shortcut capture reuse
+// the same Rust modules (`model_ui.rs`, `shortcut_capture.rs`) the Settings tab
+// uses, through their own `onboarding-*` window properties, so one overlay's
+// state never leaks into the other's fields.
+export component OnboardingView inherits KitAppShell {
     in property <AppLocale> locale;
     in property <int> step-index;
     in property <int> step-count;
@@ -91,286 +87,239 @@ export component OnboardingView inherits Rectangle {
         return "";
     }
 
-    property <string> shortcut-message: root.shortcut-rejection == ShortcutRejection.none
+    private property <string> shortcut-message: root.shortcut-rejection == ShortcutRejection.none
         ? root.shortcut-error : ShortcutMessages.rejection(root.shortcut-rejection);
-    property <bool> is-last-step: root.step-index == root.step-count - 1;
-    property <string> continue-label: root.step == OnboardingStep.model && root.model-phase != ModelPhase.ready ? @tr("Télécharger et continuer")
+    private property <bool> is-last-step: root.step-index == root.step-count - 1;
+    private property <string> continue-label: root.step == OnboardingStep.model && root.model-phase != ModelPhase.ready ? @tr("Télécharger et continuer")
         : root.is-last-step ? @tr("Terminer")
         : @tr("Continuer");
 
-    background: Theme.canvas;
-
     changed step => { viewport.content-y = 0px; }
 
-    wizard := VerticalLayout {
-        width: min(root.width - 64px, 512px);
-        x: (root.width - self.width) / 2;
-        height: min(root.height - 56px, card.preferred-height + self.spacing + actions.preferred-height);
-        y: (root.height - self.height) / 2;
-        spacing: 24px;
+    viewport := KitScrollArea {
+        inset: LayoutSpace.roomy;
+        overlay-scrollbars: true;
+        focusable: self.scrollable;
+        label: root.step-title(root.step);
 
-        viewport := KitScrollArea {
-            focusable: self.scrollable;
-            label: root.step-title(root.step);
-            vertical-stretch: 1;
+        column := KitContainer {
+            max-content-width: Theme.onboarding-column-width;
+            gutter: LayoutSpace.none;
 
-            card := VerticalLayout {
-                width: viewport.visible-width;
-                spacing: 24px;
+            KitStack {
+                gap: LayoutSpace.compact;
 
-                // Header: icon, name, tagline, privacy note, locale toggle.
-                VerticalLayout {
+                KitInline {
                     alignment: center;
-                    spacing: 10px;
+                    KitImage {
+                        width: Theme.onboarding-mark-size;
+                        source: @image-url("assets/icon.png");
+                    }
+                }
+                KitText {
+                    role: TypographyRole.title;
+                    horizontal-alignment: center;
+                    text: @tr("Soufflé");
+                }
+                KitText {
+                    horizontal-alignment: center;
+                    text: @tr("Transcription vocale locale pour la dictée et les meetings.");
+                }
+                KitInline {
+                    alignment: center;
+                    KitIcon {
+                        control-size: ControlSize.compact;
+                        glyph: LucideSecurity.lock();
+                    }
+                    KitText {
+                        role: TypographyRole.caption;
+                        vertical-alignment: center;
+                        text: @tr("100 % local : rien ne quitte votre Mac. Pas de compte, pas de cloud.");
+                    }
+                }
+                if root.step-index == 0: KitInline {
+                    alignment: center;
+                    inset: LayoutSpace.tight;
+                    private property <bool> choice-focused: locale-choice.has-focus;
+                    changed choice-focused => {
+                        if self.choice-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
+                    }
+                    locale-choice := KitSegmentedControl {
+                        control-size: ControlSize.compact;
+                        horizontal-stretch: 0;
+                        label: @tr("InterfaceSection" => "Langue de l'interface");
+                        ownership: Ownership.controlled;
+                        options: SettingsOptions.locale-options(root.locale).rows;
+                        selected: SettingsOptions.locale-options(root.locale).selected;
+                        chosen(row) => { root.locale-changed(SettingsOptions.locale-value(row, root.locale)); }
+                    }
+                }
+            }
 
-                    HorizontalLayout {
-                        alignment: center;
-                        Image {
-                            source: @image-url("assets/icon.png");
-                            width: 64px;
-                            height: 64px;
-                        }
-                    }
-                    Text {
-                        text: @tr("Soufflé");
-                        font-family: "Archivo SemiBold";
-                        font-size: 24px;
-                        font-weight: 700;
-                        color: Theme.text-primary;
-                        horizontal-alignment: center;
-                    }
-                    Text {
-                        text: @tr("Transcription vocale locale pour la dictée et les meetings.");
-                        font-size: 14px;
-                        color: Theme.text-secondary;
-                        horizontal-alignment: center;
-                        wrap: word-wrap;
-                    }
-                    HorizontalLayout {
-                        alignment: center;
-                        spacing: 6px;
-                        KitIcon {
-                            glyph: LucideSecurity.lock();
-                            width: 12px; height: 12px;
-                            ink: Theme.text-muted;
-                            y: (parent.height - self.height) / 2;
-                        }
-                        Text {
-                            text: @tr("100 % local — rien ne quitte votre Mac. Pas de compte, pas de cloud.");
-                            font-size: 12px;
-                            color: Theme.text-muted;
-                            vertical-alignment: center;
-                            wrap: word-wrap;
-                        }
-                    }
+            if root.step-count > 1: KitProgress {
+                value: (root.step-index + 1) / root.step-count;
+                accessible-label: root.step-title(root.step);
+            }
 
-                    if root.step-index == 0: HorizontalLayout {
-                        alignment: center;
-                        spacing: 4px;
-                        KitButton {
-                            text: @tr("English");
-                            control-size: ControlSize.compact;
-                            intent: root.locale == AppLocale.en ? ButtonIntent.primary : ButtonIntent.secondary;
-                            activated => { root.locale-changed(AppLocale.en); }
-                        }
-                        KitButton {
-                            text: @tr("Français");
-                            control-size: ControlSize.compact;
-                            intent: root.locale == AppLocale.fr ? ButtonIntent.primary : ButtonIntent.secondary;
-                            activated => { root.locale-changed(AppLocale.fr); }
+            KitSection {
+                gap: LayoutSpace.tight;
+                title: root.step-title(root.step);
+                description: root.step-subtitle(root.step);
+            }
+
+            // Rust clears this on every step change and only ever puts a real
+            // error message here (a failed save, download or load).
+            if root.status-message != "": StatusBanner {
+                message: root.status-message;
+                dismissible: false;
+            }
+
+            if root.step == OnboardingStep.permissions: PermissionsStep {
+                available-width: column.available-width;
+                rows: root.permission-rows;
+                error-message: root.permissions-error;
+                repair-busy: root.repair-busy;
+                repair-success: root.repair-success;
+                repair-cooldown: root.repair-cooldown;
+                grant-requested(kind) => { root.grant-requested(kind); }
+                hint-action-requested(kind) => { root.hint-action-requested(kind); }
+                repair-requested => { root.repair-requested(); }
+            }
+
+            if root.step == OnboardingStep.microphone: microphone-row := KitFieldRow {
+                orientation: Orientation.vertical;
+                padding: KitMetrics.field-gap(self.theme);
+                focus-requested => { device-picker.take-focus(); }
+                private property <bool> picker-focused: device-picker.has-focus;
+                changed picker-focused => {
+                    if self.picker-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
+                }
+
+                KitWrap {
+                    cross-axis-alignment: center;
+                    device-picker := CatalogPicker {
+                        model: root.device-labels;
+                        option-values: root.device-ids;
+                        default-device-index: root.default-device-index;
+                        selection: self.selection-at(root.selected-device-index);
+                        control-label: @tr("Choisissez votre microphone");
+                        selected-index(index) => { root.device-changed(index); }
+                    }
+                    KitButton {
+                        control-size: ControlSize.compact;
+                        text: @tr("Actualiser");
+                        activated => { root.refresh-devices-requested(); }
+                        focus-observed(focused) => {
+                            if focused { microphone-row.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
                         }
                     }
                 }
+            }
 
-                if root.step-count > 1: KitProgress {
-                    value: (root.step-index + 1) / root.step-count;
-                    accessible-label: step-title(root.step);
+            if root.step == OnboardingStep.model && root.model-phase == ModelPhase.downloading: KitProgress {
+                label: @tr("Téléchargement du modèle…");
+                value: root.download-progress-fraction;
+                value-text: root.download-progress-label;
+            }
+            if root.step == OnboardingStep.model && root.model-phase == ModelPhase.loading: KitProgress {
+                mode: ProgressMode.indeterminate;
+                label: @tr("Chargement du modèle…");
+            }
+            if root.step == OnboardingStep.model && root.model-phase == ModelPhase.ready: KitText {
+                text: @tr("Modèle prêt.");
+            }
+            if root.step == OnboardingStep.model && root.model-phase == ModelPhase.pick: model-row := KitFieldRow {
+                orientation: Orientation.vertical;
+                padding: KitMetrics.field-gap(self.theme);
+                access: root.busy ? FieldAccess.disabled : FieldAccess.editable;
+                label: @tr("Modèle de transcription");
+                focus-requested => { model-picker.take-focus(); }
+                private property <bool> picker-focused: model-picker.has-focus;
+                changed picker-focused => {
+                    if self.picker-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
                 }
 
-                VerticalLayout {
-                    spacing: 4px;
-                    Text {
-                        text: step-title(root.step);
-                        font-family: "Archivo SemiBold";
-                        font-size: 18px;
-                        font-weight: 600;
-                        color: Theme.text-primary;
-                    }
-                    Text {
-                        text: step-subtitle(root.step);
-                        font-size: 14px;
-                        color: Theme.text-muted;
-                        wrap: word-wrap;
-                    }
+                model-picker := CatalogPicker {
+                    combo-width: model-row.width - 2 * KitMetrics.field-gap(model-row.theme);
+                    model: root.model-labels;
+                    option-values: root.model-ids;
+                    selection: self.selection-at(root.selected-model-index);
+                    control-label: @tr("Modèle de transcription");
+                    enabled: !root.busy;
+                    selected-index(index) => { root.model-picked(index); }
                 }
+            }
 
-                // Rust clears this on every step change and only ever puts a
-                // real error message here (a failed save/download/load), so
-                // the banner has no dismiss action of its own.
-                if root.status-message != "": StatusBanner {
-                    message: root.status-message;
-                    dismissible: false;
+            if root.step == OnboardingStep.shortcut: shortcut-row := KitFieldRow {
+                orientation: Orientation.vertical;
+                padding: KitMetrics.field-gap(self.theme);
+                focus-requested => { shortcut-recorder.take-focus(); }
+                description: @tr("Cliquez sur le raccourci, puis appuyez sur les touches voulues. Échap annule.");
+                error-message: root.shortcut-message;
+                private property <bool> recorder-focused: shortcut-recorder.recorder-focused;
+                changed recorder-focused => {
+                    if self.recorder-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
                 }
-
-                if root.step == OnboardingStep.permissions: PermissionsStep {
-                    rows: root.permission-rows;
-                    error-message: root.permissions-error;
-                    repair-busy: root.repair-busy;
-                    repair-success: root.repair-success;
-                    repair-cooldown: root.repair-cooldown;
-                    grant-requested(kind) => { root.grant-requested(kind); }
-                    hint-action-requested(kind) => { root.hint-action-requested(kind); }
-                    repair-requested => { root.repair-requested(); }
-                }
-
-                if root.step == OnboardingStep.microphone: VerticalLayout {
-                    spacing: 10px;
-                    HorizontalLayout {
-                        spacing: 8px;
-                        KitIcon {
-                            glyph: LucideCommunication.mic();
-                            width: 16px; height: 16px;
-                            ink: Theme.text-muted;
-                            y: (parent.height - self.height) / 2;
-                        }
-                        // Explicit arithmetic rather than `horizontal-stretch`: the
-                        // combo carries its own `width:` binding, which a layout
-                        // treats as a fixed constraint (see the status-pill note in
-                        // `app_header.slint`).
-                        CatalogPicker {
-                            width: parent.width - 16px - 8px - 8px - refresh-btn.width;
-                            model: root.device-labels;
-                            option-values: root.device-ids;
-                            default-device-index: root.default-device-index;
-                            selection: self.selection-at(root.selected-device-index);
-                            control-label: @tr("Choisissez votre microphone");
-                            selected-index(index) => { root.device-changed(index); }
-                        }
-                        refresh-btn := KitButton {
-                            width: 110px;
-                            text: @tr("Actualiser");
-                            activated => { root.refresh-devices-requested(); }
-                        }
+                changed error-message => {
+                    if (self.error-message != "" && self.recorder-focused) {
+                        self.ensure-visible(KitThemes.scroll-behavior(self.theme));
                     }
                 }
 
-                if root.step == OnboardingStep.model: VerticalLayout {
-                    spacing: 8px;
+                shortcut-recorder := ShortcutRecorderButton {
+                    description: shortcut-row.error-message != "" ? shortcut-row.error-message : shortcut-row.description;
+                    shortcut-label: root.toggle-shortcut-label;
+                    recording: root.shortcut-recording;
+                    capture-eligible: root.capture-eligible;
+                    generation: root.shortcut-generation;
+                    record-requested => { root.shortcut-record-requested(); }
+                    key-allowed(text, ctrl, shift, alt, meta) => { return root.shortcut-key-allowed(text, ctrl, shift, alt, meta); }
+                    rejected(text, ctrl, shift, alt, meta) => { root.shortcut-rejected(text, ctrl, shift, alt, meta); }
+                    captured(text, ctrl, shift, alt, meta) => { root.shortcut-captured(text, ctrl, shift, alt, meta); }
+                    released(text, ctrl, shift, alt, meta) => { root.shortcut-released(text, ctrl, shift, alt, meta); }
+                    cleared => { root.shortcut-cleared(); }
+                    cancelled => { root.shortcut-cancelled(); }
+                }
+            }
+            if root.step == OnboardingStep.shortcut && !root.accessibility-granted: accessibility-alert := KitAlert {
+                severity: AlertSeverity.warning;
+                message: @tr("Le collage automatique a besoin de l'Accessibilité, qui n'est pas encore accordée. Le texte ira dans votre historique à la place.");
 
-                    if root.model-phase == ModelPhase.downloading: KitProgress {
-                        label: @tr("Téléchargement du modèle…");
-                        value: root.download-progress-fraction;
-                        value-text: root.download-progress-label;
-                    }
-                    if root.model-phase == ModelPhase.loading: KitProgress {
-                        mode: ProgressMode.indeterminate;
-                        label: @tr("Chargement du modèle…");
-                    }
-                    if root.model-phase == ModelPhase.ready: Text {
-                        text: @tr("Modèle prêt.");
-                        font-size: 14px;
-                        color: Theme.text-secondary;
-                    }
-                    if root.model-phase == ModelPhase.pick: Text {
-                        text: @tr("Modèle de transcription");
-                        font-family: "Archivo SemiBold";
-                        font-size: 11px;
-                        font-weight: 600;
-                        color: Theme.text-muted;
-                    }
-                    if root.model-phase == ModelPhase.pick: CatalogPicker {
-                        width: parent.width;
-                        model: root.model-labels;
-                        option-values: root.model-ids;
-                        selection: self.selection-at(root.selected-model-index);
-                        control-label: @tr("Modèle de transcription");
-                        enabled: !root.busy;
-                        selected-index(index) => { root.model-picked(index); }
+                KitButton {
+                    control-size: ControlSize.compact;
+                    text: @tr("Vérifier les permissions");
+                    text-wrap: word-wrap;
+                    activated => { root.review-accessibility-requested(); }
+                    focus-observed(focused) => {
+                        if focused { accessibility-alert.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
                     }
                 }
-
-                if root.step == OnboardingStep.shortcut: VerticalLayout {
-                    spacing: 16px;
-
-                    HorizontalLayout {
-                        spacing: 12px;
-                        KitIcon {
-                            glyph: LucideDevelopment.keyboard();
-                            width: 16px; height: 16px;
-                            ink: Theme.text-muted;
-                            y: (parent.height - self.height) / 2;
-                        }
-                        ShortcutRecorderButton {
-                            horizontal-stretch: 1;
-                            shortcut-label: root.toggle-shortcut-label;
-                            recording: root.shortcut-recording;
-                            capture-eligible: root.capture-eligible;
-                            generation: root.shortcut-generation;
-                            description: root.shortcut-message != "" ? root.shortcut-message : @tr("Cliquez sur le raccourci, puis appuyez sur les touches voulues. Échap annule.");
-                            record-requested => { root.shortcut-record-requested(); }
-                            key-allowed(text, ctrl, shift, alt, meta) => { return root.shortcut-key-allowed(text, ctrl, shift, alt, meta); }
-                            rejected(text, ctrl, shift, alt, meta) => { root.shortcut-rejected(text, ctrl, shift, alt, meta); }
-                            captured(text, ctrl, shift, alt, meta) => { root.shortcut-captured(text, ctrl, shift, alt, meta); }
-                            released(text, ctrl, shift, alt, meta) => { root.shortcut-released(text, ctrl, shift, alt, meta); }
-                            cleared => { root.shortcut-cleared(); }
-                            cancelled => { root.shortcut-cancelled(); }
-                        }
-                    }
-
-                    Text {
-                        text: @tr("Cliquez sur le raccourci, puis appuyez sur les touches voulues. Échap annule.");
-                        font-size: 12px;
-                        color: Theme.text-muted;
-                        wrap: word-wrap;
-                    }
-
-                    if root.shortcut-message != "": Text {
-                        text: root.shortcut-message;
-                        color: Theme.danger;
-                        font-size: 12px;
-                        wrap: word-wrap;
-                    }
-
-                    if !root.accessibility-granted: KitAlert {
-                        severity: AlertSeverity.warning;
-                        message: @tr("Le collage automatique a besoin de l'Accessibilité, qui n'est pas encore accordée. Le texte ira dans votre historique à la place.");
-                    }
-                    if !root.accessibility-granted: HorizontalLayout {
-                        alignment: end;
-                        KitButton {
-                            text: @tr("Vérifier les permissions");
-                            control-size: ControlSize.compact;
-                            activated => { root.review-accessibility-requested(); }
-                        }
-                    }
-                }
-
             }
         }
+    }
 
-        actions := HorizontalLayout {
-            spacing: 12px;
+    KitDivider { }
 
-            if root.step-index > 0: KitButton {
-                text: @tr("Retour");
-                intent: ButtonIntent.quiet;
-                disabled: root.busy;
-                activated => { root.back-requested(); }
-            }
-            if root.step-index == 0 && root.step == OnboardingStep.permissions: Text {
-                text: @tr("Vous pourrez les accorder plus tard.");
-                font-size: 12px;
-                color: Theme.text-muted;
-                vertical-alignment: center;
-            }
+    KitFooter {
+        KitContainer {
+            max-content-width: Theme.onboarding-column-width;
+            gutter: LayoutSpace.roomy;
 
-            Rectangle { horizontal-stretch: 1; }
-
-            KitButton {
-                text: root.continue-label;
-                intent: ButtonIntent.primary;
-                disabled: !(!root.busy && root.continue-enabled);
-                activated => { root.continue-requested(); }
+            KitWrap {
+                alignment: end;
+                cross-axis-alignment: center;
+                if root.step-index > 0: KitButton {
+                    text: @tr("Retour");
+                    intent: ButtonIntent.quiet;
+                    disabled: root.busy;
+                    activated => { root.back-requested(); }
+                }
+                KitButton {
+                    text: root.continue-label;
+                    intent: ButtonIntent.primary;
+                    disabled: root.busy || !root.continue-enabled;
+                    activated => { root.continue-requested(); }
+                }
             }
         }
     }

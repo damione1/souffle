@@ -273,6 +273,10 @@ pub(super) async fn exercise(w: &MainWindow, path: &Path) {
         super::system_page::system(w, path).await;
         return;
     }
+    if mode == "wizard" || mode == "permissions-dialog" {
+        super::wizard_page::exercise(w, path, &mode).await;
+        return;
+    }
     let en = w.get_settings_locale() == crate::AppLocale::En;
     let mut settings = AppSettings {
         dictation_polish_enabled: true,

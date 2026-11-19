@@ -297,18 +297,8 @@ msgstr "Local speech-to-text for dictation and meetings."
 
 #: app/souffle-slint/ui/onboarding_view.slint:143
 msgctxt "OnboardingView"
-msgid "100 % local — rien ne quitte votre Mac. Pas de compte, pas de cloud."
-msgstr "100% local — nothing ever leaves your Mac. No account, no cloud."
-
-#: app/souffle-slint/ui/onboarding_view.slint:155
-msgctxt "OnboardingView"
-msgid "English"
-msgstr "English"
-
-#: app/souffle-slint/ui/onboarding_view.slint:161
-msgctxt "OnboardingView"
-msgid "Français"
-msgstr "French"
+msgid "100 % local : rien ne quitte votre Mac. Pas de compte, pas de cloud."
+msgstr "100% local: nothing ever leaves your Mac. No account, no cloud."
 
 #: app/souffle-slint/ui/onboarding_view.slint:238
 msgctxt "OnboardingView"

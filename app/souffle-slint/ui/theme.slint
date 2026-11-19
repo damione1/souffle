@@ -94,5 +94,8 @@ export global Theme {
     // Viewport of the live log: a handful of lines, and larger text still shows them.
     out property <length> settings-log-height: 160px * KitThemeContext.current.text-scale;
     out property <length> settings-control-height: KitMetrics.control-height(KitThemeContext.current, ControlSize.compact);
+    // First-run wizard: the column its steps are laid out in, and the brand mark.
+    out property <length> onboarding-column-width: 512px;
+    out property <length> onboarding-mark-size: 64px;
     out property <length> settings-inset: KitMetrics.field-gap(KitThemeContext.current) - KitThemeContext.current.spacing.unit;
 }

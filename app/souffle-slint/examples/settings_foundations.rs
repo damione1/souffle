@@ -32,6 +32,8 @@ mod system_page;
 #[allow(dead_code)]
 #[path = "../src/system_ui.rs"]
 mod system_ui;
+#[path = "settings_foundations/wizard_page.rs"]
+mod wizard_page;
 
 fn settle(w: &MainWindow) {
     for _ in 0..3 {

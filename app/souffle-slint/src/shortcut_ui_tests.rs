@@ -11,8 +11,8 @@ use slint::platform::{
 use slint::{ComponentHandle, SharedString};
 use souffle_lib::settings::{AppSettings, ShortcutSettings};
 
-const WIDTH: u32 = 1040;
-const HEIGHT: u32 = 1700;
+pub(crate) const WIDTH: u32 = 1040;
+pub(crate) const HEIGHT: u32 = 1700;
 const TOGGLE: &str = "Basculer l'enregistrement";
 const PTT: &str = "Appuyer pour parler";
 
@@ -30,7 +30,7 @@ impl Platform for TestPlatform {
     }
 }
 
-fn settle() {
+pub(crate) fn settle() {
     let window = TEST_WINDOW
         .with(|w| w.borrow().clone())
         .expect("no test window");
@@ -45,7 +45,7 @@ fn settle() {
     }
 }
 
-fn pair(toggle: &str, push_to_talk: &str) -> ShortcutSettings {
+pub(crate) fn pair(toggle: &str, push_to_talk: &str) -> ShortcutSettings {
     ShortcutSettings {
         toggle: toggle.into(),
         push_to_talk: push_to_talk.into(),
@@ -54,21 +54,21 @@ fn pair(toggle: &str, push_to_talk: &str) -> ShortcutSettings {
 
 /// Stands in for the system registration and the database.
 #[derive(Clone, Default)]
-struct Recorder {
-    stored: Rc<RefCell<ShortcutSettings>>,
-    saved: Rc<RefCell<Vec<ShortcutSettings>>>,
-    failure: Rc<RefCell<Option<String>>>,
+pub(crate) struct Recorder {
+    pub(crate) stored: Rc<RefCell<ShortcutSettings>>,
+    pub(crate) saved: Rc<RefCell<Vec<ShortcutSettings>>>,
+    pub(crate) failure: Rc<RefCell<Option<String>>>,
 }
 
 impl Recorder {
-    fn new(stored: ShortcutSettings) -> Self {
+    pub(crate) fn new(stored: ShortcutSettings) -> Self {
         Self {
             stored: Rc::new(RefCell::new(stored)),
             ..Self::default()
         }
     }
 
-    fn backend(&self) -> Rc<ShortcutBackend> {
+    pub(crate) fn backend(&self) -> Rc<ShortcutBackend> {
         let stored = self.stored.clone();
         let save_stored = self.stored.clone();
         let saved = self.saved.clone();
@@ -89,12 +89,12 @@ impl Recorder {
         })
     }
 
-    fn saves(&self) -> Vec<ShortcutSettings> {
+    pub(crate) fn saves(&self) -> Vec<ShortcutSettings> {
         self.saved.borrow().clone()
     }
 }
 
-fn window() -> MainWindow {
+pub(crate) fn window() -> MainWindow {
     let _ = slint::platform::set_platform(Box::new(TestPlatform));
     let window = crate::settings_kit::new_window().unwrap();
     slint::select_bundled_translation("fr").unwrap();
@@ -131,43 +131,43 @@ fn settings(toggle: &str, push_to_talk: &str) -> Settings {
     }
 }
 
-fn find_button(window: &MainWindow, label: &str) -> ElementHandle {
+pub(crate) fn find_button(window: &MainWindow, label: &str) -> ElementHandle {
     ElementHandle::find_by_accessible_label(window, label)
         .find(|e| e.accessible_role() == Some(AccessibleRole::Button))
         .unwrap_or_else(|| panic!("no button labelled {label:?}"))
 }
 
-fn activate(window: &MainWindow, label: &str) {
+pub(crate) fn activate(window: &MainWindow, label: &str) {
     find_button(window, label).invoke_accessible_default_action();
     settle();
 }
 
-fn press(window: &MainWindow, text: impl Into<SharedString>) {
+pub(crate) fn press(window: &MainWindow, text: impl Into<SharedString>) {
     window
         .window()
         .dispatch_event(WindowEvent::KeyPressed { text: text.into() });
     settle();
 }
 
-fn release(window: &MainWindow, text: impl Into<SharedString>) {
+pub(crate) fn release(window: &MainWindow, text: impl Into<SharedString>) {
     window
         .window()
         .dispatch_event(WindowEvent::KeyReleased { text: text.into() });
     settle();
 }
 
-fn tap(window: &MainWindow, text: impl Into<SharedString> + Clone) {
+pub(crate) fn tap(window: &MainWindow, text: impl Into<SharedString> + Clone) {
     press(window, text.clone());
     release(window, text);
 }
 
-fn combo(window: &MainWindow, modifier: Key, text: impl Into<SharedString> + Clone) {
+pub(crate) fn combo(window: &MainWindow, modifier: Key, text: impl Into<SharedString> + Clone) {
     press(window, modifier);
     tap(window, text);
     release(window, modifier);
 }
 
-fn click(window: &MainWindow, element: &ElementHandle) {
+pub(crate) fn click(window: &MainWindow, element: &ElementHandle) {
     let position = slint::LogicalPosition::new(
         element.absolute_position().x + element.size().width / 2.0,
         element.absolute_position().y + element.size().height / 2.0,

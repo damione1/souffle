@@ -2388,6 +2388,19 @@ async fn polish_dictation_text(
     }
 }
 
+/// What the wizard asks the engine about the model it is showing.
+type ModelPhaseProbe =
+    Rc<dyn Fn(TranscriptionProfileSelection) -> Option<TranscriptionRuntimePhase>>;
+
+fn live_model_probe(handle: &AppHandle) -> ModelPhaseProbe {
+    let handle = Arc::clone(handle);
+    Rc::new(move |selection| {
+        souffle_lib::commands::get_model_status(Arc::clone(&handle), selection)
+            .ok()
+            .map(|status| status.phase)
+    })
+}
+
 /// All mutable state the onboarding wizard needs across its 4 steps, in one
 /// place rather than a dozen separate `Rc<RefCell<..>>`s - unlike
 /// `wire_callbacks`'s per-field caches, this state is only ever touched
@@ -2488,7 +2501,7 @@ fn initialize_onboarding(
     drop(guard);
 
     window.set_onboarding_open(true);
-    show_onboarding_step(window, handle, ob, permissions);
+    show_onboarding_step(window, &live_model_probe(handle), ob, permissions);
     permissions.sync_activity();
     true
 }
@@ -2506,7 +2519,7 @@ fn set_onboarding_step_departing(window: &MainWindow, step: OnboardingStep) {
 /// wizard-open, "Back", and every successful "Continue"/transition.
 fn show_onboarding_step(
     window: &MainWindow,
-    handle: &AppHandle,
+    probe: &ModelPhaseProbe,
     ob: &Rc<RefCell<OnboardingState>>,
     permissions: &Rc<permissions_ui::PermissionController>,
 ) {
@@ -2539,7 +2552,14 @@ fn show_onboarding_step(
             permissions.project();
         }
         OnboardingStep::Microphone => {
-            let guard = ob.borrow();
+            let mut guard = ob.borrow_mut();
+            // A pinned device that is no longer plugged in is shown as
+            // Automatic, so Automatic is also what Continue saves.
+            if !guard.selected_device.is_empty()
+                && !guard.devices.iter().any(|d| d.uid == guard.selected_device)
+            {
+                guard.selected_device.clear();
+            }
             let mut labels: Vec<slint::SharedString> = vec![audio_ui::AUTOMATIC_LABEL.into()];
             window
                 .set_onboarding_default_device_index(audio_ui::default_input_index(&guard.devices));
@@ -2592,13 +2612,11 @@ fn show_onboarding_step(
                 .get(selected_index)
                 .map(|o| o.selection());
             drop(guard);
-            let phase = selection.and_then(|selection| {
-                souffle_lib::commands::get_model_status(Arc::clone(handle), selection).ok()
-            });
+            let phase = selection.and_then(|selection| probe(selection));
             // LoadRequired collapses to Pick here (not Loading): re-entering this
             // step only shows a spinner once the user has actually clicked
             // "Continuer" to kick off the load, matching prior behavior.
-            let model_phase = match phase.map(|s| s.phase) {
+            let model_phase = match phase {
                 Some(TranscriptionRuntimePhase::Ready) => ModelPhase::Ready,
                 Some(TranscriptionRuntimePhase::Downloading) => ModelPhase::Downloading,
                 Some(TranscriptionRuntimePhase::Loading)
@@ -2635,6 +2653,7 @@ fn wire_onboarding_callbacks(
     permissions: Rc<permissions_ui::PermissionController>,
 ) -> Rc<RefCell<OnboardingState>> {
     let ob: Rc<RefCell<OnboardingState>> = Rc::new(RefCell::new(OnboardingState::default()));
+    let probe = live_model_probe(&tauri_handle);
 
     let weak = window.as_weak();
     let settings_io_for_locale = settings_io.clone();
@@ -2670,53 +2689,33 @@ fn wire_onboarding_callbacks(
     let ob_for_device = ob.clone();
     let weak = window.as_weak();
     window.on_onboarding_device_changed(move |index| {
-        let Ok(position) = usize::try_from(index) else {
-            return;
-        };
-        let mut guard = ob_for_device.borrow_mut();
-        let uid = if position == 0 {
-            String::new()
-        } else if let Some(device) = guard.devices.get(position - 1) {
-            device.uid.clone()
-        } else {
-            return;
-        };
-        guard.selected_device = uid;
         if let Some(window) = weak.upgrade() {
-            window.set_onboarding_selected_device_index(index);
+            select_onboarding_device(&window, &ob_for_device, index);
         }
     });
 
     let weak = window.as_weak();
-    let handle = tauri_handle.clone();
+    let probe_for_refresh = probe.clone();
     let ob_for_refresh = ob.clone();
     let permissions_for_device_refresh = permissions.clone();
     window.on_onboarding_refresh_devices_requested(move || {
         let Some(window) = weak.upgrade() else {
             return;
         };
-        ob_for_refresh.borrow_mut().devices =
-            souffle_lib::commands::list_audio_devices().unwrap_or_default();
-        show_onboarding_step(
+        refresh_onboarding_devices(
             &window,
-            &handle,
+            &probe_for_refresh,
             &ob_for_refresh,
             &permissions_for_device_refresh,
+            souffle_lib::commands::list_audio_devices().unwrap_or_default(),
         );
     });
 
     let ob_for_model_pick = ob.clone();
     let weak = window.as_weak();
     window.on_onboarding_model_picked(move |index| {
-        let Ok(position) = usize::try_from(index) else {
-            return;
-        };
-        let mut guard = ob_for_model_pick.borrow_mut();
-        if position < guard.model_options.len() {
-            guard.selected_model_index = Some(position);
-            if let Some(window) = weak.upgrade() {
-                window.set_onboarding_selected_model_index(index);
-            }
+        if let Some(window) = weak.upgrade() {
+            pick_onboarding_model(&window, &ob_for_model_pick, index);
         }
     });
 
@@ -2728,24 +2727,24 @@ fn wire_onboarding_callbacks(
     });
 
     let weak = window.as_weak();
-    let handle = tauri_handle.clone();
+    let probe_for_back = probe.clone();
     let ob_for_back = ob.clone();
     let permissions_for_back = permissions.clone();
     window.on_onboarding_back_requested(move || {
         let Some(window) = weak.upgrade() else {
             return;
         };
-        let mut guard = ob_for_back.borrow_mut();
-        if guard.step_index > 0 {
-            guard.step_index -= 1;
-        }
-        drop(guard);
-        show_onboarding_step(&window, &handle, &ob_for_back, &permissions_for_back);
-        permissions_for_back.sync_activity();
+        retreat_onboarding_step(
+            &window,
+            &probe_for_back,
+            &ob_for_back,
+            &permissions_for_back,
+        );
     });
 
     let weak = window.as_weak();
     let handle = tauri_handle.clone();
+    let probe_for_continue = probe.clone();
     let ob_for_continue = ob.clone();
     let permissions_for_continue = permissions.clone();
     let settings_io_for_continue = settings_io.clone();
@@ -2758,7 +2757,7 @@ fn wire_onboarding_callbacks(
                 onboarding_flags::mark_permissions_done();
                 advance_onboarding_step(
                     &window,
-                    &handle,
+                    &probe_for_continue,
                     &ob_for_continue,
                     &permissions_for_continue,
                 );
@@ -2771,6 +2770,7 @@ fn wire_onboarding_callbacks(
                 let completion_weak = weak.clone();
                 let retained_weak = weak.clone();
                 let completion_handle = handle.clone();
+                let completion_probe = probe_for_continue.clone();
                 let completion_ob = ob_for_continue.clone();
                 let completion_permissions = permissions_for_continue.clone();
                 settings_io_for_continue.submit(
@@ -2796,7 +2796,7 @@ fn wire_onboarding_callbacks(
                                 ) {
                                     Ok(()) => advance_onboarding_step(
                                         &window,
-                                        &completion_handle,
+                                        &completion_probe,
                                         &completion_ob,
                                         &completion_permissions,
                                     ),
@@ -2823,7 +2823,7 @@ fn wire_onboarding_callbacks(
                 if phase == ModelPhase::Ready {
                     advance_onboarding_step(
                         &window,
-                        &handle,
+                        &probe_for_continue,
                         &ob_for_continue,
                         &permissions_for_continue,
                     );
@@ -2934,7 +2934,7 @@ fn wire_onboarding_callbacks(
 /// as the wizard enters/leaves that step.
 fn advance_onboarding_step(
     window: &MainWindow,
-    handle: &AppHandle,
+    probe: &ModelPhaseProbe,
     ob: &Rc<RefCell<OnboardingState>>,
     permissions: &Rc<permissions_ui::PermissionController>,
 ) {
@@ -2944,8 +2944,67 @@ fn advance_onboarding_step(
             guard.step_index += 1;
         }
     }
-    show_onboarding_step(window, handle, ob, permissions);
+    show_onboarding_step(window, probe, ob, permissions);
     permissions.sync_activity();
+}
+
+/// Index 0 of the microphone list is Automatic (no pinned device).
+fn select_onboarding_device(window: &MainWindow, ob: &Rc<RefCell<OnboardingState>>, index: i32) {
+    let Ok(position) = usize::try_from(index) else {
+        return;
+    };
+    let mut guard = ob.borrow_mut();
+    let uid = if position == 0 {
+        String::new()
+    } else if let Some(device) = guard.devices.get(position - 1) {
+        device.uid.clone()
+    } else {
+        return;
+    };
+    guard.selected_device = uid;
+    window.set_onboarding_selected_device_index(index);
+}
+
+fn pick_onboarding_model(window: &MainWindow, ob: &Rc<RefCell<OnboardingState>>, index: i32) {
+    let Ok(position) = usize::try_from(index) else {
+        return;
+    };
+    let mut guard = ob.borrow_mut();
+    if position < guard.model_options.len() {
+        guard.selected_model_index = Some(position);
+        window.set_onboarding_selected_model_index(index);
+    }
+}
+
+/// The wizard's Back: the choices already made stay in `OnboardingState`, so
+/// the previous step shows them again.
+fn retreat_onboarding_step(
+    window: &MainWindow,
+    probe: &ModelPhaseProbe,
+    ob: &Rc<RefCell<OnboardingState>>,
+    permissions: &Rc<permissions_ui::PermissionController>,
+) {
+    {
+        let mut guard = ob.borrow_mut();
+        if guard.step_index > 0 {
+            guard.step_index -= 1;
+        }
+    }
+    show_onboarding_step(window, probe, ob, permissions);
+    permissions.sync_activity();
+}
+
+/// A fresh device list replaces the previous one and the current step is
+/// shown again, keeping the chosen device when it is still plugged in.
+fn refresh_onboarding_devices(
+    window: &MainWindow,
+    probe: &ModelPhaseProbe,
+    ob: &Rc<RefCell<OnboardingState>>,
+    permissions: &Rc<permissions_ui::PermissionController>,
+    devices: Vec<AudioInputDevice>,
+) {
+    ob.borrow_mut().devices = devices;
+    show_onboarding_step(window, probe, ob, permissions);
 }
 
 /// Onboarding-scoped mirror of `start_model_transition` - same commands,
@@ -6794,6 +6853,8 @@ fn quit_after_finalizing_recording(handle: &AppHandle) {
     }
 }
 
+#[cfg(test)]
+mod onboarding_ui_tests;
 #[cfg(test)]
 mod shortcut_ui_tests;
 #[cfg(test)]

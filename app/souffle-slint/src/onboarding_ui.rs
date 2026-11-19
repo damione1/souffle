@@ -13,6 +13,7 @@
 //! is dropped.
 
 use crate::{MainWindow, PermissionRow, settings_ui};
+use slint::Model;
 use souffle_lib::permissions::{PermState, PermissionKind, PermissionStatus};
 
 const ROWS: [PermissionKind; 3] = [
@@ -30,6 +31,8 @@ fn state_of(status: &PermissionStatus, kind: PermissionKind) -> PermState {
     }
 }
 
+/// Rows are rewritten in place when their count is unchanged, so a press in
+/// progress on a row's button survives the 600 ms permission poll.
 pub fn populate_permission_rows(window: &MainWindow, status: &PermissionStatus, busy: [bool; 3]) {
     let rows: Vec<PermissionRow> = ROWS
         .iter()
@@ -43,6 +46,19 @@ pub fn populate_permission_rows(window: &MainWindow, status: &PermissionStatus, 
             }
         })
         .collect();
+    let current = window.get_onboarding_permission_rows();
+    if let Some(model) = current
+        .as_any()
+        .downcast_ref::<slint::VecModel<PermissionRow>>()
+        && model.row_count() == rows.len()
+    {
+        for (index, row) in rows.into_iter().enumerate() {
+            if model.row_data(index).as_ref() != Some(&row) {
+                model.set_row_data(index, row);
+            }
+        }
+        return;
+    }
     window.set_onboarding_permission_rows(std::rc::Rc::new(slint::VecModel::from(rows)).into());
 }
 

@@ -628,7 +628,10 @@ export component MainWindow inherits Window {
                 running: false;
                 triggered => {
                     self.stop();
-                    if !header.announcements-open && !root.settings-permissions-dialog-open {
+                    if !header.announcements-open && root.settings-permissions-dialog-open {
+                        // The dialog under the announcement keeps the keyboard.
+                        permissions-dialog.take-scope-focus();
+                    } else if !header.announcements-open {
                         header.focus-settings();
                     }
                 }
@@ -1115,7 +1118,7 @@ export component MainWindow inherits Window {
         continue-requested => { root.onboarding-continue-requested(); }
     }
 
-    SettingsPermissionsDialog {
+    permissions-dialog := SettingsPermissionsDialog {
         state: { open: root.settings-permissions-dialog-open, topmost: root.settings-permissions-dialog-open && !root.whats-new-open && !root.update-available-open, busy: false };
         width: 100%;
         height: 100%;

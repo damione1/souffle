@@ -1,46 +1,91 @@
 import { Theme } from "../../theme.slint";
-import { KitBadge, KitButton, Tone } from "@kit";
+import {
+    AlertSeverity, ButtonIntent, KitAlert, KitBadge, KitButton, KitFieldDescription,
+    KitFieldRow, KitFieldSet, KitMetrics, KitStack, KitThemeContext, KitThemes, Tone
+} from "@kit";
 import { AccessState, PermissionKind } from "../../types.slint";
 
-// Port of PermissionsStep.svelte. Each row's status comes from a real,
-// repeatedly-polled `get_permission_status()` snapshot (main.rs polls every
-// 600ms while this is visible) - never a value fixed once at launch (AC7,
-// added after PR #248 shipped exactly that fake pattern).
+// Each row's status comes from a real, repeatedly-polled
+// `get_permission_status()` snapshot (main.rs polls every 600ms while this is
+// visible), never a value fixed once at launch. `busy` is the "checking" state
+// of a request in flight.
 export struct PermissionRow {
     kind: PermissionKind,
     state: AccessState,
     busy: bool,
 }
 
-export component PermissionsStep inherits VerticalLayout {
-    in property <int> modal-layer;
+// One permission: its copy, the grant action or the granted badge, and when
+// macOS refused it the way to the System Settings pane.
+component PermissionField inherits KitFieldRow {
+    in property <PermissionRow> permission;
+    in property <int> index;
+    in property <Orientation> field-orientation;
+    callback grant-requested(PermissionKind);
 
     pure function row-label(kind: PermissionKind) -> string {
-        if kind == PermissionKind.microphone { return @tr("Microphone"); }
-        if kind == PermissionKind.system-audio { return @tr("Audio système"); }
-        if kind == PermissionKind.accessibility { return @tr("Accessibilité"); }
-        if kind == PermissionKind.calendar { return @tr("Calendrier"); }
+        if kind == PermissionKind.microphone { return @tr("PermissionsStep" => "Microphone"); }
+        if kind == PermissionKind.system-audio { return @tr("PermissionsStep" => "Audio système"); }
+        if kind == PermissionKind.accessibility { return @tr("PermissionsStep" => "Accessibilité"); }
+        if kind == PermissionKind.calendar { return @tr("PermissionsStep" => "Calendrier"); }
         return "";
     }
     pure function row-description(kind: PermissionKind) -> string {
-        if kind == PermissionKind.microphone { return @tr("Nécessaire pour la dictée et les réunions."); }
-        if kind == PermissionKind.system-audio { return @tr("Capture l'autre côté d'un appel dans les réunions."); }
-        if kind == PermissionKind.accessibility { return @tr("Nécessaire pour le collage automatique et certains raccourcis."); }
+        if kind == PermissionKind.microphone { return @tr("PermissionsStep" => "Nécessaire pour la dictée et les réunions."); }
+        if kind == PermissionKind.system-audio { return @tr("PermissionsStep" => "Capture l'autre côté d'un appel dans les réunions."); }
+        if kind == PermissionKind.accessibility { return @tr("PermissionsStep" => "Nécessaire pour le collage automatique et certains raccourcis."); }
         return "";
     }
     pure function row-action-label(kind: PermissionKind) -> string {
-        if kind == PermissionKind.accessibility { return @tr("Ouvrir les Réglages"); }
-        return @tr("Autoriser");
+        if kind == PermissionKind.accessibility { return @tr("PermissionsStep" => "Ouvrir les Réglages"); }
+        return @tr("PermissionsStep" => "Autoriser");
     }
+
+    orientation: root.field-orientation;
+    padding: KitMetrics.field-gap(self.theme);
+    show-divider: root.index > 0;
+    label: root.row-label(root.permission.kind);
+    description: root.row-description(root.permission.kind);
+
+    if root.permission.state == AccessState.granted: KitBadge {
+        theme: root.theme;
+        text: @tr("PermissionsStep" => "Accordé");
+        tone: Tone.success;
+    }
+    if root.permission.state == AccessState.unsupported: KitBadge {
+        theme: root.theme;
+        text: @tr("PermissionsStep" => "Non pris en charge");
+    }
+    if root.permission.state != AccessState.granted && root.permission.state != AccessState.unsupported: KitButton {
+        theme: root.theme;
+        modal-layer: root.modal-layer;
+        text: root.permission.busy ? @tr("PermissionsStep" => "Vérification…") : root.row-action-label(root.permission.kind);
+        accessible-name: root.row-label(root.permission.kind) + ", " + self.text;
+        disabled: root.permission.busy;
+        activated => { root.grant-requested(root.permission.kind); }
+        focus-observed(focused) => {
+            if focused { root.ensure-visible(KitThemes.scroll-behavior(root.theme)); }
+        }
+    }
+}
+
+export component PermissionsStep inherits KitFieldSet {
+    in property <int> modal-layer;
+    // The width the host lays this step into. The rows stack their action under
+    // the copy when it is narrow; deriving that from the rows' own width would
+    // loop inside a scrolled dialog body.
+    in property <length> available-width;
+    private property <Orientation> field-orientation: Theme.settings-field-orientation(root.available-width);
+
     pure function row-hint(kind: PermissionKind, state: AccessState) -> string {
-        if kind == PermissionKind.accessibility && state == AccessState.denied { return @tr("Refusé. Ouvrez Réglages Système > Confidentialité et sécurité > Accessibilité."); }
-        if kind == PermissionKind.microphone && state == AccessState.denied { return @tr("Refusé. Ouvrez Réglages Système pour l'autoriser."); }
-        if kind == PermissionKind.microphone && state == AccessState.no-device { return @tr("Aucun microphone détecté."); }
+        if kind == PermissionKind.accessibility && state == AccessState.denied { return @tr("PermissionsStep" => "Refusé. Ouvrez Réglages Système > Confidentialité et sécurité > Accessibilité."); }
+        if kind == PermissionKind.microphone && state == AccessState.denied { return @tr("PermissionsStep" => "Refusé. Ouvrez Réglages Système pour l'autoriser."); }
+        if kind == PermissionKind.microphone && state == AccessState.no-device { return @tr("PermissionsStep" => "Aucun microphone détecté."); }
         return "";
     }
     pure function row-hint-action-label(kind: PermissionKind, state: AccessState) -> string {
-        if kind == PermissionKind.accessibility && state == AccessState.denied { return @tr("Réglages Système"); }
-        if kind == PermissionKind.microphone && state == AccessState.denied { return @tr("Réglages Système"); }
+        if kind == PermissionKind.accessibility && state == AccessState.denied { return @tr("PermissionsStep" => "Réglages Système"); }
+        if kind == PermissionKind.microphone && state == AccessState.denied { return @tr("PermissionsStep" => "Réglages Système"); }
         return "";
     }
 
@@ -54,101 +99,72 @@ export component PermissionsStep inherits VerticalLayout {
     callback hint-action-requested(PermissionKind);
     callback repair-requested();
 
-    spacing: 4px;
+    theme: KitThemeContext.current;
+    accessible-label: @tr("OnboardingView" => "Permissions");
 
-    for row in root.rows: VerticalLayout {
-        spacing: 4px;
+    for row[position] in root.rows: KitStack {
+        theme: root.theme;
+        gap: none;
 
-        Rectangle {
-            height: 1px;
-            background: Theme.rule;
-        }
-
-        HorizontalLayout {
-            padding-top: 8px;
-            padding-bottom: 8px;
-            spacing: 10px;
-            alignment: space-between;
-
-            VerticalLayout {
-                spacing: 1px;
-                horizontal-stretch: 1;
-                Text {
-                    text: row-label(row.kind);
-                    font-size: 12.5px;
-                    font-weight: 600;
-                    color: Theme.text-primary;
-                }
-                Text {
-                    text: row-description(row.kind);
-                    font-size: 11px;
-                    color: Theme.text-muted;
-                    wrap: word-wrap;
-                }
-            }
-
-            if row.state == AccessState.granted: KitBadge {
-                text: @tr("Accordé");
-                tone: Tone.success;
-            }
-            if row.state != AccessState.granted && row.state != AccessState.unsupported: KitButton {
-                modal-layer: root.modal-layer;
-                text: row.busy ? @tr("Vérification…") : row-action-label(row.kind);
-                disabled: row.busy;
-                activated => { root.grant-requested(row.kind); }
-            }
-        }
-
-        if row-hint(row.kind, row.state) != "": HorizontalLayout {
-            spacing: 8px;
-            alignment: space-between;
-
-            Text {
-                text: row-hint(row.kind, row.state);
-                font-size: 10.5px;
-                color: Theme.text-muted;
-                wrap: word-wrap;
-                horizontal-stretch: 1;
-            }
-            if row-hint-action-label(row.kind, row.state) != "": KitButton {
-                modal-layer: root.modal-layer;
-                text: row-hint-action-label(row.kind, row.state);
-                activated => { root.hint-action-requested(row.kind); }
-            }
-        }
-    }
-
-    Rectangle {
-        height: 1px;
-        background: Theme.rule;
-    }
-
-    HorizontalLayout {
-        padding-top: 8px;
-        spacing: 10px;
-        alignment: space-between;
-
-        Text {
-            text: root.repair-success
-                ? @tr("Réparation effectuée, en attente de confirmation macOS.")
-                : @tr("Un problème persiste ? Réparez l'entrée Accessibilité.");
-            font-size: 10.5px;
-            color: Theme.text-muted;
-            wrap: word-wrap;
-            horizontal-stretch: 1;
-        }
-        KitButton {
+        PermissionField {
+            theme: root.theme;
             modal-layer: root.modal-layer;
-            text: root.repair-busy ? @tr("Vérification…") : @tr("Réparer");
+            permission: row;
+            index: position;
+            field-orientation: root.field-orientation;
+            grant-requested(kind) => { root.grant-requested(kind); }
+        }
+
+        if root.row-hint(row.kind, row.state) != "": hint := KitAlert {
+            theme: root.theme;
+            severity: AlertSeverity.warning;
+            message: root.row-hint(row.kind, row.state);
+
+            if root.row-hint-action-label(row.kind, row.state) != "": KitButton {
+                theme: root.theme;
+                modal-layer: root.modal-layer;
+                control-size: compact;
+                text: root.row-hint-action-label(row.kind, row.state);
+                text-wrap: word-wrap;
+                activated => { root.hint-action-requested(row.kind); }
+                focus-observed(focused) => {
+                    if focused { hint.ensure-visible(KitThemes.scroll-behavior(root.theme)); }
+                }
+            }
+        }
+    }
+
+    repair-row := KitFieldRow {
+        theme: root.theme;
+        modal-layer: root.modal-layer;
+        orientation: root.field-orientation;
+        padding: KitMetrics.field-gap(self.theme);
+        show-divider: true;
+        description: root.repair-success
+            ? @tr("PermissionsStep" => "Réparation effectuée, en attente de confirmation macOS.")
+            : @tr("PermissionsStep" => "Un problème persiste ? Réparez l'entrée Accessibilité.");
+        focus-requested => { repair-button.take-focus(); }
+
+        repair-button := KitButton {
+            theme: root.theme;
+            modal-layer: root.modal-layer;
+            text: root.repair-busy ? @tr("PermissionsStep" => "Vérification…") : @tr("PermissionsStep" => "Réparer");
             disabled: root.repair-busy || root.repair-cooldown;
             activated => { root.repair-requested(); }
+            focus-observed(focused) => {
+                if focused { repair-row.ensure-visible(KitThemes.scroll-behavior(root.theme)); }
+            }
         }
     }
 
-    if root.error-message != "": Text {
-        text: root.error-message;
-        wrap: word-wrap;
-        color: Theme.danger;
-        font-size: 11px;
+    if root.error-message != "": KitAlert {
+        theme: root.theme;
+        severity: AlertSeverity.error;
+        message: root.error-message;
+    }
+
+    KitFieldDescription {
+        theme: root.theme;
+        text: @tr("OnboardingView" => "Vous pourrez les accorder plus tard.");
     }
 }

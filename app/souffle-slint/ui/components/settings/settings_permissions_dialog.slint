@@ -1,6 +1,6 @@
 import { PermissionRow, PermissionsStep } from "../onboarding/permissions_step.slint";
 import { PermissionKind } from "../../types.slint";
-import { DialogTabPolicy, KitDialog, KitFieldDescription, DialogSize, ButtonIntent } from "@kit";
+import { DialogTabPolicy, KitDialog, DialogSize, ButtonIntent, KitMetrics } from "@kit";
 
 export component SettingsPermissionsDialog inherits KitDialog {
     in property <[PermissionRow]> rows;
@@ -26,6 +26,7 @@ export component SettingsPermissionsDialog inherits KitDialog {
 
     PermissionsStep {
         modal-layer: root.modal-layer;
+        available-width: min(max(0px, root.width - 2 * KitMetrics.dialog-margin(root.theme)), KitMetrics.dialog-width(root.theme, root.size));
         rows: root.rows;
         error-message: root.error-message;
         repair-busy: root.repair-busy;
@@ -35,5 +36,4 @@ export component SettingsPermissionsDialog inherits KitDialog {
         hint-action-requested(kind) => { root.hint-action-requested(kind); }
         repair-requested => { root.repair-requested(); }
     }
-    KitFieldDescription { text: @tr("Vous pourrez les accorder plus tard."); }
 }
