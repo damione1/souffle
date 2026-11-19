@@ -1,11 +1,13 @@
-import { ThemedComboBox } from "components/themed_combo.slint";
+import { AlertSeverity, ButtonIntent, ControlSize, KitAlert, KitButton, KitIcon, KitProgress, KitScrollArea, ProgressMode } from "@kit";
+import { LucideDevelopment } from "@kit-icons/development.slint";
+import { LucideCommunication } from "@kit-icons/communication.slint";
+import { LucideSecurity } from "@kit-icons/security.slint";
+import { CatalogPicker } from "components/catalog_picker.slint";
 import { PermissionsStep, PermissionRow } from "components/onboarding/permissions_step.slint";
 import { ShortcutRecorderButton } from "components/settings/interface_section.slint";
-import { LucideIcon, IconSet } from "components/lucide_icon.slint";
 import { StatusBanner } from "components/status_banner.slint";
 import { AppLocale, ModelPhase, OnboardingStep, PermissionKind } from "types.slint";
 import { Theme } from "theme.slint";
-import { ThemedButton, ThemedButtonKind } from "components/themed_button.slint";
 
 // Port of OnboardingView.svelte (+ PermissionsStep.svelte inlined as the
 // first step). Model download and shortcut capture reuse the same Rust
@@ -34,11 +36,14 @@ export component OnboardingView inherits Rectangle {
     in property <bool> repair-cooldown;
 
     in property <[string]> device-labels;
-    in property <string> selected-device-label;
+    in property <[string]> device-ids;
+    in property <int> default-device-index: -1;
+    in property <int> selected-device-index;
 
     in property <ModelPhase> model-phase: ModelPhase.pick;
     in property <[string]> model-labels;
-    in property <string> selected-model-label;
+    in property <[string]> model-ids;
+    in property <int> selected-model-index;
     in property <string> download-progress-label;
     in property <float> download-progress-fraction;
 
@@ -54,9 +59,9 @@ export component OnboardingView inherits Rectangle {
     callback grant-requested(PermissionKind);
     callback hint-action-requested(PermissionKind);
     callback repair-requested();
-    callback device-changed(string);
+    callback device-changed(int);
     callback refresh-devices-requested();
-    callback model-picked(string);
+    callback model-picked(int);
     callback shortcut-record-requested();
     callback shortcut-captured(string, bool, bool, bool, bool);
     callback shortcut-released(string, bool, bool, bool, bool);
@@ -88,15 +93,22 @@ export component OnboardingView inherits Rectangle {
 
     background: Theme.canvas;
 
-    VerticalLayout {
-        alignment: center;
-        padding: 32px;
+    changed step => { viewport.content-y = 0px; }
 
-        HorizontalLayout {
-            alignment: center;
+    wizard := VerticalLayout {
+        width: min(root.width - 64px, 512px);
+        x: (root.width - self.width) / 2;
+        height: min(root.height - 56px, card.preferred-height + self.spacing + actions.preferred-height);
+        y: (root.height - self.height) / 2;
+        spacing: 24px;
+
+        viewport := KitScrollArea {
+            focusable: self.scrollable;
+            label: root.step-title(root.step);
+            vertical-stretch: 1;
 
             card := VerticalLayout {
-                width: min(root.width - 64px, 512px);
+                width: viewport.visible-width;
                 spacing: 24px;
 
                 // Header: icon, name, tagline, privacy note, locale toggle.
@@ -130,10 +142,10 @@ export component OnboardingView inherits Rectangle {
                     HorizontalLayout {
                         alignment: center;
                         spacing: 6px;
-                        LucideIcon {
-                            icon: IconSet.Lock;
-                            size: 12px;
-                            icon-color: Theme.text-muted;
+                        KitIcon {
+                            glyph: LucideSecurity.lock();
+                            width: 12px; height: 12px;
+                            ink: Theme.text-muted;
                             y: (parent.height - self.height) / 2;
                         }
                         Text {
@@ -148,29 +160,24 @@ export component OnboardingView inherits Rectangle {
                     if root.step-index == 0: HorizontalLayout {
                         alignment: center;
                         spacing: 4px;
-                        ThemedButton {
+                        KitButton {
                             text: @tr("English");
-                            compact: true;
-                            kind: root.locale == AppLocale.en ? ThemedButtonKind.active : ThemedButtonKind.default;
-                            clicked => { root.locale-changed(AppLocale.en); }
+                            control-size: ControlSize.compact;
+                            intent: root.locale == AppLocale.en ? ButtonIntent.primary : ButtonIntent.secondary;
+                            activated => { root.locale-changed(AppLocale.en); }
                         }
-                        ThemedButton {
+                        KitButton {
                             text: @tr("Français");
-                            compact: true;
-                            kind: root.locale == AppLocale.fr ? ThemedButtonKind.active : ThemedButtonKind.default;
-                            clicked => { root.locale-changed(AppLocale.fr); }
+                            control-size: ControlSize.compact;
+                            intent: root.locale == AppLocale.fr ? ButtonIntent.primary : ButtonIntent.secondary;
+                            activated => { root.locale-changed(AppLocale.fr); }
                         }
                     }
                 }
 
-                if root.step-count > 1: HorizontalLayout {
-                    alignment: center;
-                    spacing: 6px;
-                    for i in root.step-count: Rectangle {
-                        width: 24px;
-                        height: 6px;
-                        background: i == root.step-index ? Theme.accent : Theme.surface-3;
-                    }
+                if root.step-count > 1: KitProgress {
+                    value: (root.step-index + 1) / root.step-count;
+                    accessible-label: step-title(root.step);
                 }
 
                 VerticalLayout {
@@ -213,62 +220,44 @@ export component OnboardingView inherits Rectangle {
                     spacing: 10px;
                     HorizontalLayout {
                         spacing: 8px;
-                        LucideIcon {
-                            icon: IconSet.Mic;
-                            size: 16px;
-                            icon-color: Theme.text-muted;
+                        KitIcon {
+                            glyph: LucideCommunication.mic();
+                            width: 16px; height: 16px;
+                            ink: Theme.text-muted;
                             y: (parent.height - self.height) / 2;
                         }
                         // Explicit arithmetic rather than `horizontal-stretch`: the
                         // combo carries its own `width:` binding, which a layout
                         // treats as a fixed constraint (see the status-pill note in
                         // `app_header.slint`).
-                        ThemedComboBox {
+                        CatalogPicker {
                             width: parent.width - 16px - 8px - 8px - refresh-btn.width;
                             model: root.device-labels;
-                            current-value: root.selected-device-label;
+                            option-values: root.device-ids;
+                            default-device-index: root.default-device-index;
+                            selection: self.selection-at(root.selected-device-index);
                             control-label: @tr("Choisissez votre microphone");
-                            selected(value) => { root.device-changed(value); }
+                            selected-index(index) => { root.device-changed(index); }
                         }
-                        refresh-btn := ThemedButton {
+                        refresh-btn := KitButton {
                             width: 110px;
                             text: @tr("Actualiser");
-                            clicked => { root.refresh-devices-requested(); }
+                            activated => { root.refresh-devices-requested(); }
                         }
-                    }
-                    Text {
-                        text: @tr("Le microphone peut être changé plus tard dans les Réglages.");
-                        font-size: 12px;
-                        color: Theme.text-muted;
-                        wrap: word-wrap;
                     }
                 }
 
                 if root.step == OnboardingStep.model: VerticalLayout {
                     spacing: 8px;
 
-                    if root.model-phase == ModelPhase.downloading: VerticalLayout {
-                        spacing: 6px;
-                        Text { text: @tr("Téléchargement du modèle…"); font-size: 14px; color: Theme.text-secondary; }
-                        Rectangle {
-                            height: 6px;
-                            border-radius: 3px;
-                            background: Theme.ghost-border;
-                            Rectangle {
-                                x: 0;
-                                width: parent.width * max(0.02, root.download-progress-fraction);
-                                height: 100%;
-                                border-radius: 3px;
-                                background: Theme.accent;
-                            }
-                        }
-                        Text { text: root.download-progress-label; font-size: 12px; color: Theme.text-muted; }
+                    if root.model-phase == ModelPhase.downloading: KitProgress {
+                        label: @tr("Téléchargement du modèle…");
+                        value: root.download-progress-fraction;
+                        value-text: root.download-progress-label;
                     }
-                    if root.model-phase == ModelPhase.loading: Text {
-                        text: @tr("Chargement du modèle…");
-                        font-size: 14px;
-                        color: Theme.text-secondary;
-                        horizontal-alignment: center;
+                    if root.model-phase == ModelPhase.loading: KitProgress {
+                        mode: ProgressMode.indeterminate;
+                        label: @tr("Chargement du modèle…");
                     }
                     if root.model-phase == ModelPhase.ready: Text {
                         text: @tr("Modèle prêt.");
@@ -282,13 +271,14 @@ export component OnboardingView inherits Rectangle {
                         font-weight: 600;
                         color: Theme.text-muted;
                     }
-                    if root.model-phase == ModelPhase.pick: ThemedComboBox {
+                    if root.model-phase == ModelPhase.pick: CatalogPicker {
                         width: parent.width;
                         model: root.model-labels;
-                        current-value: root.selected-model-label;
+                        option-values: root.model-ids;
+                        selection: self.selection-at(root.selected-model-index);
                         control-label: @tr("Modèle de transcription");
                         enabled: !root.busy;
-                        selected(value) => { root.model-picked(value); }
+                        selected-index(index) => { root.model-picked(index); }
                     }
                 }
 
@@ -297,10 +287,10 @@ export component OnboardingView inherits Rectangle {
 
                     HorizontalLayout {
                         spacing: 12px;
-                        LucideIcon {
-                            icon: IconSet.Keyboard;
-                            size: 16px;
-                            icon-color: Theme.text-muted;
+                        KitIcon {
+                            glyph: LucideDevelopment.keyboard();
+                            width: 16px; height: 16px;
+                            ink: Theme.text-muted;
                             y: (parent.height - self.height) / 2;
                         }
                         ShortcutRecorderButton {
@@ -329,58 +319,46 @@ export component OnboardingView inherits Rectangle {
                         wrap: word-wrap;
                     }
 
-                    if !root.accessibility-granted: Rectangle {
-                        border-width: 1px;
-                        border-color: Theme.warning.with-alpha(0.4);
-                        border-radius: 4px;
-                        VerticalLayout {
-                            padding-left: 12px;
-                            padding-right: 12px;
-                            padding-top: 8px;
-                            padding-bottom: 8px;
-                            Text {
-                                text: @tr("Le collage automatique a besoin de l'Accessibilité, qui n'est pas encore accordée. Le texte ira dans votre historique à la place.");
-                                color: Theme.warning;
-                                font-size: 13px;
-                                wrap: word-wrap;
-                            }
-                        }
+                    if !root.accessibility-granted: KitAlert {
+                        severity: AlertSeverity.warning;
+                        message: @tr("Le collage automatique a besoin de l'Accessibilité, qui n'est pas encore accordée. Le texte ira dans votre historique à la place.");
                     }
                     if !root.accessibility-granted: HorizontalLayout {
                         alignment: end;
-                        ThemedButton {
+                        KitButton {
                             text: @tr("Vérifier les permissions");
-                            compact: true;
-                            clicked => { root.review-accessibility-requested(); }
+                            control-size: ControlSize.compact;
+                            activated => { root.review-accessibility-requested(); }
                         }
                     }
                 }
 
-                HorizontalLayout {
-                    spacing: 12px;
+            }
+        }
 
-                    if root.step-index > 0: ThemedButton {
-                        text: @tr("Retour");
-                        kind: ThemedButtonKind.ghost;
-                        enabled: !root.busy;
-                        clicked => { root.back-requested(); }
-                    }
-                    if root.step-index == 0 && root.step == OnboardingStep.permissions: Text {
-                        text: @tr("Vous pourrez les accorder plus tard.");
-                        font-size: 12px;
-                        color: Theme.text-muted;
-                        vertical-alignment: center;
-                    }
+        actions := HorizontalLayout {
+            spacing: 12px;
 
-                    Rectangle { horizontal-stretch: 1; }
+            if root.step-index > 0: KitButton {
+                text: @tr("Retour");
+                intent: ButtonIntent.quiet;
+                disabled: root.busy;
+                activated => { root.back-requested(); }
+            }
+            if root.step-index == 0 && root.step == OnboardingStep.permissions: Text {
+                text: @tr("Vous pourrez les accorder plus tard.");
+                font-size: 12px;
+                color: Theme.text-muted;
+                vertical-alignment: center;
+            }
 
-                    ThemedButton {
-                        text: root.continue-label;
-                        kind: ThemedButtonKind.primary;
-                        enabled: !root.busy && root.continue-enabled;
-                        clicked => { root.continue-requested(); }
-                    }
-                }
+            Rectangle { horizontal-stretch: 1; }
+
+            KitButton {
+                text: root.continue-label;
+                intent: ButtonIntent.primary;
+                disabled: !(!root.busy && root.continue-enabled);
+                activated => { root.continue-requested(); }
             }
         }
     }

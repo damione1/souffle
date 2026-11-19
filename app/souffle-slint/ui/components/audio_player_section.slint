@@ -1,5 +1,7 @@
+import { KitModalContext, ControlSize, KitIconButton } from "@kit";
+import { LucideMultimedia } from "@kit-icons/multimedia.slint";
+import { LucideArrows } from "@kit-icons/arrows.slint";
 import { Theme } from "../theme.slint";
-import { LucideIcon, IconSet } from "lucide_icon.slint";
 // Native audio player for MeetingDetail (SOU-187 milestone 7, AC14/AC16).
 // New engineering, not a port: MeetingAudioPlayerSection.svelte is a bare
 // `<input type="range">` next to an HTML `<audio>` element, no waveform at
@@ -34,51 +36,12 @@ export component AudioPlayerSection inherits VerticalLayout {
     if root.has-audio: HorizontalLayout {
         spacing: 10px;
 
-        play-btn := Rectangle {
-            width: 36px;
-            height: 36px;
-            border-radius: 18px;
-            border-width: play-focus.has-focus ? 2px : 0px;
-            border-color: Theme.accent;
-            background: root.loading ? Theme.surface-3 : play-area.pressed ? Theme.surface-2 : play-area.has-hover ? Theme.surface-3 : Theme.surface-4;
-            opacity: root.loading ? 0.55 : 1.0;
-
-            accessible-role: button;
-            accessible-label: root.loading ? @tr("Chargement de l'audio…") : root.is-playing ? @tr("Pause") : @tr("Lecture");
-            accessible-enabled: !root.loading;
-            accessible-action-default => { root.play-pause-requested(); }
-
-            forward-focus: play-focus;
-            play-focus := FocusScope {
-                key-pressed(event) => {
-                    if event.text == Key.Return || event.text == Key.Space {
-                        root.play-pause-requested();
-                        return accept;
-                    }
-                    return reject;
-                }
-            }
-
-            play-area := TouchArea {
-                enabled: !root.loading;
-                mouse-cursor: root.loading ? default : pointer;
-                clicked => {
-                    play-focus.focus();
-                    root.play-pause-requested();
-                }
-            }
-
-            // Lucide Play/Pause like MeetingAudioPlayerSection.svelte, not a
-            // bare U+23F8/U+25B6 glyph: those fall through to the emoji
-            // font on macOS and render as a colored emoji tile.
-            LucideIcon {
-                size: 16px;
-                x: (parent.width - self.width) / 2;
-                y: (parent.height - self.height) / 2;
-                icon: root.is-playing ? IconSet.Pause : IconSet.Play;
-                icon-color: Theme.text-primary;
-                filled: true;
-            }
+        play-btn := KitIconButton {
+            accessible-name: root.loading ? @tr("Chargement de l'audio…") : root.is-playing ? @tr("Pause") : @tr("Lecture");
+            control-size: ControlSize.compact;
+            disabled: root.loading;
+            glyph: root.is-playing ? LucideMultimedia.pause() : LucideArrows.play();
+            activated => { root.play-pause-requested(); }
         }
 
         Text {
@@ -104,6 +67,7 @@ export component AudioPlayerSection inherits VerticalLayout {
 
         forward-focus: waveform-focus;
         waveform-focus := FocusScope {
+            enabled: !KitModalContext.inert(0);
             key-pressed(event) => {
                 if event.text == Key.LeftArrow {
                     root.seek-requested(max(0, root.progress - 0.05));

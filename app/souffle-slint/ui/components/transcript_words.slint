@@ -1,6 +1,6 @@
+import { KitModalContext, ButtonIntent, ControlSize, KitButton, KitIconButton, KitTextField } from "@kit";
+import { LucideMath } from "@kit-icons/math.slint";
 import { Theme } from "../theme.slint";
-import { ThemedLineEdit } from "themed_line_edit.slint";
-import { LucideIcon, IconSet } from "lucide_icon.slint";
 
 // Click-a-word -> dictionary alias (SOU-223), shared by the post-meeting
 // transcript (transcript_section.slint) and the live meeting view
@@ -46,6 +46,10 @@ export component TranscriptWordFlow inherits FlexboxLayout {
         height: max(word-label.preferred-height, trailing-label.preferred-height);
 
         word-area := TouchArea {
+            // The item also reserves the trailing text's width. Slint
+            // would otherwise center the word in that wider item, making
+            // it overlap the punctuation drawn at word-area.width.
+            x: 0px;
             width: word-label.preferred-width;
             enabled: word.clickable;
             mouse-cursor: word.clickable ? pointer : default;
@@ -138,6 +142,7 @@ export component DictionaryAliasPopover inherits Rectangle {
         forward-focus: popup-focus;
 
         popup-focus := FocusScope {
+            enabled: !KitModalContext.inert(0);
             key-pressed(event) => {
                 if event.text == Key.Escape {
                     popup.close();
@@ -168,66 +173,36 @@ export component DictionaryAliasPopover inherits Rectangle {
                             vertical-alignment: center;
                         }
 
-                        Rectangle {
-                            width: 24px;
-                            height: 24px;
-                            border-radius: 4px;
-                            background: cancel-area.has-hover ? Theme.surface-3 : transparent;
+                        cancel-btn := KitIconButton {
+                            accessible-name: @tr("Fermer");
+                            control-size: ControlSize.compact;
 
-                            accessible-role: button;
-                            accessible-label: @tr("Fermer");
-                            accessible-action-default => { popup.close(); }
-
-                            cancel-area := TouchArea {
-                                mouse-cursor: pointer;
-                                clicked => { popup.close(); }
-                            }
-
-                            LucideIcon {
-                                icon: IconSet.X;
-                                icon-color: cancel-area.has-hover ? Theme.text-primary : Theme.text-muted;
-                                size: 14px;
-                                x: (parent.width - self.width) / 2;
-                                y: (parent.height - self.height) / 2;
-                            }
+                            glyph: LucideMath.x();
+                            activated => { popup.close(); }
                         }
                     }
 
-                    ThemedLineEdit {
+                    KitTextField {
+                        accessible-name: self.placeholder;
                         placeholder: @tr("Terme correct");
                         text <=> root.term-draft;
-                        accepted => { root.save-and-close(); }
+                        commit-requested => { root.save-and-close(); }
                     }
 
-                    ThemedLineEdit {
+                    KitTextField {
+                        accessible-name: self.placeholder;
                         placeholder: @tr("Prononciation entendue");
                         text <=> root.pronunciation-draft;
-                        accepted => { root.save-and-close(); }
+                        commit-requested => { root.save-and-close(); }
                     }
 
-                    Rectangle {
-                        height: 32px;
-                        border-radius: 4px;
-                        background: root.term-draft == "" ? Theme.surface-4 : (save-area.has-hover ? Theme.accent-hover : Theme.accent);
-
-                        accessible-role: button;
-                        accessible-label: @tr("Enregistrer l'alias");
-                        accessible-action-default => { root.save-and-close(); }
-
-                        save-area := TouchArea {
-                            enabled: root.term-draft != "";
-                            mouse-cursor: pointer;
-                            clicked => { root.save-and-close(); }
-                        }
-
-                        Text {
-                            text: @tr("Enregistrer");
-                            font-size: 13px;
-                            font-weight: 600;
-                            color: Theme.text-primary;
-                            horizontal-alignment: center;
-                            vertical-alignment: center;
-                        }
+                    save-btn := KitButton {
+                        accessible-name: @tr("Enregistrer l'alias");
+                        text: @tr("Enregistrer");
+                        control-size: ControlSize.compact;
+                        intent: ButtonIntent.primary;
+                        disabled: root.term-draft == "";
+                        activated => { root.save-and-close(); }
                     }
                 }
             }

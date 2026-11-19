@@ -1,20 +1,16 @@
-import { SettingsField } from "settings_field.slint";
-import { SettingsGroup } from "settings_group.slint";
+import { KitAlert, KitBadge, KitButton, KitFieldRow, KitFieldSet, KitInline, KitMetrics, KitStack, KitText, KitTextField, KitThemeContext, KitThemes, KitWrap, Tone } from "@kit";
+import { SettingsOptions, ClosedSettingsPicker } from "settings_options.slint";
+import { CatalogPicker } from "../catalog_picker.slint";
 import { Theme } from "../../theme.slint";
-import { ThemedButton } from "../themed_button.slint";
-import { ThemedComboBox } from "../themed_combo.slint";
-import { ThemedLineEdit } from "../themed_line_edit.slint";
 import { AppleIntelligenceUnavailableReason, SummaryProvider } from "../../types.slint";
-import { StatusIndicator } from "status_indicator.slint";
 
-// Port of IntelligenceSettingsSection.svelte. The exact per-reason-code
-// wording (`KNOWN_REASON_KEYS`) and the fine-grained model-picker
-// visibility state machine (`ollamaModelPickerState`) are simplified to
-// generic messages/conditions here - functional parity (the real
-// check_summary_providers status drives everything), wording polish is a
-// follow-up pass. Summary models keep their open-set ids paired with labels
-// through the picker so duplicate labels remain distinct.
-export component IntelligenceSection inherits VerticalLayout {
+// Provider, Apple Intelligence status, Ollama connection, model choice and
+// recovery actions. Rust projects the facts (availability, per-reason enum,
+// `provider-unavailable`, model catalogue); every user-facing message is
+// localized here with @tr, and the free-form `refresh-error` from the service
+// is shown as received. Summary models keep their open-set ids paired with
+// labels through the picker so duplicate labels remain distinct.
+export component IntelligenceSection inherits KitFieldSet {
     in property <SummaryProvider> summary-provider;
     in property <bool> apple-intelligence-available;
     in property <AppleIntelligenceUnavailableReason> apple-intelligence-reason;
@@ -25,14 +21,14 @@ export component IntelligenceSection inherits VerticalLayout {
     in property <bool> model-picker-visible;
     in property <[string]> model-ids;
     in property <[string]> model-labels;
-    in property <string> selected-model-label;
+    in property <string> selected-model-id;
     in property <bool> show-ollama-setup;
     in property <bool> ollama-pulling;
     in property <string> ollama-pull-status;
     in property <string> ollama-pull-error;
     in property <string> recommended-model;
     in property <string> refresh-error;
-    in property <string> unusable-message; // "" when the chosen provider can run
+    in property <bool> provider-unavailable;
 
     callback summary-provider-changed(SummaryProvider);
     callback ollama-url-changed(string);
@@ -40,13 +36,6 @@ export component IntelligenceSection inherits VerticalLayout {
     callback retry-requested();
     callback download-recommended-requested();
     callback open-apple-intelligence-settings-requested();
-
-    pure function provider-label(value: SummaryProvider) -> string {
-        if value == SummaryProvider.apple-intelligence { return @tr("Apple Intelligence"); }
-        if value == SummaryProvider.ollama { return @tr("Ollama"); }
-        if value == SummaryProvider.auto { return @tr("Automatique"); }
-        return "";
-    }
 
     pure function apple-reason-label(value: AppleIntelligenceUnavailableReason) -> string {
         if value == AppleIntelligenceUnavailableReason.device-not-eligible { return @tr("Ce Mac ne prend pas en charge Apple Intelligence."); }
@@ -59,189 +48,200 @@ export component IntelligenceSection inherits VerticalLayout {
         return "";
     }
 
-    spacing: 22px;
-    alignment: start;
+    theme: KitThemeContext.current;
+    legend: @tr("RÉSUMÉS");
 
-    SettingsGroup {
-        title: @tr("RÉSUMÉS");
-
-    SettingsField {
+    KitFieldRow {
+        theme: KitThemeContext.current;
+        modal-layer: 0;
+        orientation: Theme.settings-field-orientation(self.width);
+        padding: KitMetrics.field-gap(self.theme);
+        focus-requested => { engine-picker.take-focus(); }
+        private property <bool> control-focused: engine-picker.has-focus;
+        changed control-focused => {
+            if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
+        }
         show-divider: false;
         label: @tr("Moteur");
         description: @tr("Le moteur qui rédige les résumés et nettoie la dictée.");
 
-        ThemedComboBox {
-            control-label: @tr("Moteur de résumé");
-            model: [
-                root.provider-label(SummaryProvider.auto),
-                root.provider-label(SummaryProvider.apple-intelligence),
-                root.provider-label(SummaryProvider.ollama),
-            ];
-            current-value: root.provider-label(root.summary-provider);
-            selected(value) => {
-                if value == root.provider-label(SummaryProvider.apple-intelligence) {
-                    root.summary-provider-changed(SummaryProvider.apple-intelligence);
-                }
-                if value == root.provider-label(SummaryProvider.ollama) {
-                    root.summary-provider-changed(SummaryProvider.ollama);
-                }
-                if value == root.provider-label(SummaryProvider.auto) {
-                    root.summary-provider-changed(SummaryProvider.auto);
-                }
-            }
+        engine-picker := ClosedSettingsPicker {
+            theme: KitThemeContext.current;
+            modal-layer: 0;
+            label: @tr("Moteur de résumé");
+            choices: SettingsOptions.provider-options(root.summary-provider);
+            chosen(row) => { root.summary-provider-changed(SettingsOptions.provider-value(row, root.summary-provider)); }
         }
     }
 
-    if root.unusable-message != "": Rectangle {
-        border-width: 1px;
-        border-color: Theme.danger;
-        border-radius: 6px;
-        background: Theme.surface-2;
-
-        VerticalLayout {
-            padding: 10px;
-            Text {
-                text: root.unusable-message;
-                color: Theme.danger;
-                font-size: 11.5px;
-                wrap: word-wrap;
-            }
-        }
+    if root.provider-unavailable: KitAlert {
+        theme: root.theme;
+        severity: error;
+        message: root.summary-provider == SummaryProvider.apple-intelligence
+            ? @tr("Apple Intelligence n'est pas disponible sur cet appareil.")
+            : @tr("Aucun modèle Ollama compatible n'est installé.");
     }
 
-    if root.refresh-error != "": Rectangle {
-        border-width: 1px;
-        border-color: Theme.danger;
-        border-radius: 6px;
-        background: Theme.surface-2;
-
-        VerticalLayout {
-            padding: 10px;
-            Text {
-                text: root.refresh-error;
-                color: Theme.danger;
-                font-size: 11.5px;
-                wrap: word-wrap;
-            }
-        }
+    if root.refresh-error != "": KitAlert {
+        theme: root.theme;
+        severity: error;
+        message: root.refresh-error;
     }
 
-    SettingsField {
+    KitFieldRow {
+        theme: KitThemeContext.current;
+        modal-layer: 0;
+        orientation: Theme.settings-field-orientation(self.width);
+        padding: KitMetrics.field-gap(self.theme);
+        show-divider: true;
         label: @tr("Apple Intelligence");
 
-        StatusIndicator {
+        KitBadge {
+            theme: root.theme;
             text: root.apple-intelligence-available ? @tr("Disponible") : @tr("Non disponible");
-            indicator-color: root.apple-intelligence-available ? Theme.success : Theme.text-faint;
+            tone: root.apple-intelligence-available ? Tone.success : Tone.neutral;
         }
     }
 
-    if !root.apple-intelligence-available: Rectangle {
-        border-width: 1px;
-        border-color: Theme.surface-4;
-        border-radius: 6px;
-
-        HorizontalLayout {
-            padding: 10px;
-            spacing: 10px;
-            alignment: space-between;
-
-            Text {
-                text: root.apple-reason-label(root.apple-intelligence-reason);
-                color: Theme.text-muted;
-                font-size: 11px;
-                wrap: word-wrap;
-                horizontal-stretch: 1;
+    if !root.apple-intelligence-available: apple-notice := KitAlert {
+        theme: root.theme;
+        message: root.apple-reason-label(root.apple-intelligence-reason);
+        if root.apple-intelligence-reason == AppleIntelligenceUnavailableReason.apple-intelligence-not-enabled: KitButton {
+            theme: root.theme;
+            modal-layer: 0;
+            text: @tr("Réglages Système");
+            text-wrap: word-wrap;
+            focus-observed(focused) => {
+                if focused { apple-notice.ensure-visible(KitThemes.scroll-behavior(root.theme)); }
             }
-            if root.apple-intelligence-reason == AppleIntelligenceUnavailableReason.apple-intelligence-not-enabled: ThemedButton {
-                text: @tr("Réglages Système");
-                clicked => { root.open-apple-intelligence-settings-requested(); }
-            }
+            activated => { root.open-apple-intelligence-settings-requested(); }
         }
     }
 
-    SettingsField {
+    url-row := KitFieldRow {
+        theme: KitThemeContext.current;
+        modal-layer: 0;
+        orientation: Theme.settings-field-orientation(self.width);
+        padding: KitMetrics.field-gap(self.theme);
+        padding-bottom: KitThemes.focus-outset(self.theme.focus) + KitMetrics.help-gap(self.theme);
+        show-divider: true;
+        focus-requested => { url-editor.take-focus(); }
+        private property <bool> control-focused: url-editor.has-focus;
+        changed control-focused => {
+            if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
+        }
         label: @tr("URL Ollama");
         description: @tr("Adresse du serveur Ollama local ou distant.");
 
-        ThemedLineEdit {
+        url-editor := KitTextField {
+            theme: KitThemeContext.current;
+            modal-layer: 0;
             width: Theme.settings-control-width;
-            control-label: @tr("URL Ollama");
+            accessible-name: @tr("URL Ollama");
+            description: url-row.description;
+            show-description: false;
             placeholder: @tr("http://localhost:11434");
             text: root.ollama-url;
             edited(value) => { root.ollama-url-changed(value); }
         }
     }
 
-    SettingsField {
+    KitFieldRow {
+        theme: KitThemeContext.current;
+        modal-layer: 0;
+        orientation: Theme.settings-field-orientation(self.width);
+        padding: KitMetrics.field-gap(self.theme);
+        show-divider: true;
+        focus-requested => { connection-button.take-focus(); }
+        private property <bool> control-focused: connection-button.has-focus;
+        changed control-focused => {
+            if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
+        }
         label: @tr("État de la connexion");
         description: root.summary-model-count == 0 ? @tr("Aucun modèle trouvé.")
             : root.summary-model-count == 1 ? @tr("1 modèle trouvé.")
             : @tr("{} modèles trouvés.", root.summary-model-count);
 
-        Rectangle {
-            height: Theme.settings-control-height;
-            width: status.width + 12px + retry.width;
+        KitWrap {
+            theme: root.theme;
+            cross-axis-alignment: center;
             horizontal-stretch: 0;
-            vertical-stretch: 0;
-
-            status := StatusIndicator {
-                x: 0px;
-                y: (parent.height - self.height) / 2;
+            KitBadge {
+                theme: root.theme;
                 text: root.ollama-available ? @tr("Connecté") : @tr("Non disponible");
-                indicator-color: root.ollama-available ? Theme.success : Theme.text-faint;
+                tone: root.ollama-available ? Tone.success : Tone.neutral;
             }
-            retry := ThemedButton {
-                x: status.width + 12px;
-                y: 0px;
-                width: 92px;
+            connection-button := KitButton {
+                theme: KitThemeContext.current;
+                modal-layer: 0;
                 text: @tr("Réessayer");
-                enabled: !root.ollama-checking && !root.ollama-pulling;
-                clicked => { root.retry-requested(); }
+                disabled: root.ollama-checking || root.ollama-pulling;
+                activated => { root.retry-requested(); }
             }
         }
     }
 
-    if root.model-picker-visible: SettingsField {
+    if root.model-picker-visible: KitFieldRow {
+        theme: KitThemeContext.current;
+        modal-layer: 0;
+        orientation: Theme.settings-field-orientation(self.width);
+        padding: KitMetrics.field-gap(self.theme);
+        show-divider: true;
+        focus-requested => { model-picker.take-focus(); }
+        private property <bool> control-focused: model-picker.has-focus;
+        changed control-focused => {
+            if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
+        }
         label: @tr("Modèle de résumé");
 
-        ThemedComboBox {
+        model-picker := CatalogPicker {
+            theme: KitThemeContext.current;
+            modal-layer: 0;
             control-label: @tr("Modèle de résumé");
             model: root.model-labels;
             option-values: root.model-ids;
-            current-value: root.selected-model-label;
-            selected(id) => { root.ollama-model-changed(id); }
+            current-value: root.selected-model-id;
+            value-chosen(id) => { root.ollama-model-changed(id); }
         }
     }
 
-    if root.show-ollama-setup: VerticalLayout {
-        spacing: 8px;
+    if root.show-ollama-setup: KitStack {
+        theme: root.theme;
+        gap: compact;
 
-        Text {
+        KitText {
+            theme: root.theme;
+            role: caption;
+            tone: warning;
             text: @tr("Aucun modèle compatible installé.");
-            color: Theme.warning;
-            font-size: 11.5px;
         }
 
-        if root.ollama-pull-error != "": Text {
-            text: @tr("Échec du téléchargement : {}", root.ollama-pull-error);
-            color: Theme.danger;
-            font-size: 11.5px;
-            wrap: word-wrap;
+        if root.ollama-pull-error != "": KitAlert {
+            theme: root.theme;
+            severity: error;
+            message: @tr("Échec du téléchargement : {}", root.ollama-pull-error);
         }
 
-        if root.ollama-pulling: Text {
+        if root.ollama-pulling: KitText {
+            theme: root.theme;
+            role: caption;
             text: root.ollama-pull-status == "" ? @tr("Téléchargement de {}…", root.recommended-model) : root.ollama-pull-status;
-            color: Theme.text-muted;
-            font-size: 11.5px;
         }
 
-        if !root.ollama-pulling: HorizontalLayout {
+        if !root.ollama-pulling: download-actions := KitInline {
+            theme: root.theme;
             alignment: end;
-            ThemedButton {
+            inset: compact;
+            KitButton {
+                theme: root.theme;
+                modal-layer: 0;
                 text: @tr("Télécharger {}", root.recommended-model);
-                clicked => { root.download-recommended-requested(); }
+                text-wrap: word-wrap;
+                focus-observed(focused) => {
+                    if focused { download-actions.ensure-visible(KitThemes.scroll-behavior(root.theme)); }
+                }
+                activated => { root.download-recommended-requested(); }
             }
         }
-    }
     }
 }

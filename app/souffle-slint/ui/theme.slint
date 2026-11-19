@@ -1,3 +1,4 @@
+import { ControlSize, KitMetrics, KitThemeContext, KitThemes } from "@kit";
 // Color tokens ported from `src/app.css`'s `@theme`/`.light` blocks. `dark`
 // is the single source of truth for which palette every color below
 // resolves to - main.rs sets it once at launch (resolving "system" against
@@ -8,6 +9,42 @@
 // automatically.
 export global Theme {
     in-out property <bool> dark: true;
+    changed dark => { root.apply-kit-theme(); }
+    public function apply-kit-theme() {
+        KitThemeContext.current = root.dark ? KitThemes.dark : KitThemes.light;
+        KitThemeContext.current.canvas = root.canvas;
+        KitThemeContext.current.surface = root.surface-1;
+        KitThemeContext.current.surface-raised = root.surface-2;
+        KitThemeContext.current.surface-inset = root.input;
+        KitThemeContext.current.text-primary = root.text-primary;
+        KitThemeContext.current.text-secondary = root.text-muted;
+        KitThemeContext.current.placeholder = root.text-muted;
+        KitThemeContext.current.accent = root.accent;
+        KitThemeContext.current.on-accent = root.canvas;
+        KitThemeContext.current.accent-hover = root.accent-hover;
+        KitThemeContext.current.accent-pressed = root.accent-hover;
+        KitThemeContext.current.accent-subtle = root.surface-3;
+        KitThemeContext.current.selection = root.accent;
+        KitThemeContext.current.on-selection = root.canvas;
+        KitThemeContext.current.border-subtle = root.border-soft;
+        KitThemeContext.current.border-strong = root.ghost-border;
+        KitThemeContext.current.control-fill = root.input;
+        KitThemeContext.current.control-border = root.ghost-border;
+        KitThemeContext.current.choice-fill = root.accent;
+        KitThemeContext.current.on-choice-fill = root.canvas;
+        KitThemeContext.current.hover = root.surface-2;
+        KitThemeContext.current.pressed = root.surface-3;
+        KitThemeContext.current.disabled-fill = root.surface-2;
+        KitThemeContext.current.disabled-text = root.text-muted;
+        KitThemeContext.current.scrim = root.modal-scrim;
+        KitThemeContext.current.danger = root.danger;
+        KitThemeContext.current.on-danger = root.on-danger;
+        KitThemeContext.current.success = root.success;
+        KitThemeContext.current.warning = root.warning;
+        KitThemeContext.current.focus.color = root.accent;
+        KitThemeContext.current.focus.invalid-color = root.danger;
+        KitThemeContext.current.typography.family = "Archivo";
+    }
 
     out property <color> canvas: root.dark ? #16110c : #fbf7ed;
     out property <color> surface-1: root.dark ? #1e1811 : #ffffff;
@@ -16,7 +53,7 @@ export global Theme {
     out property <color> surface-4: root.dark ? #423525 : #d3c6ad;
     out property <color> input: root.dark ? #150f09 : #f6f1e4;
 
-    out property <color> accent: root.dark ? #e9ae55 : #95610f;
+    out property <color> accent: root.dark ? #e9ae55 : #89570d;
     out property <color> accent-hover: root.dark ? #f2be6e : #7a4e09;
     out property <color> secondary: root.dark ? #d98c6a : #6b2710;
 
@@ -30,9 +67,9 @@ export global Theme {
     out property <float> provisional-opacity: 0.55;
 
     out property <color> success: root.dark ? #e9ae55 : #4f7a52;
-    out property <color> warning: root.dark ? #e0a458 : #a8701a;
+    out property <color> warning: root.dark ? #e0a458 : #87550c;
     out property <color> danger: root.dark ? #f2685a : #a8402c;
-    out property <color> danger-soft: root.dark ? #f28a78 : #c07460;
+    out property <color> danger-soft: root.dark ? #f28a78 : #984631;
     out property <color> danger-strong: root.dark ? #8a5148 : #8a3222;
     out property <color> on-danger: root.dark ? #2a0e09 : #f7efdf;
 
@@ -50,6 +87,10 @@ export global Theme {
 
     // Trailing control column on settings rows (combo, URL field, spin).
     out property <length> settings-control-width: 220px;
-    out property <length> settings-control-height: 36px;
-    out property <length> settings-inset: 12px;
+    public pure function settings-field-orientation(available: length) -> Orientation {
+        return available < 2 * root.settings-control-width * KitThemeContext.current.text-scale
+            ? Orientation.vertical : Orientation.horizontal;
+    }
+    out property <length> settings-control-height: KitMetrics.control-height(KitThemeContext.current, ControlSize.compact);
+    out property <length> settings-inset: KitMetrics.field-gap(KitThemeContext.current) - KitThemeContext.current.spacing.unit;
 }

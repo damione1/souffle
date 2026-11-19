@@ -1,8 +1,5 @@
-import { SettingsField } from "settings_field.slint";
-import { SettingsGroup } from "settings_group.slint";
+import { ChoiceLabelPosition, ControlWidth, KitButton, KitSwitch, Ownership, KitFieldSet, KitThemeContext, KitThemes, KitFieldRow, KitMetrics } from "@kit";
 import { Theme } from "../../theme.slint";
-import { ThemedSwitch } from "../themed_switch.slint";
-import { ThemedButton } from "../themed_button.slint";
 
 // Port of AboutSettingsSection.svelte. `UpdateAction` (the download-progress
 // + install button shown once an update is found) is not built here - a
@@ -24,10 +21,15 @@ export component AboutSection inherits VerticalLayout {
     spacing: 22px;
     alignment: start;
 
-    SettingsGroup {
-        title: @tr("À PROPOS");
+    KitFieldSet {
+        theme: KitThemeContext.current;
+        legend: @tr("À PROPOS");
 
-        SettingsField {
+        KitFieldRow {
+            theme: KitThemeContext.current;
+            modal-layer: 0;
+            orientation: Theme.settings-field-orientation(self.width);
+            padding: KitMetrics.field-gap(self.theme);
             show-divider: false;
             label: @tr("Version");
 
@@ -42,7 +44,12 @@ export component AboutSection inherits VerticalLayout {
             }
         }
 
-        SettingsField {
+        KitFieldRow {
+            theme: KitThemeContext.current;
+            modal-layer: 0;
+            orientation: Theme.settings-field-orientation(self.width);
+            padding: KitMetrics.field-gap(self.theme);
+            show-divider: true;
             label: @tr("Transcription");
 
             Text {
@@ -56,7 +63,12 @@ export component AboutSection inherits VerticalLayout {
             }
         }
 
-        SettingsField {
+        KitFieldRow {
+            theme: KitThemeContext.current;
+            modal-layer: 0;
+            orientation: Theme.settings-field-orientation(self.width);
+            padding: KitMetrics.field-gap(self.theme);
+            show-divider: true;
             label: @tr("Résumés");
 
             Text {
@@ -70,7 +82,12 @@ export component AboutSection inherits VerticalLayout {
             }
         }
 
-        SettingsField {
+        KitFieldRow {
+            theme: KitThemeContext.current;
+            modal-layer: 0;
+            orientation: Theme.settings-field-orientation(self.width);
+            padding: KitMetrics.field-gap(self.theme);
+            show-divider: true;
             label: @tr("Confidentialité");
 
             Text {
@@ -83,23 +100,51 @@ export component AboutSection inherits VerticalLayout {
             }
         }
 
-        SettingsField {
+        KitFieldRow {
+            theme: KitThemeContext.current;
+            modal-layer: 0;
+            orientation: Theme.settings-field-orientation(self.width);
+            padding: KitMetrics.field-gap(self.theme);
+            show-divider: true;
+            focus-requested => { update-button.take-focus(); }
+            private property <bool> control-focused: update-button.has-focus;
+            changed control-focused => {
+                if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
+            }
             label: @tr("Mises à jour");
             description: root.update-status;
 
-            ThemedButton {
+            update-button := KitButton {
+                theme: KitThemeContext.current;
+                modal-layer: 0;
                 text: root.checking-updates ? @tr("Vérification…") : @tr("Vérifier les mises à jour");
-                enabled: !root.checking-updates;
-                clicked => { root.check-updates-requested(); }
+                disabled: root.checking-updates;
+                activated => { root.check-updates-requested(); }
             }
         }
 
-        SettingsField {
+        KitFieldRow {
+            theme: KitThemeContext.current;
+            modal-layer: 0;
+            orientation: Theme.settings-field-orientation(self.width);
+            padding: KitMetrics.field-gap(self.theme);
+            show-divider: true;
+            focus-requested => { update-switch.take-focus(); }
+            private property <bool> control-focused: update-switch.has-focus;
+            changed control-focused => {
+                if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
+            }
             label: @tr("Vérification automatique");
             description: @tr("Vérifier les mises à jour au démarrage.");
 
-            ThemedSwitch {
-                control-label: @tr("Vérification automatique des mises à jour");
+            update-switch := KitSwitch {
+                theme: KitThemeContext.current;
+                modal-layer: 0;
+                label-position: ChoiceLabelPosition.start;
+                padding-inline: 0px;
+                ownership: Ownership.controlled;
+                control-width: ControlWidth.intrinsic;
+                accessible-label: @tr("Vérification automatique des mises à jour");
                 checked: root.auto-update-check;
                 toggled(new) => { root.auto-update-check-changed(new); }
             }

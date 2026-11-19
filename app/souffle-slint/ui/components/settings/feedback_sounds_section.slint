@@ -1,8 +1,5 @@
-import { SettingsField } from "settings_field.slint";
-import { SettingsGroup } from "settings_group.slint";
+import { ChoiceLabelPosition, ControlWidth, KitSlider, KitSwitch, Ownership, KitFieldSet, KitThemeContext, KitThemes, KitFieldRow, KitMetrics } from "@kit";
 import { Theme } from "../../theme.slint";
-import { ThemedSwitch } from "../themed_switch.slint";
-import { ThemedSlider } from "../themed_slider.slint";
 
 // Port of FeedbackSoundsSettingsSection.svelte.
 export component FeedbackSoundsSection inherits VerticalLayout {
@@ -17,22 +14,44 @@ export component FeedbackSoundsSection inherits VerticalLayout {
     spacing: 22px;
     alignment: start;
 
-    SettingsGroup {
-        title: @tr("SONS DE DICTÉE");
+    KitFieldSet {
+        theme: KitThemeContext.current;
+        legend: @tr("SONS DE DICTÉE");
 
-        SettingsField {
+        KitFieldRow {
+            theme: KitThemeContext.current;
+            modal-layer: 0;
+            orientation: Theme.settings-field-orientation(self.width);
+            padding: KitMetrics.field-gap(self.theme);
+            focus-requested => { sounds-switch.take-focus(); }
+            private property <bool> control-focused: sounds-switch.has-focus;
+            changed control-focused => {
+                if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
+            }
             show-divider: false;
             label: @tr("Activer les sons");
             description: @tr("Jouer un son au démarrage et à l'arrêt de l'enregistrement.");
 
-            ThemedSwitch {
-                control-label: @tr("Activer les sons");
+            sounds-switch := KitSwitch {
+                theme: KitThemeContext.current;
+                modal-layer: 0;
+                label-position: ChoiceLabelPosition.start;
+                padding-inline: 0px;
+                ownership: Ownership.controlled;
+                control-width: ControlWidth.intrinsic;
+                accessible-label: @tr("Activer les sons");
                 checked: root.enabled;
                 toggled(new) => { root.enabled-changed(new); }
             }
         }
 
-        if root.enabled: SettingsField {
+        if root.enabled: KitFieldRow {
+            theme: KitThemeContext.current;
+            modal-layer: 0;
+            orientation: Theme.settings-field-orientation(self.width);
+            padding: KitMetrics.field-gap(self.theme);
+            show-divider: true;
+            focus-requested => { volume-slider.take-focus(); }
             label: @tr("Volume");
 
             HorizontalLayout {
@@ -40,12 +59,15 @@ export component FeedbackSoundsSection inherits VerticalLayout {
                 alignment: center;
                 horizontal-stretch: 0;
 
-                ThemedSlider {
-                    control-label: @tr("Volume des sons de dictée");
+                volume-slider := KitSlider {
+                    theme: KitThemeContext.current;
+                    modal-layer: 0;
+                    width: 140px;
+                    ownership: Ownership.controlled;
+                    spec: { minimum: root.volume-min, maximum: root.volume-max, step: 1 };
+                    label: @tr("Volume des sons de dictée");
                     value: root.volume;
-                    minimum: root.volume-min;
-                    maximum: root.volume-max;
-                    changed(value) => { root.volume-changed(value); }
+                    chosen(value) => { root.volume-changed(value.to-float()); }
                 }
 
                 Text {

@@ -1,6 +1,5 @@
+import { ButtonIntent, KitButton, KitTextArea } from "@kit";
 import { Theme } from "../theme.slint";
-import { ThemedButton, ThemedButtonKind } from "themed_button.slint";
-import { ThemedTextArea } from "themed_text_area.slint";
 
 // Kept on the home screen when stopping succeeded but persistence or text
 // insertion did not. The transcript remains selectable/editable until the
@@ -12,14 +11,14 @@ export component DictationRecovery inherits Rectangle {
     callback copy-requested();
     callback discard-requested();
 
-    height: 214px;
+    height: content.preferred-height;
     vertical-stretch: 0;
     border-width: 1px;
     border-color: Theme.warning;
     border-radius: 6px;
     background: Theme.surface-2;
 
-    VerticalLayout {
+    content := VerticalLayout {
         padding: 12px;
         spacing: 8px;
         alignment: start;
@@ -36,23 +35,24 @@ export component DictationRecovery inherits Rectangle {
             font-size: 12px;
             wrap: word-wrap;
         }
-        ThemedTextArea {
+        KitTextArea {
             text <=> root.text;
-            area-height: 108px;
-            control-label: @tr("Texte de dictée à récupérer");
+            min-lines: 4;
+            max-lines: 4;
+            accessible-name: @tr("Texte de dictée à récupérer");
         }
         HorizontalLayout {
             spacing: 8px;
             alignment: end;
-            ThemedButton {
+            KitButton {
                 text: @tr("Supprimer");
-                kind: ThemedButtonKind.ghost;
-                clicked => { root.discard-requested(); }
+                intent: ButtonIntent.quiet;
+                activated => { root.discard-requested(); }
             }
-            ThemedButton {
+            KitButton {
                 text: @tr("Copier le texte");
-                kind: ThemedButtonKind.primary;
-                clicked => { root.copy-requested(); }
+                intent: ButtonIntent.primary;
+                activated => { root.copy-requested(); }
             }
         }
     }

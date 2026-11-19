@@ -435,87 +435,87 @@ msgid "Sélection"
 msgstr "Sélection"
 
 #: app/souffle-slint/ui/components/themed_combo.slint:76
-msgctxt "ThemedComboBox"
+msgctxt "PickerLabels"
 msgid "Automatique"
 msgstr "Automatique"
 
 #: app/souffle-slint/ui/components/themed_combo.slint:77
-msgctxt "ThemedComboBox"
+msgctxt "PickerLabels"
 msgid "Suivre l'appareil par défaut"
 msgstr "Suivre l'appareil par défaut"
 
 #: app/souffle-slint/ui/components/themed_combo.slint:78
-msgctxt "ThemedComboBox"
+msgctxt "PickerLabels"
 msgid "Appareil personnalisé (indisponible)"
 msgstr "Appareil personnalisé (indisponible)"
 
 #: app/souffle-slint/ui/components/themed_combo.slint:79
-msgctxt "ThemedComboBox"
+msgctxt "PickerLabels"
 msgid "Jamais"
 msgstr "Jamais"
 
 #: app/souffle-slint/ui/components/themed_combo.slint:80
-msgctxt "ThemedComboBox"
+msgctxt "PickerLabels"
 msgid "Par défaut"
 msgstr "Par défaut"
 
 #: app/souffle-slint/ui/components/themed_combo.slint:81
-msgctxt "ThemedComboBox"
+msgctxt "PickerLabels"
 msgid "Compte rendu détaillé"
 msgstr "Compte rendu détaillé"
 
 #: app/souffle-slint/ui/components/themed_combo.slint:82
-msgctxt "ThemedComboBox"
+msgctxt "PickerLabels"
 msgid "Aperçu bref"
 msgstr "Aperçu bref"
 
 #: app/souffle-slint/ui/components/themed_combo.slint:83
-msgctxt "ThemedComboBox"
+msgctxt "PickerLabels"
 msgid "Intégré"
 msgstr "Intégré"
 
 #: app/souffle-slint/ui/components/themed_combo.slint:84
-msgctxt "ThemedComboBox"
+msgctxt "PickerLabels"
 msgid "USB"
 msgstr "USB"
 
 #: app/souffle-slint/ui/components/themed_combo.slint:85
-msgctxt "ThemedComboBox"
+msgctxt "PickerLabels"
 msgid "Bluetooth"
 msgstr "Bluetooth"
 
 #: app/souffle-slint/ui/components/themed_combo.slint:86
-msgctxt "ThemedComboBox"
+msgctxt "PickerLabels"
 msgid "Virtuel"
 msgstr "Virtuel"
 
 #: app/souffle-slint/ui/components/themed_combo.slint:87
-msgctxt "ThemedComboBox"
+msgctxt "PickerLabels"
 msgid "Agrégé"
 msgstr "Agrégé"
 
 #: app/souffle-slint/ui/components/themed_combo.slint:88
-msgctxt "ThemedComboBox"
+msgctxt "PickerLabels"
 msgid "Inconnu"
 msgstr "Inconnu"
 
 #: app/souffle-slint/ui/components/themed_combo.slint:89
-msgctxt "ThemedComboBox"
+msgctxt "PickerLabels"
 msgid "Nettoyage"
 msgstr "Nettoyage"
 
 #: app/souffle-slint/ui/components/themed_combo.slint:90
-msgctxt "ThemedComboBox"
+msgctxt "PickerLabels"
 msgid "E-mail professionnel"
 msgstr "E-mail professionnel"
 
 #: app/souffle-slint/ui/components/themed_combo.slint:91
-msgctxt "ThemedComboBox"
+msgctxt "PickerLabels"
 msgid "Puces"
 msgstr "Puces"
 
 #: app/souffle-slint/ui/components/themed_combo.slint:92
-msgctxt "ThemedComboBox"
+msgctxt "PickerLabels"
 msgid "Sans fillers"
 msgstr "Sans fillers"
 
@@ -954,10 +954,7 @@ msgstr "Arrêt automatique des réunions"
 #: app/souffle-slint/ui/components/settings/audio_section.slint:107
 msgctxt "AudioSection"
 msgid "Arrêter l'enregistrement quand plus personne ne parle depuis longtemps."
-msgstr ""
-"Arrêter l'enregistrement quand plus personne ne parle depuis "
-"longtemps.Arrêter l'enregistrement quand plus personne ne parle depuis "
-"longtemps."
+msgstr "Arrêter l'enregistrement quand plus personne ne parle depuis longtemps."
 
 #: app/souffle-slint/ui/components/settings/audio_section.slint:117
 msgctxt "AudioSection"
@@ -982,10 +979,7 @@ msgstr "Détection de voix (VAD)"
 #: app/souffle-slint/ui/components/settings/audio_section.slint:140
 msgctxt "AudioSection"
 msgid "Ignorer les silences pour une transcription plus rapide et plus propre."
-msgstr ""
-"Ignorer les silences pour une transcription plus rapide et plus "
-"propre.Ignorer les silences pour une transcription plus rapide et plus "
-"propre."
+msgstr "Ignorer les silences pour une transcription plus rapide et plus propre."
 
 #: app/souffle-slint/ui/components/settings/audio_section.slint:143
 msgctxt "AudioSection"
@@ -1754,10 +1748,7 @@ msgstr "Délai du rappel"
 #: app/souffle-slint/ui/components/settings/calendar_section.slint:90
 msgctxt "CalendarSection"
 msgid "Minutes avant un événement pour proposer de démarrer une transcription."
-msgstr ""
-"Minutes avant un événement pour proposer de démarrer une "
-"transcription.Minutes avant un événement pour proposer de démarrer une "
-"transcription."
+msgstr "Minutes avant un événement pour proposer de démarrer une transcription."
 
 #: app/souffle-slint/ui/components/settings/calendar_section.slint:93
 msgctxt "CalendarSection"
@@ -2913,3 +2904,127 @@ msgid ""
 msgstr ""
 "La mise en veille a interrompu cette réunion. Reprenez l'enregistrement pour "
 "continuer."
+
+msgctxt "SettingsPermissionsDialog"
+msgid "Fermer"
+msgstr "Fermer"
+
+msgctxt "SettingsPicker"
+msgid "Sélection"
+msgstr "Sélection"
+
+msgctxt "SettingsPicker"
+msgid "Aucune option"
+msgstr "Aucune option"
+
+msgctxt "CalendarSection"
+msgid "Augmenter"
+msgstr "Augmenter"
+
+msgctxt "CalendarSection"
+msgid "Diminuer"
+msgstr "Diminuer"
+
+msgctxt "InterfaceSection"
+msgid "Augmenter"
+msgstr "Augmenter"
+
+msgctxt "InterfaceSection"
+msgid "Diminuer"
+msgstr "Diminuer"
+
+msgctxt "SettingsOptions"
+msgid "Choisir une option"
+msgstr "Choisir une option"
+
+msgctxt "SettingsOptions"
+msgid "Option sélectionnée indisponible"
+msgstr "Option sélectionnée indisponible"
+
+msgctxt "SettingsOptions"
+msgid "Édition du texte"
+msgstr "Édition du texte"
+
+msgctxt "SettingsOptions"
+msgid "Annuler"
+msgstr "Annuler"
+
+msgctxt "SettingsOptions"
+msgid "Rétablir"
+msgstr "Rétablir"
+
+msgctxt "SettingsOptions"
+msgid "Couper"
+msgstr "Couper"
+
+msgctxt "SettingsOptions"
+msgid "Copier"
+msgstr "Copier"
+
+msgctxt "SettingsOptions"
+msgid "Coller"
+msgstr "Coller"
+
+msgctxt "SettingsOptions"
+msgid "Tout sélectionner"
+msgstr "Tout sélectionner"
+
+msgctxt "SettingsOptions"
+msgid "Saisissez une valeur correspondant au pas indiqué."
+msgstr "Saisissez une valeur correspondant au pas indiqué."
+
+msgctxt "SettingsOptions"
+msgid "Saisissez une valeur valide."
+msgstr "Saisissez une valeur valide."
+
+msgctxt "SettingsOptions"
+msgid "La valeur minimale est {}."
+msgstr "La valeur minimale est {}."
+
+msgctxt "SettingsOptions"
+msgid "La valeur maximale est {}."
+msgstr "La valeur maximale est {}."
+
+msgctxt "PickerLabels"
+msgid "{} (par défaut)"
+msgstr "{} (par défaut)"
+
+msgctxt "IdleView"
+msgid "Notifications de capture"
+msgstr "Notifications de capture"
+
+msgctxt "SettingsOptions"
+msgid "Sélection"
+msgstr "Sélection"
+
+msgctxt "SettingsOptions"
+msgid "Effacer le texte"
+msgstr "Effacer le texte"
+
+msgctxt "SettingsOptions"
+msgid "Effacer la recherche"
+msgstr "Effacer la recherche"
+
+msgctxt "SettingsOptions"
+msgid "Effacer la sélection"
+msgstr "Effacer la sélection"
+
+msgctxt "SettingsOptions"
+msgid "Rechercher dans les options"
+msgstr "Rechercher dans les options"
+
+msgctxt "SettingsOptions"
+msgid "Aucune option correspondante"
+msgstr "Aucune option correspondante"
+
+msgctxt "SettingsOptions"
+msgid "Fermer {}"
+msgstr "Fermer {}"
+
+msgctxt "IntelligenceSection"
+msgid "Apple Intelligence n'est pas disponible sur cet appareil."
+msgstr "Apple Intelligence n'est pas disponible sur cet appareil."
+
+msgctxt "IntelligenceSection"
+msgid "Aucun modèle Ollama compatible n'est installé."
+msgstr "Aucun modèle Ollama compatible n'est installé."

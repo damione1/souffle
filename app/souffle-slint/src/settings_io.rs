@@ -962,7 +962,7 @@ mod tests {
     fn test_window() -> MainWindow {
         let _ = slint::platform::set_platform(Box::new(TestPlatform));
         TEST_ADAPTER.with(|adapter| adapter.set_size(PhysicalSize::new(1_024, 800)));
-        MainWindow::new().unwrap()
+        crate::settings_kit::new_window().unwrap()
     }
 
     fn render_test_window() {

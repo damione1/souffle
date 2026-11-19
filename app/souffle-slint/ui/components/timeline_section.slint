@@ -1,8 +1,10 @@
-import { TimelineEntry, TimelineItemRow } from "timeline_item.slint";
-import { EmptyState } from "empty_state.slint";
+import { ButtonIntent, ControlSize, KitBadge, KitEmptyState, KitIcon, KitIconButton, KitPressable, Tone } from "@kit";
+import { LucideAccount } from "@kit-icons/account.slint";
+import { LucideTime } from "@kit-icons/time.slint";
+import { LucideArrows } from "@kit-icons/arrows.slint";
+import { HistoryEntry, TimelineItemRow } from "timeline_item.slint";
 import { TimelineKind, TimelineDay, UpcomingPhase, AccessState } from "../types.slint";
 import { Theme } from "../theme.slint";
-import { LucideIcon, IconSet } from "lucide_icon.slint";
 
 export struct TimelineDayGroup {
     day: TimelineDay,
@@ -10,7 +12,7 @@ export struct TimelineDayGroup {
     weekday: int,
     day-of-month: int,
     month: int,
-    entries: [TimelineEntry],
+    entries: [HistoryEntry],
 }
 
 // One of today's calendar events. `phase` is computed in Rust so this
@@ -117,10 +119,10 @@ export component TimelineSection inherits VerticalLayout {
                         padding-bottom: 12px;
                         spacing: 12px;
 
-                        LucideIcon {
-                            icon: IconSet.CalendarClock;
-                            icon-color: Theme.secondary;
-                            size: 16px;
+                        KitIcon {
+                            glyph: LucideTime.calendar-clock();
+                            ink: Theme.secondary;
+                            width: 16px; height: 16px;
                             y: (parent.height - self.height) / 2;
                         }
 
@@ -133,22 +135,9 @@ export component TimelineSection inherits VerticalLayout {
                             vertical-alignment: center;
                         }
 
-                        if event.phase == UpcomingPhase.now: Rectangle {
-                            height: 18px;
-                            width: now-label.width + 16px;
-                            horizontal-stretch: 0;
-                            background: Theme.text-primary;
-                            y: (parent.height - self.height) / 2;
-                            now-label := Text {
-                                x: 8px;
-                                height: 100%;
-                                text: @tr("EN COURS");
-                                font-family: "Archivo SemiBold";
-                                font-size: 10.5px;
-                                letter-spacing: 0.6px;
-                                color: Theme.canvas;
-                                vertical-alignment: center;
-                            }
+                        if event.phase == UpcomingPhase.now: KitBadge {
+                            text: @tr("EN COURS");
+                            tone: Tone.accent;
                         }
                         if event.phase == UpcomingPhase.next: Rectangle {
                             height: 18px;
@@ -174,10 +163,10 @@ export component TimelineSection inherits VerticalLayout {
                             alignment: center;
                             horizontal-stretch: 0;
 
-                            LucideIcon {
-                                icon: IconSet.Users;
-                                icon-color: Theme.text-muted;
-                                size: 13px;
+                            KitIcon {
+                                glyph: LucideAccount.users();
+                                ink: Theme.text-muted;
+                                width: 13px; height: 13px;
                                 y: (parent.height - self.height) / 2;
                             }
                             Text {
@@ -207,24 +196,12 @@ export component TimelineSection inherits VerticalLayout {
                                 width: Theme.row-action-width;
                                 height: 22px;
 
-                                if event.phase == UpcomingPhase.now || event.phase == UpcomingPhase.next || event.phase == UpcomingPhase.later: play-area := TouchArea {
-                                    width: Theme.row-action-width;
-                                    height: 22px;
-                                    enabled: root.can-start-event;
-                                    accessible-role: button;
-                                    accessible-label: @tr("Démarrer la transcription");
-                                    accessible-action-default => { root.event-start-requested(event.id); }
-                                    clicked => { root.event-start-requested(event.id); }
-
-                                    LucideIcon {
-                                        icon: IconSet.Play;
-                                        icon-color: play-area.has-hover ? Theme.accent : Theme.text-muted;
-                                        filled: true;
-                                        size: 13px;
-                                        x: (parent.width - self.width) / 2;
-                                        y: (parent.height - self.height) / 2;
-                                        opacity: root.can-start-event ? 1.0 : 0.5;
-                                    }
+                                if event.phase == UpcomingPhase.now || event.phase == UpcomingPhase.next || event.phase == UpcomingPhase.later: play-area := KitIconButton {
+                                    accessible-name: @tr("Démarrer la transcription");
+                                    control-size: ControlSize.compact;
+                                    disabled: !root.can-start-event;
+                                    glyph: LucideArrows.play();
+                                    activated => { root.event-start-requested(event.id); }
                                 }
                             }
                         }
@@ -235,15 +212,20 @@ export component TimelineSection inherits VerticalLayout {
     }
 
     if root.show-calendar-setup: Rectangle {
-        background: setup-area.has-hover ? Theme.surface-2 : transparent;
+        width: root.width;
+        height: setup-content.preferred-height;
 
-        setup-area := TouchArea {
-            accessible-role: button;
-            accessible-label: @tr("Configurer le calendrier");
-            accessible-action-default => { root.calendar-setup-requested(); }
-            clicked => { root.calendar-setup-requested(); }
 
-            VerticalLayout {
+        setup-area := KitPressable {
+            width: root.width;
+            height: setup-content.preferred-height;
+            intent: ButtonIntent.quiet;
+            padding-inline: 0px;
+            padding-block: 0px;
+            accessible-name: @tr("Configurer le calendrier");
+            activated => { root.calendar-setup-requested(); }
+
+            setup-content := VerticalLayout {
                 alignment: start;
 
                 Rectangle {
@@ -256,10 +238,10 @@ export component TimelineSection inherits VerticalLayout {
                     padding-bottom: 12px;
                     spacing: 12px;
 
-                    LucideIcon {
-                        icon: IconSet.CalendarPlus;
-                        icon-color: Theme.secondary;
-                        size: 16px;
+                    KitIcon {
+                        glyph: LucideTime.calendar-plus();
+                        ink: Theme.secondary;
+                        width: 16px; height: 16px;
                         y: (parent.height - self.height) / 2;
                     }
 
@@ -294,15 +276,18 @@ export component TimelineSection inherits VerticalLayout {
         }
     }
 
-    if root.is-empty: EmptyState {
+    if root.is-empty: KitEmptyState {
+        width: root.width;
         title: @tr("Rien ici pour l'instant");
-        message: @tr("Vos dictées et meetings apparaîtront ici, du plus récent au plus ancien.");
+        description: @tr("Vos dictées et meetings apparaîtront ici, du plus récent au plus ancien.");
     }
-    if !root.is-empty && !root.has-matches: EmptyState {
+    if !root.is-empty && !root.has-matches: KitEmptyState {
+        width: root.width;
         title: @tr("Aucun résultat");
-        message: @tr("Essayez d'autres mots-clés — la recherche couvre toutes les transcriptions.");
+        description: @tr("Essayez d'autres mots-clés — la recherche couvre toutes les transcriptions.");
     }
     if !root.is-empty && root.has-matches: VerticalLayout {
+        width: root.width;
         alignment: start;
         spacing: 26px;
 
@@ -321,6 +306,7 @@ export component TimelineSection inherits VerticalLayout {
             VerticalLayout {
                 alignment: start;
                 for entry in group.entries: TimelineItemRow {
+                    width: root.width;
                     entry: entry;
                     is-live: entry.kind == TimelineKind.meeting && entry.id == root.live-meeting-id;
                     expanded: entry.kind == TimelineKind.dictation && entry.id == root.expanded-dictation-id;

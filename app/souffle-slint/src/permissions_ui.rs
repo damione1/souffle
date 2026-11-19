@@ -82,11 +82,11 @@ impl PermissionViewState {
 /// System Settings while this window stays visible but unfocused, and the
 /// row must update within one poll.
 fn poll_surface_active(
-    settings_open: bool,
+    permission_dialog_open: bool,
     onboarding_on_permissions: bool,
     window_visible: bool,
 ) -> bool {
-    (settings_open || onboarding_on_permissions) && window_visible
+    (permission_dialog_open || onboarding_on_permissions) && window_visible
 }
 
 pub(crate) struct PermissionController {
@@ -144,7 +144,7 @@ impl PermissionController {
     fn surface_active(&self) -> bool {
         self.window.upgrade().is_some_and(|window| {
             poll_surface_active(
-                window.get_settings_open(),
+                window.get_settings_permissions_dialog_open(),
                 window.get_onboarding_open()
                     && window.get_onboarding_step() == crate::OnboardingStep::Permissions,
                 self.window_visible.get(),
@@ -351,6 +351,31 @@ mod tests {
             accessibility: state,
             calendar: state,
         }
+    }
+
+    #[test]
+    fn settings_permission_timer_follows_the_actual_dialog() {
+        i_slint_backend_testing::init_no_event_loop();
+        let window = crate::settings_kit::new_window().unwrap();
+        let visible = Rc::new(Cell::new(true));
+        let controller = PermissionController::new(&window, visible.clone());
+        // A pending read keeps this test independent of macOS permission state.
+        controller.refresh_in_flight.set(true);
+        window.set_settings_open(true);
+        controller.sync_activity();
+        assert!(controller.poll_timer.borrow().is_none());
+        window.set_settings_permissions_dialog_open(true);
+        controller.sync_activity();
+        assert!(controller.poll_timer.borrow().as_ref().unwrap().running());
+        visible.set(false);
+        controller.sync_activity();
+        assert!(controller.poll_timer.borrow().is_none());
+        visible.set(true);
+        controller.sync_activity();
+        assert!(controller.poll_timer.borrow().as_ref().unwrap().running());
+        window.set_settings_permissions_dialog_open(false);
+        controller.sync_activity();
+        assert!(controller.poll_timer.borrow().is_none());
     }
 
     #[test]

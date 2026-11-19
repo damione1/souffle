@@ -18,6 +18,8 @@
 //! `MOCK_HEIGHT` the window's logical size.
 
 slint::include_modules!();
+#[path = "../src/settings_kit.rs"]
+mod settings_kit;
 
 // The app is a binary crate, so the modules the live path needs are pulled
 // in by path. Only a fraction of timeline/transcript is used here.
@@ -102,7 +104,7 @@ fn main() {
         .select()
         .expect("failed to select the skia renderer");
 
-    let window = MainWindow::new().expect("failed to create the mock window");
+    let window = crate::settings_kit::new_window().expect("failed to create the mock window");
     window
         .window()
         .set_size(slint::LogicalSize::new(width, height));

@@ -1,5 +1,3 @@
-use std::{collections::HashMap, path::PathBuf};
-
 fn main() {
     let sha = std::process::Command::new("git")
         .args(["rev-parse", "HEAD"])
@@ -25,14 +23,13 @@ fn main() {
         println!("cargo:rustc-link-arg=-Wl,-rpath,/usr/lib/swift");
     }
 
-    let library = HashMap::from([("lucide".to_string(), PathBuf::from(lucide_slint::lib()))]);
     // Element ids are only kept with debug info; the layout tests in
     // `live_view.rs` look elements up by id (SOU-256). Debug builds only, so
     // release binaries stay exactly as before.
     let debug_build = std::env::var("PROFILE").as_deref() == Ok("debug");
-    let config = slint_build::CompilerConfiguration::new()
+    let config = slint_kit_build::config()
         .with_bundled_translations("lang")
-        .with_library_paths(library)
         .with_debug_info(debug_build);
-    slint_build::compile_with_config("ui/main_window.slint", config).expect("Slint build failed");
+    slint_kit_build::compile_with_config("ui/main_window.slint", config)
+        .expect("Slint build failed");
 }

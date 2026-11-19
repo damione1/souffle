@@ -1,5 +1,5 @@
 import { Theme } from "../../theme.slint";
-import { ThemedButton } from "../themed_button.slint";
+import { KitBadge, KitButton, Tone } from "@kit";
 import { AccessState, PermissionKind } from "../../types.slint";
 
 // Port of PermissionsStep.svelte. Each row's status comes from a real,
@@ -13,6 +13,7 @@ export struct PermissionRow {
 }
 
 export component PermissionsStep inherits VerticalLayout {
+    in property <int> modal-layer;
 
     pure function row-label(kind: PermissionKind) -> string {
         if kind == PermissionKind.microphone { return @tr("Microphone"); }
@@ -86,44 +87,15 @@ export component PermissionsStep inherits VerticalLayout {
                 }
             }
 
-            if row.state == AccessState.granted: Rectangle {
-                width: granted-label.preferred-width + 30px;
-                height: 28px;
-                horizontal-stretch: 0;
-                vertical-stretch: 0;
-                background: Theme.surface-2;
-                border-width: 1px;
-                border-color: Theme.border-soft;
-                border-radius: 4px;
-
-                Rectangle {
-                    x: 9px;
-                    y: (parent.height - self.height) / 2;
-                    width: 7px;
-                    height: 7px;
-                    border-radius: 4px;
-                    background: Theme.success;
-                }
-                granted-label := Text {
-                    x: 22px;
-                    height: parent.height;
-                    text: @tr("Accordé");
-                    color: Theme.text-secondary;
-                    font-family: "Archivo Medium";
-                    font-size: 11px;
-                    vertical-alignment: center;
-                }
+            if row.state == AccessState.granted: KitBadge {
+                text: @tr("Accordé");
+                tone: Tone.success;
             }
-            if row.state == AccessState.unsupported: Text {
-                text: @tr("Non pris en charge");
-                color: Theme.text-faint;
-                font-size: 11px;
-                vertical-alignment: center;
-            }
-            if row.state != AccessState.granted && row.state != AccessState.unsupported: ThemedButton {
+            if row.state != AccessState.granted && row.state != AccessState.unsupported: KitButton {
+                modal-layer: root.modal-layer;
                 text: row.busy ? @tr("Vérification…") : row-action-label(row.kind);
-                enabled: !row.busy;
-                clicked => { root.grant-requested(row.kind); }
+                disabled: row.busy;
+                activated => { root.grant-requested(row.kind); }
             }
         }
 
@@ -138,9 +110,10 @@ export component PermissionsStep inherits VerticalLayout {
                 wrap: word-wrap;
                 horizontal-stretch: 1;
             }
-            if row-hint-action-label(row.kind, row.state) != "": ThemedButton {
+            if row-hint-action-label(row.kind, row.state) != "": KitButton {
+                modal-layer: root.modal-layer;
                 text: row-hint-action-label(row.kind, row.state);
-                clicked => { root.hint-action-requested(row.kind); }
+                activated => { root.hint-action-requested(row.kind); }
             }
         }
     }
@@ -164,15 +137,17 @@ export component PermissionsStep inherits VerticalLayout {
             wrap: word-wrap;
             horizontal-stretch: 1;
         }
-        ThemedButton {
+        KitButton {
+            modal-layer: root.modal-layer;
             text: root.repair-busy ? @tr("Vérification…") : @tr("Réparer");
-            enabled: !root.repair-busy && !root.repair-cooldown;
-            clicked => { root.repair-requested(); }
+            disabled: root.repair-busy || root.repair-cooldown;
+            activated => { root.repair-requested(); }
         }
     }
 
     if root.error-message != "": Text {
         text: root.error-message;
+        wrap: word-wrap;
         color: Theme.danger;
         font-size: 11px;
     }

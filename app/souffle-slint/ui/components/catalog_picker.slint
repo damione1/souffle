@@ -1,0 +1,49 @@
+import { ControlSize, KitSelect, OptionRow, SelectionRef, FieldAccess, Ownership } from "@kit";
+import { SettingsOptionList } from "settings/settings_options.slint";
+import { Theme } from "../theme.slint";
+
+// Each option carries its catalogue snapshot identity. The callback only
+// resolves a row in that snapshot, even when devices refresh with a popup open.
+export global CatalogChoices {
+    pure callback snapshot([string], [string], string, int) -> SettingsOptionList;
+    pure callback index-of([OptionRow], OptionRow) -> int;
+}
+
+export component CatalogPicker inherits KitSelect {
+    in property <[string]> model;
+    in property <[string]> option-values: root.model;
+    in property <string> current-value;
+    in property <int> default-device-index: -1;
+    in property <bool> enabled: true;
+    in property <length> combo-width: Theme.settings-control-width;
+    in property <string> control-label: @tr("SettingsPicker" => "Sélection");
+    private property <SettingsOptionList> catalogue: CatalogChoices.snapshot(root.model, root.option-values, root.current-value, root.default-device-index);
+    in property <SelectionRef> selection: root.catalogue.selected;
+    public pure function selection-at(index: int) -> SelectionRef {
+        if index >= 0 && index < root.options.length {
+            return { present: true, token: root.options[index].token };
+        }
+        return { present: false, token: 0 };
+    }
+    callback value-chosen(string);
+    callback selected-index(int);
+
+    width: root.combo-width;
+    height: Theme.settings-control-height;
+    horizontal-stretch: 0;
+    vertical-stretch: 0;
+    control-size: ControlSize.compact;
+    ownership: Ownership.controlled;
+    label: root.control-label;
+    options: root.catalogue.rows;
+    selected: root.selection;
+    access: root.enabled ? FieldAccess.editable : FieldAccess.disabled;
+    empty-label: @tr("SettingsPicker" => "Aucune option");
+    chosen(row) => {
+        let index = CatalogChoices.index-of(self.options, row);
+        if index >= 0 && index < root.option-values.length {
+            root.value-chosen(root.option-values[index]);
+            root.selected-index(index);
+        }
+    }
+}

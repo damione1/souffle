@@ -6,6 +6,14 @@ Read this before adding a `.slint` file, a Slint enum, a house widget, or a `Vec
 
 Type-design rules (enums, traits, abstractions) are adapted from Microsoft's [Framework Design Guidelines](https://learn.microsoft.com/en-us/dotnet/standard/design-guidelines/type) and checked against the [Rust API Guidelines](https://rust-lang.github.io/api-guidelines/). The CLR words are class, struct, interface. Here they are enum, struct, trait, Slint `export enum`. The obsession is the same: the type is the contract. FDG is not a line-by-line port; the deltas below are the parts that would go wrong if you copied C# into Rust.
 
+The native UI uses Slint Kit 0.9.0 with Slint 1.19. Import its public controls from `@kit`.
+The runtime and build helper in `app/souffle-slint/Cargo.toml` share the exact
+Git revision of Free develop recorded in Cargo.lock. Construct the window through
+`settings_kit::new_window` to install its selection, validation and field services.
+The kit follows Soufflé's resolved theme through `ui/theme.slint`. Closed settings
+pickers enumerate the variants in `ui/types.slint`; catalogue pickers receive
+their rows from Rust.
+
 ## 1. Contracts: one declaration, exhaustive at every site
 
 The same rule as the rest of the repo, applied to Slint instead of TypeScript.
@@ -107,7 +115,7 @@ A single declaration is necessary and not sufficient. `tab == SettingsTab.ai ? "
 **Slint**
 
 - Branch on the enum (`root.tab == SettingsTab.interface`), never on a parallel string.
-- A component-local enum is fine when the set never crosses into Rust (`ThemedButtonKind`). The moment Rust has to know, it moves to `types.slint`.
+- A component-local enum is fine when the set never crosses into Rust. The moment Rust has to know, it moves to `types.slint`.
 - Slint has no `match` exhaustiveness check. Compensate: keep the enum in `types.slint`, convert exhaustively in Rust, and when a `.slint` file lists every variant (tab bar chips, onboarding phases), adding a variant is a review reject until every site is updated.
 
 **Retired TypeScript (`src/`, until SOU-192 AC8)**
@@ -140,8 +148,8 @@ Same rule, different artefact: `#[derive(specta::Type)]` on the Rust enum, gener
 | Bounds from the backend, not the UI | `SettingsOptions::current()` in `settings_ui.rs` |
 | Theme as a reactive global | `ui/theme.slint` |
 | Tab keep-alive (no remount) | `ui/components/settings/settings_tabs.slint` (`SettingsTabPage`) |
-| House widget, not Fluent | `ui/components/themed_button.slint` |
-| Modal dialog chrome (scrim, panel, Escape, click-outside) | `ui/components/modal_dialog.slint`, inherited by `whats_new_dialog.slint` / `update_available_dialog.slint` / `settings_permissions_dialog.slint` |
+| Shared controls | `KitButton` from `@kit` and `ui/components/catalog_picker.slint` |
+| Modal dialog chrome (scrim, panel, Escape, click-outside) | `KitDialog` from `@kit` in `whats_new_dialog.slint` / `update_available_dialog.slint` / `settings_permissions_dialog.slint` |
 | `Option<Enum>` across the boundary | `update_ui::project_install_block` (a `bool` + enum pair, written by one Rust site) |
 | Metal renderer pin | `souffle-slint/Cargo.toml` (`renderer-skia`) + `main.rs` (`renderer_name("skia")`) |
 
@@ -160,9 +168,9 @@ app/souffle-slint/
     └── assets/              fonts, images
 ```
 
-- One concern per file. A settings section is a component. A reusable control (`ThemedSwitch`, `SettingsField`) is a component. The Window is an assembler, not a dumping ground.
+- One concern per file. A settings section is a component. Use `KitFieldRow` and `KitFieldSet.legend` directly. `CatalogPicker` adapts Rust catalogue identities to `KitSelect`. The Window is an assembler, not a dumping ground.
 - Import what you use. Do not re-export types from random files; `types.slint` and `theme.slint` are the two globals every file may import.
-- `std-widgets.slint` Fluent skins ignore `Theme`. For anything the user sees as chrome (buttons, tabs, switches, combos, fields), use the house widgets under `ui/components/`. Stock `TextEdit` / `ListView` / `ScrollView` stay acceptable when they are not the visual identity.
+- `std-widgets.slint` Fluent skins ignore `Theme`. For anything the user sees as chrome (buttons, tabs, switches, combos, fields), use the published controls from `@kit` and the app-specific compositions under `ui/components/`. Stock `TextEdit` / `ListView` / `ScrollView` stay acceptable when they are not the visual identity.
 
 ## 3. Component API: DRY and typed
 
@@ -232,13 +240,16 @@ Settings tabs used to be `if root.tab == SettingsTab.xxx`. Each click rebuilt hu
 The keep-alive pattern:
 
 ```
-SettingsTabPage {
+interface-page := SettingsTabPage {
     active: root.tab == SettingsTab.interface;
-    InterfaceSection { /* ... */ }
+    if interface-page.mounted: InterfaceSection { /* ... */ }
 }
 ```
 
-`SettingsTabPage` sets `visible` and collapses `height` to `0px` when inactive. `visible: false` **still occupies layout space**, so height has to go to zero. `clip: true` stops the collapsed children from painting.
+The settings view overlays the six pages in one rectangle. Each page owns a
+`KitScrollArea` and sets `visible` from `active`. Its `mounted` flag stays true after
+the first visit, so later switches keep the editor and scroll state. In a
+sequential layout, also collapse inactive pages to zero height to avoid gaps.
 
 Rule of thumb:
 

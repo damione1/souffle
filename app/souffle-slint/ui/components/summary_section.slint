@@ -1,6 +1,9 @@
+import { ButtonIntent, ControlSize, KitButton, KitIcon, KitProgress, ProgressMode } from "@kit";
+import { LucideCursors } from "@kit-icons/cursors.slint";
+import { LucideText } from "@kit-icons/text.slint";
+import { LucideNotifications } from "@kit-icons/notifications.slint";
 import { Theme } from "../theme.slint";
-import { ThemedComboBox } from "themed_combo.slint";
-import { LucideIcon, IconSet } from "lucide_icon.slint";
+import { CatalogPicker } from "catalog_picker.slint";
 
 // Port of MeetingSummarySection.svelte + MeetingStructuredSummarySection.svelte
 // (SOU-187 milestone 9, SOU-221/SOU-233): display, model picker and
@@ -19,11 +22,6 @@ export component SummarySection inherits VerticalLayout {
     in property <[string]> available-models;
     in property <[string]> available-model-ids;
     in-out property <string> selected-model-id;
-    // Display label for `selected-model-id`. Rust seeds this alongside the
-    // id when it picks the default model; the picker below keeps it in sync
-    // on user selection via `selected-index` (id and label can differ, e.g.
-    // "apple-intelligence" vs "Apple Intelligence").
-    in-out property <string> selected-model-label;
 
     in property <[string]> key-points;
     in property <[string]> decisions;
@@ -75,12 +73,12 @@ export component SummarySection inherits VerticalLayout {
                 height: 34px;
                 horizontal-stretch: 0;
 
-                LucideIcon {
-                    size: 20px;
+                KitIcon {
+                    width: 20px; height: 20px;
                     x: (parent.width - self.width) / 2;
                     y: (parent.height - self.height) / 2;
-                    icon: IconSet.WandSparkles;
-                    icon-color: Theme.accent;
+                    glyph: LucideCursors.wand-sparkles();
+                    ink: Theme.accent;
                 }
             }
 
@@ -121,57 +119,20 @@ export component SummarySection inherits VerticalLayout {
             alignment: start;
             spacing: 8px;
 
-            ThemedComboBox {
+            CatalogPicker {
                 model: root.available-models;
                 option-values: root.available-model-ids;
-                current-value: root.selected-model-label;
+                current-value: root.selected-model-id;
                 combo-width: 250px;
-                selected(id) => { root.selected-model-id = id; }
-                selected-index(idx) => {
-                    root.selected-model-label = (idx >= 0 && idx < root.available-models.length)
-                        ? root.available-models[idx]
-                        : root.selected-model-id;
-                }
+                value-chosen(id) => { root.selected-model-id = id; }
             }
 
-            gen-btn := Rectangle {
-                width: gen-txt.preferred-width + 24px;
-                height: Theme.settings-control-height;
-                border-radius: 4px;
-                border-width: gen-focus.has-focus ? 2px : 0px;
-                border-color: Theme.text-primary;
-                background: gen-area.pressed ? Theme.accent.darker(0.2) : gen-area.has-hover ? Theme.accent.darker(0.1) : Theme.accent;
-
-                accessible-role: button;
-                accessible-label: @tr("Générer le résumé");
-                accessible-action-default => { root.generate-requested(); }
-
-                forward-focus: gen-focus;
-                gen-focus := FocusScope {
-                    key-pressed(event) => {
-                        if event.text == Key.Return || event.text == Key.Space {
-                            root.generate-requested();
-                            return accept;
-                        }
-                        return reject;
-                    }
-                }
-
-                gen-area := TouchArea {
-                    clicked => {
-                        gen-focus.focus();
-                        root.generate-requested();
-                    }
-                }
-
-                gen-txt := Text {
-                    text: @tr("Générer");
-                    font-family: "Archivo SemiBold";
-                    font-size: 13px;
-                    color: Theme.text-primary;
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
-                }
+            gen-btn := KitButton {
+                accessible-name: @tr("Générer le résumé");
+                text: @tr("Générer");
+                control-size: ControlSize.compact;
+                intent: ButtonIntent.primary;
+                activated => { root.generate-requested(); }
             }
         }
         }
@@ -189,12 +150,12 @@ export component SummarySection inherits VerticalLayout {
                 width: 15px;
                 horizontal-stretch: 0;
 
-                LucideIcon {
-                    size: 15px;
+                KitIcon {
+                    width: 15px; height: 15px;
                     y: (parent.height - self.height) / 2;
-                    icon: IconSet.Sparkles;
-                    icon-color: Theme.accent;
-                    filled: true;
+                    glyph: {stroke: LucideCursors.sparkles().stroke, fill: LucideCursors.sparkles().stroke, viewbox: LucideCursors.sparkles().viewbox};
+                    ink: Theme.accent;
+
                 }
             }
 
@@ -207,33 +168,16 @@ export component SummarySection inherits VerticalLayout {
             }
         }
 
-        Rectangle {
-            min-height: 80px;
-            border-width: 1px;
-            border-color: Theme.surface-4;
-
-            VerticalLayout {
-                padding: 12px;
-
-                Text {
-                    text: root.generation-progress != "" ? root.generation-progress : @tr("Génération en cours...");
-                    color: Theme.text-muted;
-                    font-size: 12.5px;
-                    wrap: word-wrap;
-                }
-            }
+        KitProgress {
+            mode: ProgressMode.indeterminate;
+            label: root.generation-progress != "" ? root.generation-progress : @tr("Génération en cours...");
         }
     }
 
     if root.summary != "" && !root.is-generating: VerticalLayout {
         spacing: 10px;
 
-        // Title row as in MeetingSummarySection.svelte: icon + title on the
-        // left, the model that produced it on the right. The picker and
-        // "Régénérer" live in their own row at the bottom (below), where a
-        // 36px combo no longer towers over a 24px button in the title line.
         HorizontalLayout {
-            height: 22px;
             vertical-stretch: 0;
             spacing: 8px;
 
@@ -241,12 +185,12 @@ export component SummarySection inherits VerticalLayout {
                 width: 15px;
                 horizontal-stretch: 0;
 
-                LucideIcon {
-                    size: 15px;
+                KitIcon {
+                    width: 15px; height: 15px;
                     y: (parent.height - self.height) / 2;
-                    icon: IconSet.Sparkles;
-                    icon-color: Theme.accent;
-                    filled: true;
+                    glyph: {stroke: LucideCursors.sparkles().stroke, fill: LucideCursors.sparkles().stroke, viewbox: LucideCursors.sparkles().viewbox};
+                    ink: Theme.accent;
+
                 }
             }
 
@@ -270,62 +214,13 @@ export component SummarySection inherits VerticalLayout {
 
             // MeetingSummarySection.svelte's CopyButton next to the model
             // badge: copies the summary text as stored (`meeting.summary`).
-            copy-btn := Rectangle {
-                width: copy-content.preferred-width + 16px;
-                height: 22px;
-                horizontal-stretch: 0;
-                border-radius: 4px;
-                border-width: copy-focus.has-focus ? 2px : 0px;
-                border-color: Theme.accent;
-                background: copy-area.pressed ? Theme.surface-4 : copy-area.has-hover ? Theme.surface-3 : transparent;
-
-                accessible-role: button;
-                accessible-label: @tr("Copier le résumé");
-                accessible-action-default => { root.copy-summary(); }
-
-                forward-focus: copy-focus;
-                copy-focus := FocusScope {
-                    key-pressed(event) => {
-                        if event.text == Key.Return || event.text == Key.Space {
-                            root.copy-summary();
-                            return accept;
-                        }
-                        return reject;
-                    }
-                }
-
-                copy-area := TouchArea {
-                    mouse-cursor: pointer;
-                    clicked => {
-                        copy-focus.focus();
-                        root.copy-summary();
-                    }
-                }
-
-                copy-content := HorizontalLayout {
-                    padding-left: 8px;
-                    padding-right: 8px;
-                    spacing: 5px;
-                    alignment: center;
-
-                    Rectangle {
-                        width: 13px;
-                        horizontal-stretch: 0;
-
-                        LucideIcon {
-                            size: 13px;
-                            y: (parent.height - self.height) / 2;
-                            icon: root.just-copied ? IconSet.Check : IconSet.Copy;
-                            icon-color: root.just-copied ? Theme.accent : Theme.text-secondary;
-                        }
-                    }
-                    Text {
-                        text: root.just-copied ? @tr("Copié") : @tr("Copier");
-                        font-size: 11.5px;
-                        color: Theme.text-secondary;
-                        vertical-alignment: center;
-                    }
-                }
+            copy-btn := KitButton {
+                accessible-name: @tr("Copier le résumé");
+                text: root.just-copied ? @tr("Copié") : @tr("Copier");
+                control-size: ControlSize.compact;
+                intent: ButtonIntent.quiet;
+                leading-icon: root.just-copied ? LucideNotifications.check() : LucideText.copy();
+                activated => { root.copy-summary(); }
             }
         }
 
@@ -356,6 +251,7 @@ export component SummarySection inherits VerticalLayout {
                     width: 18px;
                 }
                 Text {
+                    color: Theme.text-primary;
                     text: point;
                     font-size: 12px;
                     wrap: word-wrap;
@@ -372,6 +268,7 @@ export component SummarySection inherits VerticalLayout {
                 padding: 12px;
 
                 Text {
+                    color: Theme.text-primary;
                     text: root.summary;
                     font-size: 12.5px;
                     wrap: word-wrap;
@@ -407,6 +304,7 @@ export component SummarySection inherits VerticalLayout {
             }
             for item in root.action-items: VerticalLayout {
                 Text {
+                    color: Theme.text-primary;
                     text: item.text;
                     font-size: 12px;
                     wrap: word-wrap;
@@ -441,58 +339,20 @@ export component SummarySection inherits VerticalLayout {
             alignment: start;
             spacing: 8px;
 
-            ThemedComboBox {
+            CatalogPicker {
                 model: root.available-models;
                 option-values: root.available-model-ids;
-                current-value: root.selected-model-label;
+                current-value: root.selected-model-id;
                 combo-width: 250px;
-                selected(id) => { root.selected-model-id = id; }
-                selected-index(idx) => {
-                    root.selected-model-label = (idx >= 0 && idx < root.available-models.length)
-                        ? root.available-models[idx]
-                        : root.selected-model-id;
-                }
+                value-chosen(id) => { root.selected-model-id = id; }
             }
 
-            Rectangle {
-                width: regen-txt.preferred-width + 24px;
-                height: Theme.settings-control-height;
-                horizontal-stretch: 0;
-                border-radius: 4px;
-                border-width: regen-focus.has-focus ? 2px : 1px;
-                border-color: regen-focus.has-focus ? Theme.accent : Theme.ghost-border;
-                background: regen-area.pressed ? Theme.surface-2 : regen-area.has-hover ? Theme.surface-4 : Theme.surface-3;
-
-                accessible-role: button;
-                accessible-label: @tr("Régénérer");
-                accessible-action-default => { root.generate-requested(); }
-
-                forward-focus: regen-focus;
-                regen-focus := FocusScope {
-                    key-pressed(event) => {
-                        if event.text == Key.Return || event.text == Key.Space {
-                            root.generate-requested();
-                            return accept;
-                        }
-                        return reject;
-                    }
-                }
-
-                regen-area := TouchArea {
-                    clicked => {
-                        regen-focus.focus();
-                        root.generate-requested();
-                    }
-                }
-
-                regen-txt := Text {
-                    text: @tr("Régénérer");
-                    font-family: "Archivo SemiBold";
-                    font-size: 13px;
-                    color: Theme.text-primary;
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
-                }
+            regen-btn := KitButton {
+                accessible-name: @tr("Régénérer");
+                text: @tr("Régénérer");
+                control-size: ControlSize.compact;
+                intent: ButtonIntent.secondary;
+                activated => { root.generate-requested(); }
             }
         }
     }

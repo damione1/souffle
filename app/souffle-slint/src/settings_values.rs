@@ -300,7 +300,7 @@ impl SettingsValueController {
         let dark = canonical_dark_after_save(settings.theme, previous_theme, applied_dark, || {
             settings_ui::resolve_dark(SettingsTheme::System)
         });
-        crate::select_app_locale(settings_ui::locale_to_slint(&settings.locale));
+        crate::select_app_locale(window, settings_ui::locale_to_slint(&settings.locale));
         self.project(window, settings);
         // NSAppearance is AppKit-owned and stays on Slint's UI thread. The
         // worker runs only database/ServiceManagement/engine effects.
@@ -319,6 +319,13 @@ impl SettingsValueController {
         window.set_settings_paste_delay_ms(settings.paste_delay_ms as i32);
         window.set_settings_feedback_sounds_volume(settings.feedback_sounds_volume as i32);
         window.set_settings_calendar_reminder_minutes(settings.calendar_reminder_minutes as i32);
+        window.set_settings_clamshell_device_id(
+            settings
+                .clamshell_audio_device
+                .as_deref()
+                .unwrap_or_default()
+                .into(),
+        );
         window.set_settings_clamshell_device_label(
             audio_ui::clamshell_device_label(
                 &self.devices.borrow(),
@@ -338,14 +345,7 @@ impl SettingsValueController {
         window.set_settings_meeting_audio_retention(settings_ui::audio_retention_to_slint(
             settings.meeting_audio_retention,
         ));
-        let summary = self.summary.borrow();
-        let models = summary
-            .as_ref()
-            .map(|status| status.models.as_slice())
-            .unwrap_or_default();
-        window.set_settings_selected_summary_model_label(
-            ia_ui::selected_summary_model_label(models, &settings.ollama_model).into(),
-        );
+        window.set_settings_selected_summary_model_id(settings.ollama_model.as_str().into());
         window.set_settings_unload_timeout_label(
             model_ui::unload_timeout_label(settings.model_unload_timeout_minutes).into(),
         );
@@ -382,8 +382,11 @@ pub(crate) fn wire(window: &MainWindow, controller: Rc<SettingsValueController>)
         c.apply(SettingsSaveLane::General, move |s| s.theme = theme);
     });
     let c = controller.clone();
+    let weak = window.as_weak();
     window.on_settings_locale_changed(move |value| {
-        crate::select_app_locale(value);
+        if let Some(window) = weak.upgrade() {
+            crate::select_app_locale(&window, value);
+        }
         c.apply(SettingsSaveLane::General, move |s| {
             s.locale = settings_ui::locale_from_slint(value).into()
         });
@@ -421,8 +424,10 @@ pub(crate) fn wire(window: &MainWindow, controller: Rc<SettingsValueController>)
         });
     });
     let c = controller.clone();
-    window.on_settings_clamshell_device_changed(move |label| {
-        let uid = audio_ui::resolve_device_uid(&c.devices.borrow(), &label);
+    window.on_settings_clamshell_device_changed(move |id| {
+        let Some(uid) = audio_ui::device_choice(&c.devices.borrow(), &id) else {
+            return;
+        };
         c.apply(SettingsSaveLane::General, move |s| {
             s.clamshell_audio_device = uid.clone()
         });
@@ -502,7 +507,7 @@ mod tests {
 
     fn test_window() -> MainWindow {
         let _ = slint::platform::set_platform(Box::new(TestPlatform));
-        MainWindow::new().unwrap()
+        crate::settings_kit::new_window().unwrap()
     }
 
     fn committed_result(result: Result<(), String>) -> Result<(), SettingsSaveError> {
@@ -1087,7 +1092,7 @@ mod tests {
         window.invoke_settings_paste_delay_changed(window.get_settings_paste_delay_ms() + 50);
         window.invoke_settings_feedback_sounds_volume_changed(16);
         window.invoke_settings_calendar_reminder_minutes_changed(5);
-        window.invoke_settings_clamshell_device_changed("Studio Mic".into());
+        window.invoke_settings_clamshell_device_changed("mic-1".into());
         window.invoke_settings_meeting_transcription_language_changed(crate::MeetingLanguage::En);
         window.invoke_settings_meeting_autostop_changed("5 min".into());
         window.invoke_settings_meeting_max_duration_changed("2 h".into());
@@ -1128,8 +1133,8 @@ mod tests {
             crate::AudioRetention::Keep7d
         );
         assert_eq!(
-            window.get_settings_selected_summary_model_label().as_str(),
-            "Model B"
+            window.get_settings_selected_summary_model_id().as_str(),
+            "model-b"
         );
         assert_eq!(window.get_settings_unload_timeout_label().as_str(), "5 min");
         assert!(window.get_settings_save_error().is_empty());
@@ -1202,8 +1207,20 @@ mod tests {
             ollama_model: "model-a".into(),
             ..AppSettings::default()
         };
-        let harness = DatabaseHarness::new(initial);
+        let harness = DatabaseHarness::new(initial.clone());
         harness.summary.borrow_mut().as_mut().unwrap().models[1].label = "Model A".into();
+        ia_ui::populate_intelligence(
+            &harness.window,
+            &initial,
+            harness.summary.borrow().as_ref().unwrap(),
+        );
+        assert_eq!(
+            harness
+                .window
+                .get_settings_selected_summary_model_id()
+                .as_str(),
+            "model-a"
+        );
 
         harness
             .window
@@ -1217,9 +1234,9 @@ mod tests {
         assert_eq!(
             harness
                 .window
-                .get_settings_selected_summary_model_label()
+                .get_settings_selected_summary_model_id()
                 .as_str(),
-            "Model A"
+            "model-b"
         );
     }
 

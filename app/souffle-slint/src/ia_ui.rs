@@ -38,9 +38,9 @@ pub fn is_builtin_summary_template(id: &str) -> bool {
 }
 
 /// Pushes the provider/model picker state from a real
-/// `check_summary_providers()` result. `effective`/`unusable` mirror
-/// `effectiveProvider`/`unusableKey` in the Svelte controller, simplified to
-/// one generic message per case instead of per-reason-code wording.
+/// `check_summary_providers()` result. The effective provider (Auto resolves
+/// to Apple Intelligence when available) decides `provider-unavailable`, a
+/// flag the UI turns into a localized message; Rust never emits that text.
 pub fn populate_intelligence(
     window: &MainWindow,
     settings: &AppSettings,
@@ -63,22 +63,14 @@ pub fn populate_intelligence(
         souffle_lib::summary::SummaryProviderChoice::Ollama => false,
         souffle_lib::summary::SummaryProviderChoice::Auto => status.apple_intelligence_available,
     };
-    let unusable = if effective_is_apple && !status.apple_intelligence_available {
-        "Apple Intelligence n'est pas disponible sur cet appareil."
-    } else if !effective_is_apple && ollama_models.is_empty() {
-        "Aucun modèle Ollama compatible n'est installé."
+    let unavailable = if effective_is_apple {
+        !status.apple_intelligence_available
     } else {
-        ""
+        ollama_models.is_empty()
     };
-    window.set_settings_summary_unusable_message(unusable.into());
+    window.set_settings_summary_provider_unavailable(unavailable);
 
-    let ollama_relevant = matches!(
-        settings.summary_provider,
-        souffle_lib::summary::SummaryProviderChoice::Ollama
-    ) || (matches!(
-        settings.summary_provider,
-        souffle_lib::summary::SummaryProviderChoice::Auto
-    ) && !status.apple_intelligence_available);
+    let ollama_relevant = !effective_is_apple;
     let model_ids: Vec<String> = ollama_models.iter().map(|model| model.id.clone()).collect();
     let model_labels: Vec<String> = ollama_models
         .iter()
@@ -87,9 +79,7 @@ pub fn populate_intelligence(
     window.set_settings_summary_model_picker_visible(ollama_relevant && !ollama_models.is_empty());
     window.set_settings_summary_model_ids(shared_string_vec(&model_ids));
     window.set_settings_summary_model_labels(shared_string_vec(&model_labels));
-    window.set_settings_selected_summary_model_label(
-        selected_summary_model_label(&status.models, &settings.ollama_model).into(),
-    );
+    window.set_settings_selected_summary_model_id(settings.ollama_model.as_str().into());
     window.set_settings_show_ollama_setup(
         ollama_relevant && status.ollama_available && ollama_models.is_empty(),
     );
@@ -128,15 +118,6 @@ pub fn apple_unavailable_reason_to_slint(
         }
         AppleIntelligenceUnavailableReason::Unknown => SlintAppleReason::Unknown,
     }
-}
-
-pub fn selected_summary_model_label(models: &[SummaryModelDescriptor], id: &str) -> String {
-    models
-        .iter()
-        .filter(|model| is_compatible_ollama_model(model))
-        .find(|model| model.id == id)
-        .map(|model| model.label.clone())
-        .unwrap_or_else(|| id.to_string())
 }
 
 pub fn contains_summary_model_id(models: &[SummaryModelDescriptor], id: &str) -> bool {
@@ -195,11 +176,8 @@ pub fn populate_dictation_polish(
         .iter()
         .find(|t| t.id == settings.dictation_polish_template_id)
         .or_else(|| settings.dictation_polish_templates.first());
-    window.set_settings_active_dictation_polish_label(
-        active
-            .map(dictation_polish_label)
-            .unwrap_or_default()
-            .into(),
+    window.set_settings_active_dictation_polish_id(
+        active.map(|t| t.id.as_str()).unwrap_or_default().into(),
     );
     window.set_settings_active_dictation_polish_prompt(
         active.map(|t| t.prompt.as_str()).unwrap_or("").into(),
@@ -228,13 +206,9 @@ pub fn populate_summary_templates(window: &MainWindow, settings: &AppSettings, e
     window.set_settings_summary_template_ids(shared_string_vec(&ids));
     window.set_settings_summary_template_labels(shared_string_vec(&labels));
 
-    let default_label = settings
-        .summary_templates
-        .iter()
-        .find(|t| t.id == settings.default_summary_template_id)
-        .map(summary_template_label)
-        .unwrap_or_default();
-    window.set_settings_default_summary_template_label(default_label.into());
+    window.set_settings_default_summary_template_id(
+        settings.default_summary_template_id.as_str().into(),
+    );
 
     let editing = settings
         .summary_templates
@@ -247,11 +221,8 @@ pub fn populate_summary_templates(window: &MainWindow, settings: &AppSettings, e
                 .find(|t| t.id == settings.default_summary_template_id)
         })
         .or_else(|| settings.summary_templates.first());
-    window.set_settings_editing_summary_template_label(
-        editing
-            .map(summary_template_label)
-            .unwrap_or_default()
-            .into(),
+    window.set_settings_editing_summary_template_id(
+        editing.map(|t| t.id.as_str()).unwrap_or_default().into(),
     );
     window.set_settings_editing_summary_template_is_builtin(
         editing

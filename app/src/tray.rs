@@ -279,8 +279,7 @@ pub fn setup_tray(state: &Arc<AppState>) -> Result<(), Box<dyn std::error::Error
     let tray = TrayIconBuilder::new()
         .with_menu(Box::new(menu))
         .with_tooltip("Soufflé")
-        .with_icon(idle_icon())
-        .with_icon_as_template(true)
+        .with_icon_templated(idle_icon())
         .build()?;
 
     TRAY.set(TrayHandles {
@@ -398,12 +397,11 @@ pub fn sync(state: &AppState, machine: &AppStateMachine) {
         let icon_result = if dictating || meeting {
             handles.tray.set_icon(Some(recording_icon()))
         } else {
-            handles.tray.set_icon(Some(idle_icon()))
+            handles.tray.set_icon_templated(Some(idle_icon()))
         };
         if let Err(e) = icon_result {
             warn!("Tray icon sync failed: {e}");
         }
-        handles.tray.set_icon_as_template(!(dictating || meeting));
 
         handles.dictation.set_text(label(
             if dictating {

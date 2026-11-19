@@ -1,10 +1,5 @@
-import { SettingsField } from "settings_field.slint";
-import { SettingsGroup } from "settings_group.slint";
+import { ChoiceLabelPosition, ButtonIntent, CheckState, ControlWidth, KitButton, KitCheckbox, KitNumberStepper, KitSwitch, Ownership, KitFieldSet, KitThemeContext, KitThemes, KitFieldRow, KitMetrics } from "@kit";
 import { Theme } from "../../theme.slint";
-import { ThemedSwitch } from "../themed_switch.slint";
-import { ThemedButton, ThemedButtonKind } from "../themed_button.slint";
-import { ThemedSpinBox } from "../themed_spin.slint";
-import { ThemedCheckbox } from "../themed_checkbox.slint";
 import { AccessState } from "../../types.slint";
 
 export struct CalendarRow {
@@ -34,16 +29,32 @@ export component CalendarSection inherits VerticalLayout {
     spacing: 22px;
     alignment: start;
 
-    SettingsGroup {
-        title: @tr("CALENDRIER");
+    KitFieldSet {
+        theme: KitThemeContext.current;
+        legend: @tr("CALENDRIER");
 
-        SettingsField {
+        KitFieldRow {
+            theme: KitThemeContext.current;
+            modal-layer: 0;
+            orientation: Theme.settings-field-orientation(self.width);
+            padding: KitMetrics.field-gap(self.theme);
+            focus-requested => { calendar-switch.take-focus(); }
+            private property <bool> control-focused: calendar-switch.has-focus;
+            changed control-focused => {
+                if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
+            }
             show-divider: false;
             label: @tr("Intégration du calendrier");
             description: @tr("Afficher les réunions du jour sur l'accueil et rappeler avant qu'elles commencent.");
 
-            ThemedSwitch {
-                control-label: @tr("Intégration du calendrier");
+            calendar-switch := KitSwitch {
+                theme: KitThemeContext.current;
+                modal-layer: 0;
+                label-position: ChoiceLabelPosition.start;
+                padding-inline: 0px;
+                ownership: Ownership.controlled;
+                control-width: ControlWidth.intrinsic;
+                accessible-label: @tr("Intégration du calendrier");
                 checked: root.enabled;
                 toggled(new) => { root.enabled-changed(new); }
             }
@@ -66,36 +77,67 @@ export component CalendarSection inherits VerticalLayout {
                     horizontal-stretch: 1;
                 }
 
-                ThemedButton {
+                KitButton {
                     text: @tr("Ouvrir les Réglages Système");
-                    kind: ThemedButtonKind.primary;
-                    clicked => { root.open-system-settings-requested(); }
+                    intent: ButtonIntent.primary;
+                    activated => { root.open-system-settings-requested(); }
                 }
             }
         }
 
-        if root.enabled && root.permission == AccessState.granted: SettingsField {
+        if root.enabled && root.permission == AccessState.granted: KitFieldRow {
+            theme: KitThemeContext.current;
+            modal-layer: 0;
+            orientation: Theme.settings-field-orientation(self.width);
+            padding: KitMetrics.field-gap(self.theme);
+            show-divider: true;
+            focus-requested => { reminder-switch.take-focus(); }
+            private property <bool> control-focused: reminder-switch.has-focus;
+            changed control-focused => {
+                if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
+            }
             label: @tr("Proposer au début de la réunion");
             description: @tr("Quand un événement commence et que l'audio système est actif, proposer de démarrer l'enregistrement.");
 
-            ThemedSwitch {
-                control-label: @tr("Proposer au début de la réunion");
+            reminder-switch := KitSwitch {
+                theme: KitThemeContext.current;
+                modal-layer: 0;
+                label-position: ChoiceLabelPosition.start;
+                padding-inline: 0px;
+                ownership: Ownership.controlled;
+                control-width: ControlWidth.intrinsic;
+                accessible-label: @tr("Proposer au début de la réunion");
                 checked: root.autostart-enabled;
                 toggled(new) => { root.autostart-enabled-changed(new); }
             }
         }
 
-        if root.enabled && root.permission == AccessState.granted: SettingsField {
+        if root.enabled && root.permission == AccessState.granted: KitFieldRow {
+            theme: KitThemeContext.current;
+            modal-layer: 0;
+            orientation: Theme.settings-field-orientation(self.width);
+            padding: KitMetrics.field-gap(self.theme);
+            show-divider: true;
+            focus-requested => { delay-stepper.take-focus(); }
+            private property <bool> control-focused: delay-stepper.has-focus;
+            changed control-focused => {
+                if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
+            }
             label: @tr("Délai du rappel");
             description: @tr("Minutes avant un événement pour proposer de démarrer une transcription.");
 
-            ThemedSpinBox {
-                control-label: @tr("Délai du rappel en minutes");
-                value: root.reminder-minutes;
-                minimum: root.reminder-minutes-min;
-                maximum: root.reminder-minutes-max;
+            delay-stepper := KitNumberStepper {
+                theme: KitThemeContext.current;
+                modal-layer: 0;
+                width: 140px;
+                increment-label: @tr("Augmenter");
+                decrement-label: @tr("Diminuer");
+                accessible-name: @tr("Délai du rappel en minutes");
+                text: root.reminder-minutes;
+                min: root.reminder-minutes-min;
+                max: root.reminder-minutes-max;
                 step: 1;
-                edited(value) => { root.reminder-minutes-changed(value); }
+                committed(result) => { root.reminder-minutes-changed(result.value.text.to-float()); }
             }
         }
 
@@ -139,15 +181,11 @@ export component CalendarSection inherits VerticalLayout {
                     spacing: 8px;
                     alignment: start;
 
-                    ThemedCheckbox {
-                        checked: row.selected;
+                    KitCheckbox {
+                        ownership: Ownership.controlled;
+                        label: row.title;
+                        state: row.selected ? CheckState.checked : CheckState.unchecked;
                         toggled(_) => { root.calendar-toggled(row.id); }
-                    }
-                    Text {
-                        text: row.title;
-                        font-size: 13.5px;
-                        color: Theme.text-secondary;
-                        vertical-alignment: center;
                     }
                 }
             }

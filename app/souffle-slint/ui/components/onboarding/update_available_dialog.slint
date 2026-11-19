@@ -1,7 +1,6 @@
+import { DialogTabPolicy, ButtonIntent, KitButton, KitDialog } from "@kit";
 import { MarkdownBlock } from "markdown_block.slint";
-import { ReleaseNotesBox } from "markdown_view.slint";
-import { ModalDialog } from "../modal_dialog.slint";
-import { ThemedButton, ThemedButtonKind } from "../themed_button.slint";
+import { MarkdownView } from "markdown_view.slint";
 import { InstallBlockReason, UpdatePhase } from "../../types.slint";
 import { Theme } from "../../theme.slint";
 
@@ -21,7 +20,10 @@ import { Theme } from "../../theme.slint";
 // blocked, reason underneath); failed → error text, Réessayer, and the
 // GitHub fallback. Not ported: cancelling an in-flight download (no
 // `cancel_update_download` wiring in this shell yet).
-export component UpdateAvailableDialog inherits ModalDialog {
+export component UpdateAvailableDialog inherits KitDialog {
+    tab-policy: DialogTabPolicy.native;
+    modal-layer: 3;
+    close-label: @tr("SettingsPermissionsDialog" => "Fermer");
     in property <string> latest-version;
     in property <[MarkdownBlock]> release-notes-blocks;
     in property <UpdatePhase> phase: UpdatePhase.idle;
@@ -46,11 +48,11 @@ export component UpdateAvailableDialog inherits ModalDialog {
     }
 
     title: @tr("Mise à jour disponible");
-    subtitle: @tr("Version {}", root.latest-version);
-    panel-height: 440px;
-    close-requested => { root.dismiss-requested(); }
+    description: @tr("Version {}", root.latest-version);
+    dismiss(reason) => { root.dismiss-requested(); }
 
-    ReleaseNotesBox {
+    MarkdownView {
+        modal-layer: root.modal-layer;
         blocks: root.release-notes-blocks;
         link-clicked(url) => { root.link-clicked(url); }
     }
@@ -76,36 +78,42 @@ export component UpdateAvailableDialog inherits ModalDialog {
         spacing: 8px;
         vertical-stretch: 0;
 
-        ThemedButton {
+        KitButton {
+            modal-layer: root.modal-layer;
             text: @tr("Plus tard");
-            clicked => { root.dismiss-requested(); }
+            activated => { root.dismiss-requested(); }
         }
 
-        if root.phase == UpdatePhase.idle: ThemedButton {
+        if root.phase == UpdatePhase.idle: KitButton {
+            modal-layer: root.modal-layer;
             text: @tr("Télécharger la mise à jour");
-            kind: ThemedButtonKind.active;
-            clicked => { root.download-requested(); }
+            intent: ButtonIntent.primary;
+            activated => { root.download-requested(); }
         }
-        if root.phase == UpdatePhase.downloading: ThemedButton {
+        if root.phase == UpdatePhase.downloading: KitButton {
+            modal-layer: root.modal-layer;
             text: @tr("Téléchargement…");
-            kind: ThemedButtonKind.active;
-            enabled: false;
+            intent: ButtonIntent.primary;
+            disabled: true;
         }
-        if root.phase == UpdatePhase.ready: ThemedButton {
+        if root.phase == UpdatePhase.ready: KitButton {
+            modal-layer: root.modal-layer;
             text: @tr("Installer et redémarrer");
-            kind: ThemedButtonKind.active;
-            enabled: !root.install-blocked;
-            clicked => { root.install-requested(); }
+            intent: ButtonIntent.primary;
+            disabled: root.install-blocked;
+            activated => { root.install-requested(); }
         }
-        if root.phase == UpdatePhase.failed: ThemedButton {
+        if root.phase == UpdatePhase.failed: KitButton {
+            modal-layer: root.modal-layer;
             text: @tr("Réessayer");
-            kind: ThemedButtonKind.active;
-            clicked => { root.download-requested(); }
+            intent: ButtonIntent.primary;
+            activated => { root.download-requested(); }
         }
-        if root.phase == UpdatePhase.failed: ThemedButton {
+        if root.phase == UpdatePhase.failed: KitButton {
+            modal-layer: root.modal-layer;
             text: @tr("Ouvrir la page de release");
-            kind: ThemedButtonKind.ghost;
-            clicked => { root.open-release-requested(); }
+            intent: ButtonIntent.quiet;
+            activated => { root.open-release-requested(); }
         }
     }
 }

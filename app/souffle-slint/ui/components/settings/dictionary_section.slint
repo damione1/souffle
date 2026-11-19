@@ -1,9 +1,5 @@
-import { SettingsField } from "settings_field.slint";
-import { SettingsGroup } from "settings_group.slint";
+import { KitSwitch, Ownership, ButtonIntent, ControlSize, KitButton, KitTextField, ScrollFrame, KitFieldSet, KitThemeContext, KitFieldRow, KitMetrics } from "@kit";
 import { Theme } from "../../theme.slint";
-import { ThemedSwitch } from "../themed_switch.slint";
-import { ThemedButton } from "../themed_button.slint";
-import { ThemedLineEdit } from "../themed_line_edit.slint";
 
 
 // Port of DictionarySettingsSection.svelte. Simplified: aliases (comma-
@@ -51,16 +47,23 @@ export component DictionarySection inherits VerticalLayout {
     spacing: 22px;
     alignment: start;
 
-    SettingsGroup {
-        title: @tr("DICTIONNAIRE PERSONNALISÉ");
+    KitFieldSet {
+        theme: KitThemeContext.current;
+        legend: @tr("DICTIONNAIRE PERSONNALISÉ");
 
-    SettingsField {
+    KitFieldRow {
+        theme: KitThemeContext.current;
+        modal-layer: 0;
+        orientation: Theme.settings-field-orientation(self.width);
+        padding: KitMetrics.field-gap(self.theme);
         show-divider: false;
         label: @tr("Apprendre depuis les corrections après collage");
         description: @tr("Quand le collage auto est actif, retenir les corrections mot à mot faites dans l'app cible pour les dictées suivantes.");
 
-        ThemedSwitch {
-            control-label: @tr("Apprendre depuis les corrections après collage");
+        KitSwitch {
+            theme: KitThemeContext.current;
+            ownership: Ownership.controlled;
+            accessible-name: @tr("Apprendre depuis les corrections après collage");
             checked: root.learn-from-edit;
             toggled(new) => { root.learn-from-edit-changed(new); }
         }
@@ -118,28 +121,28 @@ export component DictionarySection inherits VerticalLayout {
 
             HorizontalLayout {
                 spacing: 6px;
-                ThemedLineEdit {
+                KitTextField {
                     text <=> root.new-term-draft;
                     placeholder: @tr("ex. Kubernetes");
-                    control-label: @tr("Terme");
+                    accessible-name: @tr("Terme");
                     horizontal-stretch: 1;
                 }
-                ThemedLineEdit {
+                KitTextField {
                     text <=> root.new-pronunciation-draft;
                     placeholder: @tr("ex. vaysix");
-                    control-label: @tr("Prononciation facultative");
+                    accessible-name: @tr("Prononciation facultative");
                     width: 110px;
                 }
-                ThemedLineEdit {
+                KitTextField {
                     text <=> root.new-category-draft;
                     placeholder: @tr("ex. tech");
-                    control-label: @tr("Catégorie facultative");
+                    accessible-name: @tr("Catégorie facultative");
                     width: 100px;
                 }
-                ThemedButton {
+                KitButton {
                     text: @tr("Ajouter");
-                    enabled: root.new-term-draft != "";
-                    clicked => {
+                    disabled: root.new-term-draft == "";
+                    activated => {
                         root.add-requested(root.new-term-draft, root.new-pronunciation-draft, root.new-category-draft);
                     }
                 }
@@ -159,15 +162,16 @@ export component DictionarySection inherits VerticalLayout {
         }
     }
 
-    dictionary-list := Flickable {
+    dictionary-list := ScrollFrame {
         height: min(root.list-content-height * 1px, 360px);
         visible: root.entry-count > 0;
-        content-width: self.width;
+        horizontal-scrollbar-policy: always-off;
+        content-width: self.visible-width;
         content-height: root.list-content-height * 1px;
         content-y <=> root.list-scroll-top;
 
         VerticalLayout {
-        width: dictionary-list.width;
+        width: dictionary-list.visible-width;
         alignment: start;
 
         Rectangle { height: root.list-spacer-before * 1px; }
@@ -207,9 +211,9 @@ export component DictionarySection inherits VerticalLayout {
                                 overflow: elide;
                             }
                         }
-                        ThemedButton {
+                        KitButton {
                             text: @tr("Supprimer");
-                            clicked => { root.delete-requested(row.id); }
+                            activated => { root.delete-requested(row.id); }
                         }
                     }
 

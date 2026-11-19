@@ -1,0 +1,120 @@
+import { ControlSize, KitSelect, KitStrings, Ownership, OptionRow, SelectionRef } from "@kit";
+import { AppLocale, AppTheme, PasteMethod, AudioRetention, MeetingLanguage, SummaryProvider, LogLevel, SettingsTab } from "../../types.slint";
+import { Theme } from "../../theme.slint";
+
+export struct SettingsOptionList { rows: [OptionRow], selected: SelectionRef }
+
+// The Rust projections iterate the exported enums. Translated labels are display only.
+export global SettingsOptions {
+    public function localize() {
+        KitStrings.select-label = @tr("Sélection");
+        KitStrings.clear-label = @tr("Effacer le texte");
+        KitStrings.clear-search-label = @tr("Effacer la recherche");
+        KitStrings.clear-selection-label = @tr("Effacer la sélection");
+        KitStrings.search-options-label = @tr("Rechercher dans les options");
+        KitStrings.no-matching-options-label = @tr("Aucune option correspondante");
+        KitStrings.dismiss-label-template = @tr("Fermer {}", "{title}");
+        KitStrings.select-placeholder = @tr("Choisir une option");
+        KitStrings.selection-unavailable-label = @tr("Option sélectionnée indisponible");
+        KitStrings.text-menu-label = @tr("Édition du texte");
+        KitStrings.undo-label = @tr("Annuler");
+        KitStrings.redo-label = @tr("Rétablir");
+        KitStrings.cut-label = @tr("Couper");
+        KitStrings.copy-label = @tr("Copier");
+        KitStrings.paste-label = @tr("Coller");
+        KitStrings.select-all-label = @tr("Tout sélectionner");
+        KitStrings.step-message = @tr("Saisissez une valeur correspondant au pas indiqué.");
+        KitStrings.bad-input-message = @tr("Saisissez une valeur valide.");
+        KitStrings.underflow-template = @tr("La valeur minimale est {}.", "{value}");
+        KitStrings.overflow-template = @tr("La valeur maximale est {}.", "{value}");
+    }
+
+    pure callback locale-options(AppLocale) -> SettingsOptionList;
+    pure callback locale-value(OptionRow, AppLocale) -> AppLocale;
+    public pure function locale-label(value: AppLocale) -> string {
+        if value == AppLocale.fr { return @tr("InterfaceSection" => "Français"); }
+        if value == AppLocale.en { return @tr("InterfaceSection" => "English"); }
+        return "";
+    }
+
+    pure callback theme-options(AppTheme) -> SettingsOptionList;
+    pure callback theme-value(OptionRow, AppTheme) -> AppTheme;
+    public pure function theme-label(value: AppTheme) -> string {
+        if value == AppTheme.dark { return @tr("InterfaceSection" => "Sombre"); }
+        if value == AppTheme.light { return @tr("InterfaceSection" => "Clair"); }
+        if value == AppTheme.system { return @tr("InterfaceSection" => "Système"); }
+        return "";
+    }
+
+    pure callback paste-method-options(PasteMethod) -> SettingsOptionList;
+    pure callback paste-method-value(OptionRow, PasteMethod) -> PasteMethod;
+    public pure function paste-method-label(value: PasteMethod) -> string {
+        if value == PasteMethod.clipboard { return @tr("InterfaceSection" => "Presse-papiers (⌘V)"); }
+        if value == PasteMethod.typing { return @tr("InterfaceSection" => "Frappe simulée"); }
+        if value == PasteMethod.ax { return @tr("InterfaceSection" => "Champ ciblé"); }
+        return "";
+    }
+
+    pure callback retention-options(AudioRetention) -> SettingsOptionList;
+    pure callback retention-value(OptionRow, AudioRetention) -> AudioRetention;
+    public pure function retention-label(value: AudioRetention) -> string {
+        if value == AudioRetention.keep-7d { return @tr("DataSection" => "Conserver 7 jours"); }
+        if value == AudioRetention.keep-30d { return @tr("DataSection" => "Conserver 30 jours"); }
+        if value == AudioRetention.keep-forever { return @tr("DataSection" => "Conserver indéfiniment"); }
+        if value == AudioRetention.off { return @tr("DataSection" => "Ne pas conserver"); }
+        return "";
+    }
+
+    pure callback meeting-language-options(MeetingLanguage) -> SettingsOptionList;
+    pure callback meeting-language-value(OptionRow, MeetingLanguage) -> MeetingLanguage;
+    public pure function meeting-language-label(value: MeetingLanguage) -> string {
+        if value == MeetingLanguage.en { return @tr("AudioSection" => "Anglais"); }
+        if value == MeetingLanguage.fr { return @tr("AudioSection" => "Français"); }
+        if value == MeetingLanguage.auto { return @tr("AudioSection" => "Automatique"); }
+        return "";
+    }
+
+    pure callback provider-options(SummaryProvider) -> SettingsOptionList;
+    pure callback provider-value(OptionRow, SummaryProvider) -> SummaryProvider;
+    public pure function provider-label(value: SummaryProvider) -> string {
+        if value == SummaryProvider.apple-intelligence { return @tr("IntelligenceSection" => "Apple Intelligence"); }
+        if value == SummaryProvider.ollama { return @tr("IntelligenceSection" => "Ollama"); }
+        if value == SummaryProvider.auto { return @tr("IntelligenceSection" => "Automatique"); }
+        return "";
+    }
+
+    pure callback log-level-options(LogLevel) -> SettingsOptionList;
+    pure callback log-level-value(OptionRow, LogLevel) -> LogLevel;
+    public pure function log-level-label(value: LogLevel) -> string {
+        if value == LogLevel.error { return @tr("DiagnosticsSection" => "Erreur"); }
+        if value == LogLevel.warn { return @tr("DiagnosticsSection" => "Avertissement"); }
+        if value == LogLevel.info { return @tr("DiagnosticsSection" => "Information"); }
+        if value == LogLevel.debug { return @tr("DiagnosticsSection" => "Débogage"); }
+        if value == LogLevel.trace { return @tr("DiagnosticsSection" => "Trace"); }
+        return "";
+    }
+
+    pure callback tab-options(SettingsTab) -> SettingsOptionList;
+    pure callback tab-value(OptionRow, SettingsTab) -> SettingsTab;
+    public pure function tab-label(value: SettingsTab) -> string {
+        if value == SettingsTab.transcription { return @tr("SettingsTabBar" => "Transcription"); }
+        if value == SettingsTab.ai { return @tr("SettingsTabBar" => "IA"); }
+        if value == SettingsTab.audio { return @tr("SettingsTabBar" => "Audio"); }
+        if value == SettingsTab.interface { return @tr("SettingsTabBar" => "Interface"); }
+        if value == SettingsTab.meetings { return @tr("SettingsTabBar" => "Réunions"); }
+        if value == SettingsTab.system { return @tr("SettingsTabBar" => "Système"); }
+        return "";
+    }
+}
+
+export component ClosedSettingsPicker inherits KitSelect {
+    control-size: ControlSize.compact;
+    in property <SettingsOptionList> choices;
+    ownership: Ownership.controlled;
+    options: root.choices.rows;
+    selected: root.choices.selected;
+    width: Theme.settings-control-width;
+    height: Theme.settings-control-height;
+    horizontal-stretch: 0;
+    empty-label: @tr("SettingsPicker" => "Aucune option");
+}

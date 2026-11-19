@@ -516,7 +516,10 @@ impl SettingsDraftController {
             QuitFlushDecision::AlreadySaving => return,
         };
         if let Some(window) = self.window.upgrade() {
-            let _ = window.hide();
+            window.invoke_settings_shortcut_cancelled();
+            if slint_kit::hide_window(&window).is_ok() {
+                crate::set_main_window_visible(false);
+            }
         }
 
         let completion_batch = batch.clone();
@@ -574,7 +577,7 @@ mod tests {
 
     fn test_window() -> MainWindow {
         let _ = slint::platform::set_platform(Box::new(TestPlatform));
-        MainWindow::new().unwrap()
+        crate::settings_kit::new_window().unwrap()
     }
 
     type ControlledController = (
@@ -733,7 +736,13 @@ mod tests {
                 .recv_timeout(Duration::from_secs(1))
                 .expect("timer save started");
 
+            window.show().unwrap();
+            let fields = window.global::<slint_kit::ui::KitFieldService>();
+            let ticket = fields.invoke_begin_shortcut_session();
+            assert!(ticket > 0);
             controller.request_quit();
+            assert!(!window.window().is_visible());
+            assert_eq!(fields.get_shortcut_session(), 0);
             assert!(!quit_called.get(), "quit must wait behind the blocked save");
             release.send(()).unwrap();
             drain_until_idle(&io);
@@ -751,6 +760,9 @@ mod tests {
                     "latest draft"
                 );
                 assert!(window.get_settings_open());
+                assert!(window.window().is_visible());
+                assert_eq!(fields.get_shortcut_session(), 0);
+                assert_ne!(fields.invoke_begin_shortcut_session(), ticket);
             }
         }
     }

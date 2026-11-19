@@ -1,10 +1,6 @@
-import { SettingsField } from "settings_field.slint";
-import { SettingsGroup } from "settings_group.slint";
+import { SettingsOptions, ClosedSettingsPicker } from "settings_options.slint";
+import { KitModalContext, ChoiceLabelPosition, ButtonIntent, ControlWidth, FieldAccess, KitButton, KitNumberStepper, KitSwitch, Ownership, KitFieldSet, KitThemeContext, KitThemes, KitFieldRow, KitMetrics } from "@kit";
 import { Theme } from "../../theme.slint";
-import { ThemedSwitch } from "../themed_switch.slint";
-import { ThemedButton, ThemedButtonKind } from "../themed_button.slint";
-import { ThemedComboBox } from "../themed_combo.slint";
-import { ThemedSpinBox } from "../themed_spin.slint";
 import { AppTheme, AppLocale, PasteMethod, ShortcutField } from "../../types.slint";
 
 // Captures the next key press as a shortcut accelerator. Slint's `KeyEvent`
@@ -16,6 +12,7 @@ import { AppTheme, AppLocale, PasteMethod, ShortcutField } from "../../types.sli
 // `onboarding_view.slint`'s shortcut step (SOU-190) reuses it instead of a
 // second FocusScope implementation.
 export component ShortcutRecorderButton inherits FocusScope {
+    enabled: !KitModalContext.inert(0);
     in property <string> shortcut-label;
     in property <bool> recording;
 
@@ -28,27 +25,13 @@ export component ShortcutRecorderButton inherits FocusScope {
     width: 128px;
     height: Theme.settings-control-height;
 
-    Rectangle {
-        border-width: 1px;
-        border-color: root.recording ? Theme.accent.with-alpha(0.4) : Theme.ghost-border;
-        border-radius: 4px;
-        background: root.recording ? Theme.accent.with-alpha(0.16) : Theme.input;
+    public function take-focus() { trigger.take-focus(); }
 
-        Text {
-            text: root.recording ? @tr("Appuyez…") : (root.shortcut-label == "" ? @tr("Non défini") : root.shortcut-label);
-            color: root.recording ? Theme.accent : (root.shortcut-label == "" ? Theme.text-muted : Theme.text-secondary);
-            font-size: 13px;
-            font-family: "JetBrains Mono";
-            font-weight: 500;
-            horizontal-alignment: center;
-            vertical-alignment: center;
-            width: 100%;
-            height: 100%;
-        }
-    }
-
-    TouchArea {
-        clicked => {
+    trigger := KitButton {
+        width: parent.width;
+        text: root.recording ? @tr("Appuyez…") : (root.shortcut-label == "" ? @tr("Non défini") : root.shortcut-label);
+        intent: root.recording ? ButtonIntent.primary : ButtonIntent.secondary;
+        activated => {
             root.focus();
             root.record-requested();
         }
@@ -111,128 +94,153 @@ export component InterfaceSection inherits VerticalLayout {
     callback shortcut-cancelled();
     callback permissions-review-requested();
 
-    pure function locale-label(value: AppLocale) -> string {
-        if value == AppLocale.fr { return @tr("Français"); }
-        if value == AppLocale.en { return @tr("English"); }
-        return "";
-    }
-    pure function theme-label(value: AppTheme) -> string {
-        if value == AppTheme.dark { return @tr("Sombre"); }
-        if value == AppTheme.light { return @tr("Clair"); }
-        if value == AppTheme.system { return @tr("Système"); }
-        return "";
-    }
-    pure function paste-method-label(value: PasteMethod) -> string {
-        if value == PasteMethod.clipboard { return @tr("Presse-papiers (⌘V)"); }
-        if value == PasteMethod.typing { return @tr("Frappe simulée"); }
-        if value == PasteMethod.ax { return @tr("Champ ciblé"); }
-        return "";
-    }
+
+
+
 
     spacing: 22px;
     alignment: start;
 
-    SettingsGroup {
-        title: @tr("INTERFACE");
+    KitFieldSet {
+        theme: KitThemeContext.current;
+        legend: @tr("INTERFACE");
 
-        SettingsField {
+        KitFieldRow {
+            theme: KitThemeContext.current;
+            modal-layer: 0;
+            orientation: Theme.settings-field-orientation(self.width);
+            padding: KitMetrics.field-gap(self.theme);
+            focus-requested => { language-picker.take-focus(); }
+            private property <bool> control-focused: language-picker.has-focus;
+            changed control-focused => {
+                if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
+            }
             show-divider: false;
             label: @tr("Langue");
             description: @tr("Choisissez la langue de l'interface.");
 
-            ThemedComboBox {
-                control-label: @tr("Langue de l'interface");
-                model: [root.locale-label(AppLocale.en), root.locale-label(AppLocale.fr)];
-                current-value: root.locale-label(root.locale);
-                selected(value) => {
-                    if value == root.locale-label(AppLocale.fr) {
-                        root.locale-changed(AppLocale.fr);
-                    }
-                    if value == root.locale-label(AppLocale.en) {
-                        root.locale-changed(AppLocale.en);
-                    }
-                }
+            language-picker := ClosedSettingsPicker {
+                theme: KitThemeContext.current;
+                modal-layer: 0;
+                label: @tr("Langue de l'interface");
+                choices: SettingsOptions.locale-options(root.locale);
+                chosen(row) => { root.locale-changed(SettingsOptions.locale-value(row, root.locale)); }
             }
         }
 
-        SettingsField {
+        KitFieldRow {
+            theme: KitThemeContext.current;
+            modal-layer: 0;
+            orientation: Theme.settings-field-orientation(self.width);
+            padding: KitMetrics.field-gap(self.theme);
+            show-divider: true;
+            focus-requested => { theme-picker.take-focus(); }
+            private property <bool> control-focused: theme-picker.has-focus;
+            changed control-focused => {
+                if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
+            }
             label: @tr("Thème");
             description: @tr("Choisissez l'apparence de l'interface.");
 
-            ThemedComboBox {
-                control-label: @tr("Thème de l'interface");
-                model: [
-                    root.theme-label(AppTheme.dark),
-                    root.theme-label(AppTheme.light),
-                    root.theme-label(AppTheme.system),
-                ];
-                current-value: root.theme-label(root.theme);
-                selected(value) => {
-                    if value == root.theme-label(AppTheme.dark) {
-                        root.theme-changed(AppTheme.dark);
-                    }
-                    if value == root.theme-label(AppTheme.light) {
-                        root.theme-changed(AppTheme.light);
-                    }
-                    if value == root.theme-label(AppTheme.system) {
-                        root.theme-changed(AppTheme.system);
-                    }
-                }
+            theme-picker := ClosedSettingsPicker {
+                theme: KitThemeContext.current;
+                modal-layer: 0;
+                label: @tr("Thème de l'interface");
+                choices: SettingsOptions.theme-options(root.theme);
+                chosen(row) => { root.theme-changed(SettingsOptions.theme-value(row, root.theme)); }
             }
         }
 
-        SettingsField {
+        KitFieldRow {
+            theme: KitThemeContext.current;
+            modal-layer: 0;
+            orientation: Theme.settings-field-orientation(self.width);
+            padding: KitMetrics.field-gap(self.theme);
+            show-divider: true;
+            focus-requested => { paste-switch.take-focus(); }
+            private property <bool> control-focused: paste-switch.has-focus;
+            changed control-focused => {
+                if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
+            }
             label: @tr("Collage automatique après dictée");
             description: @tr("Colle automatiquement la transcription à l'arrêt de l'enregistrement.");
 
-            ThemedSwitch {
-                control-label: @tr("Collage automatique après dictée");
+            paste-switch := KitSwitch {
+                theme: KitThemeContext.current;
+                modal-layer: 0;
+                label-position: ChoiceLabelPosition.start;
+                padding-inline: 0px;
+                ownership: Ownership.controlled;
+                control-width: ControlWidth.intrinsic;
+                accessible-label: @tr("Collage automatique après dictée");
                 checked: root.auto-paste;
                 toggled(new) => { root.auto-paste-changed(new); }
             }
         }
 
-        if root.auto-paste: SettingsField {
+        if root.auto-paste: KitFieldRow {
+            theme: KitThemeContext.current;
+            modal-layer: 0;
+            orientation: Theme.settings-field-orientation(self.width);
+            padding: KitMetrics.field-gap(self.theme);
+            show-divider: true;
+            focus-requested => { method-picker.take-focus(); }
+            private property <bool> control-focused: method-picker.has-focus;
+            changed control-focused => {
+                if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
+            }
             label: @tr("Méthode de collage");
             description: @tr("Le champ ciblé utilise l'accessibilité pour insérer dans la sélection. Utilisez la frappe simulée si une app refuse le ⌘V synthétique (terminaux, champs sécurisés).");
 
-            ThemedComboBox {
-                control-label: @tr("Méthode de collage");
-                model: [
-                    root.paste-method-label(PasteMethod.clipboard),
-                    root.paste-method-label(PasteMethod.typing),
-                    root.paste-method-label(PasteMethod.ax),
-                ];
-                current-value: root.paste-method-label(root.paste-method);
-                selected(value) => {
-                    if value == root.paste-method-label(PasteMethod.clipboard) {
-                        root.paste-method-changed(PasteMethod.clipboard);
-                    }
-                    if value == root.paste-method-label(PasteMethod.typing) {
-                        root.paste-method-changed(PasteMethod.typing);
-                    }
-                    if value == root.paste-method-label(PasteMethod.ax) {
-                        root.paste-method-changed(PasteMethod.ax);
-                    }
-                }
+            method-picker := ClosedSettingsPicker {
+                theme: KitThemeContext.current;
+                modal-layer: 0;
+                label: @tr("Méthode de collage");
+                choices: SettingsOptions.paste-method-options(root.paste-method);
+                chosen(row) => { root.paste-method-changed(SettingsOptions.paste-method-value(row, root.paste-method)); }
             }
         }
 
-        if root.auto-paste: SettingsField {
+        if root.auto-paste: KitFieldRow {
+            theme: KitThemeContext.current;
+            modal-layer: 0;
+            orientation: Theme.settings-field-orientation(self.width);
+            padding: KitMetrics.field-gap(self.theme);
+            show-divider: true;
+            focus-requested => { delay-stepper.take-focus(); }
+            private property <bool> control-focused: delay-stepper.has-focus;
+            changed control-focused => {
+                if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
+            }
             label: @tr("Délai de collage (ms)");
             description: @tr("Temps d'attente avant le collage. Augmentez si le texte arrive dans la mauvaise application.");
 
-            ThemedSpinBox {
-                control-label: @tr("Délai de collage en millisecondes");
-                value: root.paste-delay-ms;
-                minimum: root.paste-delay-min;
-                maximum: root.paste-delay-max;
+            delay-stepper := KitNumberStepper {
+                theme: KitThemeContext.current;
+                modal-layer: 0;
+                width: 140px;
+                increment-label: @tr("Augmenter");
+                decrement-label: @tr("Diminuer");
+                accessible-name: @tr("Délai de collage en millisecondes");
+                text: root.paste-delay-ms;
+                min: root.paste-delay-min;
+                max: root.paste-delay-max;
                 step: 50;
-                edited(value) => { root.paste-delay-changed(value); }
+                committed(result) => { root.paste-delay-changed(result.value.text.to-float()); }
             }
         }
 
-        SettingsField {
+        KitFieldRow {
+            theme: KitThemeContext.current;
+            modal-layer: 0;
+            orientation: Theme.settings-field-orientation(self.width);
+            padding: KitMetrics.field-gap(self.theme);
+            show-divider: true;
+            focus-requested => { toggle-recorder.take-focus(); }
+            private property <bool> control-focused: toggle-recorder.has-focus;
+            changed control-focused => {
+                if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
+            }
             label: @tr("Basculer l'enregistrement");
             description: @tr("Appuyez une fois pour démarrer ou arrêter la dictée.");
 
@@ -241,7 +249,7 @@ export component InterfaceSection inherits VerticalLayout {
                 alignment: center;
                 horizontal-stretch: 0;
 
-                ShortcutRecorderButton {
+                toggle-recorder := ShortcutRecorderButton {
                     shortcut-label: root.toggle-shortcut-label;
                     recording: root.recording-field == ShortcutField.toggle;
                     record-requested => { root.shortcut-record-requested(ShortcutField.toggle); }
@@ -250,15 +258,25 @@ export component InterfaceSection inherits VerticalLayout {
                     cleared => { root.shortcut-cleared(ShortcutField.toggle); }
                     cancelled => { root.shortcut-cancelled(); }
                 }
-                if root.toggle-shortcut-label != "": ThemedButton {
+                if root.toggle-shortcut-label != "": KitButton {
                     text: @tr("Effacer");
-                    kind: ThemedButtonKind.ghost;
-                    clicked => { root.shortcut-cleared(ShortcutField.toggle); }
+                    intent: ButtonIntent.quiet;
+                    activated => { root.shortcut-cleared(ShortcutField.toggle); }
                 }
             }
         }
 
-        SettingsField {
+        KitFieldRow {
+            theme: KitThemeContext.current;
+            modal-layer: 0;
+            orientation: Theme.settings-field-orientation(self.width);
+            padding: KitMetrics.field-gap(self.theme);
+            show-divider: true;
+            focus-requested => { ptt-recorder.take-focus(); }
+            private property <bool> control-focused: ptt-recorder.has-focus;
+            changed control-focused => {
+                if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
+            }
             label: @tr("Appuyer pour parler");
             description: @tr("Maintenez pour enregistrer, relâchez pour arrêter.");
 
@@ -267,7 +285,7 @@ export component InterfaceSection inherits VerticalLayout {
                 alignment: center;
                 horizontal-stretch: 0;
 
-                ShortcutRecorderButton {
+                ptt-recorder := ShortcutRecorderButton {
                     shortcut-label: root.ptt-shortcut-label;
                     recording: root.recording-field == ShortcutField.ptt;
                     record-requested => { root.shortcut-record-requested(ShortcutField.ptt); }
@@ -276,32 +294,64 @@ export component InterfaceSection inherits VerticalLayout {
                     cleared => { root.shortcut-cleared(ShortcutField.ptt); }
                     cancelled => { root.shortcut-cancelled(); }
                 }
-                if root.ptt-shortcut-label != "": ThemedButton {
+                if root.ptt-shortcut-label != "": KitButton {
                     text: @tr("Effacer");
-                    kind: ThemedButtonKind.ghost;
-                    clicked => { root.shortcut-cleared(ShortcutField.ptt); }
+                    intent: ButtonIntent.quiet;
+                    activated => { root.shortcut-cleared(ShortcutField.ptt); }
                 }
             }
         }
 
-        SettingsField {
+        KitFieldRow {
+            theme: KitThemeContext.current;
+            modal-layer: 0;
+            orientation: Theme.settings-field-orientation(self.width);
+            padding: KitMetrics.field-gap(self.theme);
+            show-divider: true;
+            focus-requested => { overlay-switch.take-focus(); }
+            private property <bool> control-focused: overlay-switch.has-focus;
+            changed control-focused => {
+                if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
+            }
             label: @tr("Masquer l'overlay d'enregistrement");
             description: @tr("Ne pas afficher le HUD flottant pendant une dictée ou une réunion. Déplacez-le par glisser-déposer ; la position est mémorisée et reste à l'écran si la résolution change.");
 
-            ThemedSwitch {
-                control-label: @tr("Masquer l'overlay d'enregistrement");
+            overlay-switch := KitSwitch {
+                theme: KitThemeContext.current;
+                modal-layer: 0;
+                label-position: ChoiceLabelPosition.start;
+                padding-inline: 0px;
+                ownership: Ownership.controlled;
+                control-width: ControlWidth.intrinsic;
+                accessible-label: @tr("Masquer l'overlay d'enregistrement");
                 checked: root.pill-hidden;
                 toggled(new) => { root.pill-hidden-changed(new); }
             }
         }
 
-        SettingsField {
+        KitFieldRow {
+            theme: KitThemeContext.current;
+            modal-layer: 0;
+            orientation: Theme.settings-field-orientation(self.width);
+            padding: KitMetrics.field-gap(self.theme);
+            show-divider: true;
+            focus-requested => { screenshot-switch.take-focus(); }
+            private property <bool> control-focused: screenshot-switch.has-focus;
+            changed control-focused => {
+                if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
+            }
             label: @tr("Masquer l'overlay dans les captures d'écran");
             description: @tr("Quand l'overlay est affiché, l'exclure des captures d'écran, des enregistrements et des partages d'écran.");
 
-            ThemedSwitch {
-                control-label: @tr("Masquer l'overlay dans les captures d'écran");
-                enabled: !root.pill-hidden;
+            screenshot-switch := KitSwitch {
+                theme: KitThemeContext.current;
+                modal-layer: 0;
+                label-position: ChoiceLabelPosition.start;
+                padding-inline: 0px;
+                ownership: Ownership.controlled;
+                control-width: ControlWidth.intrinsic;
+                accessible-label: @tr("Masquer l'overlay dans les captures d'écran");
+                access: !root.pill-hidden ? FieldAccess.editable : FieldAccess.disabled;
                 checked: root.pill-hidden-in-captures;
                 toggled(new) => { root.pill-hidden-in-captures-changed(new); }
             }
@@ -324,10 +374,10 @@ export component InterfaceSection inherits VerticalLayout {
                     vertical-alignment: center;
                 }
 
-                ThemedButton {
+                KitButton {
                     text: @tr("Vérifier les permissions");
-                    kind: ThemedButtonKind.ghost;
-                    clicked => { root.permissions-review-requested(); }
+                    intent: ButtonIntent.quiet;
+                    activated => { root.permissions-review-requested(); }
                 }
             }
         }
