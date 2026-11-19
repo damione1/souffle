@@ -1,6 +1,9 @@
 //! Two retained settings pages, driven with synthetic provider and peripheral snapshots.
-use super::{audio_ui, click, ia_ui, microphone_list, save_frame, send_key, settle};
-use crate::{MainWindow, SettingsTab};
+use super::{
+    audio_ui, calendar_selection, click, ia_ui, microphone_list, save_frame, send_key, settle,
+    shortcut_capture,
+};
+use crate::{MainWindow, SettingsTab, ShortcutField, ShortcutRejection};
 use i_slint_backend_testing::{ElementHandle, ElementQuery};
 use slint::{ComponentHandle, Model, platform::Key};
 use souffle_lib::apple_intelligence::AppleIntelligenceUnavailableReason as Reason;
@@ -69,7 +72,14 @@ fn reveal(w: &MainWindow, page: &ElementHandle, name: &str) -> ElementHandle {
             wheel(w, page, -30.);
         }
     }
-    panic!("scroll never revealed {name}");
+    let found = ElementHandle::find_by_element_id(w, name).next();
+    panic!(
+        "scroll never revealed {name}: element {:?} {:?}, page {:?} {:?}",
+        found.as_ref().map(|e| e.absolute_position()),
+        found.as_ref().map(|e| e.size()),
+        page.absolute_position(),
+        page.size()
+    );
 }
 
 fn assert_widths(w: &MainWindow) {
@@ -227,7 +237,7 @@ fn editor(w: &MainWindow, name: &str, path: &Path, scene: &str) {
 fn sample_devices(n: usize) -> Vec<AudioInputDevice> {
     (0..n).map(|i| AudioInputDevice {
         uid: format!("fixture-{i}"),
-        name: if i < 2 { "Studio · USB".into() } else { format!("Station {i} — microphone de conférence à très longue désignation pour les réunions enregistrées") },
+        name: if i < 2 { "Studio · USB".into() } else { format!("Station {i} - microphone de conférence à très longue désignation pour les réunions enregistrées") },
         transport: TransportType::Usb,
         is_default: i == 2,
     }).collect()
@@ -245,6 +255,18 @@ pub(super) async fn exercise(w: &MainWindow, path: &Path) {
     }
     if mode == "audio-actions" {
         audio_actions(w, path).await;
+        return;
+    }
+    if mode == "interface" {
+        interface(w, path).await;
+        return;
+    }
+    if mode == "meetings" {
+        meetings(w, path).await;
+        return;
+    }
+    if mode == "meetings-scale" {
+        meetings_scale(w, path).await;
         return;
     }
     let en = w.get_settings_locale() == crate::AppLocale::En;
@@ -1173,4 +1195,923 @@ async fn ai_actions(w: &MainWindow, path: &Path) {
     println!(
         "ai actions: URL drafts, homonymous model ids, polish ownership, template target/default/delete/add observed"
     );
+}
+
+fn shortcut_label(value: &str) -> String {
+    value
+        .replace("CommandOrControl", "\u{2318}")
+        .replace("Shift", "\u{21e7}")
+        .replace("Alt", "\u{2325}")
+        .replace('+', " ")
+}
+
+/// The host side of Interface and sounds: the Rust decision comes from the real
+/// classifier, persistence is a pair held in memory.
+struct Host {
+    pair: Rc<std::cell::RefCell<souffle_lib::settings::ShortcutSettings>>,
+    log: Log,
+}
+
+fn wire_interface_host(w: &MainWindow) -> Host {
+    use shortcut_capture::{Modifiers, Target, decide};
+    let pair = Rc::new(std::cell::RefCell::new(
+        souffle_lib::settings::ShortcutSettings {
+            toggle: "CommandOrControl+Shift+Space".into(),
+            push_to_talk: "CommandOrControl+Alt+Shift+ArrowLeft".into(),
+        },
+    ));
+    let log: Log = Default::default();
+    let target = |field| match field {
+        ShortcutField::Toggle => Some(Target::Toggle),
+        ShortcutField::Ptt => Some(Target::PushToTalk),
+        ShortcutField::None => None,
+    };
+    let decision = {
+        let pair = pair.clone();
+        move |field, text: &str, c, s, a, m| {
+            let target = target(field);
+            let current = pair.borrow().clone();
+            target.map_or(Err(shortcut_capture::Rejection::Unavailable), |target| {
+                decide(
+                    Some(&current),
+                    target,
+                    text,
+                    Modifiers {
+                        control: c,
+                        shift: s,
+                        alt: a,
+                        meta: m,
+                    },
+                )
+            })
+        }
+    };
+    let rejection = |reason: Option<shortcut_capture::Rejection>| {
+        use shortcut_capture::Rejection;
+        match reason {
+            None => ShortcutRejection::None,
+            Some(Rejection::MissingModifier) => ShortcutRejection::MissingModifier,
+            Some(Rejection::Unmappable) => ShortcutRejection::Unmappable,
+            Some(Rejection::Unavailable) => ShortcutRejection::Unavailable,
+            Some(Rejection::Conflict) => ShortcutRejection::Conflict,
+        }
+    };
+    let project = |w: &MainWindow, pair: &souffle_lib::settings::ShortcutSettings| {
+        w.set_settings_toggle_shortcut_label(shortcut_label(&pair.toggle).into());
+        w.set_settings_ptt_shortcut_label(shortcut_label(&pair.push_to_talk).into());
+    };
+    project(w, &pair.borrow());
+    let weak = w.as_weak();
+    w.on_settings_shortcut_record_requested(move |field| {
+        let w = weak.unwrap();
+        w.set_settings_recording_field(field);
+        w.set_settings_shortcut_error("".into());
+        w.set_settings_shortcut_rejection(ShortcutRejection::None);
+    });
+    let d = decision.clone();
+    w.on_settings_shortcut_key_allowed(move |field, text, c, s, a, m| {
+        d(field, &text, c, s, a, m).is_ok()
+    });
+    let (d, weak) = (decision.clone(), w.as_weak());
+    w.on_settings_shortcut_rejected(move |field, text, c, s, a, m| {
+        let w = weak.unwrap();
+        w.set_settings_recording_field(field);
+        w.set_settings_shortcut_rejection(rejection(d(field, &text, c, s, a, m).err()));
+    });
+    for released in [false, true] {
+        let (d, weak, pair, log) = (decision.clone(), w.as_weak(), pair.clone(), log.clone());
+        let apply = move |field, text: slint::SharedString, c, s, a, m| {
+            let w = weak.unwrap();
+            if let Ok(value) = d(field, &text, c, s, a, m) {
+                match field {
+                    ShortcutField::Toggle => pair.borrow_mut().toggle = value.clone(),
+                    ShortcutField::Ptt => pair.borrow_mut().push_to_talk = value.clone(),
+                    ShortcutField::None => {}
+                }
+                log.borrow_mut().push(format!("save {field:?} {value:?}"));
+                w.set_settings_recording_field(ShortcutField::None);
+                w.set_settings_shortcut_rejection(ShortcutRejection::None);
+                project(&w, &pair.borrow());
+            }
+        };
+        if released {
+            w.on_settings_shortcut_released(apply);
+        } else {
+            w.on_settings_shortcut_captured(apply);
+        }
+    }
+    let (weak, pair2, log2) = (w.as_weak(), pair.clone(), log.clone());
+    w.on_settings_shortcut_cleared(move |field| {
+        let w = weak.unwrap();
+        match field {
+            ShortcutField::Toggle => pair2.borrow_mut().toggle.clear(),
+            ShortcutField::Ptt => pair2.borrow_mut().push_to_talk.clear(),
+            ShortcutField::None => {}
+        }
+        log2.borrow_mut().push(format!("clear {field:?}"));
+        w.set_settings_recording_field(ShortcutField::None);
+        project(&w, &pair2.borrow());
+    });
+    let weak = w.as_weak();
+    w.on_settings_shortcut_cancelled(move || {
+        let w = weak.unwrap();
+        w.set_settings_recording_field(ShortcutField::None);
+        w.set_settings_shortcut_rejection(ShortcutRejection::None);
+    });
+    let (weak, l) = (w.as_weak(), log.clone());
+    w.on_settings_paste_delay_changed(move |v| {
+        l.borrow_mut().push(format!("delay {v}"));
+        weak.unwrap().set_settings_paste_delay_ms(v);
+    });
+    let (weak, l) = (w.as_weak(), log.clone());
+    w.on_settings_feedback_sounds_volume_changed(move |v| {
+        l.borrow_mut().push(format!("volume {v}"));
+        weak.unwrap().set_settings_feedback_sounds_volume(v);
+    });
+    let (weak, l) = (w.as_weak(), log.clone());
+    w.on_settings_feedback_sounds_enabled_changed(move |v| {
+        l.borrow_mut().push(format!("sounds {v}"));
+        weak.unwrap().set_settings_feedback_sounds_enabled(v);
+    });
+    let l = log.clone();
+    w.on_settings_permissions_review_requested(move || l.borrow_mut().push("permissions".into()));
+    Host { pair, log }
+}
+
+fn focus_ring_fits(w: &MainWindow, page: &ElementHandle, owner: &str, what: &str) {
+    let root = id(w, owner);
+    let ring = root
+        .query_descendants()
+        .match_inherits("FocusOutline")
+        .find_first()
+        .unwrap_or_else(|| panic!("{what}: no focus ring"));
+    let (p, r) = (page.absolute_position(), ring.absolute_position());
+    let (ps, rs) = (page.size(), ring.size());
+    println!("{what}: ring {:?} {:?} in page {:?} {:?}", r, rs, p, ps);
+    assert!(
+        r.y >= p.y - 1. && r.y + rs.height <= p.y + ps.height + 1.,
+        "{what}: ring clipped vertically"
+    );
+    assert!(
+        r.x >= p.x - 1. && r.x + rs.width <= p.x + ps.width + 1.,
+        "{what}: ring clipped horizontally"
+    );
+}
+
+/// Reaches `owner` with Tab from the top of the page, so the framework's own
+/// reveal is what keeps the ring inside the scroll, then measures it.
+fn tab_to_and_measure(w: &MainWindow, page: &ElementHandle, owner: &str, what: &str) {
+    wheel(w, page, 100000.);
+    for _ in 0..80 {
+        let focused = ElementHandle::find_by_element_id(w, owner)
+            .next()
+            .is_some_and(|e| {
+                e.query_descendants()
+                    .match_inherits("FocusOutline")
+                    .find_first()
+                    .is_some()
+            });
+        if focused {
+            focus_ring_fits(w, page, owner, what);
+            return;
+        }
+        send_key(w, Key::Tab.into());
+    }
+    panic!("{what}: Tab never reached {owner}");
+}
+
+async fn interface(w: &MainWindow, path: &Path) {
+    use slint::platform::WindowEvent;
+    let en = w.get_settings_locale() == crate::AppLocale::En;
+    w.set_settings_tab(SettingsTab::Interface);
+    w.set_settings_auto_paste(true);
+    w.set_settings_feedback_sounds_enabled(true);
+    w.set_settings_feedback_sounds_volume(70);
+    w.set_settings_paste_delay_ms(150);
+    let options = souffle_lib::settings::SettingsOptions::current();
+    w.set_settings_paste_delay_min(options.paste_delay_ms_min as i32);
+    w.set_settings_paste_delay_max(options.paste_delay_ms_max as i32);
+    w.set_settings_paste_delay_step(options.paste_delay_ms_step as i32);
+    w.set_settings_feedback_sounds_volume_min(options.feedback_sounds_volume_min as i32);
+    w.set_settings_feedback_sounds_volume_max(options.feedback_sounds_volume_max as i32);
+    w.set_settings_feedback_sounds_volume_step(options.feedback_sounds_volume_step as i32);
+    w.set_settings_native_tap_warning_visible(true);
+    let host = wire_interface_host(w);
+    settle(w);
+    let page = id(w, "SettingsView::interface-page");
+    assert_widths(w);
+    frame(w, path, "interface-top");
+
+    // Every focus stop is reached with Tab and its whole ring stays in the scroll.
+    for (owner, what) in [
+        ("InterfaceSection::toggle-recorder", "toggle recorder"),
+        ("InterfaceSection::ptt-recorder", "push-to-talk recorder"),
+        ("InterfaceSection::delay-stepper", "delay stepper"),
+        ("FeedbackSoundsSection::sounds-switch", "sounds switch"),
+        ("FeedbackSoundsSection::volume-slider", "volume slider"),
+    ] {
+        tab_to_and_measure(w, &page, owner, what);
+    }
+    // The clear icon sits after the recorder and has its own ring, which the
+    // recorder-focused output does not cover; Shift+Tab walks back.
+    tab_to_and_measure(
+        w,
+        &page,
+        "InterfaceSection::toggle-recorder",
+        "toggle recorder",
+    );
+    send_key(w, Key::Tab.into());
+    focus_ring_fits(
+        w,
+        &page,
+        "InterfaceSection::toggle-recorder",
+        "toggle clear icon",
+    );
+    tab_to_and_measure(
+        w,
+        &page,
+        "FeedbackSoundsSection::volume-slider",
+        "volume slider",
+    );
+    send_key(w, Key::Backtab.into());
+    focus_ring_fits(
+        w,
+        &page,
+        "FeedbackSoundsSection::sounds-switch",
+        "sounds switch backwards",
+    );
+    let clear = |field: &str| {
+        if en {
+            format!("Clear shortcut \u{201c}{field}\u{201d}")
+        } else {
+            format!("Effacer le raccourci \u{ab} {field} \u{bb}")
+        }
+    };
+    let (toggle_name, ptt_name) = if en {
+        ("Toggle recording", "Push to talk")
+    } else {
+        ("Basculer l'enregistrement", "Appuyer pour parler")
+    };
+    let button = |name: &str| {
+        items(w, "KitButton")
+            .into_iter()
+            .chain(items(w, "KitIconButton"))
+            .find(|e| e.accessible_label().as_deref() == Some(name))
+            .unwrap_or_else(|| panic!("no button {name:?}"))
+    };
+    // The clear icon is a real, translated action reachable by Tab.
+    reveal(w, &page, "InterfaceSection::ptt-recorder");
+    assert_eq!(
+        button(&clear(ptt_name)).accessible_role(),
+        Some(i_slint_backend_testing::AccessibleRole::Button)
+    );
+
+    // Capture, refusal and retry without a second click.
+    reveal(w, &page, "InterfaceSection::toggle-recorder");
+    click(w, &button(toggle_name));
+    assert_eq!(w.get_settings_recording_field(), ShortcutField::Toggle);
+    send_key(w, "d".into());
+    assert_eq!(
+        w.get_settings_shortcut_rejection(),
+        ShortcutRejection::MissingModifier
+    );
+    assert_eq!(w.get_settings_recording_field(), ShortcutField::Toggle);
+    let message = if en {
+        "The shortcut must include a modifier key (Cmd, Ctrl, Shift, Alt) or be a function key."
+    } else {
+        "Le raccourci doit inclure une touche de modification (Cmd, Ctrl, Maj, Alt) ou \u{ea}tre une touche de fonction."
+    };
+    assert_eq!(
+        button(toggle_name).accessible_description().as_deref(),
+        Some(message)
+    );
+    frame(w, path, "interface-rejection");
+    shortcut(w, "j", false);
+    assert_eq!(host.pair.borrow().toggle, "CommandOrControl+J");
+    assert_eq!(w.get_settings_recording_field(), ShortcutField::None);
+
+    // Conflict, then the other binding is untouched.
+    reveal(w, &page, "InterfaceSection::ptt-recorder");
+    click(w, &button(ptt_name));
+    assert_eq!(w.get_settings_recording_field(), ShortcutField::Ptt);
+    shortcut(w, "j", false);
+    assert_eq!(
+        w.get_settings_shortcut_rejection(),
+        ShortcutRejection::Conflict
+    );
+    assert_eq!(w.get_settings_recording_field(), ShortcutField::Ptt);
+    send_key(w, Key::Escape.into());
+    assert_eq!(w.get_settings_recording_field(), ShortcutField::None);
+    assert_eq!(
+        host.pair.borrow().push_to_talk,
+        "CommandOrControl+Alt+Shift+ArrowLeft"
+    );
+
+    // A modifier alone on its release, and the icon clears.
+    reveal(w, &page, "InterfaceSection::ptt-recorder");
+    click(w, &button(ptt_name));
+    assert_eq!(w.get_settings_recording_field(), ShortcutField::Ptt);
+    w.window().dispatch_event(WindowEvent::KeyPressed {
+        text: Key::Shift.into(),
+    });
+    settle(w);
+    assert!(!host.log.borrow().iter().any(|l| l.contains("ShiftLeft")));
+    w.window().dispatch_event(WindowEvent::KeyReleased {
+        text: Key::Shift.into(),
+    });
+    settle(w);
+    assert_eq!(host.pair.borrow().push_to_talk, "ShiftLeft");
+    click(w, &button(&clear(ptt_name)));
+    assert_eq!(host.pair.borrow().push_to_talk, "");
+    assert_eq!(w.get_settings_recording_field(), ShortcutField::None);
+
+    // The permission action of the alert.
+    reveal(w, &page, "InterfaceSection::permission-alert");
+    let review = items(w, "KitButton")
+        .into_iter()
+        .find(|e| {
+            e.accessible_label().as_deref()
+                == Some(if en {
+                    "Check permissions"
+                } else {
+                    "V\u{e9}rifier les permissions"
+                })
+        })
+        .expect("permission action");
+    review.invoke_accessible_default_action();
+    assert!(host.log.borrow().iter().any(|l| l == "permissions"));
+    frame(w, path, "interface-alert");
+
+    // Delay: host step, bounds and a value between two steps.
+    let more = || {
+        items(w, "KitPressable")
+            .into_iter()
+            .find(|e| {
+                e.accessible_label().as_deref() == Some(if en { "Increase" } else { "Augmenter" })
+            })
+            .expect("increase")
+    };
+    reveal(w, &page, "InterfaceSection::delay-stepper");
+    more().invoke_accessible_default_action();
+    settle(w);
+    assert_eq!(w.get_settings_paste_delay_ms(), 200);
+    w.set_settings_paste_delay_ms(1000);
+    settle(w);
+    more().invoke_accessible_default_action();
+    settle(w);
+    assert_eq!(w.get_settings_paste_delay_ms(), 1000);
+    w.set_settings_paste_delay_ms(125);
+    settle(w);
+    more().invoke_accessible_default_action();
+    settle(w);
+    println!("125 + one step = {}", w.get_settings_paste_delay_ms());
+    assert!((126..=1000).contains(&w.get_settings_paste_delay_ms()));
+
+    // Sounds: keyboard steps, extremes, percentage and switch.
+    let slider = reveal(w, &page, "FeedbackSoundsSection::volume-slider");
+    let row = id(w, "FeedbackSoundsSection::volume-row");
+    let label = row
+        .query_descendants()
+        .match_inherits("KitFieldLabel")
+        .find_first()
+        .unwrap();
+    click(w, &label);
+    send_key(w, Key::RightArrow.into());
+    assert_eq!(w.get_settings_feedback_sounds_volume(), 71);
+    send_key(w, Key::End.into());
+    assert_eq!(w.get_settings_feedback_sounds_volume(), 100);
+    send_key(w, Key::RightArrow.into());
+    assert_eq!(w.get_settings_feedback_sounds_volume(), 100);
+    frame(w, path, "interface-volume-max");
+    send_key(w, Key::Home.into());
+    assert_eq!(w.get_settings_feedback_sounds_volume(), 0);
+    let percent = if en { "0 %" } else { "0%" };
+    assert!(
+        items(w, "KitText")
+            .iter()
+            .any(|e| e.accessible_label().as_deref() == Some(percent)),
+        "visible percentage {percent}"
+    );
+    assert_eq!(slider.accessible_value().as_deref(), Some("0"));
+    let slider = reveal(w, &page, "FeedbackSoundsSection::volume-slider");
+    let at = |fraction: f32| {
+        slint::LogicalPosition::new(
+            slider.absolute_position().x + slider.size().width * fraction,
+            slider.absolute_position().y + slider.size().height / 2.,
+        )
+    };
+    let pointer = slint::platform::PointerEventButton::Left;
+    let before = host.log.borrow().len();
+    w.window()
+        .dispatch_event(WindowEvent::PointerMoved { position: at(0.2) });
+    w.window().dispatch_event(WindowEvent::PointerPressed {
+        position: at(0.2),
+        button: pointer,
+    });
+    w.window()
+        .dispatch_event(WindowEvent::PointerMoved { position: at(0.6) });
+    send_key(w, Key::Escape.into());
+    w.window().dispatch_event(WindowEvent::PointerReleased {
+        position: at(0.6),
+        button: pointer,
+    });
+    settle(w);
+    assert_eq!(
+        host.log.borrow().len(),
+        before,
+        "a cancelled gesture proposes nothing"
+    );
+    w.window()
+        .dispatch_event(WindowEvent::PointerMoved { position: at(0.6) });
+    w.window().dispatch_event(WindowEvent::PointerPressed {
+        position: at(0.6),
+        button: pointer,
+    });
+    w.window().dispatch_event(WindowEvent::PointerReleased {
+        position: at(0.6),
+        button: pointer,
+    });
+    settle(w);
+    let chosen = w.get_settings_feedback_sounds_volume();
+    println!("pointer volume {chosen}");
+    assert!((50..=70).contains(&chosen));
+    let sounds = items(w, "KitSwitch")
+        .into_iter()
+        .find(|e| {
+            e.accessible_label().as_deref()
+                == Some(if en {
+                    "Enable sounds"
+                } else {
+                    "Activer les sons"
+                })
+        })
+        .expect("sounds switch");
+    sounds.invoke_accessible_default_action();
+    assert!(!w.get_settings_feedback_sounds_enabled());
+    assert!(
+        sounds.is_valid(),
+        "the switch stays after the volume row is gone"
+    );
+    sounds.invoke_accessible_default_action();
+    assert!(w.get_settings_feedback_sounds_enabled());
+    frame(w, path, "interface-sounds");
+    println!(
+        "interface and sounds interactions verified: {:?}",
+        host.log.borrow()
+    );
+}
+
+fn calendar(id: &str, title: &str, source: Option<&str>) -> souffle_lib::calendar::CalendarInfo {
+    souffle_lib::calendar::CalendarInfo {
+        id: id.into(),
+        title: title.into(),
+        source_title: source.map(str::to_string),
+    }
+}
+
+/// Three accounts, two homonymous calendars in one of them and a third elsewhere.
+fn meeting_calendars() -> Vec<souffle_lib::calendar::CalendarInfo> {
+    vec![
+        calendar("a1", "Travail", Some("iCloud")),
+        calendar("a2", "Travail", Some("iCloud")),
+        calendar("g1", "Travail", Some("Google")),
+        calendar(
+            "n1",
+            "Calendrier personnel à très longue désignation pour vérifier le retour à la ligne",
+            None,
+        ),
+    ]
+}
+
+/// The host side of Meetings: the real selection rules over an in-memory catalogue.
+struct MeetingsHost {
+    stored: Rc<std::cell::RefCell<Vec<String>>>,
+    log: Log,
+}
+
+fn wire_meetings_host(
+    w: &MainWindow,
+    catalogue: Vec<souffle_lib::calendar::CalendarInfo>,
+    granted_by_system_settings: bool,
+) -> MeetingsHost {
+    use crate::AccessState;
+    use calendar_selection::{SelectionChange, change_selection, publish_rows, rows};
+    let options = souffle_lib::settings::SettingsOptions::current();
+    w.set_settings_calendar_reminder_minutes_min(options.calendar_reminder_minutes_min as i32);
+    w.set_settings_calendar_reminder_minutes_max(options.calendar_reminder_minutes_max as i32);
+    w.set_settings_calendar_reminder_minutes(2);
+    w.set_settings_calendar_enabled(false);
+    w.set_settings_calendar_autostart_enabled(false);
+    w.set_settings_calendar_permission(AccessState::Denied);
+    let stored: Rc<std::cell::RefCell<Vec<String>>> = Default::default();
+    let log: Log = Default::default();
+    let granted = Rc::new(Cell::new(false));
+    let catalogue = Rc::new(catalogue);
+
+    let (weak, granted_for_open, l) = (w.as_weak(), granted.clone(), log.clone());
+    w.on_settings_calendar_open_system_settings_requested(move || {
+        l.borrow_mut().push("system settings".into());
+        granted_for_open.set(granted_by_system_settings);
+        let _ = weak.upgrade();
+    });
+    let (weak, granted_for_enable, catalogue_for_enable, stored_for_enable, l) = (
+        w.as_weak(),
+        granted.clone(),
+        catalogue.clone(),
+        stored.clone(),
+        log.clone(),
+    );
+    w.on_settings_calendar_enabled_changed(move |value| {
+        let w = weak.unwrap();
+        l.borrow_mut().push(format!("enabled {value}"));
+        if value && !granted_for_enable.get() {
+            w.set_settings_calendar_permission(AccessState::Denied);
+            return;
+        }
+        w.set_settings_calendar_enabled(value);
+        if value {
+            w.set_settings_calendar_permission(AccessState::Granted);
+            publish_rows(&w, rows(&catalogue_for_enable, &stored_for_enable.borrow()));
+        } else {
+            publish_rows(&w, Vec::new());
+        }
+    });
+    let (weak, catalogue_for_toggle, stored_for_toggle, l) =
+        (w.as_weak(), catalogue.clone(), stored.clone(), log.clone());
+    w.on_settings_calendar_toggled(move |id| {
+        let w = weak.unwrap();
+        let Some(shown) = w.get_settings_calendars().iter().find(|row| row.id == id) else {
+            l.borrow_mut().push(format!("ignored {id}"));
+            return;
+        };
+        let change = change_selection(
+            &stored_for_toggle.borrow(),
+            &catalogue_for_toggle,
+            &id,
+            !shown.selected,
+        );
+        match change {
+            SelectionChange::Write(ids) => {
+                l.borrow_mut().push(format!("write {id} {ids:?}"));
+                *stored_for_toggle.borrow_mut() = ids;
+            }
+            SelectionChange::Unchanged(refusal) => {
+                l.borrow_mut().push(format!("kept {id} {refusal:?}"));
+            }
+        }
+        publish_rows(&w, rows(&catalogue_for_toggle, &stored_for_toggle.borrow()));
+    });
+    let (weak, l) = (w.as_weak(), log.clone());
+    w.on_settings_calendar_autostart_enabled_changed(move |value| {
+        l.borrow_mut().push(format!("autostart {value}"));
+        weak.unwrap().set_settings_calendar_autostart_enabled(value);
+    });
+    let (weak, l) = (w.as_weak(), log.clone());
+    let (min, max) = (
+        options.calendar_reminder_minutes_min as i32,
+        options.calendar_reminder_minutes_max as i32,
+    );
+    w.on_settings_calendar_reminder_minutes_changed(move |value| {
+        let value = value.clamp(min, max);
+        l.borrow_mut().push(format!("reminder {value}"));
+        weak.unwrap().set_settings_calendar_reminder_minutes(value);
+    });
+    MeetingsHost { stored, log }
+}
+
+/// Every focus ring on screen must sit inside the page viewport.
+fn rings_fit(w: &MainWindow, page: &ElementHandle, what: &str) -> usize {
+    let rings = items(w, "FocusOutline");
+    let (p, ps) = (page.absolute_position(), page.size());
+    for ring in &rings {
+        let (r, rs) = (ring.absolute_position(), ring.size());
+        assert!(
+            r.y >= p.y - 1. && r.y + rs.height <= p.y + ps.height + 1.,
+            "{what}: ring clipped vertically {r:?} {rs:?} in {p:?} {ps:?}"
+        );
+        assert!(
+            r.x >= p.x - 1. && r.x + rs.width <= p.x + ps.width + 1.,
+            "{what}: ring clipped horizontally {r:?} {rs:?} in {p:?} {ps:?}"
+        );
+    }
+    rings.len()
+}
+
+/// The accessible name of the control that currently shows a focus ring.
+fn focused_label(w: &MainWindow) -> Option<String> {
+    [
+        "KitSwitch",
+        "KitDecimalField",
+        "KitTextField",
+        "KitCheckbox",
+        "KitButton",
+    ]
+    .into_iter()
+    .flat_map(|kind| items(w, kind))
+    .find(|e| {
+        e.query_descendants()
+            .match_inherits("FocusOutline")
+            .find_first()
+            .is_some()
+    })
+    .and_then(|e| e.accessible_label())
+    .map(|label| label.to_string())
+}
+
+async fn meetings(w: &MainWindow, path: &Path) {
+    use crate::AccessState;
+    let en = w.get_settings_locale() == crate::AppLocale::En;
+    w.set_settings_tab(SettingsTab::Meetings);
+    let host = wire_meetings_host(w, meeting_calendars(), true);
+    settle(w);
+    let page = id(w, "SettingsView::meetings-page");
+    assert_widths(w);
+
+    // Refusal: the alert and its action are there even though the integration is off.
+    let denied = if en {
+        "Calendar access was denied."
+    } else {
+        "L'acc\u{e8}s au calendrier a \u{e9}t\u{e9} refus\u{e9}."
+    };
+    assert_eq!(alerts(w), [denied]);
+    assert!(items(w, "KitCheckbox").is_empty());
+    frame(w, path, "meetings-denied");
+    tab_to_and_measure(
+        w,
+        &page,
+        "CalendarSection::calendar-switch",
+        "integration switch",
+    );
+    send_key(w, Key::Tab.into());
+    assert_eq!(rings_fit(w, &page, "alert action"), 1);
+    let open = items(w, "KitButton")
+        .into_iter()
+        .find(|e| {
+            e.accessible_label().as_deref()
+                == Some(if en {
+                    "Open System Settings"
+                } else {
+                    "Ouvrir les R\u{e9}glages Syst\u{e8}me"
+                })
+        })
+        .expect("the recovery action");
+    open.invoke_accessible_default_action();
+    settle(w);
+    assert!(host.log.borrow().iter().any(|l| l == "system settings"));
+
+    // Authorization: the switch now succeeds, the alert disappears and the list shows.
+    let integration = id(w, "CalendarSection::calendar-switch");
+    integration.invoke_accessible_default_action();
+    settle(w);
+    assert!(w.get_settings_calendar_enabled());
+    assert_eq!(w.get_settings_calendar_permission(), AccessState::Granted);
+    assert!(alerts(w).is_empty());
+    assert_eq!(w.get_settings_calendars().row_count(), 4);
+    assert_widths(w);
+    frame(w, path, "meetings-list");
+
+    // Walk every stop with Tab: the switches, the stepper, then the calendars in
+    // display order. Each ring stays inside the page whatever the scroll.
+    tab_to_and_measure(
+        w,
+        &page,
+        "CalendarSection::calendar-switch",
+        "integration switch",
+    );
+    let expected: Vec<String> = [
+        if en {
+            "Calendar integration"
+        } else {
+            "Int\u{e9}gration du calendrier"
+        },
+        if en {
+            "Prompt at start of meeting"
+        } else {
+            "Proposer au d\u{e9}but de la r\u{e9}union"
+        },
+        if en {
+            "Reminder delay in minutes"
+        } else {
+            "D\u{e9}lai du rappel en minutes"
+        },
+    ]
+    .into_iter()
+    .map(str::to_string)
+    .chain(
+        w.get_settings_calendars()
+            .iter()
+            .map(|row| row.title.to_string()),
+    )
+    .collect();
+    let mut reached = vec![focused_label(w).expect("the integration switch is focused")];
+    for _ in 1..expected.len() {
+        send_key(w, Key::Tab.into());
+        assert!(rings_fit(w, &page, "tab walk") > 0);
+        let label = focused_label(w);
+        reached.push(label.expect("a focused control"));
+    }
+    println!("focus stops reached: {reached:?}");
+    assert_eq!(reached, expected);
+    frame(w, path, "meetings-last-focus");
+
+    // Space on the focused calendar writes by identifier; the checkbox follows the host.
+    let before = host.log.borrow().len();
+    send_key(w, " ".into());
+    let after: Vec<String> = host.log.borrow()[before..].to_vec();
+    println!("space on the focused calendar: {after:?}");
+    assert_eq!(after.len(), 1);
+    assert!(after[0].starts_with("write "), "{after:?}");
+    assert!(
+        rings_fit(w, &page, "ring after the write") > 0,
+        "focus survives the in-place refresh"
+    );
+    frame(w, path, "meetings-after-toggle");
+
+    // Unchecking every calendar in turn through the host handler: the last one is refused.
+    for row in w.get_settings_calendars().iter().filter(|row| row.selected) {
+        host.log.borrow_mut().clear();
+        w.invoke_settings_calendar_toggled(row.id.clone());
+        settle(w);
+    }
+    let remaining = w
+        .get_settings_calendars()
+        .iter()
+        .filter(|row| row.selected)
+        .count();
+    assert_eq!(remaining, 1, "one calendar stays checked");
+    assert!(
+        host.log.borrow().iter().any(|l| l.contains("LastCalendar")),
+        "the last checked calendar is refused: {:?}",
+        host.log.borrow()
+    );
+    println!("selection by identifier: {:?}", host.stored.borrow());
+
+    // Reminder: bounds from Rust, steps stop at both ends.
+    let more = || {
+        items(w, "KitPressable")
+            .into_iter()
+            .find(|e| {
+                e.accessible_label().as_deref() == Some(if en { "Increase" } else { "Augmenter" })
+            })
+            .expect("increase")
+    };
+    let less = || {
+        items(w, "KitPressable")
+            .into_iter()
+            .find(|e| {
+                e.accessible_label().as_deref() == Some(if en { "Decrease" } else { "Diminuer" })
+            })
+            .expect("decrease")
+    };
+    let (min, max) = (
+        w.get_settings_calendar_reminder_minutes_min(),
+        w.get_settings_calendar_reminder_minutes_max(),
+    );
+    reveal(w, &page, "CalendarSection::delay-stepper");
+    for _ in 0..(max - min + 3) {
+        more().invoke_accessible_default_action();
+        settle(w);
+    }
+    assert_eq!(w.get_settings_calendar_reminder_minutes(), max);
+    frame(w, path, "meetings-reminder-max");
+    for _ in 0..(max - min + 3) {
+        less().invoke_accessible_default_action();
+        settle(w);
+    }
+    assert_eq!(w.get_settings_calendar_reminder_minutes(), min);
+
+    // The proposal switch is controlled and reachable.
+    reveal(w, &page, "CalendarSection::reminder-switch");
+    id(w, "CalendarSection::reminder-switch").invoke_accessible_default_action();
+    settle(w);
+    assert!(w.get_settings_calendar_autostart_enabled());
+
+    // Replacing the model: an in-place update keeps the delegates, a new set replaces them.
+    wheel(w, &page, -100000.);
+    let first = items(w, "KitCheckbox").remove(0);
+    let catalogue = meeting_calendars();
+    calendar_selection::publish_rows(w, calendar_selection::rows(&catalogue, &[]));
+    settle(w);
+    println!(
+        "delegate survives a same-calendars refresh: {}",
+        first.is_valid()
+    );
+    assert!(first.is_valid());
+    calendar_selection::publish_rows(w, calendar_selection::rows(&catalogue[..2], &[]));
+    settle(w);
+    assert_eq!(w.get_settings_calendars().row_count(), 2);
+    calendar_selection::publish_rows(w, calendar_selection::rows(&catalogue, &[]));
+    settle(w);
+
+    // Turning the integration off hides the choices again.
+    wheel(w, &page, 100000.);
+    integration.invoke_accessible_default_action();
+    settle(w);
+    assert!(!w.get_settings_calendar_enabled());
+    assert!(items(w, "KitCheckbox").is_empty());
+    println!("meetings interactions verified: {:?}", host.log.borrow());
+}
+
+fn synthetic_calendars(count: usize) -> Vec<souffle_lib::calendar::CalendarInfo> {
+    const SOURCES: [&str; 5] = ["iCloud", "Google", "Exchange", "Fastmail", "Local"];
+    (0..count)
+        .map(|index| {
+            let title = if index % 7 == 0 {
+                "Travail".to_string()
+            } else {
+                format!("Calendrier {index}")
+            };
+            calendar(
+                &format!("synthetic-{index}"),
+                &title,
+                Some(SOURCES[(index * SOURCES.len() / count.max(1)).min(SOURCES.len() - 1)]),
+            )
+        })
+        .collect()
+}
+
+/// Mount, scroll and refresh cost of the calendar list for a synthetic catalogue.
+async fn meetings_scale(w: &MainWindow, path: &Path) {
+    use std::time::Instant;
+    let count: usize = std::env::var("SOUFFLE_FIXTURE_CALENDARS")
+        .expect("calendar count")
+        .parse()
+        .unwrap();
+    w.set_settings_tab(SettingsTab::Meetings);
+    let catalogue = synthetic_calendars(count);
+    let host = wire_meetings_host(w, catalogue.clone(), true);
+    w.set_settings_calendar_enabled(true);
+    w.set_settings_calendar_permission(crate::AccessState::Granted);
+    settle(w);
+    let page = id(w, "SettingsView::meetings-page");
+
+    let started = Instant::now();
+    calendar_selection::publish_rows(w, calendar_selection::rows(&catalogue, &[]));
+    settle(w);
+    let mount = started.elapsed();
+    let at_top = items(w, "KitCheckbox").len();
+    wheel(w, &page, -100000.);
+    let at_end = items(w, "KitCheckbox").len();
+    wheel(w, &page, 100000.);
+    println!(
+        "calendars {count}: mount {mount:?}, queryable checkboxes at the top {at_top}, at the end {at_end}"
+    );
+    assert_widths(w);
+
+    let started = Instant::now();
+    let mut steps = 0;
+    let mut last_y: Option<f32> = None;
+    loop {
+        wheel(w, &page, -400.);
+        steps += 1;
+        let y = items(w, "KitCheckbox")
+            .last()
+            .map(|e| e.absolute_position().y);
+        if (y.is_some() && y == last_y) || steps > 4000 {
+            break;
+        }
+        last_y = y;
+    }
+    println!(
+        "calendars {count}: scroll to the end {:?} in {steps} wheel steps",
+        started.elapsed()
+    );
+    let last = items(w, "KitCheckbox")
+        .into_iter()
+        .last()
+        .expect("a last calendar");
+    let (p, ps) = (page.absolute_position(), page.size());
+    let y = last.absolute_position().y;
+    assert!(
+        y >= p.y && y <= p.y + ps.height + 1.,
+        "the last calendar is reachable by scrolling: {y} in {p:?} {ps:?}"
+    );
+    frame(w, path, "meetings-scale-end");
+
+    let started = Instant::now();
+    send_key(w, Key::Tab.into());
+    println!("calendars {count}: one Tab {:?}", started.elapsed());
+
+    let started = Instant::now();
+    let mut refreshed = calendar_selection::rows(&catalogue, &[]);
+    if let Some(row) = refreshed.first_mut() {
+        row.selected = false;
+    }
+    calendar_selection::publish_rows(w, refreshed);
+    settle(w);
+    println!(
+        "calendars {count}: in-place refresh {:?}",
+        started.elapsed()
+    );
+
+    let started = Instant::now();
+    w.set_settings_tab(SettingsTab::Interface);
+    settle(w);
+    w.set_settings_tab(SettingsTab::Meetings);
+    settle(w);
+    println!(
+        "calendars {count}: leave and return to the tab {:?}",
+        started.elapsed()
+    );
+    println!("calendars {count}: log {:?}", host.log.borrow());
 }

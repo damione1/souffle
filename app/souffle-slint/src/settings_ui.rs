@@ -6,11 +6,10 @@
 //! source for those once a section needs them.
 
 use crate::{
-    AccessState, AppLocale, AppTheme, AudioRetention as SlintAudioRetention, CalendarRow,
+    AccessState, AppLocale, AppTheme, AudioRetention as SlintAudioRetention,
     LogLevel as SlintLogLevel, MainWindow, MeetingLanguage, PasteMethod as SlintPasteMethod,
     PermissionKind as SlintPermissionKind,
 };
-use souffle_lib::calendar::CalendarInfo;
 use souffle_lib::logging::LogLevel;
 use souffle_lib::permissions::{PermState, PermissionKind};
 use souffle_lib::settings::{
@@ -62,8 +61,10 @@ pub fn populate(window: &MainWindow, settings: &AppSettings) {
     let bounds = SettingsOptions::current();
     window.set_settings_paste_delay_min(bounds.paste_delay_ms_min as i32);
     window.set_settings_paste_delay_max(bounds.paste_delay_ms_max as i32);
+    window.set_settings_paste_delay_step(bounds.paste_delay_ms_step as i32);
     window.set_settings_feedback_sounds_volume_min(bounds.feedback_sounds_volume_min as i32);
     window.set_settings_feedback_sounds_volume_max(bounds.feedback_sounds_volume_max as i32);
+    window.set_settings_feedback_sounds_volume_step(bounds.feedback_sounds_volume_step as i32);
     window.set_settings_calendar_reminder_minutes_min(bounds.calendar_reminder_minutes_min as i32);
     window.set_settings_calendar_reminder_minutes_max(bounds.calendar_reminder_minutes_max as i32);
     window.set_settings_meeting_autostop_labels(shared_string_model(
@@ -102,48 +103,6 @@ pub fn meeting_language_from_slint(value: MeetingLanguage) -> MeetingTranscripti
         MeetingLanguage::En => MeetingTranscriptionLanguage::En,
         MeetingLanguage::Fr => MeetingTranscriptionLanguage::Fr,
     }
-}
-
-/// Pushes the calendar picker's list + permission state - kept separate
-/// from `populate()` since it needs a real EventKit query
-/// (`souffle_lib::calendar::list_calendars`), not just `AppSettings`, and is
-/// only ever loaded when `calendar_integration_enabled` is already on
-/// (mirrors `loadCalendars()`'s own guard in controller.svelte.ts).
-pub fn populate_calendars(
-    window: &MainWindow,
-    calendars: &[CalendarInfo],
-    selected_ids: &[String],
-    permission: PermState,
-) {
-    window.set_settings_calendar_permission(perm_state_to_slint(permission));
-
-    let mut sorted: Vec<&CalendarInfo> = calendars.iter().collect();
-    sorted.sort_by(|a, b| {
-        a.source_title
-            .as_deref()
-            .unwrap_or("")
-            .cmp(b.source_title.as_deref().unwrap_or(""))
-            .then_with(|| a.title.cmp(&b.title))
-    });
-
-    let mut last_source: Option<&str> = None;
-    let rows: Vec<CalendarRow> = sorted
-        .into_iter()
-        .map(|calendar| {
-            let source = calendar.source_title.as_deref().unwrap_or("");
-            let show_header = last_source != Some(source);
-            last_source = Some(source);
-            CalendarRow {
-                id: calendar.id.as_str().into(),
-                title: calendar.title.as_str().into(),
-                source_title: source.into(),
-                selected: selected_ids.is_empty()
-                    || selected_ids.iter().any(|id| id == &calendar.id),
-                show_header,
-            }
-        })
-        .collect();
-    window.set_settings_calendars(std::rc::Rc::new(slint::VecModel::from(rows)).into());
 }
 
 pub(crate) fn perm_state_to_slint(state: PermState) -> AccessState {

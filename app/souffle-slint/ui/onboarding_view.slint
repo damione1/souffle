@@ -4,7 +4,7 @@ import { LucideCommunication } from "@kit-icons/communication.slint";
 import { LucideSecurity } from "@kit-icons/security.slint";
 import { CatalogPicker } from "components/catalog_picker.slint";
 import { PermissionsStep, PermissionRow } from "components/onboarding/permissions_step.slint";
-import { ShortcutRecorderButton } from "components/settings/interface_section.slint";
+import { ShortcutMessages, ShortcutRecorderButton, ShortcutRejection } from "components/settings/interface_section.slint";
 import { StatusBanner } from "components/status_banner.slint";
 import { AppLocale, ModelPhase, OnboardingStep, PermissionKind } from "types.slint";
 import { Theme } from "theme.slint";
@@ -50,6 +50,9 @@ export component OnboardingView inherits Rectangle {
     in property <string> toggle-shortcut-label;
     in property <bool> shortcut-recording;
     in property <string> shortcut-error;
+    in property <ShortcutRejection> shortcut-rejection;
+    in property <bool> capture-eligible;
+    in property <int> shortcut-generation;
     in property <bool> accessibility-granted;
 
     in property <bool> busy;
@@ -63,6 +66,8 @@ export component OnboardingView inherits Rectangle {
     callback refresh-devices-requested();
     callback model-picked(int);
     callback shortcut-record-requested();
+    pure callback shortcut-key-allowed(string, bool, bool, bool, bool) -> bool;
+    callback shortcut-rejected(string, bool, bool, bool, bool);
     callback shortcut-captured(string, bool, bool, bool, bool);
     callback shortcut-released(string, bool, bool, bool, bool);
     callback shortcut-cleared();
@@ -86,6 +91,8 @@ export component OnboardingView inherits Rectangle {
         return "";
     }
 
+    property <string> shortcut-message: root.shortcut-rejection == ShortcutRejection.none
+        ? root.shortcut-error : ShortcutMessages.rejection(root.shortcut-rejection);
     property <bool> is-last-step: root.step-index == root.step-count - 1;
     property <string> continue-label: root.step == OnboardingStep.model && root.model-phase != ModelPhase.ready ? @tr("Télécharger et continuer")
         : root.is-last-step ? @tr("Terminer")
@@ -297,7 +304,12 @@ export component OnboardingView inherits Rectangle {
                             horizontal-stretch: 1;
                             shortcut-label: root.toggle-shortcut-label;
                             recording: root.shortcut-recording;
+                            capture-eligible: root.capture-eligible;
+                            generation: root.shortcut-generation;
+                            description: root.shortcut-message != "" ? root.shortcut-message : @tr("Cliquez sur le raccourci, puis appuyez sur les touches voulues. Échap annule.");
                             record-requested => { root.shortcut-record-requested(); }
+                            key-allowed(text, ctrl, shift, alt, meta) => { return root.shortcut-key-allowed(text, ctrl, shift, alt, meta); }
+                            rejected(text, ctrl, shift, alt, meta) => { root.shortcut-rejected(text, ctrl, shift, alt, meta); }
                             captured(text, ctrl, shift, alt, meta) => { root.shortcut-captured(text, ctrl, shift, alt, meta); }
                             released(text, ctrl, shift, alt, meta) => { root.shortcut-released(text, ctrl, shift, alt, meta); }
                             cleared => { root.shortcut-cleared(); }
@@ -312,8 +324,8 @@ export component OnboardingView inherits Rectangle {
                         wrap: word-wrap;
                     }
 
-                    if root.shortcut-error != "": Text {
-                        text: root.shortcut-error;
+                    if root.shortcut-message != "": Text {
+                        text: root.shortcut-message;
                         color: Theme.danger;
                         font-size: 12px;
                         wrap: word-wrap;

@@ -272,6 +272,9 @@ const MEETING_MAX_DURATION_MINUTES_OPTIONS: [u32; 3] = [120, 240, 480];
 
 pub const MIN_PASTE_DELAY_MS: u64 = 50;
 pub const MAX_PASTE_DELAY_MS: u64 = 1000;
+/// Editing increments only: the backend still accepts any value in range.
+const PASTE_DELAY_STEP_MS: u64 = 50;
+const FEEDBACK_SOUNDS_VOLUME_STEP: u32 = 1;
 
 /// The numeric choices the settings UI may offer, served from the same file
 /// that validates them. `sanitize_for_save` alone decides what is acceptable;
@@ -283,10 +286,12 @@ pub struct SettingsOptions {
     pub meeting_max_duration_minutes: Vec<u32>,
     pub paste_delay_ms_min: u64,
     pub paste_delay_ms_max: u64,
+    pub paste_delay_ms_step: u64,
     pub calendar_reminder_minutes_min: u32,
     pub calendar_reminder_minutes_max: u32,
     pub feedback_sounds_volume_min: u32,
     pub feedback_sounds_volume_max: u32,
+    pub feedback_sounds_volume_step: u32,
     pub default_shortcuts: ShortcutSettings,
 }
 
@@ -299,10 +304,12 @@ impl SettingsOptions {
             meeting_max_duration_minutes: MEETING_MAX_DURATION_MINUTES_OPTIONS.to_vec(),
             paste_delay_ms_min: MIN_PASTE_DELAY_MS,
             paste_delay_ms_max: MAX_PASTE_DELAY_MS,
+            paste_delay_ms_step: PASTE_DELAY_STEP_MS,
             calendar_reminder_minutes_min: *CALENDAR_REMINDER_MINUTES_RANGE.start(),
             calendar_reminder_minutes_max: *CALENDAR_REMINDER_MINUTES_RANGE.end(),
             feedback_sounds_volume_min: *FEEDBACK_SOUNDS_VOLUME_RANGE.start(),
             feedback_sounds_volume_max: *FEEDBACK_SOUNDS_VOLUME_RANGE.end(),
+            feedback_sounds_volume_step: FEEDBACK_SOUNDS_VOLUME_STEP,
             default_shortcuts: ShortcutSettings::default(),
         }
     }
@@ -2170,6 +2177,20 @@ mod tests {
         assert_eq!(
             options.feedback_sounds_volume_max,
             *super::FEEDBACK_SOUNDS_VOLUME_RANGE.end()
+        );
+    }
+
+    #[test]
+    fn editing_steps_fit_their_ranges() {
+        let options = SettingsOptions::current();
+        assert_eq!(options.paste_delay_ms_step, 50);
+        assert_eq!(options.feedback_sounds_volume_step, 1);
+        assert!(
+            options.paste_delay_ms_min + options.paste_delay_ms_step <= options.paste_delay_ms_max
+        );
+        assert!(
+            options.feedback_sounds_volume_min + options.feedback_sounds_volume_step
+                <= options.feedback_sounds_volume_max
         );
     }
 

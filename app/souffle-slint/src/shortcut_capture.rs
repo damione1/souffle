@@ -11,6 +11,8 @@
 //! the Svelte version: non-QWERTY layouts and `AltGr` are not distinguished
 //! from a plain right Option key the way a browser's `code` would.
 
+use souffle_lib::settings::ShortcutSettings;
+
 /// The modifiers held alongside a key press, as Slint's `KeyEvent.modifiers`
 /// reports them.
 #[derive(Debug, Clone, Copy, Default)]
@@ -146,6 +148,67 @@ pub fn format_combo(text: &str, modifiers: Modifiers) -> Option<String> {
     Some(parts.join("+"))
 }
 
+/// Why a proposed accelerator is refused before any effect. Presentation
+/// wording lives in Slint (`ShortcutMessages`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Rejection {
+    MissingModifier,
+    Unmappable,
+    Unavailable,
+    Conflict,
+}
+
+/// Classifies a logical key event without effects. A bare modifier (reported
+/// by the kit when released alone) becomes its own accelerator, an unmodified
+/// Backspace or Delete is the empty candidate that clears the shortcut, and
+/// every other key needs a modifier unless it is a function key.
+pub fn classify(text: &str, modifiers: Modifiers) -> Result<String, Rejection> {
+    if let Some(name) = modifier_only_shortcut(text) {
+        return Ok(name.to_string());
+    }
+    if !modifiers.any() && matches!(text, "\u{8}" | "\u{7f}") {
+        return Ok(String::new());
+    }
+    if missing_modifier(text, modifiers) {
+        return Err(Rejection::MissingModifier);
+    }
+    format_combo(text, modifiers).ok_or(Rejection::Unmappable)
+}
+
+/// Replaces one binding of the last accepted pair and applies the backend
+/// normalization, so a conflict is known before the kit consumes the ticket.
+pub fn candidate_pair(
+    current: Option<&ShortcutSettings>,
+    target: Target,
+    value: &str,
+) -> Result<ShortcutSettings, Rejection> {
+    let mut candidate = current.cloned().ok_or(Rejection::Unavailable)?;
+    match target {
+        Target::Toggle => candidate.toggle = value.to_string(),
+        Target::PushToTalk => candidate.push_to_talk = value.to_string(),
+    }
+    candidate.normalize().map_err(|_| Rejection::Conflict)
+}
+
+/// The binding a capture edits.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Target {
+    Toggle,
+    PushToTalk,
+}
+
+/// Full decision for a proposal: the accelerator it would publish, or why not.
+pub fn decide(
+    current: Option<&ShortcutSettings>,
+    target: Target,
+    text: &str,
+    modifiers: Modifiers,
+) -> Result<String, Rejection> {
+    let value = classify(text, modifiers)?;
+    candidate_pair(current, target, &value)?;
+    Ok(value)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -206,5 +269,117 @@ mod tests {
     #[test]
     fn unmapped_key_has_no_combo() {
         assert_eq!(format_combo("\u{3b1}", Modifiers::default()), None);
+    }
+
+    fn ctrl() -> Modifiers {
+        Modifiers {
+            control: true,
+            ..Default::default()
+        }
+    }
+
+    fn pair(toggle: &str, push_to_talk: &str) -> ShortcutSettings {
+        ShortcutSettings {
+            toggle: toggle.into(),
+            push_to_talk: push_to_talk.into(),
+        }
+    }
+
+    #[test]
+    fn classification_follows_the_policy_without_effects() {
+        assert_eq!(classify("d", ctrl()), Ok("CommandOrControl+D".into()));
+        assert_eq!(
+            classify("d", Modifiers::default()),
+            Err(Rejection::MissingModifier)
+        );
+        assert_eq!(classify("\u{f708}", Modifiers::default()), Ok("F5".into()));
+        assert_eq!(classify("\u{3b1}", ctrl()), Err(Rejection::Unmappable));
+        assert_eq!(
+            classify("\u{17}", Modifiers::default()),
+            Ok("MetaLeft".into())
+        );
+        assert_eq!(
+            classify("\u{15}", Modifiers::default()),
+            Ok("ShiftRight".into())
+        );
+    }
+
+    #[test]
+    fn backspace_and_delete_clear_only_without_a_modifier() {
+        for key in ["\u{8}", "\u{7f}"] {
+            assert_eq!(classify(key, Modifiers::default()), Ok(String::new()));
+        }
+        assert_eq!(
+            classify("\u{8}", ctrl()),
+            Ok("CommandOrControl+Backspace".into())
+        );
+        assert_eq!(
+            classify(
+                "\u{7f}",
+                Modifiers {
+                    shift: true,
+                    ..Default::default()
+                }
+            ),
+            Ok("Shift+Delete".into())
+        );
+    }
+
+    #[test]
+    fn a_candidate_replaces_one_binding_and_refuses_a_conflict() {
+        let current = pair("CommandOrControl+K", "");
+        assert_eq!(
+            candidate_pair(Some(&current), Target::PushToTalk, "CommandOrControl+L"),
+            Ok(pair("CommandOrControl+K", "CommandOrControl+L"))
+        );
+        assert_eq!(
+            candidate_pair(Some(&current), Target::PushToTalk, "CommandOrControl+K"),
+            Err(Rejection::Conflict)
+        );
+        assert_eq!(
+            candidate_pair(Some(&current), Target::Toggle, "CommandOrControl+K"),
+            Ok(current.clone()),
+            "re-entering the same binding is not a conflict with itself"
+        );
+        assert_eq!(
+            candidate_pair(
+                Some(&pair("CommandOrControl+K", "CommandOrControl+L")),
+                Target::Toggle,
+                ""
+            ),
+            Ok(pair("", "CommandOrControl+L")),
+            "clearing never conflicts"
+        );
+        assert_eq!(
+            candidate_pair(None, Target::Toggle, "CommandOrControl+K"),
+            Err(Rejection::Unavailable)
+        );
+    }
+
+    #[test]
+    fn the_decision_is_pure_and_reports_the_first_reason() {
+        let current = pair("CommandOrControl+K", "CommandOrControl+L");
+        assert_eq!(
+            decide(Some(&current), Target::Toggle, "l", ctrl()),
+            Err(Rejection::Conflict)
+        );
+        assert_eq!(
+            decide(Some(&current), Target::Toggle, "x", Modifiers::default()),
+            Err(Rejection::MissingModifier)
+        );
+        assert_eq!(
+            decide(None, Target::Toggle, "x", Modifiers::default()),
+            Err(Rejection::MissingModifier),
+            "the key is judged before the missing projection"
+        );
+        assert_eq!(
+            decide(None, Target::Toggle, "x", ctrl()),
+            Err(Rejection::Unavailable)
+        );
+        assert_eq!(
+            decide(Some(&current), Target::Toggle, "j", ctrl()),
+            Ok("CommandOrControl+J".into())
+        );
+        assert_eq!(current, pair("CommandOrControl+K", "CommandOrControl+L"));
     }
 }

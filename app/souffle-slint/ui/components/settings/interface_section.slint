@@ -1,81 +1,117 @@
 import { SettingsOptions, ClosedSettingsPicker } from "settings_options.slint";
-import { KitModalContext, ChoiceLabelPosition, ButtonIntent, ControlWidth, FieldAccess, KitButton, KitNumberStepper, KitSwitch, Ownership, KitFieldSet, KitThemeContext, KitThemes, KitFieldRow, KitMetrics } from "@kit";
+import {
+    AlertSeverity, ButtonIntent, ChoiceLabelPosition, ControlWidth, FieldAccess,
+    KitAlert, KitButton, KitFieldRow, KitFieldSet, KitInline, KitMetrics,
+    KitNumberStepper, KitShortcutField, KitSwitch, KitThemeContext, KitThemes,
+    Ownership, ShortcutTicket
+} from "@kit";
 import { Theme } from "../../theme.slint";
 import { AppTheme, AppLocale, PasteMethod, ShortcutField } from "../../types.slint";
 
-// Captures the next key press as a shortcut accelerator. Slint's `KeyEvent`
-// only hands over a produced character (or one of i-slint-common's
-// private-use code points for named/modifier keys), not a DOM physical
-// `code`, so the actual accelerator-string parsing happens in Rust
-// (`shortcut_capture.rs`) from the raw `text`/modifier booleans forwarded
-// here - this component only owns focus/recording UI state. Exported so
-// `onboarding_view.slint`'s shortcut step (SOU-190) reuses it instead of a
-// second FocusScope implementation.
-export component ShortcutRecorderButton inherits FocusScope {
-    enabled: !KitModalContext.inert(0);
+export enum ShortcutRejection { none, missing-modifier, unmappable, unavailable, conflict }
+
+// Rust classifies a refused proposal; the wording is translated here so a
+// message already on screen follows a language change.
+export global ShortcutMessages {
+    pure public function rejection(reason: ShortcutRejection) -> string {
+        if reason == ShortcutRejection.missing-modifier {
+            return @tr("Le raccourci doit inclure une touche de modification (Cmd, Ctrl, Maj, Alt) ou être une touche de fonction.");
+        }
+        if reason == ShortcutRejection.unmappable {
+            return @tr("Cette touche ne peut pas servir de raccourci.");
+        }
+        if reason == ShortcutRejection.unavailable {
+            return @tr("Les raccourcis ne sont pas encore chargés. Réessayez dans un instant.");
+        }
+        if reason == ShortcutRejection.conflict {
+            return @tr("Les raccourcis de dictée doivent être différents.");
+        }
+        return "";
+    }
+}
+
+// Both Settings and onboarding publish accelerators through Rust. Tickets
+// stay with this instance, including while the host classifies a proposal.
+export component ShortcutRecorderButton inherits KitInline {
+    in property <string> control-label: @tr("OnboardingView" => "Raccourci clavier");
+    in property <string> description;
     in property <string> shortcut-label;
+    in property <bool> capture-eligible;
+    in property <int> generation;
+    // Host mirror used to address notifications when moving between fields.
     in property <bool> recording;
+    out property <bool> recorder-focused: field.recorder-focused;
 
     callback record-requested();
+    pure callback key-allowed(string, bool, bool, bool, bool) -> bool;
+    callback rejected(string, bool, bool, bool, bool);
     callback captured(string, bool, bool, bool, bool);
     callback released(string, bool, bool, bool, bool);
     callback cleared();
     callback cancelled();
 
-    width: 128px;
-    height: Theme.settings-control-height;
+    public function take-focus() { field.take-focus(); }
 
-    public function take-focus() { trigger.take-focus(); }
-
-    trigger := KitButton {
-        width: parent.width;
-        text: root.recording ? @tr("Appuyez…") : (root.shortcut-label == "" ? @tr("Non défini") : root.shortcut-label);
-        intent: root.recording ? ButtonIntent.primary : ButtonIntent.secondary;
-        activated => {
-            root.focus();
-            root.record-requested();
+    function accept-key(ticket: ShortcutTicket, event: KeyEvent) -> bool {
+        let m = event.modifiers;
+        if (root.key-allowed(event.text, m.control, m.shift, m.alt, m.meta)) {
+            return field.finish(ticket);
         }
+        if (field.retry(ticket)) {
+            if (!root.recording) { root.record-requested(); }
+            root.rejected(event.text, m.control, m.shift, m.alt, m.meta);
+        }
+        return false;
     }
 
-    key-pressed(event) => {
-        if (!root.recording) {
-            return reject;
+    field := KitShortcutField {
+        theme: root.theme;
+        modal-layer: 0;
+        enabled: root.capture-eligible;
+        generation: root.generation;
+        value-label: root.shortcut-label;
+        label: root.control-label;
+        description: root.description;
+        empty-label: @tr("Non défini");
+        recording-label: @tr("Appuyez…");
+        clear-label: @tr("Effacer le raccourci « {} »", root.control-label);
+        allow-modifier-only: true;
+        changed recording => {
+            if (self.recording && !root.recording) { root.record-requested(); }
         }
-        if (event.text == Key.Escape) {
-            root.cancelled();
-            return accept;
+        captured(ticket, event) => {
+            let m = event.modifiers;
+            if (root.accept-key(ticket, event)) {
+                root.captured(event.text, m.control, m.shift, m.alt, m.meta);
+            }
         }
-        if (event.text == Key.Backspace || event.text == Key.Delete) {
-            root.cleared();
-            return accept;
+        modifier-released(ticket, event) => {
+            let m = event.modifiers;
+            if (root.accept-key(ticket, event)) {
+                root.released(event.text, m.control, m.shift, m.alt, m.meta);
+            }
         }
-        root.captured(event.text, event.modifiers.control, event.modifiers.shift, event.modifiers.alt, event.modifiers.meta);
-        return accept;
-    }
-
-    key-released(event) => {
-        if (!root.recording) {
-            return reject;
-        }
-        root.released(event.text, event.modifiers.control, event.modifiers.shift, event.modifiers.alt, event.modifiers.meta);
-        return accept;
+        clear-requested(ticket) => { if (self.finish(ticket)) { root.cleared(); } }
+        cancelled => { if (root.recording) { root.cancelled(); } }
     }
 }
 
-// Port of InterfaceSettingsSection.svelte. The locale is projected from the
-// same durable AppSettings value used by the onboarding selector.
-export component InterfaceSection inherits VerticalLayout {
-    in property <AppTheme> theme;
+export component InterfaceSection inherits KitFieldSet {
+    in property <AppTheme> app-theme;
     in property <AppLocale> locale;
     in property <bool> auto-paste;
     in property <PasteMethod> paste-method;
     in property <int> paste-delay-ms;
     in property <int> paste-delay-min;
     in property <int> paste-delay-max;
+    in property <int> paste-delay-step;
+    in property <bool> capture-eligible;
+    in property <int> shortcut-generation;
     in property <string> toggle-shortcut-label;
     in property <string> ptt-shortcut-label;
     in property <ShortcutField> recording-field;
     in property <string> shortcut-error;
+    in property <ShortcutRejection> shortcut-rejection;
     in property <bool> native-tap-warning-visible;
     in property <bool> pill-hidden;
     in property <bool> pill-hidden-in-captures;
@@ -88,313 +124,305 @@ export component InterfaceSection inherits VerticalLayout {
     callback pill-hidden-changed(bool);
     callback pill-hidden-in-captures-changed(bool);
     callback shortcut-record-requested(ShortcutField);
+    pure callback shortcut-key-allowed(ShortcutField, string, bool, bool, bool, bool) -> bool;
+    callback shortcut-rejected(ShortcutField, string, bool, bool, bool, bool);
     callback shortcut-captured(ShortcutField, string, bool, bool, bool, bool);
     callback shortcut-released(ShortcutField, string, bool, bool, bool, bool);
     callback shortcut-cleared(ShortcutField);
     callback shortcut-cancelled();
     callback permissions-review-requested();
 
+    // Two-way with the stepper so the host can still replace the value after
+    // the user has edited it, while an uncommitted draft survives a language
+    // or theme change.
+    private property <string> delay-text: root.paste-delay-ms;
+    changed paste-delay-ms => { root.delay-text = root.paste-delay-ms; }
+    private property <string> shortcut-message: root.shortcut-rejection == ShortcutRejection.none
+        ? root.shortcut-error : ShortcutMessages.rejection(root.shortcut-rejection);
 
+    theme: KitThemeContext.current;
+    legend: @tr("INTERFACE");
 
-
-
-    spacing: 22px;
-    alignment: start;
-
-    KitFieldSet {
-        theme: KitThemeContext.current;
-        legend: @tr("INTERFACE");
-
-        KitFieldRow {
-            theme: KitThemeContext.current;
-            modal-layer: 0;
-            orientation: Theme.settings-field-orientation(self.width);
-            padding: KitMetrics.field-gap(self.theme);
-            focus-requested => { language-picker.take-focus(); }
-            private property <bool> control-focused: language-picker.has-focus;
-            changed control-focused => {
-                if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
-            }
-            show-divider: false;
-            label: @tr("Langue");
-            description: @tr("Choisissez la langue de l'interface.");
-
-            language-picker := ClosedSettingsPicker {
-                theme: KitThemeContext.current;
-                modal-layer: 0;
-                label: @tr("Langue de l'interface");
-                choices: SettingsOptions.locale-options(root.locale);
-                chosen(row) => { root.locale-changed(SettingsOptions.locale-value(row, root.locale)); }
-            }
+    KitFieldRow {
+        theme: root.theme;
+        modal-layer: 0;
+        orientation: Theme.settings-field-orientation(self.width);
+        padding: KitMetrics.field-gap(self.theme);
+        focus-requested => { language-picker.take-focus(); }
+        private property <bool> control-focused: language-picker.has-focus;
+        changed control-focused => {
+            if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
         }
+        show-divider: false;
+        label: @tr("Langue");
+        description: @tr("Choisissez la langue de l'interface.");
 
-        KitFieldRow {
-            theme: KitThemeContext.current;
+        language-picker := ClosedSettingsPicker {
+            theme: root.theme;
             modal-layer: 0;
-            orientation: Theme.settings-field-orientation(self.width);
-            padding: KitMetrics.field-gap(self.theme);
-            show-divider: true;
-            focus-requested => { theme-picker.take-focus(); }
-            private property <bool> control-focused: theme-picker.has-focus;
-            changed control-focused => {
-                if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
-            }
-            label: @tr("Thème");
-            description: @tr("Choisissez l'apparence de l'interface.");
-
-            theme-picker := ClosedSettingsPicker {
-                theme: KitThemeContext.current;
-                modal-layer: 0;
-                label: @tr("Thème de l'interface");
-                choices: SettingsOptions.theme-options(root.theme);
-                chosen(row) => { root.theme-changed(SettingsOptions.theme-value(row, root.theme)); }
-            }
+            label: @tr("Langue de l'interface");
+            choices: SettingsOptions.locale-options(root.locale);
+            chosen(row) => { root.locale-changed(SettingsOptions.locale-value(row, root.locale)); }
         }
+    }
 
-        KitFieldRow {
-            theme: KitThemeContext.current;
-            modal-layer: 0;
-            orientation: Theme.settings-field-orientation(self.width);
-            padding: KitMetrics.field-gap(self.theme);
-            show-divider: true;
-            focus-requested => { paste-switch.take-focus(); }
-            private property <bool> control-focused: paste-switch.has-focus;
-            changed control-focused => {
-                if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
-            }
-            label: @tr("Collage automatique après dictée");
-            description: @tr("Colle automatiquement la transcription à l'arrêt de l'enregistrement.");
-
-            paste-switch := KitSwitch {
-                theme: KitThemeContext.current;
-                modal-layer: 0;
-                label-position: ChoiceLabelPosition.start;
-                padding-inline: 0px;
-                ownership: Ownership.controlled;
-                control-width: ControlWidth.intrinsic;
-                accessible-label: @tr("Collage automatique après dictée");
-                checked: root.auto-paste;
-                toggled(new) => { root.auto-paste-changed(new); }
-            }
+    KitFieldRow {
+        theme: root.theme;
+        modal-layer: 0;
+        orientation: Theme.settings-field-orientation(self.width);
+        padding: KitMetrics.field-gap(self.theme);
+        show-divider: true;
+        focus-requested => { theme-picker.take-focus(); }
+        private property <bool> control-focused: theme-picker.has-focus;
+        changed control-focused => {
+            if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
         }
+        label: @tr("Thème");
+        description: @tr("Choisissez l'apparence de l'interface.");
 
-        if root.auto-paste: KitFieldRow {
-            theme: KitThemeContext.current;
+        theme-picker := ClosedSettingsPicker {
+            theme: root.theme;
             modal-layer: 0;
-            orientation: Theme.settings-field-orientation(self.width);
-            padding: KitMetrics.field-gap(self.theme);
-            show-divider: true;
-            focus-requested => { method-picker.take-focus(); }
-            private property <bool> control-focused: method-picker.has-focus;
-            changed control-focused => {
-                if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
-            }
+            label: @tr("Thème de l'interface");
+            choices: SettingsOptions.theme-options(root.app-theme);
+            chosen(row) => { root.theme-changed(SettingsOptions.theme-value(row, root.app-theme)); }
+        }
+    }
+
+    paste-row := KitFieldRow {
+        theme: root.theme;
+        modal-layer: 0;
+        orientation: Theme.settings-field-orientation(self.width);
+        padding: KitMetrics.field-gap(self.theme);
+        show-divider: true;
+        focus-requested => { paste-switch.take-focus(); }
+        private property <bool> control-focused: paste-switch.has-focus;
+        changed control-focused => {
+            if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
+        }
+        label: @tr("Collage automatique après dictée");
+        description: @tr("Colle automatiquement la transcription à l'arrêt de l'enregistrement.");
+
+        paste-switch := KitSwitch {
+            theme: root.theme;
+            modal-layer: 0;
+            label-position: ChoiceLabelPosition.start;
+            padding-inline: 0px;
+            ownership: Ownership.controlled;
+            control-width: ControlWidth.intrinsic;
+            accessible-name: paste-row.label;
+            accessible-description: paste-row.description;
+            checked: root.auto-paste;
+            toggled(new) => { root.auto-paste-changed(new); }
+        }
+    }
+
+    if root.auto-paste: KitFieldRow {
+        theme: root.theme;
+        modal-layer: 0;
+        orientation: Theme.settings-field-orientation(self.width);
+        padding: KitMetrics.field-gap(self.theme);
+        show-divider: true;
+        focus-requested => { method-picker.take-focus(); }
+        private property <bool> control-focused: method-picker.has-focus;
+        changed control-focused => {
+            if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
+        }
+        label: @tr("Méthode de collage");
+        description: @tr("Le champ ciblé utilise l'accessibilité pour insérer dans la sélection. Utilisez la frappe simulée si une app refuse le ⌘V synthétique (terminaux, champs sécurisés).");
+
+        method-picker := ClosedSettingsPicker {
+            theme: root.theme;
+            modal-layer: 0;
             label: @tr("Méthode de collage");
-            description: @tr("Le champ ciblé utilise l'accessibilité pour insérer dans la sélection. Utilisez la frappe simulée si une app refuse le ⌘V synthétique (terminaux, champs sécurisés).");
-
-            method-picker := ClosedSettingsPicker {
-                theme: KitThemeContext.current;
-                modal-layer: 0;
-                label: @tr("Méthode de collage");
-                choices: SettingsOptions.paste-method-options(root.paste-method);
-                chosen(row) => { root.paste-method-changed(SettingsOptions.paste-method-value(row, root.paste-method)); }
-            }
+            choices: SettingsOptions.paste-method-options(root.paste-method);
+            chosen(row) => { root.paste-method-changed(SettingsOptions.paste-method-value(row, root.paste-method)); }
         }
+    }
 
-        if root.auto-paste: KitFieldRow {
-            theme: KitThemeContext.current;
+    if root.auto-paste: KitFieldRow {
+        theme: root.theme;
+        modal-layer: 0;
+        orientation: Theme.settings-field-orientation(self.width);
+        padding: KitMetrics.field-gap(self.theme);
+        show-divider: true;
+        focus-requested => { delay-stepper.take-focus(); }
+        private property <bool> control-focused: delay-stepper.has-focus;
+        changed control-focused => {
+            if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
+        }
+        label: @tr("Délai de collage (ms)");
+        description: @tr("Temps d'attente avant le collage. Augmentez si le texte arrive dans la mauvaise application.");
+
+        delay-stepper := KitNumberStepper {
+            theme: root.theme;
             modal-layer: 0;
-            orientation: Theme.settings-field-orientation(self.width);
-            padding: KitMetrics.field-gap(self.theme);
-            show-divider: true;
-            focus-requested => { delay-stepper.take-focus(); }
-            private property <bool> control-focused: delay-stepper.has-focus;
-            changed control-focused => {
-                if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
-            }
-            label: @tr("Délai de collage (ms)");
-            description: @tr("Temps d'attente avant le collage. Augmentez si le texte arrive dans la mauvaise application.");
+            preferred-width: Theme.settings-control-width;
+            increment-label: @tr("Augmenter");
+            decrement-label: @tr("Diminuer");
+            accessible-name: @tr("Délai de collage en millisecondes");
+            text <=> root.delay-text;
+            min: root.paste-delay-min;
+            max: root.paste-delay-max;
+            step: root.paste-delay-step;
+            committed(result) => { root.paste-delay-changed(result.value.text.to-float()); }
+        }
+    }
 
-            delay-stepper := KitNumberStepper {
-                theme: KitThemeContext.current;
-                modal-layer: 0;
-                width: 140px;
-                increment-label: @tr("Augmenter");
-                decrement-label: @tr("Diminuer");
-                accessible-name: @tr("Délai de collage en millisecondes");
-                text: root.paste-delay-ms;
-                min: root.paste-delay-min;
-                max: root.paste-delay-max;
-                step: 50;
-                committed(result) => { root.paste-delay-changed(result.value.text.to-float()); }
+    toggle-row := KitFieldRow {
+        theme: root.theme;
+        modal-layer: 0;
+        orientation: Theme.settings-field-orientation(self.width);
+        padding: KitMetrics.field-gap(self.theme);
+        show-divider: true;
+        focus-requested => { toggle-recorder.take-focus(); }
+        private property <bool> control-focused: toggle-recorder.recorder-focused;
+        changed control-focused => {
+            if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
+        }
+        label: @tr("Basculer l'enregistrement");
+        description: @tr("Appuyez une fois pour démarrer ou arrêter la dictée.");
+        error-message: root.recording-field == ShortcutField.toggle ? root.shortcut-message : "";
+        changed error-message => {
+            if (self.error-message != "" && toggle-recorder.recorder-focused) {
+                self.ensure-visible(KitThemes.scroll-behavior(self.theme));
             }
         }
 
-        KitFieldRow {
-            theme: KitThemeContext.current;
+        toggle-recorder := ShortcutRecorderButton {
+            theme: root.theme;
+            control-label: toggle-row.label;
+            description: toggle-row.error-message != "" ? toggle-row.error-message : toggle-row.description;
+            capture-eligible: root.capture-eligible;
+            generation: root.shortcut-generation;
+            shortcut-label: root.toggle-shortcut-label;
+            recording: root.recording-field == ShortcutField.toggle;
+            record-requested => { root.shortcut-record-requested(ShortcutField.toggle); }
+            key-allowed(text, ctrl, shift, alt, meta) => { return root.shortcut-key-allowed(ShortcutField.toggle, text, ctrl, shift, alt, meta); }
+            rejected(text, ctrl, shift, alt, meta) => { root.shortcut-rejected(ShortcutField.toggle, text, ctrl, shift, alt, meta); }
+            captured(text, ctrl, shift, alt, meta) => { root.shortcut-captured(ShortcutField.toggle, text, ctrl, shift, alt, meta); }
+            released(text, ctrl, shift, alt, meta) => { root.shortcut-released(ShortcutField.toggle, text, ctrl, shift, alt, meta); }
+            cleared => { root.shortcut-cleared(ShortcutField.toggle); }
+            cancelled => { root.shortcut-cancelled(); }
+        }
+    }
+
+    ptt-row := KitFieldRow {
+        theme: root.theme;
+        modal-layer: 0;
+        orientation: Theme.settings-field-orientation(self.width);
+        padding: KitMetrics.field-gap(self.theme);
+        show-divider: true;
+        focus-requested => { ptt-recorder.take-focus(); }
+        private property <bool> control-focused: ptt-recorder.recorder-focused;
+        changed control-focused => {
+            if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
+        }
+        label: @tr("Appuyer pour parler");
+        description: @tr("Maintenez pour enregistrer, relâchez pour arrêter.");
+        error-message: root.recording-field == ShortcutField.ptt ? root.shortcut-message : "";
+        changed error-message => {
+            if (self.error-message != "" && ptt-recorder.recorder-focused) {
+                self.ensure-visible(KitThemes.scroll-behavior(self.theme));
+            }
+        }
+
+        ptt-recorder := ShortcutRecorderButton {
+            theme: root.theme;
+            control-label: ptt-row.label;
+            description: ptt-row.error-message != "" ? ptt-row.error-message : ptt-row.description;
+            capture-eligible: root.capture-eligible;
+            generation: root.shortcut-generation;
+            shortcut-label: root.ptt-shortcut-label;
+            recording: root.recording-field == ShortcutField.ptt;
+            record-requested => { root.shortcut-record-requested(ShortcutField.ptt); }
+            key-allowed(text, ctrl, shift, alt, meta) => { return root.shortcut-key-allowed(ShortcutField.ptt, text, ctrl, shift, alt, meta); }
+            rejected(text, ctrl, shift, alt, meta) => { root.shortcut-rejected(ShortcutField.ptt, text, ctrl, shift, alt, meta); }
+            captured(text, ctrl, shift, alt, meta) => { root.shortcut-captured(ShortcutField.ptt, text, ctrl, shift, alt, meta); }
+            released(text, ctrl, shift, alt, meta) => { root.shortcut-released(ShortcutField.ptt, text, ctrl, shift, alt, meta); }
+            cleared => { root.shortcut-cleared(ShortcutField.ptt); }
+            cancelled => { root.shortcut-cancelled(); }
+        }
+    }
+
+    overlay-row := KitFieldRow {
+        theme: root.theme;
+        modal-layer: 0;
+        orientation: Theme.settings-field-orientation(self.width);
+        padding: KitMetrics.field-gap(self.theme);
+        show-divider: true;
+        focus-requested => { overlay-switch.take-focus(); }
+        private property <bool> control-focused: overlay-switch.has-focus;
+        changed control-focused => {
+            if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
+        }
+        label: @tr("Masquer l'overlay d'enregistrement");
+        description: @tr("Ne pas afficher le HUD flottant pendant une dictée ou une réunion. Déplacez-le par glisser-déposer ; la position est mémorisée et reste à l'écran si la résolution change.");
+
+        overlay-switch := KitSwitch {
+            theme: root.theme;
             modal-layer: 0;
-            orientation: Theme.settings-field-orientation(self.width);
-            padding: KitMetrics.field-gap(self.theme);
-            show-divider: true;
-            focus-requested => { toggle-recorder.take-focus(); }
-            private property <bool> control-focused: toggle-recorder.has-focus;
-            changed control-focused => {
-                if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
-            }
-            label: @tr("Basculer l'enregistrement");
-            description: @tr("Appuyez une fois pour démarrer ou arrêter la dictée.");
-
-            HorizontalLayout {
-                spacing: 8px;
-                alignment: center;
-                horizontal-stretch: 0;
-
-                toggle-recorder := ShortcutRecorderButton {
-                    shortcut-label: root.toggle-shortcut-label;
-                    recording: root.recording-field == ShortcutField.toggle;
-                    record-requested => { root.shortcut-record-requested(ShortcutField.toggle); }
-                    captured(text, ctrl, shift, alt, meta) => { root.shortcut-captured(ShortcutField.toggle, text, ctrl, shift, alt, meta); }
-                    released(text, ctrl, shift, alt, meta) => { root.shortcut-released(ShortcutField.toggle, text, ctrl, shift, alt, meta); }
-                    cleared => { root.shortcut-cleared(ShortcutField.toggle); }
-                    cancelled => { root.shortcut-cancelled(); }
-                }
-                if root.toggle-shortcut-label != "": KitButton {
-                    text: @tr("Effacer");
-                    intent: ButtonIntent.quiet;
-                    activated => { root.shortcut-cleared(ShortcutField.toggle); }
-                }
-            }
+            label-position: ChoiceLabelPosition.start;
+            padding-inline: 0px;
+            ownership: Ownership.controlled;
+            control-width: ControlWidth.intrinsic;
+            accessible-name: overlay-row.label;
+            accessible-description: overlay-row.description;
+            checked: root.pill-hidden;
+            toggled(new) => { root.pill-hidden-changed(new); }
         }
+    }
 
-        KitFieldRow {
-            theme: KitThemeContext.current;
+    screenshot-row := KitFieldRow {
+        theme: root.theme;
+        modal-layer: 0;
+        orientation: Theme.settings-field-orientation(self.width);
+        padding: KitMetrics.field-gap(self.theme);
+        show-divider: true;
+        access: root.pill-hidden ? FieldAccess.disabled : FieldAccess.editable;
+        focus-requested => { screenshot-switch.take-focus(); }
+        private property <bool> control-focused: screenshot-switch.has-focus;
+        changed control-focused => {
+            if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
+        }
+        label: @tr("Masquer l'overlay dans les captures d'écran");
+        description: @tr("Quand l'overlay est affiché, l'exclure des captures d'écran, des enregistrements et des partages d'écran.");
+
+        screenshot-switch := KitSwitch {
+            theme: root.theme;
             modal-layer: 0;
-            orientation: Theme.settings-field-orientation(self.width);
-            padding: KitMetrics.field-gap(self.theme);
-            show-divider: true;
-            focus-requested => { ptt-recorder.take-focus(); }
-            private property <bool> control-focused: ptt-recorder.has-focus;
-            changed control-focused => {
-                if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
-            }
-            label: @tr("Appuyer pour parler");
-            description: @tr("Maintenez pour enregistrer, relâchez pour arrêter.");
-
-            HorizontalLayout {
-                spacing: 8px;
-                alignment: center;
-                horizontal-stretch: 0;
-
-                ptt-recorder := ShortcutRecorderButton {
-                    shortcut-label: root.ptt-shortcut-label;
-                    recording: root.recording-field == ShortcutField.ptt;
-                    record-requested => { root.shortcut-record-requested(ShortcutField.ptt); }
-                    captured(text, ctrl, shift, alt, meta) => { root.shortcut-captured(ShortcutField.ptt, text, ctrl, shift, alt, meta); }
-                    released(text, ctrl, shift, alt, meta) => { root.shortcut-released(ShortcutField.ptt, text, ctrl, shift, alt, meta); }
-                    cleared => { root.shortcut-cleared(ShortcutField.ptt); }
-                    cancelled => { root.shortcut-cancelled(); }
-                }
-                if root.ptt-shortcut-label != "": KitButton {
-                    text: @tr("Effacer");
-                    intent: ButtonIntent.quiet;
-                    activated => { root.shortcut-cleared(ShortcutField.ptt); }
-                }
-            }
+            label-position: ChoiceLabelPosition.start;
+            padding-inline: 0px;
+            ownership: Ownership.controlled;
+            control-width: ControlWidth.intrinsic;
+            accessible-name: screenshot-row.label;
+            accessible-description: screenshot-row.description;
+            access: screenshot-row.access;
+            checked: root.pill-hidden-in-captures;
+            toggled(new) => { root.pill-hidden-in-captures-changed(new); }
         }
+    }
 
-        KitFieldRow {
-            theme: KitThemeContext.current;
+    if root.native-tap-warning-visible: permission-alert := KitAlert {
+        theme: root.theme;
+        severity: AlertSeverity.warning;
+        message: @tr("Votre raccourci sur une seule touche ne fonctionnera pas tant que l'Accessibilité n'est pas accordée.");
+        KitButton {
+            theme: root.theme;
             modal-layer: 0;
-            orientation: Theme.settings-field-orientation(self.width);
-            padding: KitMetrics.field-gap(self.theme);
-            show-divider: true;
-            focus-requested => { overlay-switch.take-focus(); }
-            private property <bool> control-focused: overlay-switch.has-focus;
-            changed control-focused => {
-                if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
+            text: @tr("Vérifier les permissions");
+            text-wrap: word-wrap;
+            intent: ButtonIntent.quiet;
+            focus-observed(focused) => {
+                if focused { permission-alert.ensure-visible(KitThemes.scroll-behavior(root.theme)); }
             }
-            label: @tr("Masquer l'overlay d'enregistrement");
-            description: @tr("Ne pas afficher le HUD flottant pendant une dictée ou une réunion. Déplacez-le par glisser-déposer ; la position est mémorisée et reste à l'écran si la résolution change.");
-
-            overlay-switch := KitSwitch {
-                theme: KitThemeContext.current;
-                modal-layer: 0;
-                label-position: ChoiceLabelPosition.start;
-                padding-inline: 0px;
-                ownership: Ownership.controlled;
-                control-width: ControlWidth.intrinsic;
-                accessible-label: @tr("Masquer l'overlay d'enregistrement");
-                checked: root.pill-hidden;
-                toggled(new) => { root.pill-hidden-changed(new); }
-            }
+            activated => { root.permissions-review-requested(); }
         }
+    }
 
-        KitFieldRow {
-            theme: KitThemeContext.current;
-            modal-layer: 0;
-            orientation: Theme.settings-field-orientation(self.width);
-            padding: KitMetrics.field-gap(self.theme);
-            show-divider: true;
-            focus-requested => { screenshot-switch.take-focus(); }
-            private property <bool> control-focused: screenshot-switch.has-focus;
-            changed control-focused => {
-                if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
-            }
-            label: @tr("Masquer l'overlay dans les captures d'écran");
-            description: @tr("Quand l'overlay est affiché, l'exclure des captures d'écran, des enregistrements et des partages d'écran.");
-
-            screenshot-switch := KitSwitch {
-                theme: KitThemeContext.current;
-                modal-layer: 0;
-                label-position: ChoiceLabelPosition.start;
-                padding-inline: 0px;
-                ownership: Ownership.controlled;
-                control-width: ControlWidth.intrinsic;
-                accessible-label: @tr("Masquer l'overlay dans les captures d'écran");
-                access: !root.pill-hidden ? FieldAccess.editable : FieldAccess.disabled;
-                checked: root.pill-hidden-in-captures;
-                toggled(new) => { root.pill-hidden-in-captures-changed(new); }
-            }
-        }
-
-        if root.native-tap-warning-visible: Rectangle {
-            background: Theme.warning.with-alpha(0.1);
-
-            HorizontalLayout {
-                padding: 12px;
-                spacing: 10px;
-                alignment: space-between;
-
-                Text {
-                    text: @tr("Votre raccourci sur une seule touche ne fonctionnera pas tant que l'Accessibilité n'est pas accordée.");
-                    color: Theme.warning;
-                    font-size: 12px;
-                    wrap: word-wrap;
-                    horizontal-stretch: 1;
-                    vertical-alignment: center;
-                }
-
-                KitButton {
-                    text: @tr("Vérifier les permissions");
-                    intent: ButtonIntent.quiet;
-                    activated => { root.permissions-review-requested(); }
-                }
-            }
-        }
-
-        if root.shortcut-error != "": Rectangle {
-            background: Theme.danger.with-alpha(0.1);
-
-            VerticalLayout {
-                padding: 12px;
-
-                Text {
-                    text: root.shortcut-error;
-                    color: Theme.danger;
-                    font-size: 12px;
-                    wrap: word-wrap;
-                }
-            }
-        }
+    if root.recording-field == ShortcutField.none && root.shortcut-message != "": KitAlert {
+        theme: root.theme;
+        severity: AlertSeverity.error;
+        message: root.shortcut-message;
     }
 }

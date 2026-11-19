@@ -2546,3 +2546,31 @@ msgstr ""
 msgctxt "UpdateAvailableDialog"
 msgid "Ouvrir la page de release"
 msgstr ""
+
+#: app/souffle-slint/ui/components/settings/interface_section.slint:18
+msgctxt "ShortcutMessages"
+msgid ""
+"Le raccourci doit inclure une touche de modification (Cmd, Ctrl, Maj, Alt) "
+"ou être une touche de fonction."
+msgstr ""
+
+#: app/souffle-slint/ui/components/settings/interface_section.slint:21
+msgctxt "ShortcutMessages"
+msgid "Cette touche ne peut pas servir de raccourci."
+msgstr ""
+
+#: app/souffle-slint/ui/components/settings/interface_section.slint:24
+msgctxt "ShortcutMessages"
+msgid "Les raccourcis ne sont pas encore chargés. Réessayez dans un instant."
+msgstr ""
+
+#: app/souffle-slint/ui/components/settings/interface_section.slint:27
+msgctxt "ShortcutMessages"
+msgid "Les raccourcis de dictée doivent être différents."
+msgstr ""
+
+#: app/souffle-slint/ui/components/settings/interface_section.slint:77
+msgctxt "ShortcutRecorderButton"
+msgid "Effacer le raccourci « {} »"
+msgstr ""
+

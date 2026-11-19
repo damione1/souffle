@@ -1,7 +1,7 @@
 import { AutostartSection } from "components/settings/autostart_section.slint";
 import { PermissionsSection } from "components/settings/permissions_section.slint";
 import { DiagnosticsSection } from "components/settings/diagnostics_section.slint";
-import { InterfaceSection } from "components/settings/interface_section.slint";
+import { InterfaceSection, ShortcutRejection } from "components/settings/interface_section.slint";
 import { FeedbackSoundsSection } from "components/settings/feedback_sounds_section.slint";
 import { CalendarSection, CalendarRow } from "components/settings/calendar_section.slint";
 import { MicrophoneSection, MicrophoneRow } from "components/settings/microphone_section.slint";
@@ -42,17 +42,22 @@ export component SettingsView inherits KitAppShell {
     in property <int> paste-delay-ms;
     in property <int> paste-delay-min;
     in property <int> paste-delay-max;
+    in property <int> paste-delay-step;
     in property <bool> pill-hidden;
     in property <bool> pill-hidden-in-captures;
     in property <bool> feedback-sounds-enabled;
     in property <int> feedback-sounds-volume;
     in property <int> feedback-sounds-volume-min;
     in property <int> feedback-sounds-volume-max;
+    in property <int> feedback-sounds-volume-step;
+    in property <bool> capture-eligible;
+    in property <int> shortcut-generation;
     in property <string> toggle-shortcut-label;
     in property <string> ptt-shortcut-label;
     in property <bool> native-tap-warning-visible;
     in property <ShortcutField> recording-field: ShortcutField.none;
     in-out property <string> shortcut-error: "";
+    in property <ShortcutRejection> shortcut-rejection;
     in property <string> save-error;
     // True when `save-error` covers a `SettingsSaveOutcome::Unavailable`
     // (the durable state could not be re-read after saving), so the wrapper
@@ -208,6 +213,8 @@ export component SettingsView inherits KitAppShell {
     callback feedback-sounds-enabled-changed(bool);
     callback feedback-sounds-volume-changed(int);
     callback shortcut-record-requested(ShortcutField);
+    pure callback shortcut-key-allowed(ShortcutField, string, bool, bool, bool, bool) -> bool;
+    callback shortcut-rejected(ShortcutField, string, bool, bool, bool, bool);
     callback shortcut-captured(ShortcutField, string, bool, bool, bool, bool);
     callback shortcut-released(ShortcutField, string, bool, bool, bool, bool);
     callback shortcut-cleared(ShortcutField);
@@ -508,17 +515,21 @@ export component SettingsView inherits KitAppShell {
                     label: SettingsOptions.tab-label(SettingsTab.interface);
 
                         if interface-page.mounted: InterfaceSection {
-                            theme: root.app-theme;
+                            app-theme: root.app-theme;
                             locale: root.locale;
                             auto-paste: root.auto-paste;
                             paste-method: root.paste-method;
                             paste-delay-ms: root.paste-delay-ms;
                             paste-delay-min: root.paste-delay-min;
                             paste-delay-max: root.paste-delay-max;
+                            paste-delay-step: root.paste-delay-step;
+                            capture-eligible: root.capture-eligible && interface-page.active;
+                            shortcut-generation: root.shortcut-generation;
                             toggle-shortcut-label: root.toggle-shortcut-label;
                             ptt-shortcut-label: root.ptt-shortcut-label;
                             recording-field: root.recording-field;
                             shortcut-error: root.shortcut-error;
+                            shortcut-rejection: root.shortcut-rejection;
                             native-tap-warning-visible: root.native-tap-warning-visible;
                             pill-hidden: root.pill-hidden;
                             pill-hidden-in-captures: root.pill-hidden-in-captures;
@@ -530,6 +541,8 @@ export component SettingsView inherits KitAppShell {
                             pill-hidden-changed(value) => { root.pill-hidden-changed(value); }
                             pill-hidden-in-captures-changed(value) => { root.pill-hidden-in-captures-changed(value); }
                             shortcut-record-requested(field) => { root.shortcut-record-requested(field); }
+                            shortcut-key-allowed(field, text, ctrl, shift, alt, meta) => { return root.shortcut-key-allowed(field, text, ctrl, shift, alt, meta); }
+                            shortcut-rejected(field, text, ctrl, shift, alt, meta) => { root.shortcut-rejected(field, text, ctrl, shift, alt, meta); }
                             shortcut-captured(field, text, ctrl, shift, alt, meta) => { root.shortcut-captured(field, text, ctrl, shift, alt, meta); }
                             shortcut-released(field, text, ctrl, shift, alt, meta) => { root.shortcut-released(field, text, ctrl, shift, alt, meta); }
                             shortcut-cleared(field) => { root.shortcut-cleared(field); }
@@ -542,6 +555,7 @@ export component SettingsView inherits KitAppShell {
                             volume: root.feedback-sounds-volume;
                             volume-min: root.feedback-sounds-volume-min;
                             volume-max: root.feedback-sounds-volume-max;
+                            volume-step: root.feedback-sounds-volume-step;
                             enabled-changed(value) => { root.feedback-sounds-enabled-changed(value); }
                             volume-changed(value) => { root.feedback-sounds-volume-changed(value); }
                         }

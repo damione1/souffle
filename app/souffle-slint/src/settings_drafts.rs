@@ -516,7 +516,8 @@ impl SettingsDraftController {
             QuitFlushDecision::AlreadySaving => return,
         };
         if let Some(window) = self.window.upgrade() {
-            window.invoke_settings_shortcut_cancelled();
+            window.invoke_cancel_settings_capture();
+            window.invoke_cancel_onboarding_capture();
             if slint_kit::hide_window(&window).is_ok() {
                 crate::set_main_window_visible(false);
             }
@@ -740,9 +741,14 @@ mod tests {
             let fields = window.global::<slint_kit::ui::KitFieldService>();
             let ticket = fields.invoke_begin_shortcut_session();
             assert!(ticket > 0);
+            let generation = window.get_shortcut_generation();
             controller.request_quit();
             assert!(!window.window().is_visible());
             assert_eq!(fields.get_shortcut_session(), 0);
+            assert!(
+                window.get_shortcut_generation() > generation,
+                "the capture identity moves on before the hide"
+            );
             assert!(!quit_called.get(), "quit must wait behind the blocked save");
             release.send(()).unwrap();
             drain_until_idle(&io);

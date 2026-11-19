@@ -3028,3 +3028,33 @@ msgstr "Apple Intelligence n'est pas disponible sur cet appareil."
 msgctxt "IntelligenceSection"
 msgid "Aucun modèle Ollama compatible n'est installé."
 msgstr "Aucun modèle Ollama compatible n'est installé."
+
+#: app/souffle-slint/ui/components/settings/interface_section.slint:18
+msgctxt "ShortcutMessages"
+msgid ""
+"Le raccourci doit inclure une touche de modification (Cmd, Ctrl, Maj, Alt) "
+"ou être une touche de fonction."
+msgstr ""
+"Le raccourci doit inclure une touche de modification (Cmd, Ctrl, Maj, Alt) "
+"ou être une touche de fonction."
+
+#: app/souffle-slint/ui/components/settings/interface_section.slint:21
+msgctxt "ShortcutMessages"
+msgid "Cette touche ne peut pas servir de raccourci."
+msgstr "Cette touche ne peut pas servir de raccourci."
+
+#: app/souffle-slint/ui/components/settings/interface_section.slint:24
+msgctxt "ShortcutMessages"
+msgid "Les raccourcis ne sont pas encore chargés. Réessayez dans un instant."
+msgstr "Les raccourcis ne sont pas encore chargés. Réessayez dans un instant."
+
+#: app/souffle-slint/ui/components/settings/interface_section.slint:27
+msgctxt "ShortcutMessages"
+msgid "Les raccourcis de dictée doivent être différents."
+msgstr "Les raccourcis de dictée doivent être différents."
+
+#: app/souffle-slint/ui/components/settings/interface_section.slint:77
+msgctxt "ShortcutRecorderButton"
+msgid "Effacer le raccourci « {} »"
+msgstr "Effacer le raccourci « {} »"
+

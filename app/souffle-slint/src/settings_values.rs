@@ -397,17 +397,19 @@ pub(crate) fn wire(window: &MainWindow, controller: Rc<SettingsValueController>)
             s.paste_method = settings_ui::paste_method_from_slint(value)
         });
     });
+    let options = SettingsOptions::current();
+    let delay_min = options.paste_delay_ms_min as i32;
+    let delay_max = options.paste_delay_ms_max as i32;
     let c = controller.clone();
     window.on_settings_paste_delay_changed(move |value| {
         crate::settings_instrumentation::handler(
             crate::settings_instrumentation::SettingsScenario::Number,
         );
         c.apply(SettingsSaveLane::General, move |s| {
-            s.paste_delay_ms = value.max(0) as u64
+            s.paste_delay_ms = value.clamp(delay_min, delay_max) as u64
         });
     });
     let c = controller.clone();
-    let options = SettingsOptions::current();
     let volume_min = options.feedback_sounds_volume_min as i32;
     let volume_max = options.feedback_sounds_volume_max as i32;
     window.on_settings_feedback_sounds_volume_changed(move |value| {
@@ -743,6 +745,35 @@ mod tests {
         );
         assert!(dark);
         assert_eq!(resolutions.get(), 1);
+    }
+
+    #[test]
+    fn paste_delay_callback_clamps_to_backend_options_and_keeps_intermediate_values() {
+        let harness = DatabaseHarness::new(AppSettings::default());
+        let options = SettingsOptions::current();
+        let between = options.paste_delay_ms_min as i32 + options.paste_delay_ms_step as i32 / 2;
+
+        harness.window.invoke_settings_paste_delay_changed(-40);
+        harness.wait_for_saves(1);
+        assert_eq!(
+            AppSettings::load(&harness.db).unwrap().paste_delay_ms,
+            options.paste_delay_ms_min
+        );
+
+        harness.window.invoke_settings_paste_delay_changed(i32::MAX);
+        harness.wait_for_saves(2);
+        assert_eq!(
+            AppSettings::load(&harness.db).unwrap().paste_delay_ms,
+            options.paste_delay_ms_max
+        );
+
+        harness.window.invoke_settings_paste_delay_changed(between);
+        harness.wait_for_saves(3);
+        assert_eq!(
+            AppSettings::load(&harness.db).unwrap().paste_delay_ms,
+            between as u64,
+            "a historical value between two steps is not rounded by the host"
+        );
     }
 
     #[test]

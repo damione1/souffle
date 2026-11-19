@@ -7,6 +7,8 @@ slint::include_modules!();
 
 mod audio_player;
 mod audio_ui;
+mod calendar_selection;
+mod calendar_ui;
 mod data_ui;
 mod edit_learning;
 mod ia_ui;
@@ -984,61 +986,6 @@ fn spawn_settings_load_stage<T: Send + 'static>(
                 }
             }
             Err(error) => eprintln!("Failed to load {label}: {error}"),
-        }
-    })
-    .expect("slint event loop not running");
-}
-
-/// Populates the calendar picker without prompting - mirrors
-/// `loadCalendars()`'s own guard (only queries EventKit when the
-/// integration is already on, which implies access was granted before).
-fn load_calendars_if_enabled(
-    window: &MainWindow,
-    settings_state: &SettingsCache,
-    settings_io: Rc<settings_io::SettingsIoCoordinator>,
-) {
-    let Some(token) = settings_io.current_load_token() else {
-        return;
-    };
-    let (enabled, selected_ids) = {
-        let guard = settings_state.borrow();
-        match guard.as_ref() {
-            Some(settings) => (
-                settings.calendar_integration_enabled,
-                settings.calendar_selected_ids.clone(),
-            ),
-            None => return,
-        }
-    };
-    if !enabled {
-        settings_ui::populate_calendars(
-            window,
-            &[],
-            &[],
-            souffle_lib::calendar::authorization_state(),
-        );
-        return;
-    }
-    let weak = window.as_weak();
-    let worker = souffle_lib::async_runtime::spawn_blocking(souffle_lib::calendar::list_calendars);
-    slint::spawn_local(async move {
-        let result = worker.await;
-        if !settings_io.accepts_load(token) {
-            return;
-        }
-        let Some(window) = weak.upgrade() else {
-            return;
-        };
-        match result {
-            Ok(Ok(calendars)) => settings_ui::populate_calendars(
-                &window,
-                &calendars,
-                &selected_ids,
-                PermState::Granted,
-            ),
-            Ok(Err(_)) | Err(_) => {
-                settings_ui::populate_calendars(&window, &[], &selected_ids, PermState::Denied)
-            }
         }
     })
     .expect("slint event loop not running");
@@ -2660,7 +2607,7 @@ struct OnboardingState {
     model_options: Vec<model_ui::FlatModelOption>,
     selected_model_index: Option<usize>,
     toggle_shortcut: String,
-    pending_modifier: Option<String>,
+    shortcuts: Option<ShortcutSettings>,
 }
 
 fn project_startup_settings(
@@ -2741,12 +2688,22 @@ fn initialize_onboarding(
             && option.model_id == startup.catalog.selected_model_id
     });
     guard.toggle_shortcut = startup.shortcuts.toggle.clone();
+    guard.shortcuts = Some(startup.shortcuts.clone());
     drop(guard);
 
     window.set_onboarding_open(true);
     show_onboarding_step(window, handle, ob, permissions);
     permissions.sync_activity();
     true
+}
+
+/// Leaving a step expires the shortcut capture before the route changes, so
+/// a round trip inside one event cannot bring the old ticket back.
+fn set_onboarding_step_departing(window: &MainWindow, step: OnboardingStep) {
+    if window.get_onboarding_step() != step {
+        window.invoke_cancel_onboarding_capture();
+    }
+    window.set_onboarding_step(step);
 }
 
 /// Renders whatever step `ob.step_index` currently points at - shared by
@@ -2772,7 +2729,7 @@ fn show_onboarding_step(
         };
         (step, guard.step_index as i32, guard.steps.len() as i32)
     };
-    window.set_onboarding_step(step);
+    set_onboarding_step_departing(window, step);
     window.set_onboarding_step_index(step_index);
     window.set_onboarding_step_count(step_count);
     window.set_onboarding_busy(false);
@@ -2967,81 +2924,7 @@ fn wire_onboarding_callbacks(
         }
     });
 
-    let weak = window.as_weak();
-    let handle = tauri_handle.clone();
-    let ob_for_shortcut_record = ob.clone();
-    window.on_onboarding_shortcut_record_requested(move || {
-        let _ = &handle;
-        let _ = &ob_for_shortcut_record;
-        if let Some(window) = weak.upgrade() {
-            window.set_onboarding_shortcut_recording(true);
-            window.set_onboarding_shortcut_error("".into());
-        }
-    });
-
-    let weak = window.as_weak();
-    let handle = tauri_handle.clone();
-    let ob_for_capture = ob.clone();
-    window.on_onboarding_shortcut_captured(move |text, ctrl, shift, alt, meta| {
-        let Some(window) = weak.upgrade() else {
-            return;
-        };
-        let modifiers = shortcut_capture::Modifiers { control: ctrl, shift, alt, meta };
-        if let Some(name) = shortcut_capture::modifier_only_shortcut(&text) {
-            ob_for_capture.borrow_mut().pending_modifier = Some(name.to_string());
-            return;
-        }
-        ob_for_capture.borrow_mut().pending_modifier = None;
-        if shortcut_capture::missing_modifier(&text, modifiers) {
-            window.set_onboarding_shortcut_error(
-                "Le raccourci doit inclure une touche de modification (Cmd, Ctrl, Maj, Alt) ou être une touche de fonction.".into(),
-            );
-            return;
-        }
-        let Some(value) = shortcut_capture::format_combo(&text, modifiers) else {
-            return;
-        };
-        apply_onboarding_shortcut(&handle, &window, &ob_for_capture, value);
-    });
-
-    let weak = window.as_weak();
-    let handle = tauri_handle.clone();
-    let ob_for_release = ob.clone();
-    window.on_onboarding_shortcut_released(move |text, _ctrl, _shift, _alt, _meta| {
-        let Some(window) = weak.upgrade() else {
-            return;
-        };
-        let Some(name) = shortcut_capture::modifier_only_shortcut(&text) else {
-            return;
-        };
-        let mut pending = ob_for_release.borrow_mut();
-        if pending.pending_modifier.as_deref() != Some(name) {
-            return;
-        }
-        pending.pending_modifier = None;
-        drop(pending);
-        apply_onboarding_shortcut(&handle, &window, &ob_for_release, name.to_string());
-    });
-
-    let weak = window.as_weak();
-    let ob_for_clear = ob.clone();
-    let handle = tauri_handle.clone();
-    window.on_onboarding_shortcut_cleared(move || {
-        let Some(window) = weak.upgrade() else {
-            return;
-        };
-        apply_onboarding_shortcut(&handle, &window, &ob_for_clear, String::new());
-    });
-
-    let weak = window.as_weak();
-    let ob_for_cancel = ob.clone();
-    window.on_onboarding_shortcut_cancelled(move || {
-        ob_for_cancel.borrow_mut().pending_modifier = None;
-        if let Some(window) = weak.upgrade() {
-            window.set_onboarding_shortcut_recording(false);
-            window.set_onboarding_shortcut_error("".into());
-        }
-    });
+    wire_onboarding_shortcut_capture(window, &ob, Rc::new(ShortcutBackend::live(&tauri_handle)));
 
     let permissions_for_accessibility_review = permissions.clone();
     window.on_onboarding_review_accessibility_requested(move || {
@@ -3203,6 +3086,7 @@ fn wire_onboarding_callbacks(
             }
             OnboardingStep::Shortcut => {
                 let recovery_only = ob_for_continue.borrow().recovery_only;
+                window.invoke_cancel_onboarding_capture();
                 window.set_onboarding_busy(true);
                 window.set_onboarding_continue_enabled(false);
                 let completion_weak = weak.clone();
@@ -3266,30 +3150,6 @@ fn advance_onboarding_step(
     }
     show_onboarding_step(window, handle, ob, permissions);
     permissions.sync_activity();
-}
-
-fn apply_onboarding_shortcut(
-    handle: &AppHandle,
-    window: &MainWindow,
-    ob: &Rc<RefCell<OnboardingState>>,
-    value: String,
-) {
-    window.set_onboarding_shortcut_recording(false);
-    ob.borrow_mut().toggle_shortcut = value.clone();
-    let state = Arc::clone(handle);
-    let mut shortcuts = souffle_lib::commands::get_shortcuts(state).unwrap_or_default();
-    shortcuts.toggle = value;
-    let state = Arc::clone(handle);
-    match souffle_lib::commands::save_shortcuts(state, shortcuts) {
-        Ok(()) => {
-            window.set_onboarding_shortcut_error("".into());
-            let guard = ob.borrow();
-            window.set_onboarding_toggle_shortcut_label(
-                format_shortcut_label(&guard.toggle_shortcut).into(),
-            );
-        }
-        Err(e) => window.set_onboarding_shortcut_error(e.into()),
-    }
 }
 
 /// Onboarding-scoped mirror of `start_model_transition` - same commands,
@@ -4588,11 +4448,6 @@ fn wire_callbacks(
     // Not part of `AppSettings` (see `get_shortcuts`/`save_shortcuts`), so it
     // gets its own cache next to `settings_state` rather than folding into it.
     let shortcuts_state: Rc<RefCell<Option<ShortcutSettings>>> = Rc::new(RefCell::new(None));
-    // The modifier text (e.g. "MetaLeft") of a bare modifier key press still
-    // waiting to see whether it is released alone (-> commit) or followed by
-    // a real key (-> that combo wins instead) - mirrors `modifierDownEvent`
-    // in controller.svelte.ts's `handleKeyDown`/`handleKeyUp`.
-    let pending_modifier: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(None));
     // Cached so device-picker/microphone-list callbacks (move/hide/remove,
     // label->uid resolution) don't each re-query CoreAudio.
     let audio_devices_state: Rc<RefCell<Vec<AudioInputDevice>>> = Rc::new(RefCell::new(Vec::new()));
@@ -4629,6 +4484,21 @@ fn wire_callbacks(
     // SnippetsSettingsSection.svelte (local UI state, not persisted).
     let snippet_editing: Rc<RefCell<Option<i64>>> = Rc::new(RefCell::new(None));
 
+    let calendar_host = {
+        let cleared = upcoming_cache.clone();
+        let refreshed = upcoming_cache.clone();
+        let handle = tauri_handle.clone();
+        calendar_ui::CalendarHost::new(
+            settings_io.clone(),
+            settings_state.clone(),
+            calendar_ui::CalendarBackend::live(
+                move |window| apply_upcoming(window, &[], &cleared),
+                move |window| refresh_upcoming(window, &handle, refreshed.clone()),
+            ),
+        )
+    };
+    calendar_ui::wire(window, &calendar_host);
+    let calendar_host_for_open = calendar_host.clone();
     let weak = window.as_weak();
     let handle = tauri_handle.clone();
     let settings_state_for_open = settings_state.clone();
@@ -4679,6 +4549,7 @@ fn wire_callbacks(
         let core_handle = handle.clone();
         let core_io = settings_io_for_open.clone();
         let core_state = settings_state_for_open.clone();
+        let core_calendars = calendar_host_for_open.clone();
         let core_devices = audio_devices_state_for_open.clone();
         let core_device_projection = audio_device_projection_for_open.clone();
         let core_summary_refresh = summary_refresh_state_for_open.clone();
@@ -4702,7 +4573,7 @@ fn wire_callbacks(
             data_ui::populate(&window, &settings);
             core_values.observe_loaded(&settings);
             core_device_projection.borrow_mut().observe_canonical();
-            load_calendars_if_enabled(&window, &core_state, finish_core_io.clone());
+            calendar_ui::reload(&window, &core_calendars);
             load_audio_devices(
                 &window,
                 &core_state,
@@ -4900,34 +4771,6 @@ fn wire_callbacks(
         });
     }
 
-    // Builds a candidate with `value` under `field` ("toggle" or "ptt"),
-    // saves the whole thing (this also re-registers the global shortcut and
-    // syncs the native modifier tap), then commits the cache/projection only
-    // on success. The recording UI state is cleared regardless of outcome.
-    fn apply_shortcut(
-        handle: &AppHandle,
-        shortcuts_state: &Rc<RefCell<Option<ShortcutSettings>>>,
-        window: &MainWindow,
-        field: ShortcutField,
-        value: String,
-    ) {
-        window.set_settings_recording_field(ShortcutField::None);
-        let state = Arc::clone(handle);
-        match persist_shortcut_candidate(shortcuts_state, field, value, move |candidate| {
-            souffle_lib::commands::save_shortcuts(state, candidate)
-        }) {
-            Ok(Some(shortcuts)) => {
-                window.set_settings_shortcut_error("".into());
-                let natives = souffle_lib::commands::get_native_shortcuts();
-                let tap_installed =
-                    souffle_lib::commands::get_modifier_tap_status().map(|s| s.installed);
-                settings_ui::populate_shortcuts(window, &shortcuts, &natives, tap_installed);
-            }
-            Ok(None) => {}
-            Err(e) => window.set_settings_shortcut_error(e.into()),
-        }
-    }
-
     let weak = window.as_weak();
     let settings_io_for_autostart = settings_io.clone();
     window.on_settings_autostart_changed(move |enabled| {
@@ -5019,175 +4862,6 @@ fn wire_callbacks(
         if let Some(window) = weak.upgrade() {
             window.set_settings_feedback_sounds_enabled(enabled);
         }
-    });
-
-    let weak = window.as_weak();
-    let handle = tauri_handle.clone();
-    let settings_io_for_calendar_enabled = settings_io.clone();
-    let settings_state_for_calendar_enabled = settings_state.clone();
-    let upcoming_for_enable = upcoming_cache.clone();
-    window.on_settings_calendar_enabled_changed(move |enabled| {
-        if !enabled {
-            let weak = weak.clone();
-            let upcoming = upcoming_for_enable.clone();
-            save_settings_field_then(
-                &settings_io_for_calendar_enabled,
-                souffle_lib::commands::SettingsSaveLane::General,
-                |settings| settings.calendar_integration_enabled = false,
-                move |order, outcome| {
-                    if !order.publishes_to_open_window() {
-                        return;
-                    }
-                    if let SettingsSaveOutcome::Observed { settings, .. } = outcome
-                        && let Some(window) = weak.upgrade()
-                    {
-                        let enabled = settings.calendar_integration_enabled;
-                        window.set_settings_calendar_enabled(enabled);
-                        if !enabled {
-                            settings_ui::populate_calendars(
-                                &window,
-                                &[],
-                                &[],
-                                souffle_lib::calendar::authorization_state(),
-                            );
-                            apply_upcoming(&window, &[], &upcoming);
-                        }
-                    }
-                },
-            );
-            return;
-        }
-        let handle = handle.clone();
-        let settings_io = settings_io_for_calendar_enabled.clone();
-        let settings_state = settings_state_for_calendar_enabled.clone();
-        let upcoming_for_enable = upcoming_for_enable.clone();
-        let weak = weak.clone();
-        // Not `souffle_lib::async_runtime::spawn`: this closes over an
-        // `Rc<RefCell<..>>`, which is not `Send`. `request_permission`
-        // blocks on the native TCC prompt internally (off its own thread via
-        // `spawn_blocking`), so awaiting it on Slint's single-threaded local
-        // executor is exactly what it's for.
-        slint::spawn_local(async move {
-            let permission =
-                souffle_lib::commands::request_permission(DomainPermissionKind::Calendar)
-                    .await
-                    .unwrap_or(PermState::Denied);
-            let Some(window) = weak.upgrade() else {
-                return;
-            };
-            if permission != PermState::Granted {
-                window.set_settings_calendar_enabled(false);
-                settings_ui::populate_calendars(&window, &[], &[], permission);
-                return;
-            }
-            let weak = window.as_weak();
-            let publication_io = settings_io.clone();
-            save_settings_field_then(
-                &settings_io,
-                souffle_lib::commands::SettingsSaveLane::General,
-                |settings| settings.calendar_integration_enabled = true,
-                move |order, outcome| {
-                    if !order.publishes_to_open_window() {
-                        return;
-                    }
-                    let SettingsSaveOutcome::Observed { settings, .. } = outcome else {
-                        return;
-                    };
-                    let Some(window) = weak.upgrade() else {
-                        return;
-                    };
-                    let enabled = settings.calendar_integration_enabled;
-                    window.set_settings_calendar_enabled(enabled);
-                    if !enabled {
-                        settings_ui::populate_calendars(
-                            &window,
-                            &[],
-                            &[],
-                            souffle_lib::calendar::authorization_state(),
-                        );
-                        apply_upcoming(&window, &[], &upcoming_for_enable);
-                        return;
-                    }
-                    load_calendars_if_enabled(&window, &settings_state, publication_io);
-                    refresh_upcoming(&window, &handle, upcoming_for_enable);
-                },
-            );
-        })
-        .expect("slint event loop not running");
-    });
-
-    let weak = window.as_weak();
-    let settings_io_for_calendar_autostart = settings_io.clone();
-    window.on_settings_calendar_autostart_enabled_changed(move |enabled| {
-        save_settings_field(
-            &settings_io_for_calendar_autostart,
-            souffle_lib::commands::SettingsSaveLane::General,
-            move |settings| settings.calendar_autostart_enabled = enabled,
-        );
-        if let Some(window) = weak.upgrade() {
-            window.set_settings_calendar_autostart_enabled(enabled);
-        }
-    });
-
-    let weak = window.as_weak();
-    let settings_io_for_calendar_toggle = settings_io.clone();
-    let settings_state_for_calendar_toggle = settings_state.clone();
-    window.on_settings_calendar_toggled(move |id| {
-        let Some(window) = weak.upgrade() else {
-            return;
-        };
-        let model = window.get_settings_calendars();
-        let all_ids: Vec<String> = (0..model.row_count())
-            .filter_map(|i| model.row_data(i))
-            .map(|row| row.id.to_string())
-            .collect();
-        let id_string = id.to_string();
-        let weak = weak.clone();
-        let settings_state = settings_state_for_calendar_toggle.clone();
-        let publication_io = settings_io_for_calendar_toggle.clone();
-        save_settings_field_then(
-            &settings_io_for_calendar_toggle,
-            souffle_lib::commands::SettingsSaveLane::General,
-            move |settings| {
-                let effective = if settings.calendar_selected_ids.is_empty() {
-                    all_ids.clone()
-                } else {
-                    settings.calendar_selected_ids.clone()
-                };
-                let mut next = effective.clone();
-                if let Some(pos) = next.iter().position(|existing| existing == &id_string) {
-                    next.remove(pos);
-                } else {
-                    next.push(id_string.clone());
-                }
-                if next.is_empty() {
-                    // Mirrors `toggleCalendarSelected()`: the last checked
-                    // calendar cannot be unchecked.
-                    return;
-                }
-                settings.calendar_selected_ids = if next.len() == all_ids.len() {
-                    Vec::new()
-                } else {
-                    next
-                };
-            },
-            move |order, outcome| {
-                if !order.publishes_to_open_window() {
-                    return;
-                }
-                let SettingsSaveOutcome::Observed { .. } = outcome else {
-                    return;
-                };
-                let Some(window) = weak.upgrade() else {
-                    return;
-                };
-                load_calendars_if_enabled(&window, &settings_state, publication_io);
-            },
-        );
-    });
-
-    window.on_settings_calendar_open_system_settings_requested(move || {
-        souffle_lib::commands::open_calendar_settings();
     });
 
     let weak = window.as_weak();
@@ -6569,93 +6243,11 @@ fn wire_callbacks(
         }
     });
 
-    let weak = window.as_weak();
-    window.on_settings_shortcut_record_requested(move |field| {
-        if let Some(window) = weak.upgrade() {
-            window.set_settings_recording_field(field);
-            window.set_settings_shortcut_error("".into());
-        }
-    });
-
-    let weak = window.as_weak();
-    let handle = tauri_handle.clone();
-    let shortcuts_state_for_capture = shortcuts_state.clone();
-    let pending_modifier_for_capture = pending_modifier.clone();
-    window.on_settings_shortcut_captured(move |field, text, ctrl, shift, alt, meta| {
-        let Some(window) = weak.upgrade() else {
-            return;
-        };
-        let modifiers = shortcut_capture::Modifiers {
-            control: ctrl,
-            shift,
-            alt,
-            meta,
-        };
-        if let Some(name) = shortcut_capture::modifier_only_shortcut(&text) {
-            // Wait for the matching key-released event (see
-            // `on_settings_shortcut_released`) instead of committing now -
-            // a real key pressed while this is still held wins instead.
-            *pending_modifier_for_capture.borrow_mut() = Some(name.to_string());
-            return;
-        }
-        *pending_modifier_for_capture.borrow_mut() = None;
-        if shortcut_capture::missing_modifier(&text, modifiers) {
-            window.set_settings_shortcut_error(
-                "Le raccourci doit inclure une touche de modification (Cmd, Ctrl, Maj, Alt) ou être une touche de fonction.".into(),
-            );
-            return;
-        }
-        let Some(value) = shortcut_capture::format_combo(&text, modifiers) else {
-            return;
-        };
-        apply_shortcut(&handle, &shortcuts_state_for_capture, &window, field, value);
-    });
-
-    let weak = window.as_weak();
-    let handle = tauri_handle.clone();
-    let shortcuts_state_for_release = shortcuts_state.clone();
-    let pending_modifier_for_release = pending_modifier.clone();
-    window.on_settings_shortcut_released(move |field, text, _ctrl, _shift, _alt, _meta| {
-        let Some(window) = weak.upgrade() else {
-            return;
-        };
-        let Some(name) = shortcut_capture::modifier_only_shortcut(&text) else {
-            return;
-        };
-        let mut pending = pending_modifier_for_release.borrow_mut();
-        if pending.as_deref() != Some(name) {
-            return;
-        }
-        *pending = None;
-        drop(pending);
-        apply_shortcut(
-            &handle,
-            &shortcuts_state_for_release,
-            &window,
-            field,
-            name.to_string(),
-        );
-    });
-
-    let weak = window.as_weak();
-    let handle = tauri_handle.clone();
-    let shortcuts_state_for_clear = shortcuts_state.clone();
-    let pending_modifier_for_clear = pending_modifier.clone();
-    window.on_settings_shortcut_cleared(move |field| {
-        let Some(window) = weak.upgrade() else {
-            return;
-        };
-        *pending_modifier_for_clear.borrow_mut() = None;
-        apply_shortcut(
-            &handle,
-            &shortcuts_state_for_clear,
-            &window,
-            field,
-            String::new(),
-        );
-    });
-
-    wire_settings_capture_cancel(window, pending_modifier);
+    wire_settings_shortcut_capture(
+        window,
+        &shortcuts_state,
+        Rc::new(ShortcutBackend::live(&tauri_handle)),
+    );
 
     let weak = window.as_weak();
     let permissions_for_dialog = permissions.clone();
@@ -7200,6 +6792,10 @@ fn wire_window_activity(
     let weak = window.as_weak();
     activity.subscribe(move |visible| {
         if let Some(window) = weak.upgrade() {
+            if !visible {
+                window.invoke_cancel_settings_capture();
+                window.invoke_cancel_onboarding_capture();
+            }
             window.set_window_visible(visible);
         }
     });
@@ -7237,16 +6833,295 @@ fn wire_window_activity(
     WINDOW_ACTIVITY.with(|slot| *slot.borrow_mut() = Some(Rc::clone(activity)));
 }
 
-fn wire_settings_capture_cancel(
+/// The OS-facing effects of publishing a shortcut. Production talks to the
+/// backend commands; tests substitute a recorder.
+struct ShortcutBackend {
+    load: Box<dyn Fn() -> ShortcutSettings>,
+    save: Box<dyn Fn(ShortcutSettings) -> Result<(), String>>,
+    project: Box<ProjectShortcuts>,
+}
+
+type ProjectShortcuts = dyn Fn(&MainWindow, &ShortcutSettings);
+
+impl ShortcutBackend {
+    fn live(handle: &AppHandle) -> Self {
+        let load_handle = Arc::clone(handle);
+        let save_handle = Arc::clone(handle);
+        Self {
+            load: Box::new(move || {
+                souffle_lib::commands::get_shortcuts(Arc::clone(&load_handle)).unwrap_or_default()
+            }),
+            save: Box::new(move |candidate| {
+                souffle_lib::commands::save_shortcuts(Arc::clone(&save_handle), candidate)
+            }),
+            project: Box::new(|window, shortcuts| {
+                let natives = souffle_lib::commands::get_native_shortcuts();
+                let tap_installed =
+                    souffle_lib::commands::get_modifier_tap_status().map(|s| s.installed);
+                settings_ui::populate_shortcuts(window, shortcuts, &natives, tap_installed);
+            }),
+        }
+    }
+}
+
+fn rejection_to_slint(reason: Option<shortcut_capture::Rejection>) -> ShortcutRejection {
+    use shortcut_capture::Rejection;
+    match reason {
+        None => ShortcutRejection::None,
+        Some(Rejection::MissingModifier) => ShortcutRejection::MissingModifier,
+        Some(Rejection::Unmappable) => ShortcutRejection::Unmappable,
+        Some(Rejection::Unavailable) => ShortcutRejection::Unavailable,
+        Some(Rejection::Conflict) => ShortcutRejection::Conflict,
+    }
+}
+
+fn clear_settings_shortcut_error(window: &MainWindow) {
+    window.set_settings_shortcut_error("".into());
+    window.set_settings_shortcut_rejection(ShortcutRejection::None);
+}
+
+fn clear_onboarding_shortcut_error(window: &MainWindow) {
+    window.set_onboarding_shortcut_error("".into());
+    window.set_onboarding_shortcut_rejection(ShortcutRejection::None);
+}
+
+fn modifiers_of(ctrl: bool, shift: bool, alt: bool, meta: bool) -> shortcut_capture::Modifiers {
+    shortcut_capture::Modifiers {
+        control: ctrl,
+        shift,
+        alt,
+        meta,
+    }
+}
+
+fn settings_shortcut_decision(
+    shortcuts_state: &Rc<RefCell<Option<ShortcutSettings>>>,
+    field: ShortcutField,
+    text: &str,
+    modifiers: shortcut_capture::Modifiers,
+) -> Result<String, shortcut_capture::Rejection> {
+    let target = match field {
+        ShortcutField::Toggle => shortcut_capture::Target::Toggle,
+        ShortcutField::Ptt => shortcut_capture::Target::PushToTalk,
+        ShortcutField::None => return Err(shortcut_capture::Rejection::Unavailable),
+    };
+    shortcut_capture::decide(shortcuts_state.borrow().as_ref(), target, text, modifiers)
+}
+
+/// Builds a candidate with `value` under `field`, saves the whole pair (this
+/// also re-registers the global shortcut and syncs the native modifier tap),
+/// then commits the cache and projection only on success. The recording
+/// mirror is cleared regardless of the outcome.
+fn apply_settings_shortcut(
+    backend: &ShortcutBackend,
+    shortcuts_state: &Rc<RefCell<Option<ShortcutSettings>>>,
     window: &MainWindow,
-    pending_modifier: Rc<RefCell<Option<String>>>,
+    field: ShortcutField,
+    value: String,
+) {
+    window.set_settings_recording_field(ShortcutField::None);
+    match persist_shortcut_candidate(shortcuts_state, field, value, |candidate| {
+        (backend.save)(candidate)
+    }) {
+        Ok(Some(shortcuts)) => {
+            clear_settings_shortcut_error(window);
+            (backend.project)(window, &shortcuts);
+        }
+        Ok(None) => {}
+        Err(e) => {
+            window.set_settings_shortcut_rejection(ShortcutRejection::None);
+            window.set_settings_shortcut_error(e.into());
+        }
+    }
+}
+
+/// Wires the two Settings shortcut fields. Rust decides each proposal
+/// synchronously (`key-allowed`) before the kit consumes the ticket, and
+/// only an accepted proposal reaches `captured`/`released`/`cleared`.
+fn wire_settings_shortcut_capture(
+    window: &MainWindow,
+    shortcuts_state: &Rc<RefCell<Option<ShortcutSettings>>>,
+    backend: Rc<ShortcutBackend>,
 ) {
     let weak = window.as_weak();
+    window.on_settings_shortcut_record_requested(move |field| {
+        if let Some(window) = weak.upgrade() {
+            window.set_settings_recording_field(field);
+            clear_settings_shortcut_error(&window);
+        }
+    });
+
+    let state = shortcuts_state.clone();
+    window.on_settings_shortcut_key_allowed(move |field, text, ctrl, shift, alt, meta| {
+        settings_shortcut_decision(&state, field, &text, modifiers_of(ctrl, shift, alt, meta))
+            .is_ok()
+    });
+
+    let weak = window.as_weak();
+    let state = shortcuts_state.clone();
+    window.on_settings_shortcut_rejected(move |field, text, ctrl, shift, alt, meta| {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        let reason =
+            settings_shortcut_decision(&state, field, &text, modifiers_of(ctrl, shift, alt, meta))
+                .err();
+        window.set_settings_recording_field(field);
+        window.set_settings_shortcut_error("".into());
+        window.set_settings_shortcut_rejection(rejection_to_slint(reason));
+    });
+
+    for released in [false, true] {
+        let weak = window.as_weak();
+        let state = shortcuts_state.clone();
+        let backend = backend.clone();
+        let apply = move |field, text: slint::SharedString, ctrl, shift, alt, meta| {
+            let Some(window) = weak.upgrade() else {
+                return;
+            };
+            if let Ok(value) = settings_shortcut_decision(
+                &state,
+                field,
+                &text,
+                modifiers_of(ctrl, shift, alt, meta),
+            ) {
+                apply_settings_shortcut(&backend, &state, &window, field, value);
+            }
+        };
+        if released {
+            window.on_settings_shortcut_released(apply);
+        } else {
+            window.on_settings_shortcut_captured(apply);
+        }
+    }
+
+    let weak = window.as_weak();
+    let state = shortcuts_state.clone();
+    window.on_settings_shortcut_cleared(move |field| {
+        if let Some(window) = weak.upgrade() {
+            apply_settings_shortcut(&backend, &state, &window, field, String::new());
+        }
+    });
+
+    wire_settings_capture_cancel(window);
+}
+
+fn wire_settings_capture_cancel(window: &MainWindow) {
+    let weak = window.as_weak();
     window.on_settings_shortcut_cancelled(move || {
-        *pending_modifier.borrow_mut() = None;
         if let Some(window) = weak.upgrade() {
             window.set_settings_recording_field(ShortcutField::None);
-            window.set_settings_shortcut_error("".into());
+            clear_settings_shortcut_error(&window);
+        }
+    });
+}
+
+fn onboarding_shortcut_decision(
+    ob: &Rc<RefCell<OnboardingState>>,
+    text: &str,
+    modifiers: shortcut_capture::Modifiers,
+) -> Result<String, shortcut_capture::Rejection> {
+    shortcut_capture::decide(
+        ob.borrow().shortcuts.as_ref(),
+        shortcut_capture::Target::Toggle,
+        text,
+        modifiers,
+    )
+}
+
+fn apply_onboarding_shortcut(
+    backend: &ShortcutBackend,
+    window: &MainWindow,
+    ob: &Rc<RefCell<OnboardingState>>,
+    value: String,
+) {
+    window.set_onboarding_shortcut_recording(false);
+    let mut shortcuts = (backend.load)();
+    shortcuts.toggle = value.clone();
+    match (backend.save)(shortcuts.clone()) {
+        Ok(()) => {
+            clear_onboarding_shortcut_error(window);
+            let mut guard = ob.borrow_mut();
+            guard.toggle_shortcut = value;
+            guard.shortcuts = Some(shortcuts);
+            window.set_onboarding_toggle_shortcut_label(
+                format_shortcut_label(&guard.toggle_shortcut).into(),
+            );
+        }
+        Err(e) => {
+            window.set_onboarding_shortcut_rejection(ShortcutRejection::None);
+            window.set_onboarding_shortcut_error(e.into());
+        }
+    }
+}
+
+/// The wizard counterpart of [`wire_settings_shortcut_capture`], for the one
+/// toggle field of its shortcut step.
+fn wire_onboarding_shortcut_capture(
+    window: &MainWindow,
+    ob: &Rc<RefCell<OnboardingState>>,
+    backend: Rc<ShortcutBackend>,
+) {
+    let weak = window.as_weak();
+    window.on_onboarding_shortcut_record_requested(move || {
+        if let Some(window) = weak.upgrade() {
+            window.set_onboarding_shortcut_recording(true);
+            clear_onboarding_shortcut_error(&window);
+        }
+    });
+
+    let state = ob.clone();
+    window.on_onboarding_shortcut_key_allowed(move |text, ctrl, shift, alt, meta| {
+        onboarding_shortcut_decision(&state, &text, modifiers_of(ctrl, shift, alt, meta)).is_ok()
+    });
+
+    let weak = window.as_weak();
+    let state = ob.clone();
+    window.on_onboarding_shortcut_rejected(move |text, ctrl, shift, alt, meta| {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        let reason =
+            onboarding_shortcut_decision(&state, &text, modifiers_of(ctrl, shift, alt, meta)).err();
+        window.set_onboarding_shortcut_recording(true);
+        window.set_onboarding_shortcut_error("".into());
+        window.set_onboarding_shortcut_rejection(rejection_to_slint(reason));
+    });
+
+    for released in [false, true] {
+        let weak = window.as_weak();
+        let state = ob.clone();
+        let backend = backend.clone();
+        let apply = move |text: slint::SharedString, ctrl, shift, alt, meta| {
+            let Some(window) = weak.upgrade() else {
+                return;
+            };
+            if let Ok(value) =
+                onboarding_shortcut_decision(&state, &text, modifiers_of(ctrl, shift, alt, meta))
+            {
+                apply_onboarding_shortcut(&backend, &window, &state, value);
+            }
+        };
+        if released {
+            window.on_onboarding_shortcut_released(apply);
+        } else {
+            window.on_onboarding_shortcut_captured(apply);
+        }
+    }
+
+    let weak = window.as_weak();
+    let state = ob.clone();
+    window.on_onboarding_shortcut_cleared(move || {
+        if let Some(window) = weak.upgrade() {
+            apply_onboarding_shortcut(&backend, &window, &state, String::new());
+        }
+    });
+
+    let weak = window.as_weak();
+    window.on_onboarding_shortcut_cancelled(move || {
+        if let Some(window) = weak.upgrade() {
+            window.set_onboarding_shortcut_recording(false);
+            clear_onboarding_shortcut_error(&window);
         }
     });
 }
@@ -7259,6 +7134,7 @@ fn wire_main_window_close(window: &MainWindow, io_close: Rc<settings_io::Setting
             // SOU-284: release the open meeting's decoded audio and output.
             release_meeting_audio_on_hide(&w);
             w.invoke_cancel_settings_capture();
+            w.invoke_cancel_onboarding_capture();
         }
         // SOU-282: hidden, so the waveform tick and the permission poll stop.
         set_main_window_visible(false);
@@ -7370,6 +7246,9 @@ fn quit_after_finalizing_recording(handle: &AppHandle) {
         std::process::exit(0);
     }
 }
+
+#[cfg(test)]
+mod shortcut_ui_tests;
 
 #[cfg(test)]
 mod tests {
@@ -7667,10 +7546,9 @@ mod tests {
     }
 
     #[test]
-    fn closing_settings_cancels_the_pending_modifier_before_a_same_turn_reopen() {
+    fn closing_settings_cancels_the_capture_before_a_same_turn_reopen() {
         let window = test_window();
-        let modifier = Rc::new(RefCell::new(Some("Shift".to_owned())));
-        super::wire_settings_capture_cancel(&window, modifier.clone());
+        super::wire_settings_capture_cancel(&window);
         let weak = window.as_weak();
         window.on_settings_closed(move || {
             let window = weak.unwrap();
@@ -7689,7 +7567,6 @@ mod tests {
         let ticket = fields.invoke_begin_shortcut_session();
         window.invoke_close_settings();
         assert!(window.get_settings_open());
-        assert!(modifier.borrow().is_none());
         assert_ne!(ticket, fields.invoke_begin_shortcut_session());
     }
 

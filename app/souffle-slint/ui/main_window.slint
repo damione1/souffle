@@ -22,6 +22,7 @@ import { TranscriptBlock } from "components/transcript_section.slint";
 import { TranscriptWord } from "components/transcript_words.slint";
 import { StructuredActionItem } from "components/summary_section.slint";
 import { RecordingMode, LiveSystemAudio, MicStall, MeetingIdleBanner, WakeResumeNotice,SpeakerRole, TimelineFilter, TimelineKind, NotesSaveState, ModelPhase, TranscriptionPhase, UpcomingPhase, SettingsTab, SettingsInteraction, AppTheme, AppLocale, PasteMethod, MeetingLanguage, LogLevel, AudioRetention, AccessState, PermissionKind, ShortcutField, SummaryProvider, AppleIntelligenceUnavailableReason, OnboardingStep, UpdatePhase, InstallBlockReason, MeetingExportFormat } from "types.slint";
+export { ShortcutRejection }
 export { SettingsTab, SettingsInteraction, AppTheme, AppLocale, PasteMethod, MeetingLanguage, LogLevel, AudioRetention, AccessState, PermissionKind, ShortcutField, SummaryProvider, AppleIntelligenceUnavailableReason, SpeakerRole }
 import { Theme } from "theme.slint";
 // Re-exported (not just imported) so Slint's codegen generates a Rust
@@ -31,6 +32,7 @@ import { Theme } from "theme.slint";
 // to reach the global at all.
 export { Theme }
 import { AppHeader } from "components/app_header.slint";
+import { ShortcutRejection } from "components/settings/interface_section.slint";
 
 // Self-hosted variable fonts from src/app.css, instantiated to static
 // per-weight TTFs (scripts/... none checked in - see the ticket notes: Slint
@@ -221,17 +223,20 @@ export component MainWindow inherits Window {
     in property <int> settings-paste-delay-ms;
     in property <int> settings-paste-delay-min;
     in property <int> settings-paste-delay-max;
+    in property <int> settings-paste-delay-step;
     in property <bool> settings-pill-hidden;
     in property <bool> settings-pill-hidden-in-captures;
     in property <bool> settings-feedback-sounds-enabled;
     in property <int> settings-feedback-sounds-volume;
     in property <int> settings-feedback-sounds-volume-min;
     in property <int> settings-feedback-sounds-volume-max;
+    in property <int> settings-feedback-sounds-volume-step;
     in property <string> settings-toggle-shortcut-label;
     in property <string> settings-ptt-shortcut-label;
     in property <bool> settings-native-tap-warning-visible;
     in-out property <ShortcutField> settings-recording-field: ShortcutField.none;
     in-out property <string> settings-shortcut-error: "";
+    in-out property <ShortcutRejection> settings-shortcut-rejection: ShortcutRejection.none;
     in property <string> settings-save-error;
     in property <bool> settings-save-error-unavailable;
     in property <string> settings-draft-save-error;
@@ -394,9 +399,22 @@ export component MainWindow inherits Window {
     changed settings-permissions-dialog-open => { root.permissions-dialog-changed(); }
     callback settings-tab-changed();
     callback settings-closed();
+    // Identity of the shortcut targets on screen. Every departure of a route
+    // that can come back in the same event advances it with the session.
+    in-out property <int> shortcut-generation;
+    out property <bool> settings-shortcut-eligible: root.window-visible && root.settings-open
+        && !root.onboarding-open && root.settings-tab == SettingsTab.interface;
+    out property <bool> onboarding-shortcut-eligible: root.window-visible && root.onboarding-open
+        && root.onboarding-step == OnboardingStep.shortcut && !root.onboarding-busy;
     public function cancel-settings-capture() {
         KitFieldService.invalidate-shortcut-session();
+        root.shortcut-generation += 1;
         root.settings-shortcut-cancelled();
+    }
+    public function cancel-onboarding-capture() {
+        KitFieldService.invalidate-shortcut-session();
+        root.shortcut-generation += 1;
+        root.onboarding-shortcut-cancelled();
     }
     public function close-settings() {
         root.cancel-settings-capture();
@@ -420,6 +438,8 @@ export component MainWindow inherits Window {
     callback settings-feedback-sounds-enabled-changed(bool);
     callback settings-feedback-sounds-volume-changed(int);
     callback settings-shortcut-record-requested(ShortcutField);
+    pure callback settings-shortcut-key-allowed(ShortcutField, string, bool, bool, bool, bool) -> bool;
+    callback settings-shortcut-rejected(ShortcutField, string, bool, bool, bool, bool);
     callback settings-shortcut-captured(ShortcutField, string, bool, bool, bool, bool);
     callback settings-shortcut-released(ShortcutField, string, bool, bool, bool, bool);
     callback settings-shortcut-cleared(ShortcutField);
@@ -553,6 +573,7 @@ export component MainWindow inherits Window {
     in property <string> onboarding-toggle-shortcut-label;
     in-out property <bool> onboarding-shortcut-recording: false;
     in-out property <string> onboarding-shortcut-error: "";
+    in-out property <ShortcutRejection> onboarding-shortcut-rejection: ShortcutRejection.none;
     in property <bool> onboarding-accessibility-granted;
     in property <bool> onboarding-busy;
     in property <bool> onboarding-continue-enabled: true;
@@ -565,6 +586,8 @@ export component MainWindow inherits Window {
     callback onboarding-refresh-devices-requested();
     callback onboarding-model-picked(int);
     callback onboarding-shortcut-record-requested();
+    pure callback onboarding-shortcut-key-allowed(string, bool, bool, bool, bool) -> bool;
+    callback onboarding-shortcut-rejected(string, bool, bool, bool, bool);
     callback onboarding-shortcut-captured(string, bool, bool, bool, bool);
     callback onboarding-shortcut-released(string, bool, bool, bool, bool);
     callback onboarding-shortcut-cleared();
@@ -812,17 +835,22 @@ export component MainWindow inherits Window {
         paste-delay-ms: root.settings-paste-delay-ms;
         paste-delay-min: root.settings-paste-delay-min;
         paste-delay-max: root.settings-paste-delay-max;
+        paste-delay-step: root.settings-paste-delay-step;
         pill-hidden: root.settings-pill-hidden;
         pill-hidden-in-captures: root.settings-pill-hidden-in-captures;
         feedback-sounds-enabled: root.settings-feedback-sounds-enabled;
         feedback-sounds-volume: root.settings-feedback-sounds-volume;
         feedback-sounds-volume-min: root.settings-feedback-sounds-volume-min;
         feedback-sounds-volume-max: root.settings-feedback-sounds-volume-max;
+        feedback-sounds-volume-step: root.settings-feedback-sounds-volume-step;
+        capture-eligible: root.settings-shortcut-eligible;
+        shortcut-generation: root.shortcut-generation;
         toggle-shortcut-label: root.settings-toggle-shortcut-label;
         ptt-shortcut-label: root.settings-ptt-shortcut-label;
         native-tap-warning-visible: root.settings-native-tap-warning-visible;
         recording-field <=> root.settings-recording-field;
         shortcut-error <=> root.settings-shortcut-error;
+        shortcut-rejection: root.settings-shortcut-rejection;
         save-error: root.settings-save-error;
         save-error-unavailable: root.settings-save-error-unavailable;
         draft-save-error: root.settings-draft-save-error;
@@ -975,6 +1003,8 @@ export component MainWindow inherits Window {
         feedback-sounds-enabled-changed(value) => { root.settings-feedback-sounds-enabled-changed(value); }
         feedback-sounds-volume-changed(value) => { root.settings-feedback-sounds-volume-changed(value); }
         shortcut-record-requested(field) => { root.settings-shortcut-record-requested(field); }
+        shortcut-key-allowed(field, text, ctrl, shift, alt, meta) => { return root.settings-shortcut-key-allowed(field, text, ctrl, shift, alt, meta); }
+        shortcut-rejected(field, text, ctrl, shift, alt, meta) => { root.settings-shortcut-rejected(field, text, ctrl, shift, alt, meta); }
         shortcut-captured(field, text, ctrl, shift, alt, meta) => { root.settings-shortcut-captured(field, text, ctrl, shift, alt, meta); }
         shortcut-released(field, text, ctrl, shift, alt, meta) => { root.settings-shortcut-released(field, text, ctrl, shift, alt, meta); }
         shortcut-cleared(field) => { root.settings-shortcut-cleared(field); }
@@ -1070,6 +1100,9 @@ export component MainWindow inherits Window {
         toggle-shortcut-label: root.onboarding-toggle-shortcut-label;
         shortcut-recording: root.onboarding-shortcut-recording;
         shortcut-error: root.onboarding-shortcut-error;
+        shortcut-rejection: root.onboarding-shortcut-rejection;
+        capture-eligible: root.onboarding-shortcut-eligible;
+        shortcut-generation: root.shortcut-generation;
         accessibility-granted: root.onboarding-accessibility-granted;
         busy: root.onboarding-busy;
         continue-enabled: root.onboarding-continue-enabled;
@@ -1081,6 +1114,8 @@ export component MainWindow inherits Window {
         refresh-devices-requested => { root.onboarding-refresh-devices-requested(); }
         model-picked(value) => { root.onboarding-model-picked(value); }
         shortcut-record-requested => { root.onboarding-shortcut-record-requested(); }
+        shortcut-key-allowed(text, ctrl, shift, alt, meta) => { return root.onboarding-shortcut-key-allowed(text, ctrl, shift, alt, meta); }
+        shortcut-rejected(text, ctrl, shift, alt, meta) => { root.onboarding-shortcut-rejected(text, ctrl, shift, alt, meta); }
         shortcut-captured(text, ctrl, shift, alt, meta) => { root.onboarding-shortcut-captured(text, ctrl, shift, alt, meta); }
         shortcut-released(text, ctrl, shift, alt, meta) => { root.onboarding-shortcut-released(text, ctrl, shift, alt, meta); }
         shortcut-cleared => { root.onboarding-shortcut-cleared(); }

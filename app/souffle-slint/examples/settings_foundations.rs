@@ -14,6 +14,9 @@ mod settings_kit;
 #[path = "../src/audio_ui.rs"]
 mod audio_ui;
 #[allow(dead_code)]
+#[path = "../src/calendar_selection.rs"]
+mod calendar_selection;
+#[allow(dead_code)]
 #[path = "../src/ia_ui.rs"]
 mod ia_ui;
 #[allow(dead_code)]
@@ -21,6 +24,9 @@ mod ia_ui;
 mod microphone_list;
 #[path = "settings_foundations/settings_pages.rs"]
 mod settings_pages;
+#[allow(dead_code)]
+#[path = "../src/shortcut_capture.rs"]
+mod shortcut_capture;
 
 fn settle(w: &MainWindow) {
     for _ in 0..3 {

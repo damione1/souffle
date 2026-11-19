@@ -1,4 +1,9 @@
-import { ChoiceLabelPosition, ButtonIntent, CheckState, ControlWidth, KitButton, KitCheckbox, KitNumberStepper, KitSwitch, Ownership, KitFieldSet, KitThemeContext, KitThemes, KitFieldRow, KitMetrics } from "@kit";
+import {
+    AlertSeverity, ButtonIntent, CheckState, ChoiceLabelPosition, ControlWidth,
+    KitAlert, KitButton, KitCheckbox, KitFieldRow, KitFieldSet, KitMetrics,
+    KitNumberStepper, KitSection, KitStack, KitSwitch, KitText, KitThemeContext, KitThemes,
+    Ownership
+} from "@kit";
 import { Theme } from "../../theme.slint";
 import { AccessState } from "../../types.slint";
 
@@ -10,8 +15,54 @@ export struct CalendarRow {
     show-header: bool,
 }
 
-// Port of CalendarSettingsSection.svelte.
-export component CalendarSection inherits VerticalLayout {
+component CalendarChoice inherits KitStack {
+    in property <CalendarRow> calendar;
+    in property <int> modal-layer;
+    callback toggle-requested(string, bool);
+
+    gap: tight;
+    padding: KitThemes.focus-outset(root.theme.focus);
+    accessible-role: list-item;
+    accessible-label: root.calendar.title;
+
+    if root.calendar.show-header && root.calendar.source-title != "": KitText {
+        theme: root.theme;
+        role: caption;
+        font-weight: root.theme.typography.weight-semibold;
+        text: root.calendar.source-title;
+    }
+
+    KitCheckbox {
+        theme: root.theme;
+        modal-layer: root.modal-layer;
+        ownership: Ownership.controlled;
+        label: root.calendar.title;
+        accessible-description: root.calendar.source-title;
+        state: root.calendar.selected ? CheckState.checked : CheckState.unchecked;
+
+        private property <string> calendar-id: root.calendar.id;
+        private property <string> pressed-id;
+        private property <CheckState> pressed-state;
+        private property <bool> target-current;
+        activation-started => {
+            self.pressed-id = self.calendar-id;
+            self.pressed-state = self.state;
+            self.target-current = true;
+        }
+        // Keep a held Space disarmed even if a reused row changes back before key-up.
+        changed calendar-id => { if self.calendar-id != self.pressed-id { self.target-current = false; } }
+        changed state => { if self.state != self.pressed-state { self.target-current = false; } }
+        activation-allowed => {
+            return self.target-current && self.calendar-id == self.pressed-id && self.state == self.pressed-state;
+        }
+        toggled(_) => { root.toggle-requested(self.pressed-id, self.pressed-state == CheckState.checked); }
+        focus-observed(focused) => {
+            if focused { root.ensure-visible(KitThemes.scroll-behavior(root.theme)); }
+        }
+    }
+}
+
+export component CalendarSection inherits KitFieldSet {
     in property <bool> enabled;
     in property <AccessState> permission;
     in property <bool> autostart-enabled;
@@ -19,6 +70,7 @@ export component CalendarSection inherits VerticalLayout {
     in property <int> reminder-minutes-min;
     in property <int> reminder-minutes-max;
     in property <[CalendarRow]> calendars;
+    in property <int> modal-layer: 0;
 
     callback enabled-changed(bool);
     callback autostart-enabled-changed(bool);
@@ -26,166 +78,150 @@ export component CalendarSection inherits VerticalLayout {
     callback calendar-toggled(string);
     callback open-system-settings-requested();
 
-    spacing: 22px;
-    alignment: start;
+    theme: KitThemeContext.current;
+    legend: @tr("CALENDRIER");
+    private property <bool> show-settings: root.enabled && root.permission == AccessState.granted;
 
-    KitFieldSet {
-        theme: KitThemeContext.current;
-        legend: @tr("CALENDRIER");
+    integration-row := KitFieldRow {
+        theme: root.theme;
+        modal-layer: root.modal-layer;
+        orientation: Theme.settings-field-orientation(self.width);
+        padding: KitMetrics.field-gap(self.theme);
+        label: @tr("Intégration du calendrier");
+        description: @tr("Afficher les réunions du jour sur l'accueil et rappeler avant qu'elles commencent.");
+        focus-requested => { calendar-switch.take-focus(); }
 
-        KitFieldRow {
-            theme: KitThemeContext.current;
-            modal-layer: 0;
-            orientation: Theme.settings-field-orientation(self.width);
-            padding: KitMetrics.field-gap(self.theme);
-            focus-requested => { calendar-switch.take-focus(); }
-            private property <bool> control-focused: calendar-switch.has-focus;
-            changed control-focused => {
-                if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
-            }
-            show-divider: false;
-            label: @tr("Intégration du calendrier");
-            description: @tr("Afficher les réunions du jour sur l'accueil et rappeler avant qu'elles commencent.");
-
-            calendar-switch := KitSwitch {
-                theme: KitThemeContext.current;
-                modal-layer: 0;
-                label-position: ChoiceLabelPosition.start;
-                padding-inline: 0px;
-                ownership: Ownership.controlled;
-                control-width: ControlWidth.intrinsic;
-                accessible-label: @tr("Intégration du calendrier");
-                checked: root.enabled;
-                toggled(new) => { root.enabled-changed(new); }
+        calendar-switch := KitSwitch {
+            theme: root.theme;
+            modal-layer: integration-row.modal-layer;
+            label-position: ChoiceLabelPosition.start;
+            padding-inline: 0px;
+            ownership: Ownership.controlled;
+            control-width: ControlWidth.intrinsic;
+            accessible-name: integration-row.label;
+            accessible-description: integration-row.description;
+            checked: root.enabled;
+            toggled(new) => { root.enabled-changed(new); }
+            focus-observed(focused) => {
+                if focused { integration-row.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
             }
         }
+    }
 
-        if root.permission == AccessState.denied: Rectangle {
-            background: Theme.danger.with-alpha(0.1);
+    if root.permission == AccessState.denied: denied-alert := KitAlert {
+        theme: root.theme;
+        severity: AlertSeverity.error;
+        message: @tr("L'accès au calendrier a été refusé.");
 
-            HorizontalLayout {
-                padding: 12px;
-                spacing: 16px;
-                alignment: space-between;
-
-                Text {
-                    text: @tr("L'accès au calendrier a été refusé.");
-                    color: Theme.text-primary;
-                    font-size: 13.5px;
-                    wrap: word-wrap;
-                    vertical-alignment: center;
-                    horizontal-stretch: 1;
-                }
-
-                KitButton {
-                    text: @tr("Ouvrir les Réglages Système");
-                    intent: ButtonIntent.primary;
-                    activated => { root.open-system-settings-requested(); }
-                }
+        KitButton {
+            theme: root.theme;
+            modal-layer: root.modal-layer;
+            text: @tr("Ouvrir les Réglages Système");
+            text-wrap: word-wrap;
+            intent: ButtonIntent.primary;
+            activated => { root.open-system-settings-requested(); }
+            focus-observed(focused) => {
+                if focused { denied-alert.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
             }
         }
+    }
 
-        if root.enabled && root.permission == AccessState.granted: KitFieldRow {
-            theme: KitThemeContext.current;
-            modal-layer: 0;
-            orientation: Theme.settings-field-orientation(self.width);
-            padding: KitMetrics.field-gap(self.theme);
-            show-divider: true;
-            focus-requested => { reminder-switch.take-focus(); }
-            private property <bool> control-focused: reminder-switch.has-focus;
-            changed control-focused => {
-                if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
-            }
-            label: @tr("Proposer au début de la réunion");
-            description: @tr("Quand un événement commence et que l'audio système est actif, proposer de démarrer l'enregistrement.");
+    if root.show-settings: autostart-row := KitFieldRow {
+        theme: root.theme;
+        modal-layer: root.modal-layer;
+        orientation: Theme.settings-field-orientation(self.width);
+        padding: KitMetrics.field-gap(self.theme);
+        show-divider: true;
+        label: @tr("Proposer au début de la réunion");
+        description: @tr("Quand un événement commence et que l'audio système est actif, proposer de démarrer l'enregistrement.");
+        focus-requested => { reminder-switch.take-focus(); }
 
-            reminder-switch := KitSwitch {
-                theme: KitThemeContext.current;
-                modal-layer: 0;
-                label-position: ChoiceLabelPosition.start;
-                padding-inline: 0px;
-                ownership: Ownership.controlled;
-                control-width: ControlWidth.intrinsic;
-                accessible-label: @tr("Proposer au début de la réunion");
-                checked: root.autostart-enabled;
-                toggled(new) => { root.autostart-enabled-changed(new); }
-            }
-        }
-
-        if root.enabled && root.permission == AccessState.granted: KitFieldRow {
-            theme: KitThemeContext.current;
-            modal-layer: 0;
-            orientation: Theme.settings-field-orientation(self.width);
-            padding: KitMetrics.field-gap(self.theme);
-            show-divider: true;
-            focus-requested => { delay-stepper.take-focus(); }
-            private property <bool> control-focused: delay-stepper.has-focus;
-            changed control-focused => {
-                if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
-            }
-            label: @tr("Délai du rappel");
-            description: @tr("Minutes avant un événement pour proposer de démarrer une transcription.");
-
-            delay-stepper := KitNumberStepper {
-                theme: KitThemeContext.current;
-                modal-layer: 0;
-                width: 140px;
-                increment-label: @tr("Augmenter");
-                decrement-label: @tr("Diminuer");
-                accessible-name: @tr("Délai du rappel en minutes");
-                text: root.reminder-minutes;
-                min: root.reminder-minutes-min;
-                max: root.reminder-minutes-max;
-                step: 1;
-                committed(result) => { root.reminder-minutes-changed(result.value.text.to-float()); }
+        reminder-switch := KitSwitch {
+            theme: root.theme;
+            modal-layer: autostart-row.modal-layer;
+            label-position: ChoiceLabelPosition.start;
+            padding-inline: 0px;
+            ownership: Ownership.controlled;
+            control-width: ControlWidth.intrinsic;
+            accessible-name: autostart-row.label;
+            accessible-description: autostart-row.description;
+            checked: root.autostart-enabled;
+            toggled(new) => { root.autostart-enabled-changed(new); }
+            focus-observed(focused) => {
+                if focused { autostart-row.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
             }
         }
+    }
 
-        if root.enabled && root.permission == AccessState.granted && root.calendars.length > 0: VerticalLayout {
-            padding-top: 15px;
-            padding-bottom: 15px;
-            padding-left: Theme.settings-inset;
-            padding-right: Theme.settings-inset;
-            spacing: 8px;
-            alignment: start;
+    if root.show-settings: delay-row := KitFieldRow {
+        theme: root.theme;
+        modal-layer: root.modal-layer;
+        orientation: Theme.settings-field-orientation(self.width);
+        padding: KitMetrics.field-gap(self.theme);
+        show-divider: true;
+        label: @tr("Délai du rappel");
+        description: @tr("Minutes avant un événement pour proposer de démarrer une transcription.");
+        focus-requested => { delay-stepper.take-focus(); }
 
-            Text {
-                text: @tr("Calendriers");
-                font-size: 13.5px;
-                color: Theme.text-secondary;
+        delay-stepper := KitNumberStepper {
+            theme: root.theme;
+            modal-layer: delay-row.modal-layer;
+            preferred-width: Theme.settings-control-width * self.theme.text-scale;
+            max-width: self.preferred-width;
+            ownership: Ownership.controlled;
+            increment-label: @tr("Augmenter");
+            decrement-label: @tr("Diminuer");
+            accessible-name: @tr("Délai du rappel en minutes");
+            min: root.reminder-minutes-min;
+            max: root.reminder-minutes-max;
+
+            // Native edits own the draft. Rust publishes the preview and any rollback.
+            private property <string> projected-minutes: root.reminder-minutes;
+            function sync-projection() {
+                self.acknowledge({present: true, text: self.projected-minutes});
+                if self.text != self.projected-minutes { self.text = self.projected-minutes; }
             }
-            Text {
-                text: @tr("Tous les calendriers sont inclus ; décochez ceux à masquer.");
-                font-size: 12px;
-                color: Theme.text-muted;
-                wrap: word-wrap;
+            init => { self.sync-projection(); }
+            changed projected-minutes => { self.sync-projection(); }
+            committed(result) => {
+                // Clearing the original field submitted zero, which Rust clamped to its minimum.
+                root.reminder-minutes-changed(result.value.present
+                    ? result.value.text.to-float() : root.reminder-minutes-min);
+                self.sync-projection();
             }
+            focus-observed(focused) => {
+                if focused { delay-row.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
+            }
+        }
+    }
 
-            for row in root.calendars: VerticalLayout {
-                alignment: start;
-                spacing: 4px;
+    if root.show-settings && root.calendars.length > 0: calendars-section := KitSection {
+        theme: root.theme;
+        title: @tr("Calendriers");
+        description: @tr("Tous les calendriers sont inclus ; décochez ceux à masquer.");
+        accessible-role: groupbox;
+        accessible-label: self.title;
+        accessible-description: self.description;
+        padding: Theme.settings-inset;
+        gap: compact;
 
-                if row.show-header && row.source-title != "": VerticalLayout {
-                    padding-top: 10px;
-                    padding-bottom: 4px;
-                    Text {
-                        text: row.source-title;
-                        font-size: 10.5px;
-                        font-family: "Archivo Bold";
-                        letter-spacing: 1px;
-                        color: Theme.text-tertiary;
-                    }
-                }
-
-                HorizontalLayout {
-                    spacing: 8px;
-                    alignment: start;
-
-                    KitCheckbox {
-                        ownership: Ownership.controlled;
-                        label: row.title;
-                        state: row.selected ? CheckState.checked : CheckState.unchecked;
-                        toggled(_) => { root.calendar-toggled(row.id); }
+        // SettingsTabPage owns the viewport across both the settings and their calendar choices.
+        KitStack {
+            theme: root.theme;
+            gap: none;
+            accessible-role: list;
+            accessible-label: calendars-section.title;
+            for row[index] in root.calendars: CalendarChoice {
+                theme: root.theme;
+                modal-layer: root.modal-layer;
+                calendar: row;
+                accessible-item-index: index;
+                accessible-item-count: root.calendars.length;
+                toggle-requested(id, was-selected) => {
+                    // A replaced model may already differ from the delegate handling release.
+                    if root.show-settings && index < root.calendars.length
+                        && root.calendars[index].id == id && root.calendars[index].selected == was-selected {
+                        root.calendar-toggled(id);
                     }
                 }
             }
