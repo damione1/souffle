@@ -1,44 +1,38 @@
 import { Theme } from "../../theme.slint";
 import { ChoiceLabelPosition, ControlWidth, KitSwitch, Ownership, KitFieldSet, KitThemeContext, KitThemes, KitFieldRow, KitMetrics } from "@kit";
 
-// Port of AutostartSettingsSection.svelte.
-export component AutostartSection inherits VerticalLayout {
+export component AutostartSection inherits KitFieldSet {
     in-out property <bool> autostart-enabled;
 
     callback autostart-changed(bool);
 
-    spacing: 22px;
-    alignment: start;
+    theme: KitThemeContext.current;
+    legend: @tr("DÉMARRAGE");
 
-    KitFieldSet {
-        theme: KitThemeContext.current;
-        legend: @tr("DÉMARRAGE");
+    KitFieldRow {
+        theme: root.theme;
+        modal-layer: 0;
+        orientation: Theme.settings-field-orientation(self.width);
+        padding: KitMetrics.field-gap(self.theme);
+        focus-requested => { autostart-switch.take-focus(); }
+        private property <bool> control-focused: autostart-switch.has-focus;
+        changed control-focused => {
+            if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
+        }
+        show-divider: false;
+        label: @tr("Lancer à l'ouverture de session");
+        description: @tr("Ouvrir Soufflé automatiquement au démarrage du Mac.");
 
-        KitFieldRow {
-            theme: KitThemeContext.current;
+        autostart-switch := KitSwitch {
+            theme: root.theme;
             modal-layer: 0;
-            orientation: Theme.settings-field-orientation(self.width);
-            padding: KitMetrics.field-gap(self.theme);
-            focus-requested => { autostart-switch.take-focus(); }
-            private property <bool> control-focused: autostart-switch.has-focus;
-            changed control-focused => {
-                if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
-            }
-            show-divider: false;
-            label: @tr("Lancer à l'ouverture de session");
-            description: @tr("Ouvrir Soufflé automatiquement au démarrage du Mac.");
-
-            autostart-switch := KitSwitch {
-                theme: KitThemeContext.current;
-                modal-layer: 0;
-                label-position: ChoiceLabelPosition.start;
-                padding-inline: 0px;
-                ownership: Ownership.controlled;
-                control-width: ControlWidth.intrinsic;
-                accessible-label: @tr("Lancer Soufflé à l'ouverture de session");
-                checked: root.autostart-enabled;
-                toggled(new) => { root.autostart-changed(new); }
-            }
+            label-position: ChoiceLabelPosition.start;
+            padding-inline: 0px;
+            ownership: Ownership.controlled;
+            control-width: ControlWidth.intrinsic;
+            accessible-label: @tr("Lancer Soufflé à l'ouverture de session");
+            checked: root.autostart-enabled;
+            toggled(new) => { root.autostart-changed(new); }
         }
     }
 }

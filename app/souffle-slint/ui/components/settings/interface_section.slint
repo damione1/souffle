@@ -1,6 +1,6 @@
-import { AppText, Typography } from "@typography";
 import { SettingsOptions, ClosedSettingsPicker } from "settings_options.slint";
-import { KitModalContext, ChoiceLabelPosition, ButtonIntent, ControlWidth, FieldAccess, KitButton, KitNumberStepper, KitSwitch, Ownership, KitFieldSet, KitThemeContext, KitThemes, KitFieldRow, KitMetrics } from "@kit";
+import { AlertSeverity, ButtonIntent, ChoiceLabelPosition, ControlSize, ControlWidth, FieldAccess, KitAlert, KitButton, KitFieldRow, KitFieldSet, KitMetrics, KitModalContext, KitNumberStepper, KitSegmentedControl, KitSwitch, KitText, KitThemeContext, KitThemes, Ownership, TypographyRole } from "@kit";
+import { SettingsNoticeRow } from "settings_notice_row.slint";
 import { Theme } from "../../theme.slint";
 import { AppTheme, AppLocale, PasteMethod, ShortcutField, ShortcutNotice, SettingsCaptureError } from "../../types.slint";
 
@@ -86,8 +86,6 @@ export component ShortcutRecorderButton inherits FocusScope {
     }
 }
 
-// Port of InterfaceSettingsSection.svelte. The locale is projected from the
-// same durable AppSettings value used by the onboarding selector.
 export component InterfaceSection inherits VerticalLayout {
     in property <bool> capture-busy;
     in property <AppTheme> theme;
@@ -121,10 +119,6 @@ export component InterfaceSection inherits VerticalLayout {
     callback shortcut-cancelled();
     callback permissions-review-requested();
 
-
-
-
-
     spacing: 22px;
     alignment: start;
 
@@ -137,20 +131,24 @@ export component InterfaceSection inherits VerticalLayout {
             modal-layer: 0;
             orientation: Theme.settings-field-orientation(self.width);
             padding: KitMetrics.field-gap(self.theme);
+            show-divider: false;
             focus-requested => { language-picker.take-focus(); }
             private property <bool> control-focused: language-picker.has-focus;
             changed control-focused => {
                 if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
             }
-            show-divider: false;
             label: @tr("Langue");
             description: @tr("Choisissez la langue de l'interface.");
 
-            language-picker := ClosedSettingsPicker {
+            language-picker := KitSegmentedControl {
                 theme: KitThemeContext.current;
                 modal-layer: 0;
+                horizontal-stretch: 0;
+                preferred-width: Theme.settings-control-width;
                 label: @tr("Langue de l'interface");
-                choices: SettingsOptions.locale-options(root.locale);
+                options: SettingsOptions.locale-options(root.locale).rows;
+                selected: SettingsOptions.locale-options(root.locale).selected;
+                ownership: Ownership.controlled;
                 chosen(row) => { root.locale-changed(SettingsOptions.locale-value(row, root.locale)); }
             }
         }
@@ -169,11 +167,15 @@ export component InterfaceSection inherits VerticalLayout {
             label: @tr("Thème");
             description: @tr("Choisissez l'apparence de l'interface.");
 
-            theme-picker := ClosedSettingsPicker {
+            theme-picker := KitSegmentedControl {
                 theme: KitThemeContext.current;
                 modal-layer: 0;
+                horizontal-stretch: 0;
+                preferred-width: Theme.settings-control-width;
                 label: @tr("Thème de l'interface");
-                choices: SettingsOptions.theme-options(root.theme);
+                options: SettingsOptions.theme-options(root.theme).rows;
+                selected: SettingsOptions.theme-options(root.theme).selected;
+                ownership: Ownership.controlled;
                 chosen(row) => { root.theme-changed(SettingsOptions.theme-value(row, root.theme)); }
             }
         }
@@ -333,11 +335,46 @@ export component InterfaceSection inherits VerticalLayout {
             }
         }
 
-        if root.capture-busy: AppText {
-            text: @tr("Terminez l'enregistrement avant de modifier les raccourcis.");
-            color: Theme.text-muted;
-            typography: Typography.small;
-            wrap: word-wrap;
+        if root.capture-busy: SettingsNoticeRow {
+            show-divider: false;
+            KitText {
+                theme: KitThemeContext.current;
+                text: @tr("Terminez l'enregistrement avant de modifier les raccourcis.");
+                role: TypographyRole.caption;
+            }
+        }
+
+        if root.native-tap-warning-visible: SettingsNoticeRow {
+            KitAlert {
+                theme: KitThemeContext.current;
+                severity: AlertSeverity.warning;
+                message: @tr("Votre raccourci sur une seule touche ne fonctionnera pas tant que l'Accessibilité n'est pas accordée.");
+                KitButton {
+                    theme: KitThemeContext.current;
+                    control-size: ControlSize.compact;
+                    text: @tr("Vérifier les permissions");
+                    intent: ButtonIntent.secondary;
+                    activated => { root.permissions-review-requested(); }
+                }
+            }
+        }
+
+        if root.shortcut-error != "": SettingsNoticeRow {
+            KitAlert {
+                theme: KitThemeContext.current;
+                severity: AlertSeverity.error;
+                message: root.shortcut-error-kind == SettingsCaptureError.capture-busy ? @tr("Terminez l'enregistrement avant de modifier les raccourcis.")
+                    : root.shortcut-error-kind == SettingsCaptureError.runtime-busy ? @tr("Une opération est en cours. Réessayez dans un instant.")
+                    : root.shortcut-error;
+            }
+        }
+
+        if root.shortcut-notice != ShortcutNotice.none: SettingsNoticeRow {
+            KitAlert {
+                theme: KitThemeContext.current;
+                severity: ShortcutNoticeText.is-warning(root.shortcut-notice) ? AlertSeverity.warning : AlertSeverity.error;
+                message: ShortcutNoticeText.text(root.shortcut-notice);
+            }
         }
 
         KitFieldRow {
@@ -392,63 +429,6 @@ export component InterfaceSection inherits VerticalLayout {
                 access: !root.pill-hidden ? FieldAccess.editable : FieldAccess.disabled;
                 checked: root.pill-hidden-in-captures;
                 toggled(new) => { root.pill-hidden-in-captures-changed(new); }
-            }
-        }
-
-        if root.native-tap-warning-visible: Rectangle {
-            background: Theme.warning.with-alpha(0.1);
-
-            HorizontalLayout {
-                padding: 12px;
-                spacing: 10px;
-                alignment: space-between;
-
-                AppText {
-                    text: @tr("Votre raccourci sur une seule touche ne fonctionnera pas tant que l'Accessibilité n'est pas accordée.");
-                    color: Theme.warning;
-                    typography: Typography.secondary;
-                    wrap: word-wrap;
-                    horizontal-stretch: 1;
-                    vertical-alignment: center;
-                }
-
-                KitButton {
-                    text: @tr("Vérifier les permissions");
-                    intent: ButtonIntent.quiet;
-                    activated => { root.permissions-review-requested(); }
-                }
-            }
-        }
-
-        if root.shortcut-error != "": Rectangle {
-            background: Theme.danger.with-alpha(0.1);
-
-            VerticalLayout {
-                padding: 12px;
-
-                AppText {
-                    text: root.shortcut-error-kind == SettingsCaptureError.capture-busy ? @tr("Terminez l'enregistrement avant de modifier les raccourcis.")
-                        : root.shortcut-error-kind == SettingsCaptureError.runtime-busy ? @tr("Une opération est en cours. Réessayez dans un instant.")
-                        : root.shortcut-error;
-                    color: Theme.danger;
-                    typography: Typography.secondary;
-                    wrap: word-wrap;
-                }
-            }
-        }
-
-        if root.shortcut-notice != ShortcutNotice.none: Rectangle {
-            background: ShortcutNoticeText.is-warning(root.shortcut-notice) ? Theme.warning.with-alpha(0.1) : Theme.danger.with-alpha(0.1);
-
-            VerticalLayout {
-                padding: 12px;
-
-                AppText {
-                    text: ShortcutNoticeText.text(root.shortcut-notice);
-                    color: ShortcutNoticeText.is-warning(root.shortcut-notice) ? Theme.warning : Theme.danger;
-                    typography: Typography.secondary;
-                    wrap: word-wrap;
-                }
             }
         }
     }

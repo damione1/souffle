@@ -1,6 +1,8 @@
 import { AppText, Typography } from "@typography";
 import { SettingsOptions, ClosedSettingsPicker } from "settings_options.slint";
-import { KitButton, KitTextArea, FieldAccess, KitFieldSet, KitThemeContext, KitThemes, KitFieldRow, KitMetrics } from "@kit";
+import { KitButton, KitTextArea, FieldAccess, KitFieldSet, KitThemeContext, KitThemes, KitFieldRow, KitMetrics, ControlSize } from "@kit";
+import { LucideFiles } from "@kit-icons/files.slint";
+import { LucideText } from "@kit-icons/text.slint";
 import { Theme } from "../../theme.slint";
 import { AudioRetention } from "../../types.slint";
 
@@ -10,6 +12,13 @@ component CodeBlock inherits KitTextArea {
     access: FieldAccess.read-only;
     accessible-name: @tr("Bloc de code sélectionnable");
     height: 88px;
+}
+
+component CopyButton inherits KitButton {
+    theme: KitThemeContext.current;
+    control-size: ControlSize.compact;
+    leading-icon: LucideText.copy();
+    text: @tr("Copier");
 }
 
 // Port of DataSettingsSection.svelte. "Export archive" opens a native
@@ -114,6 +123,7 @@ export component DataSection inherits VerticalLayout {
         export-button := KitButton {
             theme: KitThemeContext.current;
             modal-layer: 0;
+            control-size: ControlSize.compact;
             text: root.exporting ? @tr("Export en cours…") : @tr("Exporter…");
             disabled: root.exporting;
             activated => { root.export-requested(); }
@@ -136,6 +146,8 @@ export component DataSection inherits VerticalLayout {
         reveal-button := KitButton {
             theme: KitThemeContext.current;
             modal-layer: 0;
+            control-size: ControlSize.compact;
+            leading-icon: LucideFiles.folder();
             text: @tr("Afficher dans le Finder");
             activated => { root.reveal-requested(); }
         }
@@ -224,8 +236,7 @@ export component DataSection inherits VerticalLayout {
                         wrap: word-wrap;
                     }
                 }
-                KitButton {
-                    text: @tr("Copier");
+                CopyButton {
                     activated => { root.copy-desktop-snippet-requested(); }
                 }
             }
@@ -264,8 +275,7 @@ export component DataSection inherits VerticalLayout {
                         wrap: word-wrap;
                     }
                 }
-                KitButton {
-                    text: @tr("Copier");
+                CopyButton {
                     activated => { root.copy-code-command-requested(); }
                 }
             }
@@ -291,6 +301,7 @@ export component DataSection inherits VerticalLayout {
             connection-button := KitButton {
                 theme: KitThemeContext.current;
                 modal-layer: 0;
+                control-size: ControlSize.compact;
                 text: root.testing-mcp ? @tr("Test en cours…") : @tr("Tester la connexion");
                 disabled: !(root.mcp-exists && !root.testing-mcp);
                 activated => { root.test-mcp-requested(); }

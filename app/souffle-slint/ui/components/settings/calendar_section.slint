@@ -1,5 +1,5 @@
-import { AppText, Typography } from "@typography";
-import { ChoiceLabelPosition, ButtonIntent, CheckState, ControlWidth, KitButton, KitCheckbox, KitNumberStepper, KitSwitch, Ownership, KitFieldSet, KitThemeContext, KitThemes, KitFieldRow, KitMetrics } from "@kit";
+import { AlertSeverity, ChoiceLabelPosition, ButtonIntent, ControlSize, KitAlert, KitText, TypographyRole, CheckState, ControlWidth, KitButton, KitCheckbox, KitNumberStepper, KitSwitch, Ownership, KitFieldSet, KitThemeContext, KitThemes, KitFieldRow, KitMetrics } from "@kit";
+import { SettingsNoticeRow } from "settings_notice_row.slint";
 import { Theme } from "../../theme.slint";
 import { AccessState } from "../../types.slint";
 
@@ -11,7 +11,6 @@ export struct CalendarRow {
     show-header: bool,
 }
 
-// Port of CalendarSettingsSection.svelte.
 export component CalendarSection inherits VerticalLayout {
     in property <bool> enabled;
     in property <AccessState> permission;
@@ -61,26 +60,16 @@ export component CalendarSection inherits VerticalLayout {
             }
         }
 
-        if root.permission == AccessState.denied: Rectangle {
-            background: Theme.danger.with-alpha(0.1);
-
-            HorizontalLayout {
-                padding: 12px;
-                spacing: 16px;
-                alignment: space-between;
-
-                AppText {
-                    text: @tr("L'accès au calendrier a été refusé.");
-                    color: Theme.text-primary;
-                    typography: Typography.field-label;
-                    wrap: word-wrap;
-                    vertical-alignment: center;
-                    horizontal-stretch: 1;
-                }
+        if root.permission == AccessState.denied: SettingsNoticeRow {
+            KitAlert {
+                severity: AlertSeverity.warning;
+                message: @tr("L'accès au calendrier a été refusé.");
+                vertical-stretch: 0;
 
                 KitButton {
                     text: @tr("Ouvrir les Réglages Système");
-                    intent: ButtonIntent.primary;
+                    intent: ButtonIntent.secondary;
+                    control-size: ControlSize.compact;
                     activated => { root.open-system-settings-requested(); }
                 }
             }
@@ -144,48 +133,47 @@ export component CalendarSection inherits VerticalLayout {
 
         if root.enabled && root.permission == AccessState.granted && root.calendars.length > 0: VerticalLayout {
             padding-top: 15px;
-            padding-bottom: 15px;
+            padding-bottom: 10px;
             padding-left: Theme.settings-inset;
             padding-right: Theme.settings-inset;
-            spacing: 8px;
+            spacing: 4px;
             alignment: start;
 
-            AppText {
+            KitText {
                 text: @tr("Calendriers");
-                typography: Typography.field-label;
-                color: Theme.text-secondary;
+                role: TypographyRole.control;
             }
-            AppText {
+            KitText {
                 text: @tr("Tous les calendriers sont inclus ; décochez ceux à masquer.");
-                typography: Typography.secondary;
-                color: Theme.text-muted;
+                role: TypographyRole.caption;
                 wrap: word-wrap;
             }
 
             for row in root.calendars: VerticalLayout {
                 alignment: start;
-                spacing: 4px;
 
                 if row.show-header && row.source-title != "": VerticalLayout {
                     padding-top: 10px;
-                    padding-bottom: 4px;
-                    AppText {
+                    KitText {
                         text: row.source-title;
-                        typography: Typography.table-heading;
-
-                        color: Theme.text-tertiary;
+                        role: TypographyRole.caption;
                     }
                 }
 
                 HorizontalLayout {
-                    spacing: 8px;
-                    alignment: start;
+                    spacing: 12px;
 
                     KitCheckbox {
                         ownership: Ownership.controlled;
                         label: row.title;
                         state: row.selected ? CheckState.checked : CheckState.unchecked;
+                        horizontal-stretch: 1;
                         toggled(_) => { root.calendar-toggled(row.id); }
+                    }
+                    if row.source-title != "": KitText {
+                        text: row.source-title;
+                        role: TypographyRole.caption;
+                        vertical-alignment: center;
                     }
                 }
             }

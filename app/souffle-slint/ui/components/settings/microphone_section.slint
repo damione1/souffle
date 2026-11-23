@@ -1,13 +1,14 @@
 import {
     AlertSeverity, ButtonIntent, ChoiceLabelPosition, ControlSize, ControlWidth,
     KitAlert, KitBadge, KitButton, KitFieldRow, KitFieldSet, KitIconButton,
-    KitMetrics, KitModalContext, KitSection, KitSurface, KitSwitch,
+    KitMetrics, KitModalContext, KitSection, KitSwitch,
     KitThemeContext, KitThemes, KitWrap, ListView, Ownership
 } from "@kit";
 import { LucideArrows } from "@kit-icons/arrows.slint";
 import { LucideFiles } from "@kit-icons/files.slint";
 import { CatalogPicker } from "../catalog_picker.slint";
 import { PickerLabels } from "../picker_labels.slint";
+import { SettingsNoticeRow } from "settings_notice_row.slint";
 import { Theme } from "../../theme.slint";
 
 // microphone_list.rs merges the connected and remembered devices in priority order.
@@ -36,6 +37,27 @@ component MicrophoneActionButton inherits KitIconButton {
     activated => { root.requested(root.pressed-uid); }
 }
 
+component MicrophoneHideButton inherits KitButton {
+    in property <string> device-uid;
+    in property <bool> device-hidden;
+    private property <string> pressed-uid;
+    private property <bool> pressed-hidden;
+    callback requested(string, bool);
+
+    intent: ButtonIntent.quiet;
+    control-size: compact;
+    activation-started => {
+        root.pressed-uid = root.device-uid;
+        root.pressed-hidden = root.device-hidden;
+    }
+    activation-allowed => {
+        return root.device-uid == root.pressed-uid && root.device-hidden == root.pressed-hidden;
+    }
+    changed device-uid => { root.cancel-press(); }
+    changed device-hidden => { root.cancel-press(); }
+    activated => { root.requested(root.pressed-uid, !root.pressed-hidden); }
+}
+
 component MicrophonePriorityRow inherits KitFieldRow {
     in property <MicrophoneRow> device;
     in property <string> last-seen;
@@ -54,7 +76,7 @@ component MicrophonePriorityRow inherits KitFieldRow {
     accessible-role: list-item;
     accessible-label: root.label;
     accessible-description: root.description;
-    focus-requested => { hide-switch.take-focus(); }
+    focus-requested => { hide-button.take-focus(); }
 
     KitWrap {
         theme: root.theme;
@@ -81,26 +103,16 @@ component MicrophonePriorityRow inherits KitFieldRow {
             requested(uid) => { root.move-requested(uid, 1); }
             focus-observed(focused) => { if focused { root.ensure-visible(KitThemes.scroll-behavior(root.theme)); } }
         }
-        hide-switch := KitSwitch {
+        hide-button := MicrophoneHideButton {
             theme: root.theme;
             modal-layer: root.modal-layer;
-            control-size: compact;
-            ownership: Ownership.controlled;
-            control-width: ControlWidth.intrinsic;
-            preferred-width: 120px * root.theme.text-scale;
-            label: @tr("MicrophoneSection" => "Masquer");
-            accessible-name: @tr("MicrophoneSection" => "Masquer {}", root.device.name);
-            checked: root.device.hidden;
-            private property <string> pressed-uid;
-            private property <bool> pressed-hidden;
-            activation-started => {
-                self.pressed-uid = root.device.uid;
-                self.pressed-hidden = self.checked;
-            }
-            activation-allowed => {
-                return self.pressed-uid == root.device.uid && self.pressed-hidden == self.checked;
-            }
-            toggled(new) => { root.hidden-requested(self.pressed-uid, new); }
+            device-uid: root.device.uid;
+            device-hidden: root.device.hidden;
+            text: root.device.hidden ? @tr("MicrophoneSection" => "Afficher") : @tr("MicrophoneSection" => "Masquer");
+            accessible-name: root.device.hidden
+                ? @tr("MicrophoneSection" => "Afficher {}", root.device.name)
+                : @tr("MicrophoneSection" => "Masquer {}", root.device.name);
+            requested(uid, hidden) => { root.hidden-requested(uid, hidden); }
             focus-observed(focused) => { if focused { root.ensure-visible(KitThemes.scroll-behavior(root.theme)); } }
         }
         if !root.device.connected: MicrophoneActionButton {
@@ -180,6 +192,7 @@ export component MicrophoneSection inherits KitFieldSet {
                 theme: root.theme;
                 modal-layer: device-field.modal-layer;
                 control-size: compact;
+                intent: ButtonIntent.secondary;
                 glyph: LucideArrows.refresh-cw();
                 accessible-name: @tr("Actualiser les microphones");
                 activated => { root.refresh-requested(); }
@@ -201,10 +214,12 @@ export component MicrophoneSection inherits KitFieldSet {
         }
     }
 
-    if root.pin-unavailable: KitAlert {
-        theme: root.theme;
-        severity: AlertSeverity.warning;
-        message: @tr("Le périphérique choisi n'est plus disponible ; un autre est utilisé en attendant.");
+    if root.pin-unavailable: SettingsNoticeRow {
+        KitAlert {
+            theme: root.theme;
+            severity: AlertSeverity.warning;
+            message: @tr("Le périphérique choisi n'est plus disponible ; un autre est utilisé en attendant.");
+        }
     }
 
     if root.sample-rate-label != "": KitFieldRow {
@@ -222,23 +237,25 @@ export component MicrophoneSection inherits KitFieldSet {
         }
     }
 
-    if root.sample-rate-high: rate-alert := KitAlert {
-        theme: root.theme;
-        severity: AlertSeverity.warning;
-        message: root.capture-busy
-            ? @tr("Cette fréquence élevée peut perturber les appels en visioconférence pendant l'enregistrement.") + " " + @tr("Terminez l'enregistrement avant de réinitialiser la fréquence du microphone.")
-            : @tr("Cette fréquence élevée peut perturber les appels en visioconférence pendant l'enregistrement.");
-
-        KitButton {
+    if root.sample-rate-high: SettingsNoticeRow {
+        rate-alert := KitAlert {
             theme: root.theme;
-            modal-layer: 0;
-            control-size: compact;
-            text-wrap: word-wrap;
-            text: root.resetting-sample-rate ? @tr("Réinitialisation…") : @tr("Réinitialiser à 48 kHz");
-            disabled: root.resetting-sample-rate || root.capture-busy;
-            activated => { root.reset-sample-rate-requested(); }
-            focus-observed(focused) => {
-                if focused { rate-alert.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
+            severity: AlertSeverity.warning;
+            message: root.capture-busy
+                ? @tr("Cette fréquence élevée peut perturber les appels en visioconférence pendant l'enregistrement.") + " " + @tr("Terminez l'enregistrement avant de réinitialiser la fréquence du microphone.")
+                : @tr("Cette fréquence élevée peut perturber les appels en visioconférence pendant l'enregistrement.");
+
+            KitButton {
+                theme: root.theme;
+                modal-layer: 0;
+                control-size: compact;
+                text-wrap: word-wrap;
+                text: root.resetting-sample-rate ? @tr("Réinitialisation…") : @tr("Réinitialiser à 48 kHz");
+                disabled: root.resetting-sample-rate || root.capture-busy;
+                activated => { root.reset-sample-rate-requested(); }
+                focus-observed(focused) => {
+                    if focused { rate-alert.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
+                }
             }
         }
     }
@@ -250,10 +267,7 @@ export component MicrophoneSection inherits KitFieldSet {
         title: @tr("Ordre de préférence");
         description: @tr("Utilisé quand plusieurs micros sont branchés en même temps.");
 
-        if root.microphones.length > 0: KitSurface {
-            theme: root.theme;
-            inset: tight;
-            priority-list := ListView {
+        if root.microphones.length > 0: priority-list := ListView {
                 theme: root.theme;
                 enabled: !KitModalContext.inert(0);
                 accessible-label: priority.title;
@@ -277,7 +291,6 @@ export component MicrophoneSection inherits KitFieldSet {
                     remove-requested(uid) => { root.remove-device-requested(uid); }
                 }
             }
-        }
     }
 
     bluetooth-field := KitFieldRow {

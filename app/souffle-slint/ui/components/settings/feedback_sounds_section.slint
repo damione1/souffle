@@ -1,9 +1,8 @@
 import { AppText, Typography } from "@typography";
-import { ChoiceLabelPosition, ControlWidth, KitSlider, KitSwitch, Ownership, KitFieldSet, KitThemeContext, KitThemes, KitFieldRow, KitMetrics } from "@kit";
+import { ChoiceLabelPosition, ControlWidth, KitSlider, KitSwitch, Ownership, SliderPresentation, KitFieldSet, KitThemeContext, KitThemes, KitFieldRow, KitMetrics } from "@kit";
 import { Theme } from "../../theme.slint";
 
-// Port of FeedbackSoundsSettingsSection.svelte.
-export component FeedbackSoundsSection inherits VerticalLayout {
+export component FeedbackSoundsSection inherits KitFieldSet {
     in property <bool> enabled;
     in property <int> volume;
     in property <int> volume-min;
@@ -12,72 +11,69 @@ export component FeedbackSoundsSection inherits VerticalLayout {
     callback enabled-changed(bool);
     callback volume-changed(int);
 
-    spacing: 22px;
-    alignment: start;
+    theme: KitThemeContext.current;
+    legend: @tr("SONS DE DICTÉE");
 
-    KitFieldSet {
-        theme: KitThemeContext.current;
-        legend: @tr("SONS DE DICTÉE");
-
-        KitFieldRow {
-            theme: KitThemeContext.current;
-            modal-layer: 0;
-            orientation: Theme.settings-field-orientation(self.width);
-            padding: KitMetrics.field-gap(self.theme);
-            focus-requested => { sounds-switch.take-focus(); }
-            private property <bool> control-focused: sounds-switch.has-focus;
-            changed control-focused => {
-                if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
-            }
-            show-divider: false;
-            label: @tr("Activer les sons");
-            description: @tr("Jouer un son au démarrage et à l'arrêt de l'enregistrement.");
-
-            sounds-switch := KitSwitch {
-                theme: KitThemeContext.current;
-                modal-layer: 0;
-                label-position: ChoiceLabelPosition.start;
-                padding-inline: 0px;
-                ownership: Ownership.controlled;
-                control-width: ControlWidth.intrinsic;
-                accessible-label: @tr("Activer les sons");
-                checked: root.enabled;
-                toggled(new) => { root.enabled-changed(new); }
-            }
+    KitFieldRow {
+        theme: root.theme;
+        modal-layer: 0;
+        orientation: Theme.settings-field-orientation(self.width);
+        padding: KitMetrics.field-gap(self.theme);
+        focus-requested => { sounds-switch.take-focus(); }
+        private property <bool> control-focused: sounds-switch.has-focus;
+        changed control-focused => {
+            if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
         }
+        show-divider: false;
+        label: @tr("Activer les sons");
+        description: @tr("Jouer un son au démarrage et à l'arrêt de l'enregistrement.");
 
-        if root.enabled: KitFieldRow {
-            theme: KitThemeContext.current;
+        sounds-switch := KitSwitch {
+            theme: root.theme;
             modal-layer: 0;
-            orientation: Theme.settings-field-orientation(self.width);
-            padding: KitMetrics.field-gap(self.theme);
-            show-divider: true;
-            focus-requested => { volume-slider.take-focus(); }
-            label: @tr("Volume");
+            label-position: ChoiceLabelPosition.start;
+            padding-inline: 0px;
+            ownership: Ownership.controlled;
+            control-width: ControlWidth.intrinsic;
+            accessible-label: @tr("Activer les sons");
+            checked: root.enabled;
+            toggled(new) => { root.enabled-changed(new); }
+        }
+    }
 
-            HorizontalLayout {
-                spacing: 10px;
-                alignment: center;
-                horizontal-stretch: 0;
+    if root.enabled: KitFieldRow {
+        theme: root.theme;
+        modal-layer: 0;
+        orientation: Theme.settings-field-orientation(self.width);
+        padding: KitMetrics.field-gap(self.theme);
+        show-divider: true;
+        focus-requested => { volume-slider.take-focus(); }
+        label: @tr("Volume");
 
-                volume-slider := KitSlider {
-                    theme: KitThemeContext.current;
-                    modal-layer: 0;
-                    width: 140px;
-                    ownership: Ownership.controlled;
-                    spec: { minimum: root.volume-min, maximum: root.volume-max, step: 1 };
-                    label: @tr("Volume des sons de dictée");
-                    value: root.volume;
-                    chosen(value) => { root.volume-changed(value.to-float()); }
-                }
+        HorizontalLayout {
+            spacing: 10px;
+            alignment: center;
+            horizontal-stretch: 0;
 
-                AppText {
-                    text: @tr("{}%", root.volume);
-                    color: Theme.text-muted;
-                    typography: Typography.secondary;
-                    vertical-alignment: center;
-                    width: 34px;
-                }
+            volume-slider := KitSlider {
+                theme: root.theme;
+                modal-layer: 0;
+                width: 140px;
+                presentation: SliderPresentation.filled;
+                ownership: Ownership.controlled;
+                spec: { minimum: root.volume-min, maximum: root.volume-max, step: 1 };
+                label: @tr("Volume des sons de dictée");
+                value: root.volume;
+                chosen(value) => { root.volume-changed(value.to-float()); }
+            }
+
+            AppText {
+                text: @tr("{}%", root.volume);
+                color: Theme.text-muted;
+                typography: Typography.secondary;
+                vertical-alignment: center;
+                width: 38px;
+                horizontal-alignment: right;
             }
         }
     }

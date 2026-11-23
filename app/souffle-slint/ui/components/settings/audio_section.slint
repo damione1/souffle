@@ -316,7 +316,7 @@ export component AudioSection inherits KitFieldSet {
         changed control-focused => {
             if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
         }
-        show-divider: false;
+        show-divider: true;
         label: @tr("Capture diagnostique avant AEC");
         description: root.meeting-audio-retention == AudioRetention.off
             ? @tr("Activez d'abord la conservation de l'audio dans Données. Aucun diagnostic n'est enregistré sans elle.")

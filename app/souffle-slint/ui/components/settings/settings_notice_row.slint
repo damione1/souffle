@@ -1,0 +1,17 @@
+import { KitDivider } from "@kit";
+import { Theme } from "../../theme.slint";
+
+export component SettingsNoticeRow inherits VerticalLayout {
+    in property <bool> show-divider: true;
+
+    vertical-stretch: 0;
+    if root.show-divider: KitDivider { }
+    VerticalLayout {
+        padding-left: Theme.settings-inset;
+        padding-right: Theme.settings-inset;
+        padding-top: 12px;
+        padding-bottom: 12px;
+        spacing: 8px;
+        @children
+    }
+}
