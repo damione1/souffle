@@ -7152,6 +7152,7 @@ dependencies = [
 [[package]]
 name = "slint-kit"
 version = "0.9.0"
+source = "git+https://github.com/damione1/slint-kit.git?rev=6d9fed734a3755a37cd613b533a073f6e60c9b78#6d9fed734a3755a37cd613b533a073f6e60c9b78"
 dependencies = [
  "slint",
  "slint-build",
@@ -7162,6 +7163,7 @@ dependencies = [
 [[package]]
 name = "slint-kit-build"
 version = "0.9.0"
+source = "git+https://github.com/damione1/slint-kit.git?rev=6d9fed734a3755a37cd613b533a073f6e60c9b78#6d9fed734a3755a37cd613b533a073f6e60c9b78"
 dependencies = [
  "slint-build",
  "slint-kit-core",
@@ -7171,6 +7173,7 @@ dependencies = [
 [[package]]
 name = "slint-kit-core"
 version = "0.9.0"
+source = "git+https://github.com/damione1/slint-kit.git?rev=6d9fed734a3755a37cd613b533a073f6e60c9b78#6d9fed734a3755a37cd613b533a073f6e60c9b78"
 dependencies = [
  "chrono",
  "chrono-tz",
@@ -7187,6 +7190,7 @@ dependencies = [
 [[package]]
 name = "slint-kit-pro"
 version = "0.1.0"
+source = "git+https://github.com/damione1/slint-kit-pro.git?rev=28b969445d6e1ae98c93b7e6b23c1e0409b39841#28b969445d6e1ae98c93b7e6b23c1e0409b39841"
 dependencies = [
  "plotters",
  "slint",
@@ -7198,6 +7202,7 @@ dependencies = [
 [[package]]
 name = "slint-kit-pro-build"
 version = "0.1.0"
+source = "git+https://github.com/damione1/slint-kit-pro.git?rev=28b969445d6e1ae98c93b7e6b23c1e0409b39841#28b969445d6e1ae98c93b7e6b23c1e0409b39841"
 dependencies = [
  "slint-build",
  "slint-kit-build",
@@ -7206,6 +7211,7 @@ dependencies = [
 [[package]]
 name = "slint-kit-slint"
 version = "0.9.0"
+source = "git+https://github.com/damione1/slint-kit.git?rev=6d9fed734a3755a37cd613b533a073f6e60c9b78#6d9fed734a3755a37cd613b533a073f6e60c9b78"
 dependencies = [
  "paste",
  "slint",

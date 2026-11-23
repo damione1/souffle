@@ -206,7 +206,7 @@ export component OnboardingView inherits Rectangle {
                     // Rust clears this on every step change and only ever puts a
                     // real error message here (a failed save/download/load), so
                     // the banner has no dismiss action of its own.
-                    if root.status-message != "": KitAlert {
+                    if root.status-message != "": KitAlert { bordered: false;
                         severity: AlertSeverity.error;
                         message: root.status-message;
                     }
@@ -386,7 +386,7 @@ export component OnboardingView inherits Rectangle {
                             tone: ShortcutNoticeText.is-warning(root.shortcut-notice) ? Tone.warning : Tone.danger;
                         }
 
-                        if !root.accessibility-granted: KitAlert {
+                        if !root.accessibility-granted: KitAlert { bordered: false;
                             severity: AlertSeverity.warning;
                             message: @tr("Le collage automatique a besoin de l'Accessibilité, qui n'est pas encore accordée. Le texte ira dans votre historique à la place.");
                             KitButton {

@@ -220,7 +220,7 @@ export component RecordingView inherits Rectangle {
                         dismissed => { root.wake-resume-notice-dismissed(); }
                     }
 
-                    if root.mode == RecordingMode.meeting && root.system-audio == LiveSystemAudio.unavailable: KitAlert {
+                    if root.mode == RecordingMode.meeting && root.system-audio == LiveSystemAudio.unavailable: KitAlert { bordered: false;
                         severity: AlertSeverity.warning;
                         accessible-label: @tr("Attention. Seul votre microphone est enregistré. L'audio des autres participants est indisponible.");
                         message: @tr("Seul votre microphone est enregistré. L’audio des autres participants est indisponible.");
@@ -229,7 +229,7 @@ export component RecordingView inherits Rectangle {
                     // The silence episode offers to keep recording or stop now
                     // (the meeting stops by itself 2 min later otherwise); the
                     // max-duration guard is already stopping it, so no buttons.
-                    if root.mode == RecordingMode.meeting && root.meeting-idle-banner != MeetingIdleBanner.hidden: KitAlert {
+                    if root.mode == RecordingMode.meeting && root.meeting-idle-banner != MeetingIdleBanner.hidden: KitAlert { bordered: false;
                         severity: root.meeting-idle-banner == MeetingIdleBanner.max-duration
                             ? AlertSeverity.warning : AlertSeverity.information;
                         message: root.meeting-idle-banner == MeetingIdleBanner.max-duration

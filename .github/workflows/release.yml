@@ -108,6 +108,13 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      - name: Authorize private Slint Kit Pro
+        env:
+          SLINT_KIT_PRO_TOKEN: ${{ secrets.SLINT_KIT_PRO_TOKEN }}
+        run: |
+          git config --global url."https://x-access-token:${SLINT_KIT_PRO_TOKEN}@github.com/damione1/slint-kit-pro.git".insteadOf "https://github.com/damione1/slint-kit-pro.git"
+          echo "CARGO_NET_GIT_FETCH_WITH_CLI=true" >> "$GITHUB_ENV"
+
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:

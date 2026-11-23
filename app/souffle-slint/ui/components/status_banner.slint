@@ -1,6 +1,6 @@
 import { AlertSeverity, ButtonIntent, ControlSize, KitAlert, KitButton } from "@kit";
 
-export component StatusBanner inherits KitAlert {
+export component StatusBanner inherits KitAlert { bordered: false;
     in property <string> action-label;
     callback action-triggered();
 

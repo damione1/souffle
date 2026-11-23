@@ -33,6 +33,13 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Authorize private Slint Kit Pro
+        env:
+          SLINT_KIT_PRO_TOKEN: ${{ secrets.SLINT_KIT_PRO_TOKEN }}
+        run: |
+          git config --global url."https://x-access-token:${SLINT_KIT_PRO_TOKEN}@github.com/damione1/slint-kit-pro.git".insteadOf "https://github.com/damione1/slint-kit-pro.git"
+          echo "CARGO_NET_GIT_FETCH_WITH_CLI=true" >> "$GITHUB_ENV"
+
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
@@ -75,6 +82,13 @@ jobs:
       - uses: actions/checkout@v6.0.1
         with:
           persist-credentials: false
+
+      - name: Authorize private Slint Kit Pro
+        env:
+          SLINT_KIT_PRO_TOKEN: ${{ secrets.SLINT_KIT_PRO_TOKEN }}
+        run: |
+          git config --global url."https://x-access-token:${SLINT_KIT_PRO_TOKEN}@github.com/damione1/slint-kit-pro.git".insteadOf "https://github.com/damione1/slint-kit-pro.git"
+          echo "CARGO_NET_GIT_FETCH_WITH_CLI=true" >> "$GITHUB_ENV"
 
       - uses: dtolnay/rust-toolchain@stable
         with:

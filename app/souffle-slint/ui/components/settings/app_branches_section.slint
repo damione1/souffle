@@ -166,17 +166,17 @@ export component AppBranchesSection inherits VerticalLayout {
                     activated => { root.test-requested(); }
                 }
             }
-            if root.test-phase == AppBranchTestPhase.waiting: KitAlert {
+            if root.test-phase == AppBranchTestPhase.waiting: KitAlert { bordered: false;
                 severity: AlertSeverity.information;
                 message: @tr("Passez à l'application à tester. Capture dans {} secondes.", root.test-delay-seconds);
             }
-            if root.test-phase == AppBranchTestPhase.resolving: KitAlert {
+            if root.test-phase == AppBranchTestPhase.resolving: KitAlert { bordered: false;
                 severity: AlertSeverity.information;
                 message: @tr("Recherche de la règle pour l'application capturée…");
             }
             if root.test-phase == AppBranchTestPhase.result: VerticalLayout {
                 spacing: 8px;
-                KitAlert {
+                KitAlert { bordered: false;
                     severity: AlertSeverity.information;
                     title: @tr("Application actuelle : {}", root.preview-app);
                     message: root.preview-matched ? @tr("Règle gagnante : {}", root.preview-pattern)

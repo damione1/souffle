@@ -61,7 +61,7 @@ export component CalendarSection inherits VerticalLayout {
         }
 
         if root.permission == AccessState.denied: SettingsNoticeRow {
-            KitAlert {
+            KitAlert { bordered: false;
                 severity: AlertSeverity.warning;
                 message: @tr("L'accès au calendrier a été refusé.");
                 vertical-stretch: 0;

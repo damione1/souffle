@@ -136,7 +136,7 @@ export component SummarySection inherits KitStack {
             role: TypographyRole.caption;
         }
 
-        if root.generation-error != "": KitAlert {
+        if root.generation-error != "": KitAlert { bordered: false;
             severity: AlertSeverity.error;
             message: @tr("La génération du résumé a échoué : {}", root.generation-error);
             if root.available-models.length > 0: KitButton {
@@ -187,12 +187,12 @@ export component SummarySection inherits KitStack {
             }
         }
 
-        if root.generation-error != "": KitAlert {
+        if root.generation-error != "": KitAlert { bordered: false;
             severity: AlertSeverity.error;
             message: @tr("La génération du résumé a échoué : {}", root.generation-error);
         }
 
-        if root.summary-is-stale: KitAlert {
+        if root.summary-is-stale: KitAlert { bordered: false;
             severity: AlertSeverity.warning;
             message: @tr("Résumé obsolète (audio ajouté depuis)");
         }

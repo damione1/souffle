@@ -75,7 +75,7 @@ export component IntelligenceSection inherits KitFieldSet {
         }
     }
 
-    if root.provider-unavailable: KitAlert {
+    if root.provider-unavailable: KitAlert { bordered: false;
         theme: root.theme;
         severity: warning;
         message: root.summary-provider == SummaryProvider.apple-intelligence
@@ -83,7 +83,7 @@ export component IntelligenceSection inherits KitFieldSet {
             : @tr("Aucun modèle Ollama compatible n'est installé.");
     }
 
-    if root.refresh-error != "": KitAlert {
+    if root.refresh-error != "": KitAlert { bordered: false;
         theme: root.theme;
         severity: error;
         message: root.refresh-error;
@@ -211,7 +211,7 @@ export component IntelligenceSection inherits KitFieldSet {
         }
     }
 
-    if root.show-ollama-setup && root.ollama-pull-error != "": KitAlert {
+    if root.show-ollama-setup && root.ollama-pull-error != "": KitAlert { bordered: false;
         theme: root.theme;
         severity: error;
         message: @tr("Échec du téléchargement : {}", root.ollama-pull-error);

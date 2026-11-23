@@ -29,7 +29,7 @@ export component LiveParagraphEditor inherits KitDialog {
         accessible-name: @tr("Texte du paragraphe");
         access: root.busy ? FieldAccess.disabled : FieldAccess.editable;
     }
-    if root.failed: KitAlert {
+    if root.failed: KitAlert { bordered: false;
         severity: AlertSeverity.error;
         message: @tr("Correction impossible. Fermez puis rouvrez le paragraphe pour réessayer.");
     }

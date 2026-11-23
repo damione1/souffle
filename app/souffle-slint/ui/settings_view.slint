@@ -355,7 +355,7 @@ export component SettingsView inherits KitAppShell {
             }
         }
 
-        if root.save-error != "" && root.draft-save-error == "": KitAlert {
+        if root.save-error != "" && root.draft-save-error == "": KitAlert { bordered: false;
             severity: error;
             message: root.save-error-unavailable
                 ? @tr("État des réglages enregistrés inconnu : {}", root.save-error)
@@ -363,7 +363,7 @@ export component SettingsView inherits KitAppShell {
             vertical-stretch: 0;
         }
 
-        if root.draft-save-error != "": KitAlert {
+        if root.draft-save-error != "": KitAlert { bordered: false;
             severity: error;
             message: root.draft-save-error-unavailable
                 ? @tr("Brouillon conservé, état des réglages inconnu : {}", root.draft-save-error)

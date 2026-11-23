@@ -45,7 +45,7 @@ export component DictationPolishSection inherits KitFieldSet {
         }
     }
 
-    if root.enabled && !root.provider-available: provider-notice := KitAlert {
+    if root.enabled && !root.provider-available: provider-notice := KitAlert { bordered: false;
         theme: root.theme;
         severity: warning;
         message: @tr("Aucun fournisseur IA disponible pour la retouche.");

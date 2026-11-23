@@ -124,7 +124,7 @@ export component PermissionsStep inherits VerticalLayout {
                 }
             }
 
-            if row-hint(row.kind, row.state) != "": KitAlert {
+            if row-hint(row.kind, row.state) != "": KitAlert { bordered: false;
                 severity: AlertSeverity.information;
                 message: row-hint(row.kind, row.state);
                 if row-hint-action-label(row.kind, row.state) != "": KitButton {
@@ -159,7 +159,7 @@ export component PermissionsStep inherits VerticalLayout {
         }
     }
 
-    if root.error-message != "": KitAlert {
+    if root.error-message != "": KitAlert { bordered: false;
         severity: AlertSeverity.error;
         message: root.error-message;
     }

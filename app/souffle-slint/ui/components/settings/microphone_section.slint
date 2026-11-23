@@ -215,7 +215,7 @@ export component MicrophoneSection inherits KitFieldSet {
     }
 
     if root.pin-unavailable: SettingsNoticeRow {
-        KitAlert {
+        KitAlert { bordered: false;
             theme: root.theme;
             severity: AlertSeverity.warning;
             message: @tr("Le périphérique choisi n'est plus disponible ; un autre est utilisé en attendant.");
@@ -238,7 +238,7 @@ export component MicrophoneSection inherits KitFieldSet {
     }
 
     if root.sample-rate-high: SettingsNoticeRow {
-        rate-alert := KitAlert {
+        rate-alert := KitAlert { bordered: false;
             theme: root.theme;
             severity: AlertSeverity.warning;
             message: root.capture-busy

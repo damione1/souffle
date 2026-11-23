@@ -562,7 +562,7 @@ export component MeetingDetail inherits Rectangle {
                             color: Theme.text-muted;
                             wrap: word-wrap;
                         }
-                        if root.show-reading && root.delete-error != "": KitAlert {
+                        if root.show-reading && root.delete-error != "": KitAlert { bordered: false;
                             severity: AlertSeverity.error;
                             message: @tr("Impossible de supprimer la réunion : {}", root.delete-error);
                         }

@@ -62,7 +62,7 @@ export component CompactTranscriptSection inherits KitStack {
     }
 
     if CompressionUi.ongoing: KitText { text: @tr("Disponible une fois l'enregistrement terminé."); role: TypographyRole.caption; }
-    if CompressionUi.stale: KitAlert {
+    if CompressionUi.stale: KitAlert { bordered: false;
         severity: AlertSeverity.warning;
         message: @tr("Cette version compacte précède les dernières modifications de la transcription. Régénérez-la avant de l'utiliser.");
     }
@@ -74,19 +74,19 @@ export component CompactTranscriptSection inherits KitStack {
         value: CompressionUi.progress / 100.0;
         label: @tr("Compression : {}%", CompressionUi.progress);
     }
-    if CompressionUi.job-phase == CompactJobPhase.failed: KitAlert {
+    if CompressionUi.job-phase == CompactJobPhase.failed: KitAlert { bordered: false;
         severity: AlertSeverity.error;
         message: @tr("La compression a échoué : {}", CompressionUi.job-error);
     }
-    if CompressionUi.job-phase == CompactJobPhase.source-changed: KitAlert {
+    if CompressionUi.job-phase == CompactJobPhase.source-changed: KitAlert { bordered: false;
         severity: AlertSeverity.warning;
         message: @tr("La transcription a changé. Relancez la compression.");
     }
-    if CompressionUi.job-phase == CompactJobPhase.interrupted-by-recording: KitAlert {
+    if CompressionUi.job-phase == CompactJobPhase.interrupted-by-recording: KitAlert { bordered: false;
         severity: AlertSeverity.warning;
         message: @tr("Compression interrompue par un enregistrement. Réessayez après l'enregistrement.");
     }
-    if CompressionUi.job-error != "" && CompressionUi.job-phase != CompactJobPhase.failed: KitAlert {
+    if CompressionUi.job-error != "" && CompressionUi.job-phase != CompactJobPhase.failed: KitAlert { bordered: false;
         severity: AlertSeverity.error;
         message: @tr("L'opération a échoué : {}", CompressionUi.job-error);
     }

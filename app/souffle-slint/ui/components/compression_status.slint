@@ -24,7 +24,7 @@ export component CompressionStatus inherits VerticalLayout {
         color: Theme.text-muted;
         wrap: word-wrap;
     }
-    if CompressionUi.model-error != "": KitAlert { severity: AlertSeverity.error; message: CompressionUi.model-error; vertical-stretch: 0; }
+    if CompressionUi.model-error != "": KitAlert { bordered: false; severity: AlertSeverity.error; message: CompressionUi.model-error; vertical-stretch: 0; }
     HorizontalLayout {
         alignment: start;
         spacing: 8px;

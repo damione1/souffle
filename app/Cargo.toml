@@ -210,8 +210,3 @@ souffle-typography = { path = "souffle-typography" }
 # The private slint-kit-pro workspace pins an older slint-kit revision. Both
 # link the native library `kit`, so every slint-kit crate resolves to one
 # checkout. Replace with the Pro release built for this revision once published.
-[patch."https://github.com/damione1/slint-kit.git"]
-slint-kit = { path = "../../souffle-kit-worktrees/slint-kit/crates/kit" }
-slint-kit-build = { path = "../../souffle-kit-worktrees/slint-kit/crates/kit-build" }
-slint-kit-core = { path = "../../souffle-kit-worktrees/slint-kit/crates/kit-core" }
-slint-kit-slint = { path = "../../souffle-kit-worktrees/slint-kit/crates/kit-slint" }

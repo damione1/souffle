@@ -76,7 +76,7 @@ export component ModelSection inherits KitFieldSet {
         }
     }
 
-    if root.apple-speech-selected && !root.apple-speech-unavailable: KitAlert {
+    if root.apple-speech-selected && !root.apple-speech-unavailable: KitAlert { bordered: false;
         theme: root.theme;
         severity: AlertSeverity.information;
         message: @tr("La langue affichée est celle prise en charge par Apple Speech pour la langue et la région de ce Mac. Pour la modifier, ouvrez Réglages Système > Général > Langue et région, puis relancez Soufflé.") + "\n\n" + @tr("La transcription fonctionne sans activer Siri ou Apple Intelligence. macOS gère le modèle.");
@@ -88,7 +88,7 @@ export component ModelSection inherits KitFieldSet {
         }
     }
 
-    if root.apple-speech-selected && root.apple-speech-unavailable: KitAlert {
+    if root.apple-speech-selected && root.apple-speech-unavailable: KitAlert { bordered: false;
         theme: root.theme;
         severity: AlertSeverity.warning;
         title: @tr("Apple Speech indisponible");
@@ -127,7 +127,7 @@ export component ModelSection inherits KitFieldSet {
         value: root.download-progress-fraction;
     }
 
-    if root.error-message != "": KitAlert {
+    if root.error-message != "": KitAlert { bordered: false;
         theme: root.theme;
         severity: AlertSeverity.error;
         message: root.error-message;
