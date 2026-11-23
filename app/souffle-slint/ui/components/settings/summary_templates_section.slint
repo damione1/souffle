@@ -1,4 +1,4 @@
-import { KitButton, KitFieldRow, KitFieldSet, KitForm, KitInline, KitMetrics, KitStack, KitText, KitTextArea, KitTextField, KitThemeContext, KitThemes, KitWrap } from "@kit";
+import { ButtonIntent, KitButton, KitFieldRow, KitFieldSet, KitForm, KitInline, KitMetrics, KitTextArea, KitTextField, KitThemeContext, KitThemes, KitWrap } from "@kit";
 import { CatalogPicker } from "../catalog_picker.slint";
 import { Theme } from "../../theme.slint";
 
@@ -27,16 +27,6 @@ export component SummaryTemplatesSection inherits KitFieldSet {
     theme: KitThemeContext.current;
     legend: @tr("MODÈLES DE RÉSUMÉ");
 
-    KitStack {
-        theme: root.theme;
-        inset: regular;
-        KitText {
-            theme: root.theme;
-            role: caption;
-            text: @tr("Le modèle par défaut est utilisé lorsque vous générez le résumé d'une réunion terminée.");
-        }
-    }
-
     KitFieldRow {
         theme: KitThemeContext.current;
         modal-layer: 0;
@@ -49,6 +39,7 @@ export component SummaryTemplatesSection inherits KitFieldSet {
         }
         show-divider: false;
         label: @tr("Modèle par défaut");
+        description: @tr("Le modèle par défaut est utilisé lorsque vous générez le résumé d'une réunion terminée.");
 
         default-picker := CatalogPicker {
             theme: KitThemeContext.current;
@@ -73,6 +64,7 @@ export component SummaryTemplatesSection inherits KitFieldSet {
             if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
         }
         label: @tr("Modifier");
+        description: root.editing-is-builtin ? @tr("Modèle intégré : le prompt peut être personnalisé mais pas supprimé.") : "";
 
         KitWrap {
             theme: root.theme;
@@ -136,9 +128,7 @@ export component SummaryTemplatesSection inherits KitFieldSet {
             if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
         }
         label: @tr("Instruction");
-        description: root.editing-is-builtin
-            ? @tr("Modèle intégré : le prompt peut être personnalisé mais pas supprimé.")
-            : @tr("Prompt envoyé à l'IA pour générer le résumé.");
+        description: @tr("Prompt envoyé à l'IA pour générer le résumé.");
 
         instruction-editor := KitTextArea {
             theme: KitThemeContext.current;
@@ -181,6 +171,7 @@ export component SummaryTemplatesSection inherits KitFieldSet {
                 theme: root.theme;
                 modal-layer: 0;
                 text: @tr("Ajouter");
+                intent: ButtonIntent.primary;
                 disabled: !add-form.valid;
                 focus-observed(focused) => {
                     if focused { add-row.ensure-visible(KitThemes.scroll-behavior(root.theme)); }

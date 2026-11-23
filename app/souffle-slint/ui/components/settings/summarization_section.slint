@@ -2,40 +2,34 @@ import { SummarizationUi } from "../../summarization.slint";
 import { Theme } from "../../theme.slint";
 import { ChoiceLabelPosition, ControlWidth, KitFieldRow, KitFieldSet, KitMetrics, KitSwitch, KitThemeContext, KitThemes, Ownership } from "@kit";
 
-export component SummarizationSection inherits VerticalLayout {
-    spacing: 22px;
-    alignment: start;
-    vertical-stretch: 0;
+export component SummarizationSection inherits KitFieldSet {
+    theme: KitThemeContext.current;
+    legend: @tr("EXPÉRIMENTAL");
 
-    KitFieldSet {
-        theme: KitThemeContext.current;
-        legend: @tr("EXPÉRIMENTAL");
+    KitFieldRow {
+        theme: root.theme;
+        modal-layer: 0;
+        orientation: Theme.settings-field-orientation(self.width);
+        padding: KitMetrics.field-gap(self.theme);
+        focus-requested => { summarization-switch.take-focus(); }
+        private property <bool> control-focused: summarization-switch.has-focus;
+        changed control-focused => {
+            if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
+        }
+        show-divider: false;
+        label: @tr("Résumés de réunion");
+        description: @tr("Active les résumés de réunion et la compaction expérimentaux. La qualité des longs résumés locaux reste à évaluer.");
 
-        KitFieldRow {
-            theme: KitThemeContext.current;
+        summarization-switch := KitSwitch {
+            theme: root.theme;
             modal-layer: 0;
-            orientation: Theme.settings-field-orientation(self.width);
-            padding: KitMetrics.field-gap(self.theme);
-            focus-requested => { summarization-switch.take-focus(); }
-            private property <bool> control-focused: summarization-switch.has-focus;
-            changed control-focused => {
-                if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
-            }
-            show-divider: false;
-            label: @tr("Résumés de réunion");
-            description: @tr("Active les résumés de réunion et la compaction expérimentaux. La qualité des longs résumés locaux reste à évaluer.");
-
-            summarization-switch := KitSwitch {
-                theme: KitThemeContext.current;
-                modal-layer: 0;
-                label-position: ChoiceLabelPosition.start;
-                padding-inline: 0px;
-                ownership: Ownership.controlled;
-                control-width: ControlWidth.intrinsic;
-                accessible-label: @tr("Résumés de réunion");
-                checked: SummarizationUi.enabled;
-                toggled(new) => { SummarizationUi.enabled-changed(new); }
-            }
+            label-position: ChoiceLabelPosition.start;
+            padding-inline: 0px;
+            ownership: Ownership.controlled;
+            control-width: ControlWidth.intrinsic;
+            accessible-label: @tr("Résumés de réunion");
+            checked: SummarizationUi.enabled;
+            toggled(new) => { SummarizationUi.enabled-changed(new); }
         }
     }
 }

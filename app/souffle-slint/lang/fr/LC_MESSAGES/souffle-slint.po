@@ -935,11 +935,6 @@ msgctxt "DictionaryAliasPopover"
 msgid "Enregistrer"
 msgstr "Enregistrer"
 
-#: app/souffle-slint/ui/components/transcript_section.slint:196
-msgctxt "TranscriptSection"
-msgid "Transcription"
-msgstr "Transcription"
-
 #: app/souffle-slint/ui/components/transcript_section.slint:203
 msgctxt "TranscriptSection"
 msgid "Aucun texte transcrit pour cette réunion."
@@ -1518,6 +1513,10 @@ msgid "DÉCLENCHEUR"
 msgstr "DÉCLENCHEUR"
 
 #: app/souffle-slint/ui/components/settings/snippets_section.slint:68
+msgctxt "SnippetsSection"
+msgid "Phrase déclencheur en début de dictée"
+msgstr "Phrase déclencheur en début de dictée"
+
 msgctxt "SnippetsSection"
 msgid "Phrase déclencheur"
 msgstr "Phrase déclencheur"

@@ -1,13 +1,8 @@
 import { AppText, Typography } from "@typography";
-import { ButtonIntent, ControlSize, KitButton, KitTextField, ScrollFrame, KitFieldSet, KitThemeContext, KitFieldRow, KitMetrics } from "@kit";
+import { ButtonIntent, ControlSize, KitBadge, KitButton, KitFieldRow, KitFieldSeparator, KitFieldSet, KitMetrics, KitSegmentedControl, KitSurface, KitText, KitTextField, KitThemeContext, LayoutSpace, OptionRow, Ownership, ScrollFrame, SurfaceLevel, TypographyRole, TextViewFont } from "@kit";
 import { Theme } from "../../theme.slint";
 import { DictionaryLearningMode } from "../../types.slint";
 
-// Port of DictionarySettingsSection.svelte. Simplified: aliases (comma-
-// separated pronunciations) show as plain text per entry rather than
-// individually removable chips - add/delete/list are the real thing
-// against the dictionary DB, this only drops the one-alias-at-a-time
-// removal affordance (documented gap, not a placeholder).
 export struct DictionaryRow {
     id: int,
     term: string,
@@ -59,6 +54,18 @@ export component DictionarySection inherits VerticalLayout {
     callback add-requested(string, string, string);
     callback delete-requested(int);
 
+    pure function mode-token(mode: DictionaryLearningMode) -> int {
+        return mode == DictionaryLearningMode.disabled ? 0 : mode == DictionaryLearningMode.suggestions ? 1 : 2;
+    }
+    pure function token-mode(token: int) -> DictionaryLearningMode {
+        return token == 0 ? DictionaryLearningMode.disabled : token == 1 ? DictionaryLearningMode.suggestions : DictionaryLearningMode.automatic;
+    }
+    property <[OptionRow]> learning-rows: [
+        { token: 0, generation: 0, label: @tr("Désactivé") },
+        { token: 1, generation: 0, label: @tr("Suggestions") },
+        { token: 2, generation: 0, label: @tr("Automatique") },
+    ];
+
     spacing: 22px;
     alignment: start;
 
@@ -74,19 +81,21 @@ export component DictionarySection inherits VerticalLayout {
         show-divider: false;
         label: @tr("Apprentissage depuis les corrections");
         description: @tr("Suggestions propose les corrections après collage et en réunion. Automatique apprend après collage. Les corrections de session restent immédiates.");
+    }
 
-        HorizontalLayout {
-            spacing: 6px;
-            horizontal-stretch: 0;
-            for option in root.learning-options: KitButton {
-                text: option.mode == DictionaryLearningMode.disabled ? @tr("Désactivé") :
-                    option.mode == DictionaryLearningMode.suggestions ? @tr("Suggestions") :
-                    option.mode == DictionaryLearningMode.automatic ? @tr("Automatique") : "";
-                control-size: ControlSize.compact;
-                intent: root.learning-mode == option.mode ? ButtonIntent.primary : ButtonIntent.secondary;
-                activated => {
-                    if root.learning-mode != option.mode { root.learning-mode-changed(option.mode); }
-                }
+    HorizontalLayout {
+        padding-left: Theme.settings-inset;
+        padding-right: Theme.settings-inset;
+        padding-bottom: 14px;
+        alignment: start;
+        KitSegmentedControl {
+            ownership: Ownership.controlled;
+            control-size: ControlSize.compact;
+            label: @tr("Apprentissage depuis les corrections");
+            options: root.learning-rows;
+            selected: { present: true, token: root.mode-token(root.learning-mode) };
+            chosen(row) => {
+                if root.token-mode(row.token) != root.learning-mode { root.learning-mode-changed(root.token-mode(row.token)); }
             }
         }
     }
@@ -114,25 +123,37 @@ export component DictionarySection inherits VerticalLayout {
                 Rectangle { height: root.suggestion-spacer-before * 1px; }
                 for row in root.suggestions: Rectangle {
                     height: 64px;
-                    HorizontalLayout {
-                        padding: 8px;
-                        spacing: 6px;
-                        AppText {
-                            text: @tr("Correction : {} → {}", row.misspelling, row.term);
-                            color: Theme.text-primary; typography: Typography.secondary;
-                            overflow: elide; horizontal-stretch: 1;
-                        }
-                        KitButton {
-                            text: @tr("Accepter");
-                            accessible-label: @tr("Accepter {} → {}", row.misspelling, row.term);
-                            disabled: root.suggestion-busy;
-                            activated => { root.suggestion-accept-requested(row.id); }
-                        }
-                        KitButton {
-                            text: @tr("Ignorer");
-                            accessible-label: @tr("Ignorer {} → {}", row.misspelling, row.term);
-                            disabled: root.suggestion-busy;
-                            activated => { root.suggestion-dismiss-requested(row.id); }
+                    KitSurface {
+                        y: 4px;
+                        height: parent.height - 8px;
+                        level: SurfaceLevel.inset;
+                        inset: LayoutSpace.compact;
+                        HorizontalLayout {
+                            spacing: KitMetrics.inline-gap(KitThemeContext.current);
+                            alignment: stretch;
+                            KitText {
+                                text: @tr("Correction : {} → {}", row.misspelling, row.term);
+                                role: TypographyRole.body;
+                                overflow: elide;
+                                vertical-alignment: center;
+                                horizontal-stretch: 1;
+                            }
+                            KitButton {
+                                text: @tr("Ignorer");
+                                accessible-label: @tr("Ignorer {} → {}", row.misspelling, row.term);
+                                control-size: ControlSize.compact;
+                                intent: ButtonIntent.quiet;
+                                disabled: root.suggestion-busy;
+                                activated => { root.suggestion-dismiss-requested(row.id); }
+                            }
+                            KitButton {
+                                text: @tr("Accepter");
+                                accessible-label: @tr("Accepter {} → {}", row.misspelling, row.term);
+                                control-size: ControlSize.compact;
+                                intent: ButtonIntent.primary;
+                                disabled: root.suggestion-busy;
+                                activated => { root.suggestion-accept-requested(row.id); }
+                            }
                         }
                     }
                 }
@@ -159,37 +180,15 @@ export component DictionarySection inherits VerticalLayout {
             spacing: 6px;
 
             HorizontalLayout {
-                spacing: 6px;
-                AppText {
-                    text: @tr("TERME");
-                    typography: Typography.table-heading;
-                    color: Theme.text-tertiary;
-
-                    horizontal-stretch: 1;
-                }
-                AppText {
-                    text: @tr("PRONONCIATION");
-                    typography: Typography.table-heading;
-                    color: Theme.text-tertiary;
-
-                    width: 110px;
-                }
-                AppText {
-                    text: @tr("CATÉGORIE");
-                    typography: Typography.table-heading;
-                    color: Theme.text-tertiary;
-
-                    width: 100px;
-                }
-                Rectangle {
-                    width: 88px;
-                    height: 1px;
-                    horizontal-stretch: 0;
-                }
+                spacing: 12px;
+                AppText { text: @tr("TERME"); typography: Typography.table-heading; color: Theme.text-tertiary; horizontal-stretch: 1; }
+                AppText { text: @tr("PRONONCIATION"); typography: Typography.table-heading; color: Theme.text-tertiary; horizontal-stretch: 1; }
+                AppText { text: @tr("CATÉGORIE"); typography: Typography.table-heading; color: Theme.text-tertiary; width: 100px; }
+                Rectangle { width: 110px; height: 1px; horizontal-stretch: 0; }
             }
 
             HorizontalLayout {
-                spacing: 6px;
+                spacing: 12px;
                 KitTextField {
                     text <=> root.new-term-draft;
                     placeholder: @tr("ex. Kubernetes");
@@ -200,7 +199,7 @@ export component DictionarySection inherits VerticalLayout {
                     text <=> root.new-pronunciation-draft;
                     placeholder: @tr("ex. vaysix");
                     accessible-name: @tr("Prononciation facultative");
-                    width: 110px;
+                    horizontal-stretch: 1;
                 }
                 KitTextField {
                     text <=> root.new-category-draft;
@@ -210,6 +209,7 @@ export component DictionarySection inherits VerticalLayout {
                 }
                 KitButton {
                     text: @tr("Ajouter");
+                    intent: ButtonIntent.primary;
                     disabled: root.new-term-draft == "";
                     activated => {
                         root.add-requested(root.new-term-draft, root.new-pronunciation-draft, root.new-category-draft);
@@ -248,50 +248,46 @@ export component DictionarySection inherits VerticalLayout {
         for row in root.entries: Rectangle {
             height: root.delete-error != "" && root.delete-error-id == row.id ? 88px : 64px;
 
-            Rectangle {
-                x: Theme.settings-inset;
-                width: parent.width - 2 * Theme.settings-inset;
-                height: parent.height - 6px;
-                border-width: 1px;
-                border-color: Theme.border-soft;
-                border-radius: 6px;
+            KitFieldSeparator { y: 0px; }
+            VerticalLayout {
+                padding-left: Theme.settings-inset;
+                padding-right: Theme.settings-inset;
+                padding-top: 8px;
+                padding-bottom: 8px;
+                spacing: 4px;
+                alignment: center;
 
-                VerticalLayout {
-                    padding: 8px;
-                    spacing: 6px;
-
-                    HorizontalLayout {
-                        spacing: 8px;
-                        alignment: space-between;
-
-                        VerticalLayout {
-                            spacing: 1px;
-                            horizontal-stretch: 1;
-                            AppText {
-                                text: row.term + (row.aliases-display == "" ? "" : "  (" + row.aliases-display + ")");
-                                typography: Typography.hint;
-                                color: Theme.text-primary;
-                                overflow: elide;
-                            }
-                            if row.category != "": AppText {
-                                text: row.category;
-                                typography: Typography.micro-detail;
-                                color: Theme.text-muted;
-                                overflow: elide;
-                            }
-                        }
-                        KitButton {
-                            text: @tr("Supprimer");
-                            activated => { root.delete-requested(row.id); }
-                        }
-                    }
-
-                    if root.delete-error != "" && root.delete-error-id == row.id: AppText {
-                        text: root.delete-error;
-                        color: Theme.danger;
-                        typography: Typography.caption;
+                HorizontalLayout {
+                    spacing: 12px;
+                    KitText {
+                        text: row.term;
+                        role: TypographyRole.subtitle;
                         overflow: elide;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
                     }
+                    KitText {
+                        text: row.aliases-display;
+                        role: TypographyRole.caption;
+                        font: TextViewFont.monospace;
+                        overflow: elide;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                    }
+                    if row.category != "": KitBadge { text: row.category; }
+                    KitButton {
+                        text: @tr("Supprimer");
+                        control-size: ControlSize.compact;
+                        intent: ButtonIntent.quiet;
+                        activated => { root.delete-requested(row.id); }
+                    }
+                }
+
+                if root.delete-error != "" && root.delete-error-id == row.id: AppText {
+                    text: root.delete-error;
+                    color: Theme.danger;
+                    typography: Typography.caption;
+                    overflow: elide;
                 }
             }
         }

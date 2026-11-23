@@ -1,4 +1,4 @@
-import { KitAlert, KitBadge, KitButton, KitFieldRow, KitFieldSet, KitInline, KitMetrics, KitStack, KitText, KitTextField, KitThemeContext, KitThemes, KitWrap, Tone } from "@kit";
+import { KitAlert, KitBadge, KitButton, KitFieldRow, KitFieldSet, KitMetrics, KitTextField, KitThemeContext, KitThemes, KitWrap, Tone } from "@kit";
 import { SettingsOptions, ClosedSettingsPicker } from "settings_options.slint";
 import { CatalogPicker } from "../catalog_picker.slint";
 import { Theme } from "../../theme.slint";
@@ -77,7 +77,7 @@ export component IntelligenceSection inherits KitFieldSet {
 
     if root.provider-unavailable: KitAlert {
         theme: root.theme;
-        severity: error;
+        severity: warning;
         message: root.summary-provider == SummaryProvider.apple-intelligence
             ? @tr("Apple Intelligence n'est pas disponible sur cet appareil.")
             : @tr("Aucun modèle Ollama compatible n'est installé.");
@@ -89,33 +89,36 @@ export component IntelligenceSection inherits KitFieldSet {
         message: root.refresh-error;
     }
 
-    KitFieldRow {
+    apple-row := KitFieldRow {
         theme: KitThemeContext.current;
         modal-layer: 0;
         orientation: Theme.settings-field-orientation(self.width);
         padding: KitMetrics.field-gap(self.theme);
         show-divider: true;
         label: @tr("Apple Intelligence");
+        description: root.apple-intelligence-available ? "" : root.apple-reason-label(root.apple-intelligence-reason);
 
-        KitBadge {
+        KitWrap {
             theme: root.theme;
-            text: root.apple-intelligence-available ? @tr("Disponible") : @tr("Non disponible");
-            tone: root.apple-intelligence-available ? Tone.success : Tone.neutral;
-        }
-    }
-
-    if !root.apple-intelligence-available: apple-notice := KitAlert {
-        theme: root.theme;
-        message: root.apple-reason-label(root.apple-intelligence-reason);
-        if root.apple-intelligence-reason == AppleIntelligenceUnavailableReason.apple-intelligence-not-enabled: KitButton {
-            theme: root.theme;
-            modal-layer: 0;
-            text: @tr("Réglages Système");
-            text-wrap: word-wrap;
-            focus-observed(focused) => {
-                if focused { apple-notice.ensure-visible(KitThemes.scroll-behavior(root.theme)); }
+            cross-axis-alignment: center;
+            horizontal-stretch: 0;
+            KitBadge {
+                theme: root.theme;
+                text: root.apple-intelligence-available ? @tr("Disponible") : @tr("Non disponible");
+                tone: root.apple-intelligence-available ? Tone.success : Tone.warning;
+                dot: root.apple-intelligence-available;
             }
-            activated => { root.open-apple-intelligence-settings-requested(); }
+            if !root.apple-intelligence-available && root.apple-intelligence-reason == AppleIntelligenceUnavailableReason.apple-intelligence-not-enabled: KitButton {
+                theme: root.theme;
+                modal-layer: 0;
+                control-size: compact;
+                text: @tr("Réglages Système");
+                text-wrap: word-wrap;
+                focus-observed(focused) => {
+                    if focused { apple-row.ensure-visible(KitThemes.scroll-behavior(root.theme)); }
+                }
+                activated => { root.open-apple-intelligence-settings-requested(); }
+            }
         }
     }
 
@@ -170,11 +173,13 @@ export component IntelligenceSection inherits KitFieldSet {
             KitBadge {
                 theme: root.theme;
                 text: root.ollama-available ? @tr("Connecté") : @tr("Non disponible");
-                tone: root.ollama-available ? Tone.success : Tone.neutral;
+                tone: root.ollama-available ? Tone.success : Tone.warning;
+                dot: root.ollama-available;
             }
             connection-button := KitButton {
                 theme: KitThemeContext.current;
                 modal-layer: 0;
+                control-size: compact;
                 text: @tr("Réessayer");
                 disabled: root.ollama-checking || root.ollama-pulling;
                 activated => { root.retry-requested(); }
@@ -206,43 +211,34 @@ export component IntelligenceSection inherits KitFieldSet {
         }
     }
 
-    if root.show-ollama-setup: KitStack {
+    if root.show-ollama-setup && root.ollama-pull-error != "": KitAlert {
         theme: root.theme;
-        gap: compact;
+        severity: error;
+        message: @tr("Échec du téléchargement : {}", root.ollama-pull-error);
+    }
 
-        KitText {
-            theme: root.theme;
-            role: caption;
-            tone: warning;
-            text: @tr("Aucun modèle compatible installé.");
-        }
+    if root.show-ollama-setup: setup-row := KitFieldRow {
+        theme: KitThemeContext.current;
+        modal-layer: 0;
+        orientation: Theme.settings-field-orientation(self.width);
+        padding: KitMetrics.field-gap(self.theme);
+        show-divider: true;
+        label: @tr("Aucun modèle compatible installé.");
+        description: root.ollama-pulling
+            ? (root.ollama-pull-status == "" ? @tr("Téléchargement de {}…", root.recommended-model) : root.ollama-pull-status)
+            : "";
 
-        if root.ollama-pull-error != "": KitAlert {
+        if !root.ollama-pulling: KitButton {
             theme: root.theme;
-            severity: error;
-            message: @tr("Échec du téléchargement : {}", root.ollama-pull-error);
-        }
-
-        if root.ollama-pulling: KitText {
-            theme: root.theme;
-            role: caption;
-            text: root.ollama-pull-status == "" ? @tr("Téléchargement de {}…", root.recommended-model) : root.ollama-pull-status;
-        }
-
-        if !root.ollama-pulling: download-actions := KitInline {
-            theme: root.theme;
-            alignment: end;
-            inset: compact;
-            KitButton {
-                theme: root.theme;
-                modal-layer: 0;
-                text: @tr("Télécharger {}", root.recommended-model);
-                text-wrap: word-wrap;
-                focus-observed(focused) => {
-                    if focused { download-actions.ensure-visible(KitThemes.scroll-behavior(root.theme)); }
-                }
-                activated => { root.download-recommended-requested(); }
+            modal-layer: 0;
+            intent: primary;
+            control-size: compact;
+            text: @tr("Télécharger {}", root.recommended-model);
+            text-wrap: word-wrap;
+            focus-observed(focused) => {
+                if focused { setup-row.ensure-visible(KitThemes.scroll-behavior(root.theme)); }
             }
+            activated => { root.download-recommended-requested(); }
         }
     }
 }

@@ -1,15 +1,11 @@
-import { AppText, Typography } from "@typography";
-import { KitProgress, KitBadge, KitButton, Tone, KitFieldSet, KitThemeContext, KitThemes, KitFieldRow, KitMetrics } from "@kit";
+import { AlertSeverity, KitAlert, KitBadge, KitButton, KitFieldRow, KitFieldSet, KitMetrics, KitProgress, KitThemeContext, KitThemes, ProgressIntent, Tone } from "@kit";
 import { CatalogPicker } from "../catalog_picker.slint";
 import { Theme } from "../../theme.slint";
 import { TranscriptionPhase, TranscriptionUnavailableReason, SystemSettingsPane } from "../../types.slint";
 
-// Port of ModelSettingsSection.svelte. The download/switch state machine
-// itself is not reimplemented here (AC2): it stays entirely in Rust
-// (`model_ui.rs`, calling the same `get_model_status`/`download_model`/
-// `load_model` commands the Svelte controller calls), this component only
-// displays whatever state Rust pushes and forwards the chosen label back.
-export component ModelSection inherits VerticalLayout {
+// The download/switch state machine lives in Rust (`model_ui.rs`); this
+// component only displays the pushed state and forwards the chosen value.
+export component ModelSection inherits KitFieldSet {
     in property <bool> capture-busy;
     in property <TranscriptionPhase> model-phase;
     in property <bool> ready;
@@ -32,50 +28,45 @@ export component ModelSection inherits VerticalLayout {
     callback model-changed(string);
     callback unload-timeout-changed(string);
 
-    spacing: 22px;
-    alignment: start;
-
-    KitFieldSet {
-        theme: KitThemeContext.current;
-        legend: @tr("MODÈLE DE TRANSCRIPTION");
+    theme: KitThemeContext.current;
+    legend: @tr("MODÈLE DE TRANSCRIPTION");
 
     KitFieldRow {
-        theme: KitThemeContext.current;
+        theme: root.theme;
         modal-layer: 0;
         orientation: Theme.settings-field-orientation(self.width);
         padding: KitMetrics.field-gap(self.theme);
         show-divider: false;
+        focus-requested => { model-picker.take-focus(); }
+        private property <bool> control-focused: model-picker.has-focus;
+        changed control-focused => {
+            if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
+        }
         label: @tr("Modèle de transcription");
         description: root.capture-busy
             ? @tr("Terminez l'enregistrement avant de changer de modèle.")
             : @tr("Choisissez un modèle : il se télécharge et se charge tout seul. Tout tourne sur ce Mac.");
 
-        KitBadge {
-            text: root.model-phase == TranscriptionPhase.download-required ? @tr("Téléchargement requis")
-                : root.model-phase == TranscriptionPhase.downloading ? @tr("Téléchargement…")
-                : root.model-phase == TranscriptionPhase.load-required ? @tr("Chargement requis")
-                : root.model-phase == TranscriptionPhase.loading ? @tr("Chargement…")
-                : root.model-phase == TranscriptionPhase.ready ? @tr("Prêt")
-                : root.model-phase == TranscriptionPhase.unloading ? @tr("Déchargement…")
-                : root.model-phase == TranscriptionPhase.failed ? @tr("Erreur du modèle")
-                : root.model-phase == TranscriptionPhase.audio-failed ? @tr("Erreur de capture audio")
-                : "";
-            tone: root.ready ? Tone.accent : Tone.warning;
-        }
-    }
-
-    VerticalLayout {
-        padding-left: Theme.settings-inset;
-        padding-right: Theme.settings-inset;
-        padding-bottom: 15px;
-        combo-host := Rectangle {
-            height: Theme.settings-control-height;
-            vertical-stretch: 0;
-            clip: true;
-            CatalogPicker {
+        HorizontalLayout {
+            spacing: root.theme.spacing.unit * 2;
+            alignment: end;
+            KitBadge {
+                theme: root.theme;
+                text: root.model-phase == TranscriptionPhase.download-required ? @tr("Téléchargement requis")
+                    : root.model-phase == TranscriptionPhase.downloading ? @tr("Téléchargement…")
+                    : root.model-phase == TranscriptionPhase.load-required ? @tr("Chargement requis")
+                    : root.model-phase == TranscriptionPhase.loading ? @tr("Chargement…")
+                    : root.model-phase == TranscriptionPhase.ready ? @tr("Prêt")
+                    : root.model-phase == TranscriptionPhase.unloading ? @tr("Déchargement…")
+                    : root.model-phase == TranscriptionPhase.failed ? @tr("Erreur du modèle")
+                    : root.model-phase == TranscriptionPhase.audio-failed ? @tr("Erreur de capture audio")
+                    : "";
+                tone: root.ready ? Tone.accent : Tone.warning;
+            }
+            model-picker := CatalogPicker {
+                theme: root.theme;
+                modal-layer: 0;
                 control-label: @tr("Modèle de transcription");
-                width: parent.width;
-                combo-width: parent.width;
                 model: root.model-labels;
                 option-values: root.model-ids;
                 current-value: root.selected-model-id;
@@ -85,97 +76,65 @@ export component ModelSection inherits VerticalLayout {
         }
     }
 
-    if root.apple-speech-selected && !root.apple-speech-unavailable: VerticalLayout {
-        padding-left: Theme.settings-inset;
-        padding-right: Theme.settings-inset;
-        padding-bottom: 15px;
-        spacing: 10px;
-        AppText {
-            text: @tr("La langue affichée est celle prise en charge par Apple Speech pour la langue et la région de ce Mac. Pour la modifier, ouvrez Réglages Système > Général > Langue et région, puis relancez Soufflé.");
-            typography: Typography.secondary;
-            color: Theme.text-secondary;
-            wrap: word-wrap;
-        }
-        AppText {
-            text: @tr("La transcription fonctionne sans activer Siri ou Apple Intelligence. macOS gère le modèle.");
-            typography: Typography.secondary;
-            color: Theme.text-muted;
-            wrap: word-wrap;
-        }
-        HorizontalLayout {
-            alignment: start;
-            KitButton {
-                theme: KitThemeContext.current;
-                modal-layer: 0;
-                text: @tr("Ouvrir Langue et région");
-                activated => { root.open-system-settings-requested(SystemSettingsPane.language-and-region); }
-            }
+    if root.apple-speech-selected && !root.apple-speech-unavailable: KitAlert {
+        theme: root.theme;
+        severity: AlertSeverity.information;
+        message: @tr("La langue affichée est celle prise en charge par Apple Speech pour la langue et la région de ce Mac. Pour la modifier, ouvrez Réglages Système > Général > Langue et région, puis relancez Soufflé.") + "\n\n" + @tr("La transcription fonctionne sans activer Siri ou Apple Intelligence. macOS gère le modèle.");
+        KitButton {
+            theme: root.theme;
+            modal-layer: 0;
+            text: @tr("Ouvrir Langue et région");
+            activated => { root.open-system-settings-requested(SystemSettingsPane.language-and-region); }
         }
     }
 
-    if root.apple-speech-selected && root.apple-speech-unavailable: VerticalLayout {
-        padding-left: Theme.settings-inset;
-        padding-right: Theme.settings-inset;
-        padding-bottom: 15px;
-        spacing: 10px;
-        AppText {
-            text: @tr("Apple Speech indisponible");
-            typography: Typography.content;
-            color: Theme.text-secondary;
-        }
-        AppText {
-            text: root.apple-speech-unavailable-reason == TranscriptionUnavailableReason.os-unsupported
-                ? @tr("Apple Speech nécessite macOS 26 ou une version ultérieure. Vérifiez les mises à jour de macOS ou choisissez un autre modèle.")
-                : root.apple-speech-unavailable-reason == TranscriptionUnavailableReason.device-unsupported
-                ? @tr("Apple Speech n'est pas pris en charge sur ce Mac. Choisissez un autre modèle de transcription.")
-                : root.apple-speech-unavailable-reason == TranscriptionUnavailableReason.build-unsupported
-                ? @tr("Cette version de Soufflé n'inclut pas Apple Speech. Installez une version compatible ou choisissez un autre modèle.")
-                : root.apple-speech-unavailable-reason == TranscriptionUnavailableReason.locale-unsupported
-                ? @tr("La langue et la région actuelles de ce Mac ne sont pas prises en charge par Apple Speech. Modifiez-les dans Réglages Système > Général > Langue et région, puis relancez Soufflé, ou choisissez un autre modèle.")
-                : root.apple-speech-unavailable-reason == TranscriptionUnavailableReason.assets-unsupported
-                ? @tr("Les ressources Apple Speech ne sont pas disponibles pour la langue de ce Mac. Choisissez une autre langue dans Langue et région, puis relancez Soufflé, ou utilisez un autre modèle.")
-                : root.apple-speech-unavailable-reason == TranscriptionUnavailableReason.check-failed
-                ? @tr("Impossible de vérifier la disponibilité d'Apple Speech. Relancez Soufflé pour réessayer ou choisissez un autre modèle.")
-                : "";
-            typography: Typography.secondary;
-            color: Theme.text-muted;
-            wrap: word-wrap;
-        }
+    if root.apple-speech-selected && root.apple-speech-unavailable: KitAlert {
+        theme: root.theme;
+        severity: AlertSeverity.warning;
+        title: @tr("Apple Speech indisponible");
+        message: root.apple-speech-unavailable-reason == TranscriptionUnavailableReason.os-unsupported
+            ? @tr("Apple Speech nécessite macOS 26 ou une version ultérieure. Vérifiez les mises à jour de macOS ou choisissez un autre modèle.")
+            : root.apple-speech-unavailable-reason == TranscriptionUnavailableReason.device-unsupported
+            ? @tr("Apple Speech n'est pas pris en charge sur ce Mac. Choisissez un autre modèle de transcription.")
+            : root.apple-speech-unavailable-reason == TranscriptionUnavailableReason.build-unsupported
+            ? @tr("Cette version de Soufflé n'inclut pas Apple Speech. Installez une version compatible ou choisissez un autre modèle.")
+            : root.apple-speech-unavailable-reason == TranscriptionUnavailableReason.locale-unsupported
+            ? @tr("La langue et la région actuelles de ce Mac ne sont pas prises en charge par Apple Speech. Modifiez-les dans Réglages Système > Général > Langue et région, puis relancez Soufflé, ou choisissez un autre modèle.")
+            : root.apple-speech-unavailable-reason == TranscriptionUnavailableReason.assets-unsupported
+            ? @tr("Les ressources Apple Speech ne sont pas disponibles pour la langue de ce Mac. Choisissez une autre langue dans Langue et région, puis relancez Soufflé, ou utilisez un autre modèle.")
+            : root.apple-speech-unavailable-reason == TranscriptionUnavailableReason.check-failed
+            ? @tr("Impossible de vérifier la disponibilité d'Apple Speech. Relancez Soufflé pour réessayer ou choisissez un autre modèle.")
+            : "";
         if root.apple-speech-unavailable-reason == TranscriptionUnavailableReason.locale-unsupported
-            || root.apple-speech-unavailable-reason == TranscriptionUnavailableReason.assets-unsupported: HorizontalLayout {
-            alignment: start;
-            KitButton {
-                theme: KitThemeContext.current;
-                modal-layer: 0;
-                text: @tr("Ouvrir Langue et région");
-                activated => { root.open-system-settings-requested(SystemSettingsPane.language-and-region); }
-            }
+            || root.apple-speech-unavailable-reason == TranscriptionUnavailableReason.assets-unsupported: KitButton {
+            theme: root.theme;
+            modal-layer: 0;
+            text: @tr("Ouvrir Langue et région");
+            activated => { root.open-system-settings-requested(SystemSettingsPane.language-and-region); }
         }
-        if root.apple-speech-unavailable-reason == TranscriptionUnavailableReason.os-unsupported: HorizontalLayout {
-            alignment: start;
-            KitButton {
-                theme: KitThemeContext.current;
-                modal-layer: 0;
-                text: @tr("Ouvrir Mise à jour de logiciels");
-                activated => { root.open-system-settings-requested(SystemSettingsPane.software-update); }
-            }
+        if root.apple-speech-unavailable-reason == TranscriptionUnavailableReason.os-unsupported: KitButton {
+            theme: root.theme;
+            modal-layer: 0;
+            text: @tr("Ouvrir Mise à jour de logiciels");
+            activated => { root.open-system-settings-requested(SystemSettingsPane.software-update); }
         }
     }
 
     if root.downloading: KitProgress {
+        theme: root.theme;
+        intent: ProgressIntent.accent;
         label: root.download-progress-label;
         value: root.download-progress-fraction;
     }
 
-    if root.error-message != "": AppText {
-        text: root.error-message;
-        color: Theme.danger;
-        typography: Typography.small;
-        wrap: word-wrap;
+    if root.error-message != "": KitAlert {
+        theme: root.theme;
+        severity: AlertSeverity.error;
+        message: root.error-message;
     }
 
     if !root.apple-speech-selected: KitFieldRow {
-        theme: KitThemeContext.current;
+        theme: root.theme;
         modal-layer: 0;
         orientation: Theme.settings-field-orientation(self.width);
         padding: KitMetrics.field-gap(self.theme);
@@ -189,13 +148,12 @@ export component ModelSection inherits VerticalLayout {
         description: @tr("Décharger le modèle de la mémoire après une période d'inactivité.");
 
         timeout-picker := CatalogPicker {
-            theme: KitThemeContext.current;
+            theme: root.theme;
             modal-layer: 0;
             control-label: @tr("Délai avant déchargement");
             model: root.unload-timeout-labels;
             current-value: root.unload-timeout-label;
             value-chosen(value) => { root.unload-timeout-changed(value); }
         }
-    }
     }
 }

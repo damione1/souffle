@@ -1,5 +1,6 @@
 import { AppText, Typography } from "@typography";
-import { KitButton, KitTextArea, KitTextField, ScrollFrame, KitFieldSet, KitThemeContext } from "@kit";
+import { ButtonIntent, ControlSize, KitButton, KitFieldError, KitFieldRow, KitFieldSeparator, KitFieldSet, KitMetrics, KitTextArea, KitTextField, KitThemeContext, ResizePolicy, ScrollFrame } from "@kit";
+import { LucideFiles } from "@kit-icons/files.slint";
 import { Theme } from "../../theme.slint";
 
 // Port of SnippetsSettingsSection.svelte. Which row is being edited is
@@ -17,7 +18,8 @@ export component SnippetsSection inherits VerticalLayout {
     // Only the currently visible slice of the snippet list (SOU-229) -
     // `lists_ui.rs` owns the full row list and windows it with the same
     // spacer-before/spacer-after pattern as `transcript_section.slint`; see
-    // `dictionary_section.slint` for the full rationale.
+    // `dictionary_section.slint` for the full rationale. Row heights must
+    // match the constants in `lists_ui.rs`.
     in property <[SnippetRow]> entries;
     in property <int> entry-count: 0;
     in property <float> list-content-height: 0.0;
@@ -46,168 +48,180 @@ export component SnippetsSection inherits VerticalLayout {
         theme: KitThemeContext.current;
         legend: @tr("EXTRAITS VOCAUX");
 
-    VerticalLayout {
-        padding-left: Theme.settings-inset;
-        padding-right: Theme.settings-inset;
-        padding-top: 15px;
-        padding-bottom: 15px;
-        spacing: 8px;
-
-        AppText {
-            text: @tr("Dites une phrase déclencheur au début d'une dictée pour insérer un bloc de texte. La comparaison ignore la casse et les accents ; aucune retouche IA n'est appliquée quand un extrait correspond.");
-            typography: Typography.secondary;
-            color: Theme.text-muted;
-            wrap: word-wrap;
+        KitFieldRow {
+            theme: KitThemeContext.current;
+            modal-layer: 0;
+            padding: KitMetrics.field-gap(self.theme);
+            show-divider: false;
+            label: @tr("Phrase déclencheur en début de dictée");
+            description: @tr("Dites une phrase déclencheur au début d'une dictée pour insérer un bloc de texte. La comparaison ignore la casse et les accents ; aucune retouche IA n'est appliquée quand un extrait correspond.");
         }
 
-        AppText { text: @tr("DÉCLENCHEUR"); typography: Typography.table-heading; color: Theme.text-tertiary; }
-        KitTextField {
-            text <=> root.new-trigger-draft;
-            placeholder: @tr("Phrase déclencheur");
-            accessible-name: @tr("Phrase déclencheur");
-        }
-        AppText { text: @tr("EXPANSION"); typography: Typography.table-heading; color: Theme.text-tertiary; }
-        KitTextArea {
-            text <=> root.new-expansion-draft;
-            height: 72px;
-            placeholder: @tr("Texte à insérer");
-            accessible-name: @tr("Texte de l'extrait vocal");
-        }
+        VerticalLayout {
+            padding-left: Theme.settings-inset;
+            padding-right: Theme.settings-inset;
+            padding-bottom: 16px;
+            spacing: 12px;
 
-        HorizontalLayout {
-            alignment: end;
-            KitButton {
-                text: @tr("Ajouter un extrait");
-                disabled: root.new-trigger-draft == "" || root.new-expansion-draft == "";
-                activated => {
-                    root.add-requested(root.new-trigger-draft, root.new-expansion-draft);
+            HorizontalLayout {
+                spacing: 12px;
+                alignment: stretch;
+
+                KitTextField {
+                    text <=> root.new-trigger-draft;
+                    label: @tr("DÉCLENCHEUR");
+                    placeholder: @tr("Phrase déclencheur");
+                    accessible-name: @tr("Phrase déclencheur");
+                    width: 220px;
+                    horizontal-stretch: 0;
                 }
+                KitTextArea {
+                    text <=> root.new-expansion-draft;
+                    label: @tr("EXPANSION");
+                    placeholder: @tr("Texte à insérer");
+                    accessible-name: @tr("Texte de l'extrait vocal");
+                    resize-policy: ResizePolicy.fixed;
+                    height: 72px;
+                    horizontal-stretch: 1;
+                }
+            }
+
+            HorizontalLayout {
+                alignment: start;
+                KitButton {
+                    text: @tr("Ajouter un extrait");
+                    intent: ButtonIntent.primary;
+                    disabled: root.new-trigger-draft == "" || root.new-expansion-draft == "";
+                    activated => {
+                        root.add-requested(root.new-trigger-draft, root.new-expansion-draft);
+                    }
+                }
+            }
+
+            if root.add-error != "": KitFieldError { text: root.add-error; }
+
+            if root.entry-count == 0: AppText {
+                text: @tr("Aucune formule.");
+                color: Theme.text-muted;
+                typography: Typography.secondary;
             }
         }
 
-        if root.add-error != "": AppText {
-            text: root.add-error;
-            color: Theme.danger;
-            typography: Typography.caption;
-        }
+        snippets-list := ScrollFrame {
+            height: min(root.list-content-height * 1px, 420px);
+            visible: root.entry-count > 0;
+            horizontal-scrollbar-policy: always-off;
+            content-width: self.visible-width;
+            content-height: root.list-content-height * 1px;
+            content-y <=> root.list-scroll-top;
 
-        if root.entry-count == 0: AppText {
-            text: @tr("Aucune formule.");
-            color: Theme.text-muted;
-            typography: Typography.secondary;
-        }
-    }
+            VerticalLayout {
+                width: snippets-list.visible-width;
+                alignment: start;
 
-    snippets-list := ScrollFrame {
-        height: min(root.list-content-height * 1px, 420px);
-        visible: root.entry-count > 0;
-        horizontal-scrollbar-policy: always-off;
-        content-width: self.visible-width;
-        content-height: root.list-content-height * 1px;
-        content-y <=> root.list-scroll-top;
+                Rectangle { height: root.list-spacer-before * 1px; }
 
-        VerticalLayout {
-        width: snippets-list.visible-width;
-        alignment: start;
+                for row in root.entries: VerticalLayout {
+                    height: row.editing ? 236px : (root.delete-error != "" && root.delete-error-id == row.id ? 116px : 96px);
+                    alignment: start;
 
-        Rectangle { height: root.list-spacer-before * 1px; }
+                    KitFieldSeparator { theme: KitThemeContext.current; }
 
-        for row in root.entries: Rectangle {
-            height: row.editing ? 236px : (root.delete-error != "" && root.delete-error-id == row.id ? 116px : 96px);
+                    VerticalLayout {
+                        padding-left: Theme.settings-inset;
+                        padding-right: Theme.settings-inset;
+                        padding-top: 10px;
+                        padding-bottom: 10px;
+                        spacing: 6px;
+                        alignment: start;
 
-            Rectangle {
-                x: Theme.settings-inset;
-                width: parent.width - 2 * Theme.settings-inset;
-                height: parent.height - 6px;
-                border-width: 1px;
-                border-color: Theme.border-soft;
-                border-radius: 6px;
+                        if !row.editing: HorizontalLayout {
+                            spacing: 12px;
+                            alignment: stretch;
 
-                VerticalLayout {
-                    padding: 8px;
-                    spacing: 6px;
-
-                    if !row.editing: VerticalLayout {
-                        spacing: 4px;
-
-                        HorizontalLayout {
-                            alignment: space-between;
                             AppText {
                                 text: row.trigger;
                                 typography: Typography.hint-emphasis;
-
                                 color: Theme.text-primary;
                                 overflow: elide;
+                                width: 200px;
+                                horizontal-stretch: 0;
+                                vertical-alignment: center;
+                            }
+                            AppText {
+                                text: row.expansion;
+                                typography: Typography.secondary;
+                                color: Theme.text-muted;
+                                max-height: 52px;
+                                wrap: word-wrap;
+                                overflow: elide;
+                                horizontal-stretch: 1;
+                                vertical-alignment: center;
                             }
                             HorizontalLayout {
-                                spacing: 4px;
+                                spacing: 6px;
+                                horizontal-stretch: 0;
+                                alignment: start;
                                 KitButton {
                                     text: @tr("Modifier");
+                                    control-size: ControlSize.compact;
+                                    intent: ButtonIntent.quiet;
                                     activated => { root.edit-requested(row.id); }
                                 }
                                 KitButton {
                                     text: @tr("Supprimer");
+                                    control-size: ControlSize.compact;
+                                    intent: ButtonIntent.quiet;
+                                    leading-icon: LucideFiles.trash();
                                     activated => { root.delete-requested(row.id); }
                                 }
                             }
                         }
-                        AppText {
-                            text: row.expansion;
-                            typography: Typography.caption;
-                            color: Theme.text-muted;
-                            max-height: 38px;
-                            wrap: word-wrap;
-                            overflow: elide;
-                        }
-                    }
 
-                    if row.editing: VerticalLayout {
-                        spacing: 4px;
+                        if row.editing: VerticalLayout {
+                            spacing: 6px;
 
-                        AppText { text: @tr("DÉCLENCHEUR"); typography: Typography.table-heading; color: Theme.text-tertiary; }
-                        KitTextField {
-                            text <=> root.edit-trigger-draft;
-                            accessible-name: @tr("Phrase déclencheur");
-                        }
-                        AppText { text: @tr("EXPANSION"); typography: Typography.table-heading; color: Theme.text-tertiary; }
-                        KitTextArea {
-                            text <=> root.edit-expansion-draft;
-                            height: 72px;
-                            accessible-name: @tr("Texte de l'extrait vocal");
-                        }
-                        if root.update-error != "": AppText {
-                            text: root.update-error;
-                            color: Theme.danger;
-                            typography: Typography.caption;
-                            overflow: elide;
-                        }
-                        HorizontalLayout {
-                            alignment: end;
-                            spacing: 4px;
-                            KitButton {
-                                text: @tr("Annuler");
-                                activated => { root.cancel-edit-requested(); }
+                            KitTextField {
+                                text <=> root.edit-trigger-draft;
+                                label: @tr("DÉCLENCHEUR");
+                                accessible-name: @tr("Phrase déclencheur");
                             }
-                            KitButton {
-                                text: @tr("Enregistrer");
-                                disabled: root.edit-trigger-draft == "" || root.edit-expansion-draft == "";
-                                activated => { root.save-edit-requested(row.id, root.edit-trigger-draft, root.edit-expansion-draft); }
+                            KitTextArea {
+                                text <=> root.edit-expansion-draft;
+                                label: @tr("EXPANSION");
+                                accessible-name: @tr("Texte de l'extrait vocal");
+                                resize-policy: ResizePolicy.fixed;
+                                height: 72px;
+                            }
+                            if root.update-error != "": KitFieldError { text: root.update-error; overflow: elide; }
+                            HorizontalLayout {
+                                alignment: end;
+                                spacing: 6px;
+                                KitButton {
+                                    text: @tr("Annuler");
+                                    control-size: ControlSize.compact;
+                                    intent: ButtonIntent.quiet;
+                                    activated => { root.cancel-edit-requested(); }
+                                }
+                                KitButton {
+                                    text: @tr("Enregistrer");
+                                    control-size: ControlSize.compact;
+                                    intent: ButtonIntent.primary;
+                                    disabled: root.edit-trigger-draft == "" || root.edit-expansion-draft == "";
+                                    activated => { root.save-edit-requested(row.id, root.edit-trigger-draft, root.edit-expansion-draft); }
+                                }
                             }
                         }
-                    }
 
-                    if root.delete-error != "" && root.delete-error-id == row.id: AppText {
-                        text: root.delete-error;
-                        color: Theme.danger;
-                        typography: Typography.caption;
-                        overflow: elide;
+                        if root.delete-error != "" && root.delete-error-id == row.id: KitFieldError {
+                            text: root.delete-error;
+                            overflow: elide;
+                        }
                     }
                 }
+
+                Rectangle { height: root.list-spacer-after * 1px; }
             }
         }
-
-        Rectangle { height: root.list-spacer-after * 1px; }
-        }
-    }
     }
 }

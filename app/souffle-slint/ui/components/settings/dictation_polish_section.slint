@@ -2,10 +2,6 @@ import { ChoiceLabelPosition, ControlWidth, KitAlert, KitButton, KitFieldRow, Ki
 import { CatalogPicker } from "../catalog_picker.slint";
 import { Theme } from "../../theme.slint";
 
-// Port of DictationPolishSettingsSection.svelte. The active template's
-// prompt is forwarded as a plain property (`active-prompt`) rather than
-// looked up in `.slint` from a list - same reasoning as the other pickers
-// in this tab.
 export component DictationPolishSection inherits KitFieldSet {
     in property <bool> enabled;
     in property <bool> provider-available;

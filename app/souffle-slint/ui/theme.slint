@@ -177,6 +177,7 @@ export global Theme {
 
     // Trailing control column on settings rows (combo, URL field, spin).
     out property <length> settings-control-width: 220px;
+    out property <length> settings-content-width: 780px;
     public pure function settings-field-orientation(available: length) -> Orientation {
         return available < 2 * root.settings-control-width * KitThemeContext.current.text-scale
             ? Orientation.vertical : Orientation.horizontal;

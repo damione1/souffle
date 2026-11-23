@@ -22,7 +22,7 @@ import { ModelDeleteSection } from "components/settings/model_delete_section.sli
 import { DictionarySection, DictionaryRow, DictionarySuggestionRow, DictionaryLearningOption } from "components/settings/dictionary_section.slint";
 import { SnippetsSection, SnippetRow } from "components/settings/snippets_section.slint";
 import { Theme } from "theme.slint";
-import { KitButton, KitAppShell, KitStack, KitFocusBackground, KitAlert, KitText, KitRouter, ButtonIntent } from "@kit";
+import { KitButton, KitAppShell, KitStack, KitInline, KitFocusBackground, KitAlert, KitText, KitRouter, KitLayoutMetrics, KitThemeContext, ButtonIntent, ControlSize, LayoutSpace } from "@kit";
 import { LucideArrows } from "@kit-icons/arrows.slint";
 import { SettingsOptions } from "components/settings/settings_options.slint";
 import { SettingsTabBar, SettingsTabPage } from "components/settings/settings_tabs.slint";
@@ -31,6 +31,7 @@ import { ModelDeletionError, TranscriptionUnavailableReason, SystemSettingsPane 
 
 // The six tab pages share one overlay and mount their sections on first visit.
 export component SettingsView inherits KitAppShell {
+    private property <length> column-width: min(root.width - 2 * KitLayoutMetrics.space(KitThemeContext.current, LayoutSpace.roomy), Theme.settings-content-width);
     in-out property <SettingsTab> tab: SettingsTab.transcription;
     in property <bool> autostart-enabled;
     in property <bool> debug-transcription;
@@ -323,21 +324,35 @@ export component SettingsView inherits KitAppShell {
     callback snippet-save-edit-requested(int, string, string);
 
     KitFocusBackground {
-        KitStack {
-            alignment: stretch;
-            inset: roomy;
-        done := KitButton {
-            text: @tr("Terminé");
-            accessible-name: @tr("Fermer les paramètres");
-            intent: ButtonIntent.quiet;
-            leading-icon: LucideArrows.arrow-left();
-            activated => { root.close-requested(); }
-        }
+        HorizontalLayout {
+            alignment: center;
+            padding-top: KitLayoutMetrics.space(KitThemeContext.current, LayoutSpace.roomy);
+            padding-bottom: KitLayoutMetrics.space(KitThemeContext.current, LayoutSpace.roomy);
 
-        KitText {
-            text: @tr("Paramètres");
-            role: title;
+        KitStack {
+            width: root.column-width;
+            alignment: stretch;
+            gap: roomy;
+
+        KitStack {
+            gap: compact;
             vertical-stretch: 0;
+
+            KitInline {
+                done := KitButton {
+                    text: @tr("Terminé");
+                    accessible-name: @tr("Fermer les paramètres");
+                    control-size: ControlSize.compact;
+                    intent: ButtonIntent.quiet;
+                    leading-icon: LucideArrows.arrow-left();
+                    activated => { root.close-requested(); }
+                }
+            }
+
+            KitText {
+                text: @tr("Paramètres");
+                role: title;
+            }
         }
 
         if root.save-error != "" && root.draft-save-error == "": KitAlert {
@@ -484,6 +499,19 @@ export component SettingsView inherits KitAppShell {
                         if ai-page.mounted && SummarizationUi.enabled: CompressionSection { }
                         if ai-page.mounted && (SummarizationUi.enabled || CompressionUi.cache-present || CompressionUi.model-error != ""): CompressionStorageSection { }
 
+                        if ai-page.mounted: DictationPolishSection {
+                            enabled: root.dictation-polish-enabled;
+                            provider-available: root.dictation-polish-provider-available;
+                            template-ids: root.dictation-polish-template-ids;
+                            template-labels: root.dictation-polish-template-labels;
+                            active-template-id: root.active-dictation-polish-id;
+                            active-prompt <=> root.active-dictation-polish-prompt;
+                            enabled-changed(value) => { root.dictation-polish-enabled-changed(value); }
+                            template-changed(value) => { root.dictation-polish-template-changed(value); }
+                            prompt-changed(value) => { root.dictation-polish-prompt-changed(value); }
+                            open-provider-settings-requested => { root.open-apple-intelligence-settings-requested(); }
+                        }
+
                         if ai-page.mounted && SummarizationUi.enabled: SummaryTemplatesSection {
                             template-ids: root.summary-template-ids;
                             template-labels: root.summary-template-labels;
@@ -499,19 +527,6 @@ export component SettingsView inherits KitAppShell {
                             name-changed(value) => { root.summary-template-name-changed(value); }
                             prompt-changed(value) => { root.summary-template-prompt-changed(value); }
                             add-requested(name) => { root.summary-template-add-requested(name); }
-                        }
-
-                        if ai-page.mounted: DictationPolishSection {
-                            enabled: root.dictation-polish-enabled;
-                            provider-available: root.dictation-polish-provider-available;
-                            template-ids: root.dictation-polish-template-ids;
-                            template-labels: root.dictation-polish-template-labels;
-                            active-template-id: root.active-dictation-polish-id;
-                            active-prompt <=> root.active-dictation-polish-prompt;
-                            enabled-changed(value) => { root.dictation-polish-enabled-changed(value); }
-                            template-changed(value) => { root.dictation-polish-template-changed(value); }
-                            prompt-changed(value) => { root.dictation-polish-prompt-changed(value); }
-                            open-provider-settings-requested => { root.open-apple-intelligence-settings-requested(); }
                         }
 
                         if ai-page.mounted: AppBranchesSection {
@@ -775,6 +790,7 @@ export component SettingsView inherits KitAppShell {
                         }
                     }
                 }
-    }
+            }
+        }
     }
 }
