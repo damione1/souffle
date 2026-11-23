@@ -1,4 +1,4 @@
-import { ControlSize, KitMetrics, KitThemeContext, KitThemes } from "@kit";
+import { ControlSize, ElevationLevel, FocusRingStyle, KitMetrics, KitThemeContext, KitThemes } from "@kit";
 // Color tokens ported from `src/app.css`'s `@theme`/`.light` blocks. `dark`
 // is the single source of truth for which palette every color below
 // resolves to - main.rs sets it once at launch (resolving "system" against
@@ -10,72 +10,162 @@ import { ControlSize, KitMetrics, KitThemeContext, KitThemes } from "@kit";
 export global Theme {
     in-out property <bool> dark: true;
     changed dark => { root.apply-kit-theme(); }
+    // Kit typography is projected from the shared contract by Rust at startup
+    // (src/typography.rs); the Slint typography guard forbids defining it here.
     public function apply-kit-theme() {
-        KitThemeContext.current = root.dark ? KitThemes.dark : KitThemes.light;
         KitThemeContext.current.canvas = root.canvas;
         KitThemeContext.current.surface = root.surface-1;
-        KitThemeContext.current.surface-raised = root.surface-2;
-        KitThemeContext.current.surface-inset = root.input;
+        KitThemeContext.current.surface-raised = root.surface-1;
+        KitThemeContext.current.surface-inset = root.surface-2;
         KitThemeContext.current.text-primary = root.text-primary;
         KitThemeContext.current.text-secondary = root.text-muted;
         KitThemeContext.current.placeholder = root.text-muted;
-        KitThemeContext.current.accent = root.accent;
-        KitThemeContext.current.on-accent = root.canvas;
-        KitThemeContext.current.accent-hover = root.accent-hover;
-        KitThemeContext.current.accent-pressed = root.accent-hover;
-        KitThemeContext.current.accent-subtle = root.surface-3;
-        KitThemeContext.current.selection = root.accent;
-        KitThemeContext.current.on-selection = root.canvas;
-        KitThemeContext.current.border-subtle = root.border-soft;
-        KitThemeContext.current.border-strong = root.ghost-border;
-        KitThemeContext.current.control-fill = root.input;
-        KitThemeContext.current.control-border = root.ghost-border;
-        KitThemeContext.current.choice-fill = root.accent;
-        KitThemeContext.current.on-choice-fill = root.canvas;
+        KitThemeContext.current.accent = root.brand;
+        KitThemeContext.current.on-accent = root.on-brand;
+        KitThemeContext.current.accent-hover = root.brand-hover;
+        KitThemeContext.current.accent-pressed = root.brand-pressed;
+        KitThemeContext.current.accent-subtle = root.accent-tint;
+        KitThemeContext.current.selection = root.selection;
+        KitThemeContext.current.on-selection = root.text-primary;
+        KitThemeContext.current.border-subtle = root.line;
+        KitThemeContext.current.border-strong = root.surface-4;
+        KitThemeContext.current.control-fill = root.surface-1;
+        KitThemeContext.current.control-border = root.line-strong;
+        KitThemeContext.current.choice-fill = root.brand;
+        KitThemeContext.current.on-choice-fill = root.on-choice;
         KitThemeContext.current.hover = root.surface-2;
         KitThemeContext.current.pressed = root.surface-3;
         KitThemeContext.current.disabled-fill = root.surface-2;
-        KitThemeContext.current.disabled-text = root.text-muted;
+        KitThemeContext.current.disabled-text = root.text-faint;
         KitThemeContext.current.scrim = root.modal-scrim;
         KitThemeContext.current.danger = root.danger;
         KitThemeContext.current.on-danger = root.on-danger;
+        KitThemeContext.current.danger-hover = root.danger-hover;
+        KitThemeContext.current.danger-pressed = root.danger-pressed;
+        KitThemeContext.current.danger-subtle = root.danger-tint;
         KitThemeContext.current.success = root.success;
+        KitThemeContext.current.on-success = root.on-success;
+        KitThemeContext.current.success-hover = root.success-hover;
+        KitThemeContext.current.success-pressed = root.success-pressed;
+        KitThemeContext.current.success-subtle = root.success-tint;
         KitThemeContext.current.warning = root.warning;
-        KitThemeContext.current.focus.color = root.accent;
-        KitThemeContext.current.focus.invalid-color = root.danger;
+        KitThemeContext.current.on-warning = root.on-warning;
+        KitThemeContext.current.warning-hover = root.warning-hover;
+        KitThemeContext.current.warning-pressed = root.warning-pressed;
+        KitThemeContext.current.warning-subtle = root.warning-tint;
+        KitThemeContext.current.information = root.accent;
+        KitThemeContext.current.on-information = root.on-brand;
+        KitThemeContext.current.information-hover = root.accent-hover;
+        KitThemeContext.current.information-pressed = root.accent-pressed;
+        KitThemeContext.current.information-subtle = root.accent-tint;
+        KitThemeContext.current.focus = {
+            style: FocusRingStyle.outside, width: 2px, offset: 2px,
+            color: root.accent, invalid-color: root.danger,
+        };
+        KitThemeContext.current.shape = {
+            radius-control: 10px, radius-container: 16px, radius-overlay: 20px, radius-pill: 9999px,
+            border-width: 1px, border-width-strong: 2px, icon-stroke: 1.8,
+        };
+        KitThemeContext.current.elevation = {
+            control: ElevationLevel.xs, container: ElevationLevel.sm, overlay: ElevationLevel.lg, popover: ElevationLevel.md,
+            xs: {
+                key: { offset-y: 1px, blur: 2px, spread: 0px, color: root.shadow-control },
+                ambient: { offset-y: 0px, blur: 0px, spread: 0px, color: transparent },
+            },
+            sm: {
+                key: { offset-y: 10px, blur: 28px, spread: -12px, color: root.shadow-card },
+                ambient: { offset-y: 1px, blur: 2px, spread: 0px, color: root.shadow-card-edge },
+            },
+            md: {
+                key: { offset-y: 14px, blur: 32px, spread: -12px, color: root.shadow-popover },
+                ambient: { offset-y: 1px, blur: 2px, spread: 0px, color: root.shadow-card-edge },
+            },
+            lg: {
+                key: { offset-y: 24px, blur: 60px, spread: -16px, color: root.shadow-modal },
+                ambient: { offset-y: 0px, blur: 0px, spread: 0px, color: transparent },
+            },
+            xl: {
+                key: { offset-y: 32px, blur: 72px, spread: -16px, color: root.shadow-modal },
+                ambient: { offset-y: 0px, blur: 0px, spread: 0px, color: transparent },
+            },
+        };
+        KitThemeContext.current.spacing.compact = { height: 30px, padding-inline: 12px, padding-block: 5px };
+        KitThemeContext.current.spacing.medium = { height: 36px, padding-inline: 14px, padding-block: 6px };
+        KitThemeContext.current.spacing.comfortable = { height: 40px, padding-inline: 24px, padding-block: 8px };
+        KitThemeContext.current.geometry.choice-medium = 22px;
     }
 
+    // Palette of the validated mockup (`--canvas`, `--s1..s4`, `--t1..t4`,
+    // `--brand`, `--ac`, `--line`). `accent` is the text-weight amber (`--ac`);
+    // `brand` is the fill amber carried by primary actions and selection marks.
     out property <color> canvas: root.dark ? #16110c : #fbf7ed;
     out property <color> surface-1: root.dark ? #1e1811 : #ffffff;
-    out property <color> surface-2: root.dark ? #261e15 : #f0e9dc;
-    out property <color> surface-3: root.dark ? #33291d : #e2d8c6;
-    out property <color> surface-4: root.dark ? #423525 : #d3c6ad;
-    out property <color> input: root.dark ? #150f09 : #f6f1e4;
+    out property <color> surface-2: root.dark ? #261e15 : #f3ecdd;
+    out property <color> surface-3: root.dark ? #33291d : #e8dfcd;
+    out property <color> surface-4: root.dark ? #4a3b28 : #d3c6ad;
+    out property <color> input: root.dark ? #120d08 : #f6f1e4;
 
+    out property <color> brand: root.dark ? #e9ae55 : #e2a22f;
+    out property <color> brand-hover: root.dark ? #f2be6e : #d99a22;
+    out property <color> brand-pressed: root.dark ? #d99b41 : #c98c14;
+    out property <color> on-brand: root.dark ? #1a1208 : #17110b;
+    out property <color> on-choice: #ffffff;
     out property <color> accent: root.dark ? #e9ae55 : #89570d;
     out property <color> accent-hover: root.dark ? #f2be6e : #7a4e09;
+    out property <color> accent-pressed: root.dark ? #d99b41 : #6b4308;
+    out property <color> accent-tint: root.dark ? rgba(233, 174, 85, 0.14) : rgba(226, 162, 47, 0.16);
+    out property <color> selection: root.dark ? rgba(233, 174, 85, 0.35) : rgba(226, 162, 47, 0.35);
     out property <color> secondary: root.dark ? #d98c6a : #6b2710;
+    out property <color> secondary-tint: root.dark ? rgba(217, 140, 106, 0.14) : rgba(107, 39, 16, 0.10);
 
     out property <color> text-primary: root.dark ? #f1e9dd : #17110b;
     out property <color> text-secondary: root.dark ? #e6dccb : #3a2d1c;
-    out property <color> text-tertiary: root.dark ? #c2b39a : #55432e;
+    out property <color> text-tertiary: root.dark ? #b3a284 : #6b573c;
     out property <color> text-muted: root.dark ? #b3a284 : #6b573c;
     out property <color> text-faint: root.dark ? #9c8c70 : #7b6547;
     // Opacity of a word the engine has heard but not confirmed yet (live
     // meeting and dictation views; the pill HUD uses the same value).
     out property <float> provisional-opacity: 0.55;
 
-    out property <color> success: root.dark ? #e9ae55 : #4f7a52;
+    out property <color> success: root.dark ? #8fc08f : #3f6b43;
+    out property <color> success-hover: root.dark ? #a2cea2 : #356038;
+    out property <color> success-pressed: root.dark ? #b5dbb5 : #2c5230;
+    out property <color> success-tint: root.dark ? rgba(143, 192, 143, 0.14) : rgba(79, 122, 82, 0.14);
+    out property <color> on-success: root.dark ? #10200f : #ffffff;
     out property <color> warning: root.dark ? #e0a458 : #87550c;
+    out property <color> warning-hover: root.dark ? #e8b673 : #754a0a;
+    out property <color> warning-pressed: root.dark ? #efc78e : #653f08;
+    out property <color> warning-tint: root.dark ? rgba(224, 164, 88, 0.16) : rgba(226, 162, 47, 0.20);
+    out property <color> on-warning: root.dark ? #1f1305 : #ffffff;
     out property <color> danger: root.dark ? #f2685a : #a8402c;
+    out property <color> danger-hover: root.dark ? #f58074 : #983a27;
+    out property <color> danger-pressed: root.dark ? #f7978d : #86311f;
+    out property <color> danger-tint: root.dark ? rgba(242, 104, 90, 0.14) : rgba(168, 64, 44, 0.10);
     out property <color> danger-soft: root.dark ? #f28a78 : #984631;
     out property <color> danger-strong: root.dark ? #8a5148 : #8a3222;
-    out property <color> on-danger: root.dark ? #2a0e09 : #f7efdf;
+    out property <color> on-danger: root.dark ? #2a0e09 : #ffffff;
 
-    out property <color> ghost-border: root.dark ? rgba(235, 210, 170, 0.42) : rgba(23, 17, 11, 0.46);
-    out property <color> border-soft: root.dark ? rgba(235, 210, 170, 0.16) : rgba(23, 17, 11, 0.16);
-    out property <color> rule: root.dark ? rgba(235, 210, 170, 0.22) : rgba(23, 17, 11, 0.28);
-    out property <color> modal-scrim: root.dark ? rgba(0, 0, 0, 0.72) : rgba(0, 0, 0, 0.54);
+    out property <color> line: root.dark ? rgba(235, 210, 170, 0.10) : rgba(23, 17, 11, 0.10);
+    out property <color> line-strong: root.dark ? rgba(235, 210, 170, 0.20) : rgba(23, 17, 11, 0.18);
+    out property <color> ghost-border: root.line-strong;
+    out property <color> border-soft: root.line;
+    out property <color> rule: root.line;
+    out property <color> modal-scrim: root.dark ? rgba(0, 0, 0, 0.62) : rgba(40, 28, 12, 0.45);
+    out property <color> glass: root.dark ? rgba(22, 17, 12, 0.78) : rgba(251, 247, 237, 0.78);
+
+    out property <color> shadow-control: root.dark ? rgba(0, 0, 0, 0.40) : rgba(60, 40, 10, 0.12);
+    out property <color> shadow-card: root.dark ? rgba(0, 0, 0, 0.60) : rgba(70, 45, 10, 0.16);
+    out property <color> shadow-card-edge: root.dark ? rgba(0, 0, 0, 0.40) : rgba(70, 45, 10, 0.06);
+    out property <color> shadow-popover: root.dark ? rgba(0, 0, 0, 0.70) : rgba(40, 25, 5, 0.28);
+    out property <color> shadow-modal: root.dark ? rgba(0, 0, 0, 0.80) : rgba(40, 25, 5, 0.35);
+
+    // The floating HUD keeps its dark glass in both themes.
+    out property <color> hud-glass: rgba(28, 22, 16, 0.82);
+    out property <color> hud-border: rgba(255, 255, 255, 0.12);
+    out property <color> hud-text: rgba(255, 255, 255, 0.90);
+    out property <color> hud-text-dim: rgba(255, 255, 255, 0.70);
+    out property <color> hud-record: #e5473a;
+    out property <color> hud-wave: #e9ae55;
 
     // Trailing timeline columns. A clock label is compact beside the
     // duration; calendar ranges keep the wider column they need.

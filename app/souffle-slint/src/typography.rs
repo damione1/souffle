@@ -1,5 +1,5 @@
 //! Verify the renderer's shared font collection before showing any layout.
-use crate::{MainWindow, NumericGlyph, TypefaceWeight, Typography};
+use crate::{KitThemeContext, MainWindow, NumericGlyph, TypefaceWeight, Typography};
 fn weight_from_ui(weight: TypefaceWeight) -> souffle_typography::Weight {
     use souffle_typography::Weight;
     match weight {
@@ -108,7 +108,34 @@ pub fn initialize(window: &MainWindow) -> Result<Vec<String>, String> {
             .last()
             .map_or(0., |cell| cell.offset + cell.width)
         });
+    project_kit_typography(window);
     Ok(proof)
+}
+
+fn role(name: &str) -> &'static souffle_typography::TextStyle {
+    souffle_typography::STYLES
+        .iter()
+        .find(|style| style.name == name)
+        .unwrap_or_else(|| panic!("typography role {name} missing"))
+}
+
+/// Kit components read their text metrics from the Kit theme; project the
+/// shared contract into it so they follow the same Inter roles.
+fn project_kit_typography(window: &MainWindow) {
+    let context = window.global::<KitThemeContext>();
+    let mut theme = context.get_current();
+    let semibold = i32::from(souffle_typography::Weight::SemiBold.number());
+    let typography = &mut theme.typography;
+    typography.family = SharedString::from(souffle_typography::FAMILY);
+    typography.weight_regular = i32::from(souffle_typography::Weight::Regular.number());
+    typography.weight_medium = semibold;
+    typography.weight_semibold = semibold;
+    typography.weight_bold = i32::from(souffle_typography::Weight::Bold.number());
+    typography.size_caption = role("hint").size;
+    typography.size_control = role("content").size;
+    typography.size_body = souffle_typography::BODY.size;
+    typography.size_subtitle = role("settings-title").size;
+    context.set_current(theme);
 }
 
 #[cfg(test)]
