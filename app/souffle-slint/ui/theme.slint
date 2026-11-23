@@ -89,9 +89,15 @@ export global Theme {
                 ambient: { offset-y: 0px, blur: 0px, spread: 0px, color: transparent },
             },
         };
-        KitThemeContext.current.spacing.compact = { height: 30px, padding-inline: 12px, padding-block: 5px };
-        KitThemeContext.current.spacing.medium = { height: 36px, padding-inline: 14px, padding-block: 6px };
-        KitThemeContext.current.spacing.comfortable = { height: 40px, padding-inline: 24px, padding-block: 8px };
+        KitThemeContext.current.spacing.compact = { height: 30px, padding-inline: 16px, field-padding-inline: 12px, padding-block: 5px };
+        KitThemeContext.current.spacing.medium = { height: 36px, padding-inline: 16px, field-padding-inline: 12px, padding-block: 6px };
+        KitThemeContext.current.spacing.comfortable = { height: 40px, padding-inline: 24px, field-padding-inline: 12px, padding-block: 8px };
+        KitThemeContext.current.geometry.switch-width = 40px;
+        KitThemeContext.current.geometry.switch-height = 24px;
+        KitThemeContext.current.geometry.switch-thumb = 18px;
+        KitThemeContext.current.geometry.switch-inset = 3px;
+        KitThemeContext.current.choice-thumb = #ffffff;
+        KitThemeContext.current.field-background = root.input;
         KitThemeContext.current.geometry.choice-medium = 22px;
         KitThemeContext.current.geometry.content-reading = 820px;
     }

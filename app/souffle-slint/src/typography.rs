@@ -135,6 +135,7 @@ fn project_kit_typography(window: &MainWindow) {
     typography.size_control = role("content").size;
     typography.size_body = souffle_typography::BODY.size;
     typography.size_subtitle = role("settings-title").size;
+    typography.size_display = 34.0;
     context.set_current(theme);
 }
 

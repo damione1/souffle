@@ -1,6 +1,6 @@
 import { AppText, Typography } from "@typography";
 import { SettingsOptions, ClosedSettingsPicker } from "settings_options.slint";
-import { KitButton, KitTextArea, FieldAccess, KitFieldSet, KitThemeContext, KitThemes, KitFieldRow, KitMetrics, ControlSize } from "@kit";
+import { KitButton, KitTextArea, FieldAccess, KitFieldSet, KitDivider, KitThemeContext, KitThemes, KitFieldRow, KitMetrics, ControlSize } from "@kit";
 import { LucideFiles } from "@kit-icons/files.slint";
 import { LucideText } from "@kit-icons/text.slint";
 import { Theme } from "../../theme.slint";
@@ -206,11 +206,7 @@ export component DataSection inherits VerticalLayout {
             }
         }
 
-        Rectangle {
-            height: 1px;
-            background: Theme.border-soft;
-            vertical-stretch: 0;
-        }
+        KitDivider { }
 
         VerticalLayout {
             padding-left: Theme.settings-inset;
@@ -245,11 +241,7 @@ export component DataSection inherits VerticalLayout {
             }
         }
 
-        Rectangle {
-            height: 1px;
-            background: Theme.border-soft;
-            vertical-stretch: 0;
-        }
+        KitDivider { }
 
         VerticalLayout {
             padding-left: Theme.settings-inset;
