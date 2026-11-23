@@ -1,11 +1,10 @@
 import { AppText, AppTextInput, Typography, TypographyStyle } from "@typography";
+import { KitChipButton, KitScrollArea, KitSearchField } from "@kit";
 import { Theme } from "theme.slint";
 import { ActionHero } from "components/action_hero.slint";
-import { SearchField } from "components/search_field.slint";
 import { StatusBanner } from "components/status_banner.slint";
 import { MicStallBanner } from "components/mic_stall_banner.slint";
 import { TimelineSection, TimelineDayGroup, UpcomingEvent } from "components/timeline_section.slint";
-import { FilterChip } from "components/filter_chip.slint";
 import { DictationRecovery } from "components/dictation_recovery.slint";
 import { TimelineFilter, TimelineKind, AccessState, MicStall } from "types.slint";
 
@@ -96,33 +95,44 @@ export component IdleView inherits Rectangle {
         padding-top: 26px;
         spacing: 26px;
 
-        if root.transcription-status-message != "": StatusBanner {
-            vertical-stretch: 0;
-            message: root.translate-error(root.transcription-status-message);
-            dismissed => { root.dismiss-transcription-status(); }
-        }
-        if root.mic-stall-visible: MicStallBanner {
-            vertical-stretch: 0;
-            kind: root.mic-stall-kind;
-            device: root.mic-stall-device;
-            restart-requested => { root.mic-stall-restart-requested(); }
-            dismissed => { root.mic-stall-dismissed(); }
-        }
-        if root.dictation-finalizing: AppText {
-            vertical-stretch: 0;
-            text: @tr("Reformulation…");
-            typography: Typography.body;
-            color: Theme.text-muted;
-        }
-        if root.dictation-recovery-text != "": DictationRecovery {
-            text <=> root.dictation-recovery-text;
-            copy-requested => { root.copy-dictation-recovery(); }
-            discard-requested => { root.discard-dictation-recovery(); }
-        }
-        if root.meeting-status-message != "": StatusBanner {
-            vertical-stretch: 0;
-            message: root.translate-error(root.meeting-status-message);
-            dismissed => { root.dismiss-meeting-status(); }
+        if root.transcription-status-message != "" || root.mic-stall-visible || root.dictation-finalizing
+            || root.dictation-recovery-text != "" || root.meeting-status-message != "": notices := KitScrollArea {
+            height: min(notice-list.preferred-height, root.height * 0.45);
+            focusable: self.scrollable;
+            label: @tr("Notifications de capture");
+
+            notice-list := VerticalLayout {
+                width: notices.visible-width;
+                spacing: 12px;
+                if root.transcription-status-message != "": StatusBanner {
+                    vertical-stretch: 0;
+                    message: root.translate-error(root.transcription-status-message);
+                    dismissed => { root.dismiss-transcription-status(); }
+                }
+                if root.mic-stall-visible: MicStallBanner {
+                    vertical-stretch: 0;
+                    kind: root.mic-stall-kind;
+                    device: root.mic-stall-device;
+                    restart-requested => { root.mic-stall-restart-requested(); }
+                    dismissed => { root.mic-stall-dismissed(); }
+                }
+                if root.dictation-finalizing: AppText {
+                    vertical-stretch: 0;
+                    text: @tr("Reformulation…");
+                    typography: Typography.body;
+                    color: Theme.text-muted;
+                }
+                if root.dictation-recovery-text != "": DictationRecovery {
+                    text <=> root.dictation-recovery-text;
+                    copy-requested => { root.copy-dictation-recovery(); }
+                    discard-requested => { root.discard-dictation-recovery(); }
+                }
+                if root.meeting-status-message != "": StatusBanner {
+                    vertical-stretch: 0;
+                    message: root.translate-error(root.meeting-status-message);
+                    dismissed => { root.dismiss-meeting-status(); }
+                }
+            }
         }
 
         ActionHero {
@@ -134,40 +144,41 @@ export component IdleView inherits Rectangle {
             meeting-requested => { root.meeting-requested(); }
         }
 
-        SearchField {
+        if !root.timeline-is-empty || root.search-query != "": KitSearchField {
+            clear-label: @tr("InterfaceSection" => "Effacer");
+            accessible-name: @tr("SearchField" => "Rechercher les transcriptions et réunions");
             vertical-stretch: 0;
             text <=> root.search-query;
             placeholder: @tr("Rechercher transcriptions et réunions");
             edited(text) => { root.search-changed(text); }
         }
 
-        HorizontalLayout {
+        if !root.timeline-is-empty || root.search-query != "": HorizontalLayout {
             vertical-stretch: 0;
-            padding-left: 2px;
-            padding-right: 2px;
             spacing: 6px;
             alignment: start;
 
-            FilterChip {
-                text: @tr("Tout");
+            KitChipButton {
+                label: @tr("Tout");
                 selected: root.kind-filter == TimelineFilter.all;
-                clicked => { root.filter-changed(TimelineFilter.all); }
+                activate => { root.filter-changed(TimelineFilter.all); }
             }
-            FilterChip {
-                text: @tr("Réunions");
+            KitChipButton {
+                label: @tr("Réunions");
                 selected: root.kind-filter == TimelineFilter.meeting;
-                clicked => { root.filter-changed(TimelineFilter.meeting); }
+                activate => { root.filter-changed(TimelineFilter.meeting); }
             }
-            FilterChip {
-                text: @tr("Dictées");
+            KitChipButton {
+                label: @tr("Dictées");
                 selected: root.kind-filter == TimelineFilter.dictation;
-                clicked => { root.filter-changed(TimelineFilter.dictation); }
+                activate => { root.filter-changed(TimelineFilter.dictation); }
             }
         }
 
         // Stretch pool leftover. Do not bind `content-height` to the
         // child's `.height` (binding loop, see transcript_section.slint).
         history-scroll := Flickable {
+            width: parent.width;
             vertical-stretch: 1;
             content-width: self.width;
             // Desktop history scrolls by wheel/trackpad. Disabling mouse
@@ -182,6 +193,7 @@ export component IdleView inherits Rectangle {
                 padding-bottom: 34px;
 
                 timeline-section := TimelineSection {
+                    width: history-scroll.width;
                     groups: root.timeline-groups;
                     is-empty: root.timeline-is-empty;
                     has-matches: root.timeline-has-matches;

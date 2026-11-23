@@ -1,9 +1,7 @@
-import { AppText, AppTextInput, Typography, TypographyStyle } from "@typography";
-import { SettingsField } from "settings_field.slint";
-import { SettingsGroup } from "settings_group.slint";
+import { AppText, Typography } from "@typography";
+import { ButtonIntent, KitButton, KitFieldSet, KitThemeContext, KitFieldRow, KitMetrics } from "@kit";
 import { Theme } from "../../theme.slint";
 import { TranscriptionPhase, ModelDeletionError } from "../../types.slint";
-import { ThemedButton, ThemedButtonKind } from "../themed_button.slint";
 
 // Destructive "delete the downloaded model" action for Settings > Système
 // (SOU-195-slice: the section itself was entirely missing from the Slint
@@ -33,10 +31,15 @@ export component ModelDeleteSection inherits VerticalLayout {
     spacing: 22px;
     alignment: start;
 
-    SettingsGroup {
-        title: @tr("STOCKAGE DU MODÈLE");
+    KitFieldSet {
+        theme: KitThemeContext.current;
+        legend: @tr("STOCKAGE DU MODÈLE");
 
-        SettingsField {
+        KitFieldRow {
+            theme: KitThemeContext.current;
+            modal-layer: 0;
+            orientation: Theme.settings-field-orientation(self.width);
+            padding: KitMetrics.field-gap(self.theme);
             show-divider: false;
             label: @tr("Supprimer le mod\u{e8}le t\u{e9}l\u{e9}charg\u{e9}");
             description: !root.files-deletable
@@ -49,27 +52,27 @@ export component ModelDeleteSection inherits VerticalLayout {
                 spacing: 8px;
                 horizontal-stretch: 0;
 
-                if !root.confirming: ThemedButton {
+                if !root.confirming: KitButton {
                     text: @tr("Supprimer");
-                    kind: ThemedButtonKind.danger;
-                    enabled: root.can-delete;
-                    clicked => { root.confirming = true; }
+                    intent: ButtonIntent.destructive;
+                    disabled: !root.can-delete;
+                    activated => { root.confirming = true; }
                 }
 
-                if root.confirming: ThemedButton {
+                if root.confirming: KitButton {
                     text: @tr("Confirmer");
-                    enabled: root.can-delete;
-                    kind: ThemedButtonKind.danger;
-                    clicked => {
+                    intent: ButtonIntent.destructive;
+                    disabled: !root.can-delete;
+                    activated => {
                         root.confirming = false;
                         root.delete-requested();
                     }
                 }
 
-                if root.confirming: ThemedButton {
+                if root.confirming: KitButton {
                     text: @tr("Annuler");
-                    kind: ThemedButtonKind.ghost;
-                    clicked => { root.confirming = false; }
+                    intent: ButtonIntent.quiet;
+                    activated => { root.confirming = false; }
                 }
             }
         }

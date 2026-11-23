@@ -153,15 +153,15 @@ msgctxt "AppBranchesSection"
 msgid "Modèle résolu"
 msgstr "Resolved template"
 
-msgctxt "ThemedComboBox"
+msgctxt "PickerLabels"
 msgid "Chat"
 msgstr "Chat message"
 
-msgctxt "ThemedComboBox"
+msgctxt "PickerLabels"
 msgid "Code"
 msgstr "Code editor"
 
-msgctxt "ThemedComboBox"
+msgctxt "PickerLabels"
 msgid "Modèle introuvable"
 msgstr "Missing template"
 msgctxt "ActionGuards"
@@ -608,87 +608,87 @@ msgid "Sélection"
 msgstr "Selection"
 
 #: app/souffle-slint/ui/components/themed_combo.slint:76
-msgctxt "ThemedComboBox"
+msgctxt "PickerLabels"
 msgid "Automatique"
 msgstr "Automatic"
 
 #: app/souffle-slint/ui/components/themed_combo.slint:77
-msgctxt "ThemedComboBox"
+msgctxt "PickerLabels"
 msgid "Suivre l'appareil par défaut"
 msgstr "Follow default device"
 
 #: app/souffle-slint/ui/components/themed_combo.slint:78
-msgctxt "ThemedComboBox"
+msgctxt "PickerLabels"
 msgid "Appareil personnalisé (indisponible)"
 msgstr "Custom device (unavailable)"
 
 #: app/souffle-slint/ui/components/themed_combo.slint:79
-msgctxt "ThemedComboBox"
+msgctxt "PickerLabels"
 msgid "Jamais"
 msgstr "Never"
 
 #: app/souffle-slint/ui/components/themed_combo.slint:80
-msgctxt "ThemedComboBox"
+msgctxt "PickerLabels"
 msgid "Par défaut"
 msgstr "Default"
 
 #: app/souffle-slint/ui/components/themed_combo.slint:81
-msgctxt "ThemedComboBox"
+msgctxt "PickerLabels"
 msgid "Compte rendu détaillé"
 msgstr "Detailed minutes"
 
 #: app/souffle-slint/ui/components/themed_combo.slint:82
-msgctxt "ThemedComboBox"
+msgctxt "PickerLabels"
 msgid "Aperçu bref"
 msgstr "Brief overview"
 
 #: app/souffle-slint/ui/components/themed_combo.slint:83
-msgctxt "ThemedComboBox"
+msgctxt "PickerLabels"
 msgid "Intégré"
 msgstr "Built-in"
 
 #: app/souffle-slint/ui/components/themed_combo.slint:84
-msgctxt "ThemedComboBox"
+msgctxt "PickerLabels"
 msgid "USB"
 msgstr "USB"
 
 #: app/souffle-slint/ui/components/themed_combo.slint:85
-msgctxt "ThemedComboBox"
+msgctxt "PickerLabels"
 msgid "Bluetooth"
 msgstr "Bluetooth"
 
 #: app/souffle-slint/ui/components/themed_combo.slint:86
-msgctxt "ThemedComboBox"
+msgctxt "PickerLabels"
 msgid "Virtuel"
 msgstr "Virtual"
 
 #: app/souffle-slint/ui/components/themed_combo.slint:87
-msgctxt "ThemedComboBox"
+msgctxt "PickerLabels"
 msgid "Agrégé"
 msgstr "Aggregate"
 
 #: app/souffle-slint/ui/components/themed_combo.slint:88
-msgctxt "ThemedComboBox"
+msgctxt "PickerLabels"
 msgid "Inconnu"
 msgstr "Unknown"
 
 #: app/souffle-slint/ui/components/themed_combo.slint:89
-msgctxt "ThemedComboBox"
+msgctxt "PickerLabels"
 msgid "Nettoyage"
 msgstr "Cleanup"
 
 #: app/souffle-slint/ui/components/themed_combo.slint:90
-msgctxt "ThemedComboBox"
+msgctxt "PickerLabels"
 msgid "E-mail professionnel"
 msgstr "Professional email"
 
 #: app/souffle-slint/ui/components/themed_combo.slint:91
-msgctxt "ThemedComboBox"
+msgctxt "PickerLabels"
 msgid "Puces"
 msgstr "Bullets"
 
 #: app/souffle-slint/ui/components/themed_combo.slint:92
-msgctxt "ThemedComboBox"
+msgctxt "PickerLabels"
 msgid "Sans fillers"
 msgstr "No fillers"
 
@@ -2933,7 +2933,6 @@ msgctxt "SpeakerLabels"
 msgid "Eux"
 msgstr "Them"
 
-
 msgctxt "MeetingDetail"
 msgid "Markdown (.md)"
 msgstr "Markdown (.md)"
@@ -3623,3 +3622,131 @@ msgstr "Microsoft LLMLingua-2, local and offline after installation."
 msgctxt "CompressionStatus"
 msgid "Annuler"
 msgstr "Cancel"
+
+msgctxt "SettingsPermissionsDialog"
+msgid "Fermer"
+msgstr "Close"
+
+msgctxt "SettingsPicker"
+msgid "Sélection"
+msgstr "Selection"
+
+msgctxt "SettingsPicker"
+msgid "Aucune option"
+msgstr "No options"
+
+msgctxt "CalendarSection"
+msgid "Augmenter"
+msgstr "Increase"
+
+msgctxt "CalendarSection"
+msgid "Diminuer"
+msgstr "Decrease"
+
+msgctxt "InterfaceSection"
+msgid "Augmenter"
+msgstr "Increase"
+
+msgctxt "InterfaceSection"
+msgid "Diminuer"
+msgstr "Decrease"
+
+msgctxt "SettingsOptions"
+msgid "Choisir une option"
+msgstr "Choose an option"
+
+msgctxt "SettingsOptions"
+msgid "Option sélectionnée indisponible"
+msgstr "Selected option is unavailable"
+
+msgctxt "SettingsOptions"
+msgid "Édition du texte"
+msgstr "Text editing"
+
+msgctxt "SettingsOptions"
+msgid "Annuler"
+msgstr "Undo"
+
+msgctxt "SettingsOptions"
+msgid "Rétablir"
+msgstr "Redo"
+
+msgctxt "SettingsOptions"
+msgid "Couper"
+msgstr "Cut"
+
+msgctxt "SettingsOptions"
+msgid "Copier"
+msgstr "Copy"
+
+msgctxt "SettingsOptions"
+msgid "Coller"
+msgstr "Paste"
+
+msgctxt "SettingsOptions"
+msgid "Tout sélectionner"
+msgstr "Select all"
+
+msgctxt "SettingsOptions"
+msgid "Saisissez une valeur correspondant au pas indiqué."
+msgstr "Enter a value matching the specified step."
+
+msgctxt "SettingsOptions"
+msgid "Saisissez une valeur valide."
+msgstr "Enter a valid value."
+
+msgctxt "SettingsOptions"
+msgid "La valeur minimale est {}."
+msgstr "The minimum value is {}."
+
+msgctxt "SettingsOptions"
+msgid "La valeur maximale est {}."
+msgstr "The maximum value is {}."
+
+msgctxt "PickerLabels"
+msgid "{} (par défaut)"
+msgstr "{} (default)"
+
+msgctxt "IdleView"
+msgid "Notifications de capture"
+msgstr "Recording notifications"
+
+msgctxt "SettingsOptions"
+msgid "Sélection"
+msgstr "Selection"
+
+msgctxt "SettingsOptions"
+msgid "Effacer le texte"
+msgstr "Clear text"
+
+msgctxt "SettingsOptions"
+msgid "Effacer la recherche"
+msgstr "Clear search"
+
+msgctxt "SettingsOptions"
+msgid "Effacer la sélection"
+msgstr "Clear selection"
+
+msgctxt "SettingsOptions"
+msgid "Rechercher dans les options"
+msgstr "Search options"
+
+msgctxt "SettingsOptions"
+msgid "Aucune option correspondante"
+msgstr "No matching options"
+
+msgctxt "SettingsOptions"
+msgid "Fermer {}"
+msgstr "Dismiss {}"
+
+msgctxt "IntelligenceSection"
+msgid "Apple Intelligence n'est pas disponible sur cet appareil."
+msgstr "Apple Intelligence is unavailable on this device."
+
+msgctxt "IntelligenceSection"
+msgid "Aucun modèle Ollama compatible n'est installé."
+msgstr "No compatible Ollama model is installed."
+
+msgctxt "LiveParagraphEditor"
+msgid "Fermer"
+msgstr "Close"

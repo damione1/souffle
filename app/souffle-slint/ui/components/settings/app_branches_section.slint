@@ -1,12 +1,8 @@
-import { ListView } from "std-widgets.slint";
-import { SettingsGroup } from "settings_group.slint";
+import { ChoiceLabelPosition, ControlSize, ControlWidth, FieldAccess, KitButton, KitFieldSet, KitMetrics, KitSwitch, KitTextField, KitThemeContext, Ownership } from "@kit";
 import { Theme } from "../../theme.slint";
 import { AppText, Typography } from "@typography";
 import { AppBranchFallback, AppBranchTestPhase } from "../../types.slint";
-import { ThemedButton } from "../themed_button.slint";
-import { ThemedComboBox } from "../themed_combo.slint";
-import { ThemedLineEdit } from "../themed_line_edit.slint";
-import { ThemedSwitch } from "../themed_switch.slint";
+import { CatalogPicker } from "../catalog_picker.slint";
 
 export struct AppBranchRow {
     id: string,
@@ -37,104 +33,124 @@ export component AppBranchesSection inherits VerticalLayout {
     callback rule-moved(string, int);
     callback test-requested();
 
-    spacing: 12px;
+    spacing: 22px;
     alignment: start;
-    SettingsGroup {
-        title: @tr("RETOUCHE PAR APPLICATION");
+    vertical-stretch: 0;
+
+    KitFieldSet {
+        theme: KitThemeContext.current;
+        legend: @tr("RETOUCHE PAR APPLICATION");
+
         VerticalLayout {
-            padding: Theme.settings-inset;
+            padding: KitMetrics.field-gap(KitThemeContext.current);
             spacing: 12px;
             alignment: start;
+
             AppText {
                 text: @tr("La première règle active valide gagne. Le nom de l'application contient le motif, sans tenir compte de la casse. Par défaut suit le modèle global ; les instructions sont partagées.");
                 wrap: word-wrap;
                 typography: Typography.secondary;
                 color: Theme.text-muted;
             }
+
             HorizontalLayout {
                 spacing: 8px;
-                ThemedLineEdit {
+                KitTextField {
+                    modal-layer: 0;
                     text <=> root.new-pattern;
                     placeholder: @tr("Nom d'application");
-                    control-label: @tr("Nouvelle règle d'application");
+                    accessible-name: @tr("Nouvelle règle d'application");
                     horizontal-stretch: 1;
                 }
-                ThemedComboBox {
+                CatalogPicker {
+                    modal-layer: 0;
                     control-label: @tr("Modèle de la nouvelle règle");
                     model: root.target-labels;
                     current-value: root.target-labels[root.new-target-index];
                     selected-index(index) => { root.new-target-index = index; }
                 }
-                ThemedButton {
+                KitButton {
+                    modal-layer: 0;
                     text: @tr("Ajouter");
-                    enabled: root.new-pattern != "";
-                    clicked => {
+                    disabled: root.new-pattern == "";
+                    activated => {
                         root.rule-added(root.new-pattern, root.new-target-index);
                         root.new-pattern = "";
                     }
                 }
             }
-            ListView {
-                height: min(root.rules.length * 116px, 348px);
-                for rule[index] in root.rules: Rectangle {
-                    private property <string> pattern-rule-id: rule.id;
-                    changed pattern-rule-id => { pattern-field.text = rule.app-pattern; }
-                    private property <int> pattern-rollback-revision: rule.pattern-rollback-revision;
-                    changed pattern-rollback-revision => { pattern-field.text = rule.app-pattern; }
-                    height: 116px;
-                    background: Theme.surface-2;
-                    border-radius: 4px;
-                    VerticalLayout {
-                        padding: 10px;
+
+            for rule[index] in root.rules: Rectangle {
+                private property <string> pattern-rule-id: rule.id;
+                changed pattern-rule-id => { pattern-field.text = rule.app-pattern; }
+                private property <int> pattern-rollback-revision: rule.pattern-rollback-revision;
+                changed pattern-rollback-revision => { pattern-field.text = rule.app-pattern; }
+                background: Theme.surface-2;
+                border-radius: 4px;
+                VerticalLayout {
+                    padding: 10px;
+                    spacing: 8px;
+                    HorizontalLayout {
                         spacing: 8px;
-                        HorizontalLayout {
-                            spacing: 8px;
-                            ThemedSwitch {
-                                control-label: @tr("Activer la règle {}", rule.app-pattern);
-                                checked: rule.enabled;
-                                toggled(value) => { root.rule-enabled(rule.id, value); }
-                            }
-                            pattern-field := ThemedLineEdit {
-                                text: rule.app-pattern;
-                                control-label: @tr("Motif de la règle");
-                                horizontal-stretch: 1;
-                                accepted(value) => { root.rule-pattern-changed(rule.id, value); }
-                                focus-lost(value) => { root.rule-pattern-changed(rule.id, value); }
-                            }
-                            ThemedComboBox {
-                                control-label: @tr("Modèle partagé de la règle");
-                                model: root.target-labels;
-                                current-value: rule.target-label;
-                                selected-index(value) => { root.rule-target-changed(rule.id, value); }
-                            }
+                        KitSwitch {
+                            modal-layer: 0;
+                            label-position: ChoiceLabelPosition.start;
+                            padding-inline: 0px;
+                            ownership: Ownership.controlled;
+                            control-width: ControlWidth.intrinsic;
+                            accessible-label: @tr("Activer la règle {}", rule.app-pattern);
+                            checked: rule.enabled;
+                            toggled(value) => { root.rule-enabled(rule.id, value); }
                         }
-                        HorizontalLayout {
-                            spacing: 8px;
-                            alignment: end;
-                            ThemedButton {
-                                compact: true;
-                                text: @tr("Monter");
-                                enabled: index > 0;
-                                clicked => { root.rule-moved(rule.id, index - 1); }
-                            }
-                            ThemedButton {
-                                compact: true;
-                                text: @tr("Descendre");
-                                enabled: index + 1 < root.rules.length;
-                                clicked => { root.rule-moved(rule.id, index + 1); }
-                            }
-                            ThemedButton {
-                                compact: true;
-                                text: @tr("Supprimer");
-                                clicked => { root.rule-deleted(rule.id); }
-                            }
+                        pattern-field := KitTextField {
+                            modal-layer: 0;
+                            text: rule.app-pattern;
+                            accessible-name: @tr("Motif de la règle");
+                            horizontal-stretch: 1;
+                            committed(result) => { root.rule-pattern-changed(rule.id, result.value.text); }
+                        }
+                        CatalogPicker {
+                            modal-layer: 0;
+                            control-label: @tr("Modèle partagé de la règle");
+                            model: root.target-labels;
+                            current-value: rule.target-label;
+                            selected-index(value) => { root.rule-target-changed(rule.id, value); }
+                        }
+                    }
+                    HorizontalLayout {
+                        spacing: 8px;
+                        alignment: end;
+                        KitButton {
+                            modal-layer: 0;
+                            control-size: ControlSize.compact;
+                            text: @tr("Monter");
+                            disabled: index <= 0;
+                            activated => { root.rule-moved(rule.id, index - 1); }
+                        }
+                        KitButton {
+                            modal-layer: 0;
+                            control-size: ControlSize.compact;
+                            text: @tr("Descendre");
+                            disabled: index + 1 >= root.rules.length;
+                            activated => { root.rule-moved(rule.id, index + 1); }
+                        }
+                        KitButton {
+                            modal-layer: 0;
+                            control-size: ControlSize.compact;
+                            text: @tr("Supprimer");
+                            activated => { root.rule-deleted(rule.id); }
                         }
                     }
                 }
             }
-            ThemedButton {
-                text: @tr("Tester l'application actuelle");
-                clicked => { root.test-requested(); }
+
+            HorizontalLayout {
+                alignment: start;
+                KitButton {
+                    modal-layer: 0;
+                    text: @tr("Tester l'application actuelle");
+                    activated => { root.test-requested(); }
+                }
             }
             if root.test-phase == AppBranchTestPhase.waiting: AppText {
                 text: @tr("Passez à l'application à tester. Capture dans {} secondes.", root.test-delay-seconds);
@@ -152,6 +168,7 @@ export component AppBranchesSection inherits VerticalLayout {
                 spacing: 6px;
                 AppText {
                     text: @tr("Application actuelle : {}", root.preview-app);
+                    typography: Typography.body;
                     color: Theme.text-secondary;
                     wrap: word-wrap;
                 }
@@ -162,11 +179,14 @@ export component AppBranchesSection inherits VerticalLayout {
                         : root.preview-fallback == AppBranchFallback.no-match ? @tr("Aucune règle active correspondante : modèle global.")
                         : root.preview-fallback == AppBranchFallback.invalid-pattern ? @tr("Motif vide ignoré : modèle global.")
                         : @tr("Modèle de règle introuvable : modèle global.");
+                    typography: Typography.body;
                     color: Theme.text-secondary;
                     wrap: word-wrap;
                 }
-                ThemedComboBox {
+                CatalogPicker {
+                    modal-layer: 0;
                     control-label: @tr("Modèle résolu");
+                    model: [root.preview-template];
                     current-value: root.preview-template;
                     enabled: false;
                 }

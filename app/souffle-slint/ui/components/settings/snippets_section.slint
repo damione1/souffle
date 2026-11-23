@@ -1,10 +1,6 @@
-import { AppText, AppTextInput, Typography, TypographyStyle } from "@typography";
+import { AppText, Typography } from "@typography";
+import { KitButton, KitTextArea, KitTextField, ScrollFrame, KitFieldSet, KitThemeContext } from "@kit";
 import { Theme } from "../../theme.slint";
-import { SettingsFieldVertical } from "settings_field_vertical.slint";
-import { SettingsGroup } from "settings_group.slint";
-import { ThemedButton } from "../themed_button.slint";
-import { ThemedLineEdit } from "../themed_line_edit.slint";
-import { ThemedTextArea } from "../themed_text_area.slint";
 
 // Port of SnippetsSettingsSection.svelte. Which row is being edited is
 // tracked in Rust (`snippets_editing` in main.rs), not local `.slint`
@@ -46,8 +42,9 @@ export component SnippetsSection inherits VerticalLayout {
     spacing: 22px;
     alignment: start;
 
-    SettingsGroup {
-        title: @tr("EXTRAITS VOCAUX");
+    KitFieldSet {
+        theme: KitThemeContext.current;
+        legend: @tr("EXTRAITS VOCAUX");
 
     VerticalLayout {
         padding-left: Theme.settings-inset;
@@ -63,26 +60,26 @@ export component SnippetsSection inherits VerticalLayout {
             wrap: word-wrap;
         }
 
-        AppText { text: @tr("DÉCLENCHEUR"); typography: Typography.table-heading; color: Theme.text-tertiary;   }
-        ThemedLineEdit {
+        AppText { text: @tr("DÉCLENCHEUR"); typography: Typography.table-heading; color: Theme.text-tertiary; }
+        KitTextField {
             text <=> root.new-trigger-draft;
             placeholder: @tr("Phrase déclencheur");
-            control-label: @tr("Phrase déclencheur");
+            accessible-name: @tr("Phrase déclencheur");
         }
-        AppText { text: @tr("EXPANSION"); typography: Typography.table-heading; color: Theme.text-tertiary;   }
-        ThemedTextArea {
+        AppText { text: @tr("EXPANSION"); typography: Typography.table-heading; color: Theme.text-tertiary; }
+        KitTextArea {
             text <=> root.new-expansion-draft;
-            area-height: 72px;
+            height: 72px;
             placeholder: @tr("Texte à insérer");
-            control-label: @tr("Texte de l'extrait vocal");
+            accessible-name: @tr("Texte de l'extrait vocal");
         }
 
         HorizontalLayout {
             alignment: end;
-            ThemedButton {
+            KitButton {
                 text: @tr("Ajouter un extrait");
-                enabled: root.new-trigger-draft != "" && root.new-expansion-draft != "";
-                clicked => {
+                disabled: root.new-trigger-draft == "" || root.new-expansion-draft == "";
+                activated => {
                     root.add-requested(root.new-trigger-draft, root.new-expansion-draft);
                 }
             }
@@ -101,15 +98,16 @@ export component SnippetsSection inherits VerticalLayout {
         }
     }
 
-    snippets-list := Flickable {
+    snippets-list := ScrollFrame {
         height: min(root.list-content-height * 1px, 420px);
         visible: root.entry-count > 0;
-        content-width: self.width;
+        horizontal-scrollbar-policy: always-off;
+        content-width: self.visible-width;
         content-height: root.list-content-height * 1px;
         content-y <=> root.list-scroll-top;
 
         VerticalLayout {
-        width: snippets-list.width;
+        width: snippets-list.visible-width;
         alignment: start;
 
         Rectangle { height: root.list-spacer-before * 1px; }
@@ -143,13 +141,13 @@ export component SnippetsSection inherits VerticalLayout {
                             }
                             HorizontalLayout {
                                 spacing: 4px;
-                                ThemedButton {
+                                KitButton {
                                     text: @tr("Modifier");
-                                    clicked => { root.edit-requested(row.id); }
+                                    activated => { root.edit-requested(row.id); }
                                 }
-                                ThemedButton {
+                                KitButton {
                                     text: @tr("Supprimer");
-                                    clicked => { root.delete-requested(row.id); }
+                                    activated => { root.delete-requested(row.id); }
                                 }
                             }
                         }
@@ -166,16 +164,16 @@ export component SnippetsSection inherits VerticalLayout {
                     if row.editing: VerticalLayout {
                         spacing: 4px;
 
-                        AppText { text: @tr("DÉCLENCHEUR"); typography: Typography.table-heading; color: Theme.text-tertiary;   }
-                        ThemedLineEdit {
+                        AppText { text: @tr("DÉCLENCHEUR"); typography: Typography.table-heading; color: Theme.text-tertiary; }
+                        KitTextField {
                             text <=> root.edit-trigger-draft;
-                            control-label: @tr("Phrase déclencheur");
+                            accessible-name: @tr("Phrase déclencheur");
                         }
-                        AppText { text: @tr("EXPANSION"); typography: Typography.table-heading; color: Theme.text-tertiary;   }
-                        ThemedTextArea {
+                        AppText { text: @tr("EXPANSION"); typography: Typography.table-heading; color: Theme.text-tertiary; }
+                        KitTextArea {
                             text <=> root.edit-expansion-draft;
-                            area-height: 72px;
-                            control-label: @tr("Texte de l'extrait vocal");
+                            height: 72px;
+                            accessible-name: @tr("Texte de l'extrait vocal");
                         }
                         if root.update-error != "": AppText {
                             text: root.update-error;
@@ -186,14 +184,14 @@ export component SnippetsSection inherits VerticalLayout {
                         HorizontalLayout {
                             alignment: end;
                             spacing: 4px;
-                            ThemedButton {
+                            KitButton {
                                 text: @tr("Annuler");
-                                clicked => { root.cancel-edit-requested(); }
+                                activated => { root.cancel-edit-requested(); }
                             }
-                            ThemedButton {
+                            KitButton {
                                 text: @tr("Enregistrer");
-                                enabled: root.edit-trigger-draft != "" && root.edit-expansion-draft != "";
-                                clicked => { root.save-edit-requested(row.id, root.edit-trigger-draft, root.edit-expansion-draft); }
+                                disabled: root.edit-trigger-draft == "" || root.edit-expansion-draft == "";
+                                activated => { root.save-edit-requested(row.id, root.edit-trigger-draft, root.edit-expansion-draft); }
                             }
                         }
                     }

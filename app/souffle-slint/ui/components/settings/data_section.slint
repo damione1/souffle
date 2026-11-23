@@ -1,44 +1,15 @@
-import { AppText, AppTextInput, Typography, TypographyStyle } from "@typography";
-import { SettingsField } from "settings_field.slint";
-import { SettingsGroup } from "settings_group.slint";
+import { AppText, Typography } from "@typography";
+import { SettingsOptions, ClosedSettingsPicker } from "settings_options.slint";
+import { KitButton, KitTextArea, FieldAccess, KitFieldSet, KitThemeContext, KitThemes, KitFieldRow, KitMetrics } from "@kit";
 import { Theme } from "../../theme.slint";
-import { ThemedButton } from "../themed_button.slint";
-import { ThemedComboBox } from "../themed_combo.slint";
 import { AudioRetention } from "../../types.slint";
 
-component CodeBlock inherits Rectangle {
+component CodeBlock inherits KitTextArea {
     in property <string> body;
-
-    border-width: 1px;
-    border-color: Theme.border-soft;
-    border-radius: 6px;
-    background: Theme.input;
-    clip: true;
-    vertical-stretch: 0;
-
+    text: root.body;
+    access: FieldAccess.read-only;
+    accessible-name: @tr("Bloc de code sélectionnable");
     height: 88px;
-
-    Flickable {
-        x: 10px;
-        y: 10px;
-        width: parent.width - 20px;
-        height: parent.height - 20px;
-        content-width: self.width;
-
-        AppTextInput {
-            width: parent.width;
-            height: max(parent.height, self.preferred-height);
-            text: root.body;
-            typography: Typography.caption;
-
-            color: Theme.text-muted;
-            wrap: word-wrap;
-            single-line: false;
-            read-only: true;
-            selection-background-color: Theme.accent.with-alpha(0.28);
-            accessible-label: @tr("Bloc de code sélectionnable");
-        }
-    }
 }
 
 // Port of DataSettingsSection.svelte. "Export archive" opens a native
@@ -71,19 +42,14 @@ export component DataSection inherits VerticalLayout {
     callback copy-code-command-requested();
     callback test-mcp-requested();
 
-    pure function retention-label(value: AudioRetention) -> string {
-        if value == AudioRetention.keep-7d { return @tr("Conserver 7 jours"); }
-        if value == AudioRetention.keep-30d { return @tr("Conserver 30 jours"); }
-        if value == AudioRetention.keep-forever { return @tr("Conserver indéfiniment"); }
-        if value == AudioRetention.off { return @tr("Ne pas conserver"); }
-        return "";
-    }
+
 
     spacing: 22px;
     alignment: start;
 
-    SettingsGroup {
-        title: @tr("DONNÉES");
+    KitFieldSet {
+        theme: KitThemeContext.current;
+        legend: @tr("DONNÉES");
 
     if root.stats-line != "": VerticalLayout {
         padding-left: Theme.settings-inset;
@@ -108,46 +74,70 @@ export component DataSection inherits VerticalLayout {
         }
     }
 
-    SettingsField {
+    KitFieldRow {
+        theme: KitThemeContext.current;
+        modal-layer: 0;
+        orientation: Theme.settings-field-orientation(self.width);
+        padding: KitMetrics.field-gap(self.theme);
+        focus-requested => { retention-picker.take-focus(); }
+        private property <bool> control-focused: retention-picker.has-focus;
+        changed control-focused => {
+            if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
+        }
         show-divider: root.stats-line != "" || root.recordings-line != "";
         label: @tr("Conservation audio des réunions");
         description: @tr("Durée de conservation des enregistrements audio bruts.");
 
-        ThemedComboBox {
-            control-label: @tr("Conservation audio des réunions");
-            model: [
-                root.retention-label(AudioRetention.off),
-                root.retention-label(AudioRetention.keep-7d),
-                root.retention-label(AudioRetention.keep-30d),
-                root.retention-label(AudioRetention.keep-forever),
-            ];
-            current-value: root.retention-label(root.retention);
-            selected(value) => {
-                if value == root.retention-label(AudioRetention.keep-7d) { root.retention-changed(AudioRetention.keep-7d); }
-                if value == root.retention-label(AudioRetention.keep-30d) { root.retention-changed(AudioRetention.keep-30d); }
-                if value == root.retention-label(AudioRetention.keep-forever) { root.retention-changed(AudioRetention.keep-forever); }
-                if value == root.retention-label(AudioRetention.off) { root.retention-changed(AudioRetention.off); }
-            }
+        retention-picker := ClosedSettingsPicker {
+            theme: KitThemeContext.current;
+            modal-layer: 0;
+            label: @tr("Conservation audio des réunions");
+            choices: SettingsOptions.retention-options(root.retention);
+            chosen(row) => { root.retention-changed(SettingsOptions.retention-value(row, root.retention)); }
         }
     }
 
-    SettingsField {
+    KitFieldRow {
+        theme: KitThemeContext.current;
+        modal-layer: 0;
+        orientation: Theme.settings-field-orientation(self.width);
+        padding: KitMetrics.field-gap(self.theme);
+        show-divider: true;
+        focus-requested => { export-button.take-focus(); }
+        private property <bool> control-focused: export-button.has-focus;
+        changed control-focused => {
+            if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
+        }
         label: @tr("Exporter les données");
         description: @tr("Exporter réunions, dictées et journal dans un dossier.");
 
-        ThemedButton {
+        export-button := KitButton {
+            theme: KitThemeContext.current;
+            modal-layer: 0;
             text: root.exporting ? @tr("Export en cours…") : @tr("Exporter…");
-            enabled: !root.exporting;
-            clicked => { root.export-requested(); }
+            disabled: root.exporting;
+            activated => { root.export-requested(); }
         }
     }
 
-    SettingsField {
+    KitFieldRow {
+        theme: KitThemeContext.current;
+        modal-layer: 0;
+        orientation: Theme.settings-field-orientation(self.width);
+        padding: KitMetrics.field-gap(self.theme);
+        show-divider: true;
+        focus-requested => { reveal-button.take-focus(); }
+        private property <bool> control-focused: reveal-button.has-focus;
+        changed control-focused => {
+            if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
+        }
         label: @tr("Afficher le dossier de données");
 
-        ThemedButton {
+        reveal-button := KitButton {
+            theme: KitThemeContext.current;
+            modal-layer: 0;
             text: @tr("Afficher dans le Finder");
-            clicked => { root.reveal-requested(); }
+            activated => { root.reveal-requested(); }
         }
     }
 
@@ -164,8 +154,9 @@ export component DataSection inherits VerticalLayout {
     }
     }
 
-    SettingsGroup {
-        title: @tr("SERVEUR MCP");
+    KitFieldSet {
+        theme: KitThemeContext.current;
+        legend: @tr("SERVEUR MCP");
 
         VerticalLayout {
             padding-left: Theme.settings-inset;
@@ -233,9 +224,9 @@ export component DataSection inherits VerticalLayout {
                         wrap: word-wrap;
                     }
                 }
-                ThemedButton {
+                KitButton {
                     text: @tr("Copier");
-                    clicked => { root.copy-desktop-snippet-requested(); }
+                    activated => { root.copy-desktop-snippet-requested(); }
                 }
             }
             CodeBlock {
@@ -273,9 +264,9 @@ export component DataSection inherits VerticalLayout {
                         wrap: word-wrap;
                     }
                 }
-                ThemedButton {
+                KitButton {
                     text: @tr("Copier");
-                    clicked => { root.copy-code-command-requested(); }
+                    activated => { root.copy-code-command-requested(); }
                 }
             }
             CodeBlock {
@@ -283,14 +274,26 @@ export component DataSection inherits VerticalLayout {
             }
         }
 
-        SettingsField {
+        KitFieldRow {
+            theme: KitThemeContext.current;
+            modal-layer: 0;
+            orientation: Theme.settings-field-orientation(self.width);
+            padding: KitMetrics.field-gap(self.theme);
+            show-divider: true;
+            focus-requested => { connection-button.take-focus(); }
+            private property <bool> control-focused: connection-button.has-focus;
+            changed control-focused => {
+                if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
+            }
             label: @tr("Tester la connexion");
             description: root.mcp-test-status;
 
-            ThemedButton {
+            connection-button := KitButton {
+                theme: KitThemeContext.current;
+                modal-layer: 0;
                 text: root.testing-mcp ? @tr("Test en cours…") : @tr("Tester la connexion");
-                enabled: root.mcp-exists && !root.testing-mcp;
-                clicked => { root.test-mcp-requested(); }
+                disabled: !(root.mcp-exists && !root.testing-mcp);
+                activated => { root.test-mcp-requested(); }
             }
         }
     }

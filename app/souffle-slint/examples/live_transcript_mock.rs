@@ -19,6 +19,9 @@
 
 use souffle_slint::*;
 
+#[path = "../src/settings_kit.rs"]
+mod settings_kit;
+
 #[allow(dead_code)]
 #[path = "../src/action_guards.rs"]
 mod action_guards;
@@ -109,7 +112,7 @@ fn main() {
         .select()
         .expect("failed to select the skia renderer");
 
-    let window = MainWindow::new().expect("failed to create the mock window");
+    let window = crate::settings_kit::new_window().expect("failed to create the mock window");
     typography::initialize(&window).expect("Inter renderer font resolution failed");
     window
         .window()

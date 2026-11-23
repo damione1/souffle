@@ -1,6 +1,5 @@
-import { SettingsField } from "settings_field.slint";
-import { SettingsGroup } from "settings_group.slint";
-import { ThemedButton } from "../themed_button.slint";
+import { Theme } from "../../theme.slint";
+import { KitButton, KitFieldSet, KitThemeContext, KitThemes, KitFieldRow, KitMetrics } from "@kit";
 
 // Port of PermissionsSettingsSection.svelte.
 export component PermissionsSection inherits VerticalLayout {
@@ -9,17 +8,29 @@ export component PermissionsSection inherits VerticalLayout {
     spacing: 22px;
     alignment: start;
 
-    SettingsGroup {
-        title: @tr("PERMISSIONS");
+    KitFieldSet {
+        theme: KitThemeContext.current;
+        legend: @tr("PERMISSIONS");
 
-        SettingsField {
+        KitFieldRow {
+            theme: KitThemeContext.current;
+            modal-layer: 0;
+            orientation: Theme.settings-field-orientation(self.width);
+            padding: KitMetrics.field-gap(self.theme);
+            focus-requested => { permissions-button.take-focus(); }
+            private property <bool> control-focused: permissions-button.has-focus;
+            changed control-focused => {
+                if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
+            }
             show-divider: false;
             label: @tr("Permissions");
             description: @tr("Revérifier les permissions macOS si le collage ou l'enregistrement cesse de fonctionner.");
 
-            ThemedButton {
+            permissions-button := KitButton {
+                theme: KitThemeContext.current;
+                modal-layer: 0;
                 text: @tr("Vérifier les permissions");
-                clicked => { root.review-requested(); }
+                activated => { root.review-requested(); }
             }
         }
     }

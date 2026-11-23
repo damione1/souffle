@@ -552,7 +552,7 @@ mod tests {
     #[test]
     fn settings_lists_rewindow_on_scroll_change_without_a_timer() {
         let _ = slint::platform::set_platform(Box::new(TestPlatform));
-        let window = MainWindow::new().unwrap();
+        let window = crate::settings_kit::new_window().unwrap();
         let models = SettingsListModels::install(&window);
         let dictionary: Vec<DictionaryEntry> = (1..=500)
             .map(|id| DictionaryEntry {

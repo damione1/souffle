@@ -1,16 +1,17 @@
 import { CompactTranscriptSection } from "components/compact_transcript_section.slint";
 import { SummarizationUi } from "summarization.slint";
 import { AppText, AppTextInput, Typography, TypographyStyle } from "@typography";
+import { ButtonIntent, ControlSize, ControlWidth, KitBadge, KitButton, KitDropdownMenu, KitIcon, KitKeyResult, KitPressable, KitTextArea, KitTextField, OptionRow, TextEscapeBehavior, Tone } from "@kit";
+import { LucideDesign } from "@kit-icons/design.slint";
+import { LucideAccount } from "@kit-icons/account.slint";
+import { LucideFiles } from "@kit-icons/files.slint";
+import { LucideArrows } from "@kit-icons/arrows.slint";
 import { NotesSaveState, MeetingExportFormat, WakeResumeNotice } from "types.slint";
 import { ActionGuards, MeetingDeletePermission } from "action_guards.slint";
 import { StatusBanner } from "components/status_banner.slint";
-import { ThemedLineEdit } from "components/themed_line_edit.slint";
 import { AudioPlayerSection } from "components/audio_player_section.slint";
 import { TranscriptSection, TranscriptBlock } from "components/transcript_section.slint";
 import { SummarySection, StructuredActionItem } from "components/summary_section.slint";
-import { LucideIcon, IconSet } from "components/lucide_icon.slint";
-import { ThemedTextArea } from "components/themed_text_area.slint";
-import { ThemedButton, ThemedButtonKind } from "components/themed_button.slint";
 import { Theme } from "theme.slint";
 
 // Port of MeetingHeaderSection.svelte + MeetingNotesSection.svelte -
@@ -52,34 +53,15 @@ export struct MeetingParticipantChip {
     is-current-user: bool,
 }
 
-// One entry of the header's Export menu (MeetingHeaderSection.svelte's
-// dropdown rows). `highlighted` is the keyboard cursor, hover is local.
-component ExportMenuRow inherits Rectangle {
-    in property <string> label;
-    in property <bool> highlighted: false;
-    callback chosen();
-
-    height: 30px;
-    vertical-stretch: 0;
-    border-radius: 3px;
-    background: root.highlighted || row-area.has-hover ? Theme.surface-2 : transparent;
-    accessible-role: list-item;
-    accessible-label: root.label;
-    accessible-action-default => { root.chosen(); }
-
-    row-area := TouchArea {
-        mouse-cursor: pointer;
-        clicked => { root.chosen(); }
-    }
-
-    AppText {
-        x: 10px;
-        width: parent.width - 20px;
-        text: root.label;
-        typography: Typography.hint;
-        color: Theme.text-primary;
-        vertical-alignment: center;
-        overflow: elide;
+export global MeetingExportMenu {
+    in property <[MeetingExportFormat]> formats;
+    pure callback rows(bool, string) -> [OptionRow];
+    public pure function label(value: MeetingExportFormat) -> string {
+        if value == MeetingExportFormat.markdown { return @tr("MeetingDetail" => "Markdown (.md)"); }
+        if value == MeetingExportFormat.json { return @tr("MeetingDetail" => "JSON (.json)"); }
+        if value == MeetingExportFormat.srt { return @tr("MeetingDetail" => "Sous-titres (.srt)"); }
+        if value == MeetingExportFormat.vtt { return @tr("MeetingDetail" => "Sous-titres (.vtt)"); }
+        return "";
     }
 }
 
@@ -125,7 +107,6 @@ export component MeetingDetail inherits Rectangle {
     in property <[string]> summary-available-models;
     in property <[string]> summary-available-model-ids;
     in-out property <string> summary-selected-model-id;
-    in-out property <string> summary-selected-model-label;
     in property <bool> can-resume: true;
     in property <string> resume-error;
     // SOU-295: only `interrupted` is shown here (the recording view shows
@@ -170,13 +151,6 @@ export component MeetingDetail inherits Rectangle {
         root.delete-requested();
     }
     property <bool> is-empty-meeting: !root.has-audio && root.transcript-segment-count == 0 && root.summary == "";
-    // Export menu (MeetingHeaderSection.svelte's EXPORT_FORMATS + the
-    // audio entry): rows 0-3 are the file formats, row 4 the recorded audio,
-    // only listed when there is audio. `export-highlighted` is the keyboard
-    // cursor while the menu is open.
-    property <int> export-item-count: root.has-audio ? 5 : 4;
-    property <int> export-highlighted: 0;
-
     function commit-title(value: string) {
         // `accepted` (Enter) removes the field, which then also reports a
         // focus loss: only the first of the two may commit.
@@ -193,6 +167,7 @@ export component MeetingDetail inherits Rectangle {
     // somewhere else on the page. Declared before `content` so it sits
     // underneath it: it only receives clicks nothing in the page handled.
     focus-sink := FocusScope {
+        focus-on-tab-navigation: false;
         width: 0px;
         height: 0px;
     }
@@ -219,59 +194,17 @@ export component MeetingDetail inherits Rectangle {
         // scrolled content runs to the window's last pixel.
         spacing: 14px;
 
-        back-btn := Rectangle {
-            height: 28px;
-            vertical-stretch: 0;
-
-            border-radius: 4px;
-            border-width: back-focus.has-focus ? 2px : 0px;
-            border-color: Theme.accent;
-            background: back-area.pressed ? Theme.surface-3 : back-area.has-hover ? Theme.surface-2 : transparent;
-
-            accessible-role: button;
-            accessible-label: @tr("Retour \u{e0} l'historique");
-            accessible-action-default => { root.back-requested(); }
-
-            forward-focus: back-focus;
-            back-focus := FocusScope {
-                key-pressed(event) => {
-                    if event.text == Key.Return || event.text == Key.Space {
-                        root.back-requested();
-                        return accept;
-                    }
-                    return reject;
-                }
-            }
-
-            back-area := TouchArea {
-                clicked => {
-                    back-focus.focus();
-                    root.back-requested();
-                }
-            }
-
-            HorizontalLayout {
-                y: (parent.height - self.height) / 2;
-                height: 18px;
-                spacing: 8px;
-                alignment: start;
-                LucideIcon {
-                    width: 18px;
-                    height: 18px;
-                    icon: IconSet.ArrowLeft;
-                    icon-color: Theme.text-secondary;
-                }
-                AppText {
-                    text: @tr("Historique");
-                    typography: Typography.content;
-                    color: Theme.text-secondary;
-                    vertical-alignment: center;
-                }
-            }
+        back-btn := KitButton {
+            accessible-name: @tr("Retour \u{e0} l'historique");
+            text: @tr("Historique");
+            control-size: ControlSize.compact;
+            width: self.preferred-width;
+            intent: ButtonIntent.quiet;
+            leading-icon: LucideArrows.arrow-left();
+            activated => { root.back-requested(); }
         }
 
         HorizontalLayout {
-            alignment: space-between;
             spacing: 14px;
             vertical-stretch: 0;
 
@@ -279,53 +212,21 @@ export component MeetingDetail inherits Rectangle {
                 horizontal-stretch: 1;
                 spacing: 14px;
 
-                if !root.editing-title: title-btn := Rectangle {
+                if !root.editing-title: title-btn := KitPressable {
+                    control-width: ControlWidth.fill;
+                    intent: ButtonIntent.quiet;
                     height: 34px;
+                    padding-inline: 0px;
+                    padding-block: 0px;
                     horizontal-stretch: 1;
-                    vertical-stretch: 0;
-                    border-radius: 4px;
-                    border-width: title-focus.has-focus ? 2px : 0px;
-                    border-color: Theme.accent;
-                    background: title-area.has-hover ? Theme.surface-2 : transparent;
-
-                    accessible-role: button;
-                    accessible-label: @tr("Renommer la r\u{e9}union");
-                    accessible-action-default => {
-                        root.title-draft = root.title;
-                        root.editing-title = true;
-                    }
-
-                    forward-focus: title-focus;
-                    title-focus := FocusScope {
-                        key-pressed(event) => {
-                            if event.text == Key.Return || event.text == Key.Space {
-                                root.title-draft = root.title;
-                                root.editing-title = true;
-                                return accept;
-                            }
-                            return reject;
-                        }
-                    }
-
-                    title-area := TouchArea {
-                        clicked => {
-                            title-focus.focus();
-                            root.title-draft = root.title;
-                            root.editing-title = true;
-                        }
-                    }
-
+                    accessible-name: @tr("Renommer la réunion");
+                    activated => { root.title-draft = root.title; root.editing-title = true; }
                     AppText {
-                        // Pinned to the left edge: without an explicit x/width a
-                        // Text child is centred in this full-width hover box, which
-                        // is what pushed the title right of "History" and the meta
-                        // line below (SOU-241 AC1, seen live).
-                        x: 0px;
-                        width: parent.width;
                         text: root.title;
+                        color: Theme.text-primary;
                         typography: Typography.title;
-
-                        horizontal-alignment: left;
+                        width: parent.width;
+                        overflow: elide;
                         vertical-alignment: center;
                     }
                 }
@@ -333,16 +234,18 @@ export component MeetingDetail inherits Rectangle {
                 // Created on demand, so `init` is the moment the user just
                 // asked to rename: focus the field right away instead of
                 // making them click into it a second time.
-                if root.editing-title: ThemedLineEdit {
+                if root.editing-title: KitTextField {
                     text <=> root.title-draft;
-                    control-label: @tr("Titre de la réunion");
-                    typography: Typography.title-input;
-                    init => { self.focus(); }
-                    accepted(value) => { root.commit-title(value); }
+                    accessible-name: @tr("Titre de la réunion");
+                    text-size: 22px;
+                    init => { self.take-focus(); }
+                    escape-behavior: TextEscapeBehavior.cancel;
+                    cancelled => { root.editing-title = false; }
+                    commit-requested(value) => { root.commit-title(value); }
                     // MeetingHeaderSection.svelte commits on blur too, so
                     // clicking anywhere else ends the edit instead of leaving
                     // a focused field stranded in the header.
-                    focus-lost(value) => { root.commit-title(value); }
+                    focus-observed(focused) => { if !focused { root.commit-title(self.text); } }
                 }
 
                 HorizontalLayout {
@@ -360,21 +263,9 @@ export component MeetingDetail inherits Rectangle {
                         vertical-alignment: center;
                     }
 
-                    if root.model-label != "": Rectangle {
-                        width: model-chip.preferred-width + 16px;
-                        height: 24px;
-                        horizontal-stretch: 0;
-                        border-width: 1px;
-                        border-color: Theme.surface-4;
-
-                        model-chip := AppText {
-                            text: root.model-label;
-                            color: Theme.accent;
-                            typography: Typography.caption;
-
-                            horizontal-alignment: center;
-                            vertical-alignment: center;
-                        }
+                    if root.model-label != "": KitBadge {
+                        text: root.model-label;
+                        tone: Tone.accent;
                     }
                 }
 
@@ -392,11 +283,11 @@ export component MeetingDetail inherits Rectangle {
                         horizontal-stretch: 0;
                         vertical-stretch: 0;
 
-                        LucideIcon {
-                            size: 13px;
+                        KitIcon {
+                            width: 13px; height: 13px;
                             y: (parent.height - self.height) / 2;
-                            icon: IconSet.Users;
-                            icon-color: Theme.text-muted;
+                            glyph: LucideAccount.users();
+                            ink: Theme.text-muted;
                         }
                     }
 
@@ -405,22 +296,11 @@ export component MeetingDetail inherits Rectangle {
                         spacing: 7px;
                         horizontal-stretch: 1;
 
-                        for participant in root.participants: Rectangle {
-                            width: chip-text.preferred-width + 18px;
-                            height: 22px;
-                            border-width: 1px;
-                            border-color: Theme.rule;
-
-                            chip-text := AppText {
-                                text: participant.is-organizer && participant.is-current-user ? @tr("{} (organisateur) (vous)", participant.name)
-                                    : participant.is-organizer ? @tr("{} (organisateur)", participant.name)
-                                    : participant.is-current-user ? @tr("{} (vous)", participant.name)
-                                    : participant.name;
-                                color: Theme.text-tertiary;
-                                typography: Typography.small;
-                                horizontal-alignment: center;
-                                vertical-alignment: center;
-                            }
+                        for participant in root.participants: KitBadge {
+                            text: participant.is-organizer && participant.is-current-user ? @tr("{} (organisateur) (vous)", participant.name)
+                                                                : participant.is-organizer ? @tr("{} (organisateur)", participant.name)
+                                                                : participant.is-current-user ? @tr("{} (vous)", participant.name)
+                                                                : participant.name;
                         }
                     }
                 }
@@ -438,203 +318,25 @@ export component MeetingDetail inherits Rectangle {
                     alignment: end;
                     vertical-stretch: 0;
 
-                    if root.can-resume: resume-btn := Rectangle {
-                        width: resume-txt.preferred-width + 24px;
-                        height: 32px;
-                        horizontal-stretch: 0;
-                        vertical-stretch: 0;
-                        border-radius: 4px;
-                        border-width: resume-focus.has-focus ? 2px : 0px;
-                        border-color: Theme.text-primary;
-                        background: resume-area.pressed ? Theme.accent.darker(0.2) : resume-area.has-hover ? Theme.accent.darker(0.1) : Theme.accent;
-
-                        accessible-role: button;
-                        accessible-label: @tr("Reprendre l'enregistrement");
-                        accessible-action-default => { root.resume-requested(); }
-
-                        forward-focus: resume-focus;
-                        resume-focus := FocusScope {
-                            key-pressed(event) => {
-                                if event.text == Key.Return || event.text == Key.Space {
-                                    root.resume-requested();
-                                    return accept;
-                                }
-                                return reject;
-                            }
-                        }
-
-                        resume-area := TouchArea {
-                            clicked => {
-                                resume-focus.focus();
-                                root.resume-requested();
-                            }
-                        }
-
-                        resume-txt := AppText {
-                            text: @tr("Reprendre");
-                            typography: Typography.section;
-
-                            color: Theme.text-primary;
-                            horizontal-alignment: center;
-                            vertical-alignment: center;
-                        }
+                    if root.can-resume: resume-btn := KitButton {
+                        accessible-name: @tr("Reprendre l'enregistrement");
+                        text: @tr("Reprendre");
+                        control-size: ControlSize.compact;
+                        intent: ButtonIntent.primary;
+                        activated => { root.resume-requested(); }
                     }
 
-                    if !root.is-empty-meeting: export-btn := Rectangle {
-                        width: export-content.preferred-width;
-                        height: 32px;
-                        horizontal-stretch: 0;
-                        vertical-stretch: 0;
-                        border-radius: 4px;
-                        border-width: export-focus.has-focus ? 2px : 0px;
-                        border-color: Theme.accent;
-                        background: export-area.pressed ? Theme.surface-3 : export-area.has-hover ? Theme.surface-2 : transparent;
-
-                        function choose-export(index: int) {
-                            export-menu.close();
-                            if index == 0 { root.export-requested(MeetingExportFormat.markdown); }
-                            if index == 1 { root.export-requested(MeetingExportFormat.json); }
-                            if index == 2 { root.export-requested(MeetingExportFormat.srt); }
-                            if index == 3 { root.export-requested(MeetingExportFormat.vtt); }
-                            if index == 4 && root.has-audio { root.export-audio-requested(); }
-                        }
-
-                        function open-export-menu() {
-                            root.export-highlighted = 0;
-                            export-menu.show();
-                        }
-
-                        accessible-role: button;
-                        accessible-label: @tr("Exporter la r\u{e9}union");
-                        accessible-expandable: true;
-                        accessible-expanded: export-menu.is-open;
-                        accessible-action-default => { export-btn.open-export-menu(); }
-                        accessible-action-expand => { export-btn.open-export-menu(); }
-
-                        forward-focus: export-focus;
-                        export-focus := FocusScope {
-                            key-pressed(event) => {
-                                if event.text == Key.Return || event.text == Key.Space || event.text == Key.DownArrow {
-                                    export-btn.open-export-menu();
-                                    return accept;
-                                }
-                                return reject;
-                            }
-                        }
-
-                        export-area := TouchArea {
-                            mouse-cursor: pointer;
-                            clicked => {
-                                export-focus.focus();
-                                export-btn.open-export-menu();
-                            }
-                        }
-
-                        export-content := HorizontalLayout {
-                            padding-left: 10px;
-                            padding-right: 10px;
-                            spacing: 6px;
-                            alignment: center;
-
-                            Rectangle {
-                                width: 14px;
-                                horizontal-stretch: 0;
-                                LucideIcon {
-                                    size: 14px;
-                                    y: (parent.height - self.height) / 2;
-                                    icon: IconSet.Download;
-                                    icon-color: Theme.text-secondary;
-                                }
-                            }
-                            AppText {
-                                text: @tr("Exporter");
-                                typography: Typography.hint;
-                                color: Theme.text-secondary;
-                                vertical-alignment: center;
-                            }
-                            Rectangle {
-                                width: 13px;
-                                horizontal-stretch: 0;
-                                LucideIcon {
-                                    size: 13px;
-                                    y: (parent.height - self.height) / 2;
-                                    icon: IconSet.ChevronDown;
-                                    icon-color: Theme.text-secondary;
-                                }
-                            }
-                        }
-
-                        export-menu := PopupWindow {
-                            close-policy: PopupClosePolicy.close-on-click-outside;
-                            width: 176px;
-                            x: parent.width - self.width;
-                            y: parent.height + 6px;
-                            forward-focus: export-menu-focus;
-
-                            export-menu-focus := FocusScope {
-                                key-pressed(event) => {
-                                    if event.text == Key.DownArrow {
-                                        root.export-highlighted = min(root.export-item-count - 1, root.export-highlighted + 1);
-                                        return accept;
-                                    }
-                                    if event.text == Key.UpArrow {
-                                        root.export-highlighted = max(0, root.export-highlighted - 1);
-                                        return accept;
-                                    }
-                                    if event.text == Key.Return || event.text == Key.Space {
-                                        export-btn.choose-export(root.export-highlighted);
-                                        export-focus.focus();
-                                        return accept;
-                                    }
-                                    if event.text == Key.Escape {
-                                        export-menu.close();
-                                        export-focus.focus();
-                                        return accept;
-                                    }
-                                    return reject;
-                                }
-
-                                Rectangle {
-                                    border-width: 1px;
-                                    border-color: Theme.ghost-border;
-                                    border-radius: 4px;
-                                    background: Theme.surface-1;
-                                    accessible-role: list;
-                                    accessible-label: @tr("Format d'export");
-                                    accessible-item-count: root.export-item-count;
-
-                                    VerticalLayout {
-                                        padding: 6px;
-                                        spacing: 0px;
-                                        alignment: start;
-
-                                        ExportMenuRow {
-                                            label: @tr("Markdown (.md)");
-                                            highlighted: root.export-highlighted == 0;
-                                            chosen => { export-btn.choose-export(0); }
-                                        }
-                                        ExportMenuRow {
-                                            label: @tr("JSON (.json)");
-                                            highlighted: root.export-highlighted == 1;
-                                            chosen => { export-btn.choose-export(1); }
-                                        }
-                                        ExportMenuRow {
-                                            label: @tr("Sous-titres (.srt)");
-                                            highlighted: root.export-highlighted == 2;
-                                            chosen => { export-btn.choose-export(2); }
-                                        }
-                                        ExportMenuRow {
-                                            label: @tr("Sous-titres (.vtt)");
-                                            highlighted: root.export-highlighted == 3;
-                                            chosen => { export-btn.choose-export(3); }
-                                        }
-                                        if root.has-audio: ExportMenuRow {
-                                            label: @tr("Audio (.ogg)");
-                                            highlighted: root.export-highlighted == 4;
-                                            chosen => { export-btn.choose-export(4); }
-                                        }
-                                    }
-                                }
+                    if !root.is-empty-meeting: export-btn := KitDropdownMenu {
+                        control-size: ControlSize.compact;
+                        text: @tr("Exporter");
+                        accessible-name: @tr("Exporter la réunion");
+                        leading-icon: LucideArrows.download();
+                        options: MeetingExportMenu.rows(root.has-audio, @tr("Audio (.ogg)"));
+                        chosen(row) => {
+                            if row.token >= 0 && row.token < MeetingExportMenu.formats.length {
+                                root.export-requested(MeetingExportMenu.formats[row.token]);
+                            } else if root.has-audio && row.token == MeetingExportMenu.formats.length {
+                                root.export-audio-requested();
                             }
                         }
                     }
@@ -701,8 +403,7 @@ export component MeetingDetail inherits Rectangle {
             }
 
             page-inner := VerticalLayout {
-                width: parent.width - 12px;
-                padding-right: 14px;
+                width: page-scroll.width;
                 padding-bottom: 34px;
                 spacing: 22px;
 
@@ -714,14 +415,15 @@ export component MeetingDetail inherits Rectangle {
                         vertical-stretch: 0;
                         spacing: 8px;
 
-                        LucideIcon {
+                        KitIcon {
                             width: 18px;
                             height: 18px;
-                            icon: IconSet.PenLine;
-                            icon-color: Theme.accent;
+                            glyph: LucideDesign.pen-line();
+                            ink: Theme.accent;
                         }
 
                         AppText {
+                            color: Theme.text-primary;
                             text: @tr("Notes");
                             typography: Typography.section;
 
@@ -744,11 +446,12 @@ export component MeetingDetail inherits Rectangle {
                         }
                     }
 
-                    notes-edit := ThemedTextArea {
+                    notes-edit := KitTextArea {
                         text <=> root.notes;
-                        area-height: 96px;
+                        min-lines: 4;
+                        max-lines: 4;
                         placeholder: @tr("Ajoutez les décisions, actions et noms importants…");
-                        control-label: @tr("Notes de la réunion");
+                        accessible-name: @tr("Notes de la réunion");
                         edited(value) => { root.notes-changed(value); }
                     }
 
@@ -830,7 +533,6 @@ export component MeetingDetail inherits Rectangle {
                     available-models: root.summary-available-models;
                     available-model-ids: root.summary-available-model-ids;
                     selected-model-id <=> root.summary-selected-model-id;
-                    selected-model-label <=> root.summary-selected-model-label;
                     key-points: root.summary-key-points;
                     decisions: root.summary-decisions;
                     action-items: root.summary-action-items;
@@ -853,63 +555,14 @@ export component MeetingDetail inherits Rectangle {
                 alignment: start;
                 vertical-stretch: 0;
 
-                if !root.confirming-delete || root.delete-permission.blocked: delete-link := Rectangle {
-                    width: delete-content.preferred-width + 20px;
-                    height: 30px;
-                    horizontal-stretch: 0;
-                    vertical-stretch: 0;
-                    border-radius: 4px;
-                    border-width: delete-focus.has-focus ? 2px : 0px;
-                    border-color: Theme.danger;
-                    background: delete-area.pressed ? Theme.danger.with-alpha(0.16) : delete-area.has-hover ? Theme.danger.with-alpha(0.10) : transparent;
-
-                    accessible-role: button;
-                    accessible-label: @tr("Supprimer la réunion");
-                    accessible-enabled: !root.delete-permission.blocked;
-                    opacity: root.delete-permission.blocked ? 0.5 : 1;
-                    accessible-action-default => { if !root.delete-permission.blocked { root.confirming-delete = true; } }
-
-                    forward-focus: delete-focus;
-                    delete-focus := FocusScope {
-                        key-pressed(event) => {
-                            if event.text == Key.Return || event.text == Key.Space {
-                                if !root.delete-permission.blocked { root.confirming-delete = true; }
-                                return accept;
-                            }
-                            return reject;
-                        }
-                    }
-
-                    delete-area := TouchArea {
-                        enabled: !root.delete-permission.blocked;
-                        mouse-cursor: root.delete-permission.blocked ? default : pointer;
-                        clicked => { root.confirming-delete = true; }
-                    }
-
-                    delete-content := HorizontalLayout {
-                        padding-left: 10px;
-                        padding-right: 10px;
-                        spacing: 7px;
-                        alignment: center;
-
-                        Rectangle {
-                            width: 14px;
-                            horizontal-stretch: 0;
-
-                            LucideIcon {
-                                size: 14px;
-                                y: (parent.height - self.height) / 2;
-                                icon: IconSet.Trash2;
-                                icon-color: Theme.danger-strong;
-                            }
-                        }
-                        AppText {
-                            text: @tr("Supprimer la réunion");
-                            typography: Typography.hint;
-                            color: Theme.danger-strong;
-                            vertical-alignment: center;
-                        }
-                    }
+                if !root.confirming-delete || root.delete-permission.blocked: delete-link := KitButton {
+                    accessible-name: @tr("Supprimer la réunion");
+                    text: @tr("Supprimer la réunion");
+                    control-size: ControlSize.compact;
+                    intent: ButtonIntent.quiet;
+                    disabled: root.delete-permission.blocked;
+                    leading-icon: LucideFiles.trash();
+                    activated => { if !root.delete-permission.blocked { root.confirming-delete = true; } }
                 }
 
                 if root.confirming-delete && !root.delete-permission.blocked: HorizontalLayout {
@@ -925,54 +578,23 @@ export component MeetingDetail inherits Rectangle {
                         vertical-alignment: center;
                     }
 
-                    confirm-btn := Rectangle {
-                        width: confirm-txt.preferred-width + 24px;
-                        height: Theme.settings-control-height;
-                        horizontal-stretch: 0;
-                        border-radius: 4px;
-                        border-width: confirm-focus.has-focus ? 2px : 0px;
-                        border-color: Theme.text-primary;
-                        background: confirm-area.pressed ? Theme.danger-strong : confirm-area.has-hover ? Theme.danger.with-alpha(0.9) : Theme.danger;
-
-                        accessible-role: button;
-                        accessible-label: @tr("Oui, supprimer");
-                        accessible-action-default => { root.confirm-delete(); }
-
-                        forward-focus: confirm-focus;
-                        confirm-focus := FocusScope {
-                            init => { self.focus(); }
-                            key-pressed(event) => {
-                                if event.text == Key.Return || event.text == Key.Space {
-                                    root.confirm-delete();
-                                    return accept;
-                                }
-                                if event.text == Key.Escape {
-                                    root.confirming-delete = false;
-                                    return accept;
-                                }
-                                return reject;
-                            }
+                    confirm-btn := KitButton {
+                        accessible-name: @tr("Oui, supprimer");
+                        text: @tr("Oui, supprimer");
+                        control-size: ControlSize.compact;
+                        intent: ButtonIntent.destructive;
+                        init => { self.take-focus(); }
+                        key-event(event) => {
+                            if event.text == Key.Escape { root.confirming-delete = false; return KitKeyResult.accept; }
+                            return KitKeyResult.reject;
                         }
-
-                        confirm-area := TouchArea {
-                            mouse-cursor: pointer;
-                            clicked => { root.confirm-delete(); }
-                        }
-
-                        confirm-txt := AppText {
-                            text: @tr("Oui, supprimer");
-                            typography: Typography.section;
-
-                            color: Theme.on-danger;
-                            horizontal-alignment: center;
-                            vertical-alignment: center;
-                        }
+                        activated => { root.confirm-delete(); }
                     }
 
-                    ThemedButton {
+                    KitButton {
                         text: @tr("Annuler");
-                        kind: ThemedButtonKind.ghost;
-                        clicked => { root.confirming-delete = false; }
+                        intent: ButtonIntent.quiet;
+                        activated => { root.confirming-delete = false; }
                     }
                 }
                 }

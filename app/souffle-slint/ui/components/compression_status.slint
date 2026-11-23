@@ -3,7 +3,7 @@ import { Theme } from "../theme.slint";
 import { CompressionUi } from "../compression.slint";
 import { SummarizationUi } from "../summarization.slint";
 import { CompressionModelPhase } from "../types.slint";
-import { ThemedButton } from "themed_button.slint";
+import { ButtonIntent, ControlSize, KitButton } from "@kit";
 export component CompressionStatus inherits VerticalLayout {
     in property <bool> allow-removal: false;
     property <bool> confirming: false;
@@ -25,21 +25,21 @@ export component CompressionStatus inherits VerticalLayout {
     HorizontalLayout {
         alignment: start;
         spacing: 8px;
-        if SummarizationUi.enabled && (CompressionUi.model-phase == CompressionModelPhase.not-downloaded || CompressionUi.model-phase == CompressionModelPhase.failed): ThemedButton {
+        if SummarizationUi.enabled && (CompressionUi.model-phase == CompressionModelPhase.not-downloaded || CompressionUi.model-phase == CompressionModelPhase.failed): KitButton {
             text: CompressionUi.model-phase == CompressionModelPhase.failed ? @tr("Réessayer le téléchargement") : @tr("Télécharger le modèle");
-            compact: true;
-            clicked => { CompressionUi.download(); }
+            control-size: ControlSize.compact;
+            activated => { CompressionUi.download(); }
         }
-        if CompressionUi.model-phase == CompressionModelPhase.queued || CompressionUi.model-phase == CompressionModelPhase.downloading || CompressionUi.model-phase == CompressionModelPhase.preparing: ThemedButton {
-            text: @tr("Annuler le téléchargement"); compact: true;
-            clicked => { CompressionUi.cancel-download(); }
+        if CompressionUi.model-phase == CompressionModelPhase.queued || CompressionUi.model-phase == CompressionModelPhase.downloading || CompressionUi.model-phase == CompressionModelPhase.preparing: KitButton {
+            text: @tr("Annuler le téléchargement"); control-size: ControlSize.compact;
+            activated => { CompressionUi.cancel-download(); }
         }
-        if root.allow-removal && CompressionUi.cache-present && CompressionUi.model-phase != CompressionModelPhase.deleting: ThemedButton {
+        if root.allow-removal && CompressionUi.cache-present && CompressionUi.model-phase != CompressionModelPhase.deleting: KitButton {
             text: root.confirming ? @tr("Confirmer la suppression") : @tr("Supprimer le modèle de compression");
-            compact: true;
-            clicked => { if root.confirming { CompressionUi.remove-model(); root.confirming = false; } else { root.confirming = true; } }
+            control-size: ControlSize.compact;
+            activated => { if root.confirming { CompressionUi.remove-model(); root.confirming = false; } else { root.confirming = true; } }
         }
-        if root.confirming: ThemedButton { text: @tr("Annuler"); compact: true; clicked => { root.confirming = false; } }
+        if root.confirming: KitButton { text: @tr("Annuler"); control-size: ControlSize.compact; activated => { root.confirming = false; } }
     }
     if root.confirming: AppText { text: @tr("Les versions compactes et les préférences seront conservées. Le modèle pourra être téléchargé à nouveau."); typography: Typography.hint; color: Theme.text-muted; wrap: word-wrap; }
 }

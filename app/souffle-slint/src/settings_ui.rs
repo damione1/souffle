@@ -414,7 +414,7 @@ mod tests {
     #[test]
     fn shortcut_projection_updates_settings_and_the_home_hint_together() {
         let _ = slint::platform::set_platform(Box::new(TestPlatform));
-        let window = MainWindow::new().unwrap();
+        let window = crate::settings_kit::new_window().unwrap();
         let shortcuts = ShortcutSettings {
             toggle: "CommandOrControl+Shift+Space".into(),
             push_to_talk: "Alt+Space".into(),

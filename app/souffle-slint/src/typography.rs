@@ -14,7 +14,7 @@ fn weight_from_ui(weight: TypefaceWeight) -> souffle_typography::Weight {
         TypefaceWeight::Black => Weight::Black,
     }
 }
-use slint::fontique_011::fontique;
+use slint::fontique_012::fontique;
 use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 use souffle_typography::{FONTS, REFERENCE_GLYPHS};
 
@@ -76,7 +76,7 @@ pub fn verify_collection(collection: &mut fontique::Collection) -> Result<Vec<St
     Ok(evidence)
 }
 pub fn initialize(window: &MainWindow) -> Result<Vec<String>, String> {
-    let proof = verify_collection(&mut slint::fontique_011::shared_collection())?;
+    let proof = verify_collection(&mut slint::fontique_012::shared_collection())?;
     window
         .global::<Typography>()
         .on_numeric_cells(|text, style| {

@@ -1,0 +1,33 @@
+import { TranscriptionLabels } from "transcription_labels.slint";
+
+// Both the settings picker and meeting model selector display backend catalogue labels.
+export global PickerLabels {
+    public pure function device-label(name: string, is-default: bool) -> string {
+        return is-default ? @tr("{} (par défaut)", name) : name;
+    }
+
+    public pure function display(value: string) -> string {
+        return value == "__AUTOMATIC__" ? @tr("Automatique")
+            : value == "__APPLE_SPEECH_SYSTEM__" ? TranscriptionLabels.speech-label()
+            : value == "__FOLLOW_DEFAULT__" ? @tr("Suivre l'appareil par défaut")
+            : value == "__CLAMSHELL_DEVICE_UNAVAILABLE__" ? @tr("Appareil personnalisé (indisponible)")
+            : value == "__NEVER__" ? @tr("Jamais")
+            : value == "__DEFAULT__" ? @tr("Par défaut")
+            : value == "__DETAILED__" ? @tr("Compte rendu détaillé")
+            : value == "__BRIEF__" ? @tr("Aperçu bref")
+            : value == "__BUILTIN__" ? @tr("Intégré")
+            : value == "__USB__" ? @tr("USB")
+            : value == "__BLUETOOTH__" ? @tr("Bluetooth")
+            : value == "__VIRTUAL__" ? @tr("Virtuel")
+            : value == "__AGGREGATE__" ? @tr("Agrégé")
+            : value == "__UNKNOWN__" ? @tr("Inconnu")
+            : value == "__CLEANUP__" ? @tr("Nettoyage")
+            : value == "__PROFESSIONAL_EMAIL__" ? @tr("E-mail professionnel")
+            : value == "__BULLETS__" ? @tr("Puces")
+            : value == "__NO_FILLERS__" ? @tr("Sans fillers")
+            : value == "__CHAT__" ? @tr("Chat")
+            : value == "__CODE__" ? @tr("Code")
+            : value == "__MISSING_TEMPLATE__" ? @tr("Modèle introuvable")
+            : value;
+    }
+}

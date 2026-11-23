@@ -27,6 +27,7 @@ mod quit_shutdown;
 mod settings_drafts;
 mod settings_instrumentation;
 mod settings_io;
+mod settings_kit;
 mod settings_log;
 mod settings_ui;
 mod settings_values;
@@ -279,11 +280,12 @@ fn capture_and_submit_window_geometry(
 /// Switches the bundled Slint translation to the given locale. Called from
 /// `settings_values.rs` whenever the user changes the language in the
 /// Interface settings tab.
-pub(crate) fn select_app_locale(locale: AppLocale) {
+pub(crate) fn select_app_locale(window: &MainWindow, locale: AppLocale) {
     let locale_str = settings_ui::locale_from_slint(locale);
     if let Err(e) = slint::select_bundled_translation(locale_str) {
         eprintln!("Translation error: {:?}", e);
     } else {
+        window.global::<SettingsOptions>().invoke_localize();
         eprintln!("Translation selected: {}", locale_str);
     }
 }
@@ -595,13 +597,6 @@ fn load_meeting_summary_models(window_weak: slint::Weak<MainWindow>, state: Arc<
                     Ok(id) => id,
                     Err(_) => "".to_string(),
                 };
-            let default_label = providers
-                .models
-                .iter()
-                .find(|m| m.id == default_id)
-                .map(|m| m.label.clone())
-                .unwrap_or_else(|| default_id.clone());
-
             let _ = slint::invoke_from_event_loop(move || {
                 if let Some(w) = window_weak.upgrade() {
                     w.set_meeting_detail_summary_available_models(
@@ -620,7 +615,6 @@ fn load_meeting_summary_models(window_weak: slint::Weak<MainWindow>, state: Arc<
                     let current = w.get_meeting_detail_summary_selected_model_id();
                     if current.is_empty() {
                         w.set_meeting_detail_summary_selected_model_id(default_id.into());
-                        w.set_meeting_detail_summary_selected_model_label(default_label.into());
                     }
                 }
             });
@@ -1003,6 +997,7 @@ fn refresh_settings_log_tail(
             Ok(Ok(tail)) => {
                 if settings_io.accepts_load(token)
                     && let Some(window) = weak.upgrade()
+                    && window.get_settings_log_active()
                 {
                     apply_settings_log_tail(&window, &log_state, &tail);
                 }
@@ -1020,33 +1015,25 @@ fn refresh_settings_log_tail(
 /// five tabs are keep-alive and would otherwise relayout the log rows on
 /// every real tail change while invisible. Entering the tab also does one
 /// immediate refresh so the module is not blank for up to 2s.
-fn sync_settings_log_timers(
-    window: &MainWindow,
-    timers: &Rc<RefCell<Option<slint::Timer>>>,
-    settings_io: &Rc<settings_io::SettingsIoCoordinator>,
-    log_state: &Rc<RefCell<settings_log::SettingsLogState>>,
-) {
-    let active = window.get_settings_open() && window.get_settings_tab() == SettingsTab::System;
-    let mut slot = timers.borrow_mut();
-    if !active {
-        *slot = None;
-        return;
-    }
-    if slot.is_some() {
-        return;
-    }
-    refresh_settings_log_tail(window, settings_io.clone(), log_state.clone());
+fn wire_settings_log_poll(window: &MainWindow, refresh: impl Fn(&MainWindow) + 'static) {
+    let timer = slint::Timer::default();
     let weak = window.as_weak();
-    let tail_io = settings_io.clone();
-    let tail_state = log_state.clone();
-    let tail = slint::Timer::default();
-    tail.start(slint::TimerMode::Repeated, SETTINGS_LOG_POLL, move || {
-        let Some(window) = weak.upgrade() else {
-            return;
-        };
-        refresh_settings_log_tail(&window, tail_io.clone(), tail_state.clone());
+    let refresh = Rc::new(refresh);
+    window.on_settings_log_activity_changed(move |active| {
+        timer.stop();
+        if active && let Some(window) = weak.upgrade() {
+            refresh(&window);
+            let refresh = refresh.clone();
+            let weak = window.as_weak();
+            timer.start(slint::TimerMode::Repeated, SETTINGS_LOG_POLL, move || {
+                if let Some(window) = weak.upgrade()
+                    && window.get_settings_log_active()
+                {
+                    refresh(&window);
+                }
+            });
+        }
     });
-    *slot = Some(tail);
 }
 
 fn spawn_settings_load_stage<T: Send + 'static>(
@@ -1310,7 +1297,7 @@ fn refresh_summary_providers(
             return;
         };
         ia_ui::populate_intelligence(&window, settings, &status);
-        let provider_available = window.get_settings_summary_unusable_message().is_empty();
+        let provider_available = !window.get_settings_summary_provider_unavailable();
         ia_ui::populate_dictation_polish(&window, settings, provider_available);
         settings_drafts.reapply_polish_prompt(&window, &settings.dictation_polish_template_id);
         let current_editing_id = summary_template_editing.borrow().clone();
@@ -2966,7 +2953,7 @@ fn project_startup_settings(
     window.set_settings_calendar_enabled(settings.calendar_integration_enabled);
     let locale = settings_ui::locale_to_slint(settings.locale.as_str());
     window.set_settings_locale(locale);
-    select_app_locale(locale);
+    select_app_locale(window, locale);
     let mut onboarding = onboarding.borrow_mut();
     onboarding.selected_device = settings.audio_device.clone().unwrap_or_default();
     dark
@@ -3042,14 +3029,6 @@ fn initialize_onboarding(
     true
 }
 
-fn device_option_label(device: &AudioInputDevice) -> String {
-    if device.is_default {
-        format!("{} (par défaut)", device.name)
-    } else {
-        device.name.clone()
-    }
-}
-
 /// Renders whatever step `ob.step_index` currently points at - shared by
 /// wizard-open, "Back", and every successful "Continue"/transition.
 fn show_onboarding_step(
@@ -3089,18 +3068,31 @@ fn show_onboarding_step(
         }
         OnboardingStep::Microphone => {
             let guard = ob.borrow();
-            let mut labels: Vec<slint::SharedString> = vec!["Automatique".into()];
-            labels.extend(guard.devices.iter().map(|d| device_option_label(d).into()));
+            let mut labels: Vec<slint::SharedString> = vec![audio_ui::AUTOMATIC_LABEL.into()];
+            window
+                .set_onboarding_default_device_index(audio_ui::default_input_index(&guard.devices));
+            labels.extend(
+                guard
+                    .devices
+                    .iter()
+                    .map(|device| device.name.as_str().into()),
+            );
+            window.set_onboarding_device_ids(slint::VecModel::from_slice(
+                &std::iter::once(slint::SharedString::default())
+                    .chain(guard.devices.iter().map(|d| d.uid.as_str().into()))
+                    .collect::<Vec<_>>(),
+            ));
             window.set_onboarding_device_labels(
                 std::rc::Rc::new(slint::VecModel::from(labels)).into(),
             );
-            let selected_label = guard
+            let selected_index = guard
                 .devices
                 .iter()
-                .find(|d| d.uid == guard.selected_device)
-                .map(device_option_label)
-                .unwrap_or_else(|| "Automatique".to_string());
-            window.set_onboarding_selected_device_label(selected_label.into());
+                .position(|d| d.uid == guard.selected_device)
+                .map_or(0, |index| index + 1);
+            window.set_onboarding_selected_device_index(
+                i32::try_from(selected_index).expect("device index fits Slint"),
+            );
         }
         OnboardingStep::Model => {
             let guard = ob.borrow();
@@ -3109,16 +3101,20 @@ fn show_onboarding_step(
                 .iter()
                 .map(|o| o.label.as_str().into())
                 .collect();
+            window.set_onboarding_model_ids(slint::VecModel::from_slice(
+                &guard
+                    .model_options
+                    .iter()
+                    .map(|o| o.key().into())
+                    .collect::<Vec<_>>(),
+            ));
             window.set_onboarding_model_labels(
                 std::rc::Rc::new(slint::VecModel::from(labels)).into(),
             );
             let selected_index = guard.selected_model_index.unwrap_or(0);
-            let selected_label = guard
-                .model_options
-                .get(selected_index)
-                .map(|o| o.label.clone())
-                .unwrap_or_default();
-            window.set_onboarding_selected_model_label(selected_label.into());
+            window.set_onboarding_selected_model_index(
+                i32::try_from(selected_index).expect("model index fits Slint"),
+            );
             let selection = guard
                 .model_options
                 .get(selected_index)
@@ -3200,8 +3196,8 @@ fn wire_onboarding_callbacks(
     window.on_onboarding_locale_changed(move |locale| {
         if let Some(window) = weak.upgrade() {
             window.set_settings_locale(locale);
+            select_app_locale(&window, locale);
         }
-        select_app_locale(locale);
         let locale_value = settings_ui::locale_from_slint(locale).to_string();
         settings_io_for_locale.submit(
             souffle_lib::commands::SettingsSaveLane::General,
@@ -3227,18 +3223,23 @@ fn wire_onboarding_callbacks(
     });
 
     let ob_for_device = ob.clone();
-    window.on_onboarding_device_changed(move |label| {
-        let mut guard = ob_for_device.borrow_mut();
-        guard.selected_device = if label == "Automatique" {
-            String::new()
-        } else {
-            guard
-                .devices
-                .iter()
-                .find(|d| device_option_label(d) == label.as_str())
-                .map(|d| d.uid.clone())
-                .unwrap_or_default()
+    let weak = window.as_weak();
+    window.on_onboarding_device_changed(move |index| {
+        let Ok(position) = usize::try_from(index) else {
+            return;
         };
+        let mut guard = ob_for_device.borrow_mut();
+        let uid = if position == 0 {
+            String::new()
+        } else if let Some(device) = guard.devices.get(position - 1) {
+            device.uid.clone()
+        } else {
+            return;
+        };
+        guard.selected_device = uid;
+        if let Some(window) = weak.upgrade() {
+            window.set_onboarding_selected_device_index(index);
+        }
     });
 
     let weak = window.as_weak();
@@ -3263,14 +3264,18 @@ fn wire_onboarding_callbacks(
     let weak = window.as_weak();
     let handle = tauri_handle.clone();
     let permissions_for_model_pick = permissions.clone();
-    window.on_onboarding_model_picked(move |label| {
+    window.on_onboarding_model_picked(move |index| {
+        let Ok(position) = usize::try_from(index) else {
+            return;
+        };
         let mut guard = ob_for_model_pick.borrow_mut();
-        guard.selected_model_index = guard
-            .model_options
-            .iter()
-            .position(|o| o.label == label.as_str());
+        if position >= guard.model_options.len() {
+            return;
+        }
+        guard.selected_model_index = Some(position);
         drop(guard);
         if let Some(window) = weak.upgrade() {
+            window.set_onboarding_selected_model_index(index);
             show_onboarding_step(
                 &window,
                 &handle,
@@ -5146,7 +5151,6 @@ fn wire_callbacks(
     // `wire_update_dialogs` (SOU-226) so the updater's "Install and restart"
     // flushes through the same controller instance as quit, rather than a
     // second one that could drift out of sync.
-    let settings_log_timer: Rc<RefCell<Option<slint::Timer>>> = Rc::new(RefCell::new(None));
     // Full line list + window bookkeeping behind the virtualized live log
     // (SOU-224) - `MainWindow.settings-log-lines` only ever holds the
     // visible slice of this.
@@ -5228,8 +5232,11 @@ fn wire_callbacks(
     let model_options_state_for_open = model_options_state.clone();
     let snippets_list_state_for_open = snippets_list_state.clone();
     let snippet_editing_for_open = snippet_editing.clone();
-    let settings_log_timer_for_open = settings_log_timer.clone();
-    let settings_log_state_for_open = settings_log_state.clone();
+    let log_io = settings_io.clone();
+    let log_state = settings_log_state.clone();
+    wire_settings_log_poll(window, move |window| {
+        refresh_settings_log_tail(window, log_io.clone(), log_state.clone());
+    });
     let settings_drafts_for_open = settings_drafts.clone();
     let settings_io_for_open = settings_io.clone();
     let settings_values_for_open = settings_values.clone();
@@ -5260,15 +5267,6 @@ fn wire_callbacks(
         window.set_settings_open(true);
         window.set_settings_model_delete_error("".into());
         permissions_for_open.sync_activity();
-        // Only starts the live-log timers if the sheet opened straight onto
-        // the Système tab (AC5) - the usual Transcription/Meetings entry
-        // points leave them off until the user actually visits that tab.
-        sync_settings_log_timers(
-            &window,
-            &settings_log_timer_for_open,
-            &settings_io_for_open,
-            &settings_log_state_for_open,
-        );
         drop(window);
 
         let core_weak = weak.clone();
@@ -5430,9 +5428,7 @@ fn wire_callbacks(
     });
 
     let weak = window.as_weak();
-    let settings_log_timer_for_close = settings_log_timer.clone();
     let settings_drafts_for_close = settings_drafts.clone();
-    let pending_modifier_for_close = pending_modifier.clone();
     let upcoming_for_close = upcoming_cache.clone();
     let handle_for_close = tauri_handle.clone();
     let settings_io_for_close = settings_io.clone();
@@ -5443,8 +5439,6 @@ fn wire_callbacks(
         permissions_for_close.sync_activity();
         let close_token = settings_io_for_close.close();
         let weak = weak.clone();
-        let settings_log_timer = settings_log_timer_for_close.clone();
-        let pending_modifier = pending_modifier_for_close.clone();
         let upcoming = upcoming_for_close.clone();
         let handle = handle_for_close.clone();
         let io = settings_io_for_close.clone();
@@ -5463,8 +5457,6 @@ fn wire_callbacks(
                 }
                 settings_drafts::DraftFlushResult::NothingPending
                 | settings_drafts::DraftFlushResult::Committed => {
-                    *settings_log_timer.borrow_mut() = None;
-                    *pending_modifier.borrow_mut() = None;
                     if let Some(window) = weak.upgrade() {
                         window.set_settings_recording_field(ShortcutField::None);
                         window.set_settings_shortcut_error("".into());
@@ -5478,23 +5470,12 @@ fn wire_callbacks(
 
     window.on_settings_instrument_input(settings_instrumentation::input);
     let weak = window.as_weak();
-    let settings_log_timer_for_tab = settings_log_timer.clone();
-    let settings_log_state_for_tab = settings_log_state.clone();
-    let settings_io_for_tab = settings_io.clone();
     window.on_settings_tab_changed(move || {
         settings_instrumentation::handler(settings_instrumentation::SettingsScenario::Tab);
         settings_instrumentation::snapshot_without_persistence(
             settings_instrumentation::SettingsScenario::Tab,
         );
         if let Some(window) = weak.upgrade() {
-            // AC5 (SOU-224): the live-log poll follows the Système tab, it
-            // does not run for the whole life of the sheet.
-            sync_settings_log_timers(
-                &window,
-                &settings_log_timer_for_tab,
-                &settings_io_for_tab,
-                &settings_log_state_for_tab,
-            );
             window.window().request_redraw();
         }
     });
@@ -5836,9 +5817,12 @@ fn wire_callbacks(
     let audio_device_projection_for_device = audio_device_projection_state.clone();
     let device_selection_revision = Arc::new(std::sync::atomic::AtomicU64::new(0));
     let device_effect_lock = Arc::new(Mutex::new(()));
-    window.on_settings_device_changed(move |label| {
-        let uid = audio_ui::resolve_device_uid(&audio_devices_state_for_device.borrow(), &label)
-            .unwrap_or_default();
+    window.on_settings_device_changed(move |id| {
+        let Some(uid) = audio_ui::device_choice(&audio_devices_state_for_device.borrow(), &id)
+        else {
+            return;
+        };
+        let uid = uid.unwrap_or_default();
         let revision = device_selection_revision.fetch_add(1, Ordering::AcqRel) + 1;
         audio_device_projection_for_device
             .borrow_mut()
@@ -7241,25 +7225,16 @@ fn wire_callbacks(
         );
     });
 
-    let weak = window.as_weak();
-    let pending_modifier_for_cancel = pending_modifier.clone();
-    window.on_settings_shortcut_cancelled(move || {
-        *pending_modifier_for_cancel.borrow_mut() = None;
-        if let Some(window) = weak.upgrade() {
-            window.set_settings_recording_field(ShortcutField::None);
-            window.set_settings_shortcut_error("".into());
-            window.set_settings_shortcut_notice(ShortcutNotice::None);
-        }
-    });
+    wire_settings_capture_cancel(window, pending_modifier);
 
     let weak = window.as_weak();
-    let permissions_for_review = permissions.clone();
+    let permissions_for_dialog = permissions.clone();
+    window.on_permissions_dialog_changed(move || permissions_for_dialog.sync_activity());
     window.on_settings_permissions_review_requested(move || {
         let Some(window) = weak.upgrade() else {
             return;
         };
         window.set_settings_permissions_dialog_open(true);
-        permissions_for_review.refresh();
     });
 
     let weak = window.as_weak();
@@ -7387,8 +7362,7 @@ fn finish_startup_presentation(window: &MainWindow, gate: &StartupPresentationGa
     match gate.finish() {
         Some(AppView::Home) => {
             if window.get_settings_open() {
-                window.set_settings_open(false);
-                window.invoke_settings_closed();
+                window.invoke_close_settings();
             }
         }
         Some(AppView::Settings) if !window.get_settings_open() => {
@@ -7453,8 +7427,7 @@ fn dispatch_native_action(
                 return;
             }
             if window.get_settings_open() {
-                window.set_settings_open(false);
-                window.invoke_settings_closed();
+                window.invoke_close_settings();
             }
         }
         NativeAction::Navigate(AppView::Settings) => {
@@ -7607,7 +7580,7 @@ fn main() {
         selector.select().expect("failed to select winit backend");
     }
 
-    let window = MainWindow::new().expect("failed to create Slint window");
+    let window = crate::settings_kit::new_window().expect("failed to create Slint window");
     compression_ui::populate_settings(&window, &initial_settings);
     typography::initialize(&window).expect("Inter renderer font resolution failed");
     action_guards::install(&window, &handle);
@@ -7639,20 +7612,7 @@ fn main() {
     let live_state: LiveTranscriptState = Arc::new(Mutex::new(LiveTranscript::new()));
 
     let window_activity = WindowActivity::new();
-    let weak_close = window.as_weak();
-    let io_close = settings_io.clone();
-    window.window().on_close_requested(move || {
-        if let Some(w) = weak_close.upgrade() {
-            capture_and_submit_window_geometry(&w, &io_close);
-        }
-        // SOU-284: release the open meeting's decoded audio and output.
-        if let Some(w) = weak_close.upgrade() {
-            release_meeting_audio_on_hide(&w);
-        }
-        // SOU-282: hidden, so the waveform tick and the permission poll stop.
-        set_main_window_visible(false);
-        slint::CloseRequestResponse::HideWindow
-    });
+    wire_main_window_close(&window, settings_io.clone());
     let permissions =
         permissions_ui::PermissionController::new(&window, window_activity.visible_cell());
     wire_window_activity(&window, &window_activity, &permissions);
@@ -7928,6 +7888,36 @@ fn wire_unusable_key_monitor(window: &MainWindow) {
     std::mem::forget(monitor);
 }
 
+fn wire_settings_capture_cancel(
+    window: &MainWindow,
+    pending_modifier: Rc<RefCell<Option<String>>>,
+) {
+    let weak = window.as_weak();
+    window.on_settings_shortcut_cancelled(move || {
+        *pending_modifier.borrow_mut() = None;
+        if let Some(window) = weak.upgrade() {
+            window.set_settings_recording_field(ShortcutField::None);
+            window.set_settings_shortcut_error("".into());
+            window.set_settings_shortcut_notice(ShortcutNotice::None);
+        }
+    });
+}
+
+fn wire_main_window_close(window: &MainWindow, io_close: Rc<settings_io::SettingsIoCoordinator>) {
+    let weak_close = window.as_weak();
+    window.window().on_close_requested(move || {
+        if let Some(w) = weak_close.upgrade() {
+            capture_and_submit_window_geometry(&w, &io_close);
+            // SOU-284: release the open meeting's decoded audio and output.
+            release_meeting_audio_on_hide(&w);
+            w.invoke_cancel_settings_capture();
+        }
+        // SOU-282: hidden, so the waveform tick and the permission poll stop.
+        set_main_window_visible(false);
+        slint::CloseRequestResponse::HideWindow
+    });
+}
+
 /// Shows the main window and marks it visible: winit does not reliably send
 /// `Occluded(false)` when a hidden window comes back. Every `window.show()`
 /// goes through here.
@@ -8064,13 +8054,12 @@ mod tests {
         DictationTextBuffers, DictationTranscriptDisposition, MainWindow, OnboardingState,
         SettingsCache, StartupPresentationGate, SummaryRefreshState, Theme, TimelineDayGroup,
         TimelineKind, TranscriptState, apply_audio_device_projection_settlement,
-        audio_device_load_configuration, capture_and_submit_window_geometry,
-        clear_committed_summary_add_draft, dictation_transcript_disposition,
-        finish_startup_presentation, merge_recovery_text, model_selection_matches_settings,
-        persist_shortcut_candidate, prime_summary_template_editor,
-        project_model_selection_snapshot, project_startup_settings, reset_live_buffers,
-        reset_stale_save_error, run_current_model_task, settle_audio_device_save,
-        settle_model_selection_save, settle_onboarding_completion,
+        audio_device_load_configuration, clear_committed_summary_add_draft,
+        dictation_transcript_disposition, finish_startup_presentation, merge_recovery_text,
+        model_selection_matches_settings, persist_shortcut_candidate,
+        prime_summary_template_editor, project_model_selection_snapshot, project_startup_settings,
+        reset_live_buffers, reset_stale_save_error, run_current_model_task,
+        settle_audio_device_save, settle_model_selection_save, settle_onboarding_completion,
         should_clear_committed_summary_add_draft, wire_meeting_detail_delete,
         wire_summary_template_edit_callbacks, wire_timeline_item_removed,
     };
@@ -8111,7 +8100,7 @@ mod tests {
 
     fn test_window() -> MainWindow {
         let _ = slint::platform::set_platform(Box::new(TestPlatform));
-        MainWindow::new().unwrap()
+        crate::settings_kit::new_window().unwrap()
     }
 
     #[test]
@@ -8260,7 +8249,7 @@ mod tests {
                 renderer.render(&mut pixels, 1200);
             });
         }
-        let button = ElementHandle::find_by_element_id(&window, "AboutSection::update-action")
+        let button = ElementHandle::find_by_element_id(&window, "AboutSection::update-button")
             .next()
             .expect("Settings update action");
         assert_eq!(button.accessible_enabled(), Some(true));
@@ -9175,6 +9164,76 @@ mod tests {
         assert_eq!(stops.get(), 1);
     }
 
+    #[test]
+    fn closing_settings_cancels_the_pending_modifier_before_a_same_turn_reopen() {
+        let window = test_window();
+        let modifier = Rc::new(RefCell::new(Some("Shift".to_owned())));
+        super::wire_settings_capture_cancel(&window, modifier.clone());
+        let weak = window.as_weak();
+        window.on_settings_closed(move || {
+            let window = weak.unwrap();
+            assert_eq!(window.get_settings_recording_field(), ShortcutField::None);
+            assert_eq!(
+                window
+                    .global::<slint_kit::ui::KitFieldService>()
+                    .get_shortcut_session(),
+                0
+            );
+            window.set_settings_open(true);
+        });
+        window.set_settings_open(true);
+        window.set_settings_recording_field(ShortcutField::Toggle);
+        let fields = window.global::<slint_kit::ui::KitFieldService>();
+        let ticket = fields.invoke_begin_shortcut_session();
+        window.invoke_close_settings();
+        assert!(window.get_settings_open());
+        assert!(modifier.borrow().is_none());
+        assert_ne!(ticket, fields.invoke_begin_shortcut_session());
+    }
+
+    #[test]
+    fn log_poll_ticks_only_on_the_visible_system_page_and_resumes_after_reopen() {
+        i_slint_backend_testing::init_no_event_loop();
+        let window = crate::settings_kit::new_window().unwrap();
+        let polls = Rc::new(Cell::new(0));
+        let seen = polls.clone();
+        super::wire_settings_log_poll(&window, move |_| seen.set(seen.get() + 1));
+        let tick = || {
+            i_slint_backend_testing::mock_elapsed_time(
+                super::SETTINGS_LOG_POLL + Duration::from_millis(1),
+            )
+        };
+        window.set_settings_open(true);
+        tick();
+        assert_eq!(polls.get(), 0);
+        window.set_settings_tab(crate::SettingsTab::System);
+        tick();
+        let started = polls.get();
+        tick();
+        assert_eq!(polls.get(), started + 1);
+        window.set_settings_tab(crate::SettingsTab::Ai);
+        tick();
+        let stopped = polls.get();
+        tick();
+        assert_eq!(polls.get(), stopped);
+        window.set_settings_tab(crate::SettingsTab::System);
+        tick();
+        assert!(polls.get() > stopped);
+        window.set_settings_open(false);
+        tick();
+        let closed = polls.get();
+        tick();
+        assert_eq!(polls.get(), closed);
+        window.set_settings_open(true);
+        tick();
+        assert!(polls.get() > closed);
+        window.set_window_visible(false);
+        tick();
+        let hidden = polls.get();
+        tick();
+        assert_eq!(polls.get(), hidden);
+    }
+
     // SOU-226 AC2: a save-error banner from a closed Settings session must
     // not resurface just because Settings is reopened without any new save
     // attempt.
@@ -9195,7 +9254,7 @@ mod tests {
     // physical size would truncate to 500x300 instead of 501x301) and the
     // rounded value is what actually reaches the settings save.
     #[test]
-    fn window_geometry_capture_rounds_logical_size_and_submits_it() {
+    fn accepted_window_close_saves_geometry_and_expires_capture_across_immediate_show() {
         let window = test_window();
         let cache = SettingsCache::with_observed(&window, AppSettings::default());
         let durable = Arc::new(Mutex::new(AppSettings::default()));
@@ -9223,7 +9282,19 @@ mod tests {
             .window()
             .set_size(slint::PhysicalSize::new(1001, 601));
 
-        capture_and_submit_window_geometry(&window, &io);
+        window.show().unwrap();
+        super::wire_main_window_close(&window, io.clone());
+        let fields = window.global::<slint_kit::ui::KitFieldService>();
+        let ticket = fields.invoke_begin_shortcut_session();
+        assert!(ticket > 0);
+        window
+            .window()
+            .dispatch_event(slint::platform::WindowEvent::CloseRequested);
+        assert!(!window.window().is_visible());
+        super::show_main_window(&window).unwrap();
+        assert!(window.window().is_visible());
+        assert_eq!(fields.get_shortcut_session(), 0);
+        assert_ne!(fields.invoke_begin_shortcut_session(), ticket);
 
         let deadline = Instant::now() + Duration::from_secs(1);
         while !io.is_idle_for_test() {
@@ -9536,7 +9607,7 @@ mod tests {
     #[test]
     fn blocked_device_load_cannot_publish_stale_uid_after_unavailable_commit() {
         let window = test_window();
-        window.set_settings_selected_device_label("Microphone B".into());
+        window.set_settings_selected_device_id("mic-b".into());
         let fallback = AppSettings {
             audio_device: Some("mic-a".into()),
             ..AppSettings::default()
@@ -9584,10 +9655,7 @@ mod tests {
         // Both the post-effect path and a manual Refresh use the pending
         // unknown selection instead of the stale preserved cache snapshot.
         assert_eq!(selected, "mic-b");
-        assert_eq!(
-            window.get_settings_selected_device_label().as_str(),
-            "Microphone B"
-        );
+        assert_eq!(window.get_settings_selected_device_id().as_str(), "mic-b");
     }
 
     #[test]

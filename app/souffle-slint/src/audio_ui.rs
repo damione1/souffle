@@ -1,6 +1,5 @@
 //! Audio + Microphone tabs (SOU-188 milestone 4). Device pickers forward
-//! their chosen *label* back to Rust rather than a uid/index resolved in
-//! `.slint` - see `microphone_section.slint`'s doc comment for why. Minute
+//! a chosen UID back to Rust, even when several devices share a name. Minute
 //! dropdowns (autostop/max-duration) format their own labels from
 //! `SettingsOptions::current()`'s values (AC3: no bounds redeclared here)
 //! and parse them back deterministically, so no lookup table is needed on
@@ -10,7 +9,7 @@ use crate::microphone_list::{self, MicrophoneListEntry};
 use crate::{MainWindow, MicrophoneRow};
 use souffle_lib::audio::AudioInputDevice;
 
-const AUTOMATIC_LABEL: &str = "__AUTOMATIC__";
+pub(crate) const AUTOMATIC_LABEL: &str = "__AUTOMATIC__";
 const CLAMSHELL_FOLLOW_LABEL: &str = "__FOLLOW_DEFAULT__";
 // Distinct from `CLAMSHELL_FOLLOW_LABEL`: shown only when a *specific* device
 // was pinned for clamshell mode and it is not in the current catalogue
@@ -19,12 +18,13 @@ const CLAMSHELL_FOLLOW_LABEL: &str = "__FOLLOW_DEFAULT__";
 // otherwise silently lose (SOU-225).
 const CLAMSHELL_UNAVAILABLE_LABEL: &str = "__CLAMSHELL_DEVICE_UNAVAILABLE__";
 
-fn device_label(device: &AudioInputDevice) -> String {
-    if device.is_default {
-        format!("{} (par défaut)", device.name)
-    } else {
-        device.name.clone()
-    }
+// Index zero is the automatic/follow-system choice in both pickers.
+pub fn default_input_index(devices: &[AudioInputDevice]) -> i32 {
+    devices
+        .iter()
+        .position(|d| d.is_default)
+        .and_then(|index| i32::try_from(index + 1).ok())
+        .unwrap_or(-1)
 }
 
 /// Pushes the two device pickers' label lists + current selection. `selected`
@@ -36,22 +36,23 @@ pub fn populate_device_pickers(
     selected: &str,
     clamshell: Option<&str>,
 ) {
+    let ids = std::iter::once(slint::SharedString::default())
+        .chain(devices.iter().map(|d| d.uid.as_str().into()))
+        .collect::<Vec<_>>();
+    window.set_settings_audio_device_ids(slint::VecModel::from_slice(&ids));
+    window.set_settings_selected_device_id(selected.into());
+    window.set_settings_clamshell_device_id(clamshell.unwrap_or_default().into());
+    window.set_settings_default_device_index(default_input_index(devices));
     let mut labels = vec![AUTOMATIC_LABEL.to_string()];
-    labels.extend(devices.iter().map(device_label));
+    labels.extend(devices.iter().map(|device| device.name.clone()));
     let labels: Vec<slint::SharedString> = labels.into_iter().map(Into::into).collect();
     window.set_settings_audio_device_labels(std::rc::Rc::new(slint::VecModel::from(labels)).into());
-    let selected_label = devices
-        .iter()
-        .find(|d| d.uid == selected)
-        .map(device_label)
-        .unwrap_or_else(|| AUTOMATIC_LABEL.to_string());
-    window.set_settings_selected_device_label(selected_label.into());
     window.set_settings_pin_unavailable(
         !selected.is_empty() && !devices.iter().any(|d| d.uid == selected),
     );
 
     let mut clamshell_labels = vec![CLAMSHELL_FOLLOW_LABEL.to_string()];
-    clamshell_labels.extend(devices.iter().map(device_label));
+    clamshell_labels.extend(devices.iter().map(|device| device.name.clone()));
     let clamshell_labels: Vec<slint::SharedString> =
         clamshell_labels.into_iter().map(Into::into).collect();
     window.set_settings_clamshell_device_labels(
@@ -67,23 +68,23 @@ pub fn populate_device_pickers(
 pub fn clamshell_device_label(devices: &[AudioInputDevice], clamshell: Option<&str>) -> String {
     clamshell
         .and_then(|uid| devices.iter().find(|d| d.uid == uid))
-        .map(device_label)
+        .map(|device| device.name.clone())
         .unwrap_or_else(|| match clamshell {
             Some(_) => CLAMSHELL_UNAVAILABLE_LABEL.to_string(),
             None => CLAMSHELL_FOLLOW_LABEL.to_string(),
         })
 }
 
-/// Inverse of `populate_device_pickers`' label building - `None` means the
-/// picker's "automatic"/"follow default" sentinel was chosen.
-pub fn resolve_device_uid(devices: &[AudioInputDevice], label: &str) -> Option<String> {
-    if label == AUTOMATIC_LABEL || label == CLAMSHELL_FOLLOW_LABEL {
-        return None;
+/// An empty UID selects the system default. Ignore stale device IDs.
+pub fn device_choice(devices: &[AudioInputDevice], uid: &str) -> Option<Option<String>> {
+    if uid.is_empty() {
+        Some(None)
+    } else {
+        devices
+            .iter()
+            .find(|device| device.uid == uid)
+            .map(|device| Some(device.uid.clone()))
     }
-    devices
-        .iter()
-        .find(|d| device_label(d) == label)
-        .map(|d| d.uid.clone())
 }
 
 /// Port of `resolveSampleRateDeviceUid()`: the pin if connected, else the
@@ -223,16 +224,23 @@ mod tests {
     }
 
     #[test]
-    fn resolve_device_uid_returns_none_for_sentinels() {
-        let devices = vec![device("a", false)];
-        assert_eq!(resolve_device_uid(&devices, AUTOMATIC_LABEL), None);
-        assert_eq!(resolve_device_uid(&devices, CLAMSHELL_FOLLOW_LABEL), None);
-        assert_eq!(resolve_device_uid(&devices, "a"), Some("a".to_string()));
+    fn device_choice_distinguishes_duplicate_names_default_and_missing() {
+        let mut devices = vec![device("a", false), device("b", false)];
+        devices[1].name = devices[0].name.clone();
+        assert_eq!(device_choice(&devices, ""), Some(None));
+        assert_eq!(device_choice(&devices, "b"), Some(Some("b".to_string())));
+        assert_eq!(device_choice(&devices, "missing"), None);
     }
 
     #[test]
     fn clamshell_device_label_shows_the_device_name_when_present() {
         let devices = vec![device("a", false), device("b", true)];
+        assert_eq!(clamshell_device_label(&devices, Some("a")), "a");
+    }
+
+    #[test]
+    fn clamshell_device_label_leaves_the_default_suffix_to_the_picker_catalogue() {
+        let devices = vec![device("a", true)];
         assert_eq!(clamshell_device_label(&devices, Some("a")), "a");
     }
 

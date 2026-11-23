@@ -3,7 +3,7 @@ import { ListView } from "std-widgets.slint";
 import { Theme } from "../theme.slint";
 import { CompressionUi } from "../compression.slint";
 import { CompactJobPhase } from "../types.slint";
-import { ThemedButton, ThemedButtonKind } from "themed_button.slint";
+import { ButtonIntent, ControlSize, KitButton } from "@kit";
 import { CompressionStatus } from "compression_status.slint";
 export component CompactTranscriptSection inherits VerticalLayout {
     spacing: 10px;
@@ -11,14 +11,15 @@ export component CompactTranscriptSection inherits VerticalLayout {
     HorizontalLayout {
         spacing: 8px;
         AppText { text: @tr("Version compacte (expérimentale)"); typography: Typography.section; color: Theme.text-primary; vertical-alignment: center; horizontal-stretch: 1; }
-        if !CompressionUi.busy: ThemedButton {
+        if !CompressionUi.busy: KitButton {
             text: CompressionUi.has-compact ? @tr("Régénérer") : @tr("Générer");
-            kind: ThemedButtonKind.primary;
-            enabled: !CompressionUi.ongoing && CompressionUi.has-source;
-            clicked => { CompressionUi.generate(); }
+            intent: ButtonIntent.primary;
+            control-size: ControlSize.compact;
+            disabled: CompressionUi.ongoing || !CompressionUi.has-source;
+            activated => { CompressionUi.generate(); }
         }
-        if CompressionUi.busy: ThemedButton { text: @tr("Annuler"); clicked => { CompressionUi.cancel(); } }
-        if CompressionUi.has-compact: ThemedButton { text: CompressionUi.copied ? @tr("Copié") : @tr("Copier"); clicked => { CompressionUi.copy(); } }
+        if CompressionUi.busy: KitButton { text: @tr("Annuler"); control-size: ControlSize.compact; activated => { CompressionUi.cancel(); } }
+        if CompressionUi.has-compact: KitButton { text: CompressionUi.copied ? @tr("Copié") : @tr("Copier"); control-size: ControlSize.compact; activated => { CompressionUi.copy(); } }
     }
     if CompressionUi.ongoing: AppText { text: @tr("Disponible une fois l'enregistrement terminé."); typography: Typography.secondary; color: Theme.text-muted; }
     if CompressionUi.stale: AppText { text: @tr("Cette version compacte précède les dernières modifications de la transcription. Régénérez-la avant de l'utiliser."); typography: Typography.secondary; color: Theme.text-muted; wrap: word-wrap; }
@@ -59,7 +60,7 @@ export component CompactTranscriptSection inherits VerticalLayout {
     }
     if CompressionUi.has-compact: HorizontalLayout {
         alignment: start;
-        ThemedButton { text: CompressionUi.expanded ? @tr("Réduire l'aperçu") : @tr("Développer l'aperçu"); compact: true; clicked => { CompressionUi.expand(); } }
+        KitButton { text: CompressionUi.expanded ? @tr("Réduire l'aperçu") : @tr("Développer l'aperçu"); control-size: ControlSize.compact; activated => { CompressionUi.expand(); } }
     }
     if CompressionUi.has-compact && CompressionUi.compact-rate < CompressionUi.rate-default: AppText { text: @tr("Une valeur basse omet des mots."); typography: Typography.hint; color: Theme.text-muted; wrap: word-wrap; }
 }

@@ -1,14 +1,12 @@
+import { DialogTabPolicy, ButtonIntent, KitDialog } from "@kit";
 import { MarkdownBlock } from "markdown_block.slint";
-import { ReleaseNotesBox } from "markdown_view.slint";
-import { ModalDialog } from "../modal_dialog.slint";
-import { ThemedButton, ThemedButtonKind } from "../themed_button.slint";
+import { MarkdownView } from "markdown_view.slint";
 
-// Port of WhatsNewDialog.svelte. Content is pre-parsed into `MarkdownBlock`s
-// on the Rust side (`markdown.rs`) - see that module's doc comment for why
-// Slint's `@markdown()` builtin (literal-only) can't take this dynamic
-// content directly. Chrome comes from `ModalDialog`; the only action is
-// the reference's `btn btn-active` "Compris".
-export component WhatsNewDialog inherits ModalDialog {
+// Release notes are parsed into MarkdownBlock rows in Rust.
+export component WhatsNewDialog inherits KitDialog {
+    tab-policy: DialogTabPolicy.native;
+    modal-layer: 2;
+    close-label: @tr("SettingsPermissionsDialog" => "Fermer");
     in property <string> version;
     in property <[MarkdownBlock]> content-blocks;
 
@@ -16,22 +14,15 @@ export component WhatsNewDialog inherits ModalDialog {
     callback link-clicked(string);
 
     title: @tr("Nouveautés");
-    subtitle: @tr("Mis à jour vers v{}", root.version);
-    close-requested => { root.dismissed(); }
+    description: @tr("Mis à jour vers v{}", root.version);
+    dismiss(reason) => { root.dismissed(); }
 
-    ReleaseNotesBox {
+    MarkdownView {
+        modal-layer: root.modal-layer;
         blocks: root.content-blocks;
         link-clicked(url) => { root.link-clicked(url); }
     }
 
-    HorizontalLayout {
-        alignment: end;
-        vertical-stretch: 0;
-
-        ThemedButton {
-            text: @tr("Compris");
-            kind: ThemedButtonKind.active;
-            clicked => { root.dismissed(); }
-        }
-    }
+    actions: [{token: 1, text: @tr("Compris"), intent: ButtonIntent.primary}];
+    action-activated(token) => { root.dismissed(); }
 }

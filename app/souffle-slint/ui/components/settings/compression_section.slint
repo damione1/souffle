@@ -1,48 +1,129 @@
 import { AppText, Typography } from "@typography";
 import { CompressionUi } from "../../compression.slint";
 import { Theme } from "../../theme.slint";
-import { SettingsGroup } from "settings_group.slint";
-import { SettingsField } from "settings_field.slint";
-import { ThemedSwitch } from "../themed_switch.slint";
-import { ThemedSlider } from "../themed_slider.slint";
 import { CompressionStatus } from "../compression_status.slint";
+import { ChoiceLabelPosition, ControlWidth, KitFieldRow, KitFieldSet, KitMetrics, KitSlider, KitSwitch, KitThemeContext, KitThemes, Ownership } from "@kit";
+
 export component CompressionSection inherits VerticalLayout {
+    spacing: 22px;
+    alignment: start;
     vertical-stretch: 0;
-    SettingsGroup {
-        title: @tr("COMPRESSION DES TRANSCRIPTIONS");
-        SettingsField {
+
+    KitFieldSet {
+        theme: KitThemeContext.current;
+        legend: @tr("COMPRESSION DES TRANSCRIPTIONS");
+
+        KitFieldRow {
+            theme: KitThemeContext.current;
+            modal-layer: 0;
+            orientation: Theme.settings-field-orientation(self.width);
+            padding: KitMetrics.field-gap(self.theme);
+            focus-requested => { summary-switch.take-focus(); }
+            private property <bool> control-focused: summary-switch.has-focus;
+            changed control-focused => {
+                if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
+            }
             show-divider: false;
             label: @tr("Compresser les longues transcriptions avant le résumé");
             description: @tr("Réduit l'entrée des étapes intermédiaires. Les résumés courts utilisent le texte original.");
-            ThemedSwitch { control-label: @tr("Compresser avant le résumé"); checked: CompressionUi.summary-enabled; toggled(value) => { CompressionUi.summary-changed(value); } }
+
+            summary-switch := KitSwitch {
+                theme: KitThemeContext.current;
+                modal-layer: 0;
+                label-position: ChoiceLabelPosition.start;
+                padding-inline: 0px;
+                ownership: Ownership.controlled;
+                control-width: ControlWidth.intrinsic;
+                accessible-label: @tr("Compresser avant le résumé");
+                checked: CompressionUi.summary-enabled;
+                toggled(new) => { CompressionUi.summary-changed(new); }
+            }
         }
-        SettingsField {
+
+        KitFieldRow {
+            theme: KitThemeContext.current;
+            modal-layer: 0;
+            orientation: Theme.settings-field-orientation(self.width);
+            padding: KitMetrics.field-gap(self.theme);
+            focus-requested => { alongside-switch.take-focus(); }
+            private property <bool> control-focused: alongside-switch.has-focus;
+            changed control-focused => {
+                if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
+            }
+            show-divider: true;
             label: @tr("Créer aussi une version compacte lors du résumé");
             description: @tr("Conserve un texte compact consultable, indépendamment de l'entrée utilisée pour le résumé.");
-            ThemedSwitch { control-label: @tr("Créer aussi une version compacte"); checked: CompressionUi.alongside-enabled; toggled(value) => { CompressionUi.alongside-changed(value); } }
+
+            alongside-switch := KitSwitch {
+                theme: KitThemeContext.current;
+                modal-layer: 0;
+                label-position: ChoiceLabelPosition.start;
+                padding-inline: 0px;
+                ownership: Ownership.controlled;
+                control-width: ControlWidth.intrinsic;
+                accessible-label: @tr("Créer aussi une version compacte");
+                checked: CompressionUi.alongside-enabled;
+                toggled(new) => { CompressionUi.alongside-changed(new); }
+            }
         }
-        SettingsField {
+
+        KitFieldRow {
+            theme: KitThemeContext.current;
+            modal-layer: 0;
+            orientation: Theme.settings-field-orientation(self.width);
+            padding: KitMetrics.field-gap(self.theme);
+            focus-requested => { rate-slider.take-focus(); }
+            show-divider: true;
             label: @tr("Texte à conserver");
             description: CompressionUi.rate < CompressionUi.rate-default ? @tr("Une valeur basse omet des mots.") : "";
+
             HorizontalLayout {
-                horizontal-stretch: 0;
                 spacing: 10px;
-                ThemedSlider { control-label: @tr("Pourcentage de texte à conserver"); value: CompressionUi.rate; minimum: CompressionUi.rate-min; maximum: CompressionUi.rate-max; changed(value) => { CompressionUi.rate-changed(value); } }
-                AppText { text: @tr("{} %", CompressionUi.rate); typography: Typography.secondary; color: Theme.text-muted; vertical-alignment: center; }
+                alignment: center;
+                horizontal-stretch: 0;
+
+                rate-slider := KitSlider {
+                    theme: KitThemeContext.current;
+                    modal-layer: 0;
+                    width: 140px;
+                    ownership: Ownership.controlled;
+                    spec: { minimum: CompressionUi.rate-min, maximum: CompressionUi.rate-max, step: 1 };
+                    label: @tr("Pourcentage de texte à conserver");
+                    value: CompressionUi.rate;
+                    chosen(value) => { CompressionUi.rate-changed(value.to-float()); }
+                }
+
+                AppText {
+                    text: @tr("{} %", CompressionUi.rate);
+                    typography: Typography.secondary;
+                    color: Theme.text-muted;
+                    vertical-alignment: center;
+                    width: 40px;
+                }
             }
         }
     }
 }
 
 export component CompressionStorageSection inherits VerticalLayout {
+    spacing: 22px;
+    alignment: start;
     vertical-stretch: 0;
-    SettingsGroup {
-        title: @tr("MODÈLE DE COMPRESSION LOCAL");
+
+    KitFieldSet {
+        theme: KitThemeContext.current;
+        legend: @tr("MODÈLE DE COMPRESSION LOCAL");
+
         VerticalLayout {
-            padding: Theme.settings-inset;
+            padding: KitMetrics.field-gap(KitThemeContext.current);
             spacing: 8px;
             CompressionStatus { allow-removal: true; }
-            AppText { text: @tr("LLMLingua-2 de Microsoft, local et hors ligne après installation."); typography: Typography.secondary; color: Theme.text-muted; wrap: word-wrap; }
+            AppText {
+                text: @tr("LLMLingua-2 de Microsoft, local et hors ligne après installation.");
+                typography: Typography.secondary;
+                color: Theme.text-muted;
+                wrap: word-wrap;
+            }
         }
     }
 }

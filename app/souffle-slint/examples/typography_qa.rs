@@ -207,7 +207,7 @@ fn main() {
     window.set_timeline_is_empty(false);
     window.set_timeline_groups(model(vec![TimelineDayGroup {
         day: TimelineDay::Today,
-        entries: model(vec![TimelineEntry {
+        entries: model(vec![HistoryEntry {
             id: "fixture".into(),
             kind: TimelineKind::Meeting,
             title: "Équipe & « œufs » — accès ⌘ ⌥ ⇧".into(),
@@ -261,12 +261,12 @@ fn main() {
         },
     ]));
     window.set_onboarding_device_labels(strings(&["Microphone — Équipe & USB"]));
-    window.set_onboarding_selected_device_label("Microphone — Équipe & USB".into());
+    window.set_onboarding_selected_device_index(0);
     window.set_onboarding_model_labels(strings(&[
         "Apple Speech — Français & English",
         "Whisper — Large v3",
     ]));
-    window.set_onboarding_selected_model_label("Apple Speech — Français & English".into());
+    window.set_onboarding_selected_model_index(0);
     window.set_onboarding_toggle_shortcut_label("⌘ ⌥ ⇧ D".into());
     let text = "Équipe & œufs : « Bonjour ! » é è ê ë à ç Œ É ’ … € 0123456789. La dernière ligne reste lisible & accessible.";
     let blocks = model(vec![TranscriptBlock {

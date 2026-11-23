@@ -9,7 +9,7 @@ use souffle_lib::db::dictation::DictationEntry;
 use souffle_lib::transcript::MeetingListItem;
 
 use crate::{
-    TimelineDay, TimelineDayGroup, TimelineEntry, TimelineFilter, TimelineKind, UpcomingEvent,
+    HistoryEntry, TimelineDay, TimelineDayGroup, TimelineFilter, TimelineKind, UpcomingEvent,
     UpcomingPhase,
 };
 
@@ -36,7 +36,7 @@ fn day_key(at: DateTime<Utc>) -> NaiveDate {
 /// Header of a day group relative to `today`. The wording lives in
 /// timeline_section.slint behind @tr(), so Rust only ships which kind of
 /// day it is plus the date parts (SOU-246).
-fn day_group(day: NaiveDate, today: NaiveDate, entries: Vec<TimelineEntry>) -> TimelineDayGroup {
+fn day_group(day: NaiveDate, today: NaiveDate, entries: Vec<HistoryEntry>) -> TimelineDayGroup {
     let kind = if day == today {
         TimelineDay::Today
     } else if Some(day) == today.pred_opt() {
@@ -59,8 +59,8 @@ fn day_group(day: NaiveDate, today: NaiveDate, entries: Vec<TimelineEntry>) -> T
 fn merge_entries(
     dictations: &[DictationEntry],
     meetings: &[MeetingListItem],
-) -> Vec<(DateTime<Utc>, TimelineEntry)> {
-    let mut entries: Vec<(DateTime<Utc>, TimelineEntry)> =
+) -> Vec<(DateTime<Utc>, HistoryEntry)> {
+    let mut entries: Vec<(DateTime<Utc>, HistoryEntry)> =
         Vec::with_capacity(dictations.len() + meetings.len());
 
     for entry in dictations {
@@ -70,7 +70,7 @@ fn merge_entries(
         let at = at.with_timezone(&Utc);
         entries.push((
             at,
-            TimelineEntry {
+            HistoryEntry {
                 kind: TimelineKind::Dictation,
                 id: entry.id.clone().into(),
                 title: entry.text.clone().into(),
@@ -85,7 +85,7 @@ fn merge_entries(
     for meeting in meetings {
         entries.push((
             meeting.started_at,
-            TimelineEntry {
+            HistoryEntry {
                 kind: TimelineKind::Meeting,
                 id: meeting.id.clone().into(),
                 title: meeting.title.clone().into(),
@@ -120,7 +120,7 @@ pub fn build_groups(
         TimelineFilter::Dictation => kind == TimelineKind::Dictation,
     };
 
-    let mut groups: Vec<(NaiveDate, Vec<TimelineEntry>)> = Vec::new();
+    let mut groups: Vec<(NaiveDate, Vec<HistoryEntry>)> = Vec::new();
     for (at, entry) in entries {
         if !matches_filter(entry.kind) {
             continue;
@@ -224,7 +224,7 @@ mod tests {
 
     fn timeline_window() -> MainWindow {
         let _ = slint::platform::set_platform(Box::new(TestPlatform));
-        let window = MainWindow::new().unwrap();
+        let window = crate::settings_kit::new_window().unwrap();
         window
             .window()
             .set_size(slint::PhysicalSize::new(WIDTH, HEIGHT));
@@ -234,7 +234,7 @@ mod tests {
         window.set_timeline_has_matches(true);
 
         let entries: Vec<_> = (0..30)
-            .map(|index| TimelineEntry {
+            .map(|index| HistoryEntry {
                 kind: TimelineKind::Meeting,
                 id: format!("meeting-{index}").into(),
                 title: format!("Réunion {index}").into(),

@@ -1,11 +1,8 @@
-import { AppText, AppTextInput, Typography, TypographyStyle } from "@typography";
-import { SettingsField } from "settings_field.slint";
-import { SettingsGroup } from "settings_group.slint";
+import { AppText, Typography } from "@typography";
+import { KitProgress, KitBadge, KitButton, Tone, KitFieldSet, KitThemeContext, KitThemes, KitFieldRow, KitMetrics } from "@kit";
+import { CatalogPicker } from "../catalog_picker.slint";
 import { Theme } from "../../theme.slint";
 import { TranscriptionPhase, TranscriptionUnavailableReason, SystemSettingsPane } from "../../types.slint";
-import { ThemedButton } from "../themed_button.slint";
-import { ThemedComboBox } from "../themed_combo.slint";
-import { StatusIndicator } from "status_indicator.slint";
 
 // Port of ModelSettingsSection.svelte. The download/switch state machine
 // itself is not reimplemented here (AC2): it stays entirely in Rust
@@ -17,7 +14,9 @@ export component ModelSection inherits VerticalLayout {
     in property <TranscriptionPhase> model-phase;
     in property <bool> ready;
     in property <[string]> model-labels;
+    in property <[string]> model-ids;
     in property <string> selected-model-label;
+    in property <string> selected-model-id;
     in property <bool> apple-speech-selected;
     in property <bool> apple-speech-unavailable;
     in property <TranscriptionUnavailableReason> apple-speech-unavailable-reason;
@@ -36,17 +35,22 @@ export component ModelSection inherits VerticalLayout {
     spacing: 22px;
     alignment: start;
 
-    SettingsGroup {
-        title: @tr("MODÈLE DE TRANSCRIPTION");
+    KitFieldSet {
+        theme: KitThemeContext.current;
+        legend: @tr("MODÈLE DE TRANSCRIPTION");
 
-    SettingsField {
+    KitFieldRow {
+        theme: KitThemeContext.current;
+        modal-layer: 0;
+        orientation: Theme.settings-field-orientation(self.width);
+        padding: KitMetrics.field-gap(self.theme);
         show-divider: false;
         label: @tr("Modèle de transcription");
         description: root.capture-busy
             ? @tr("Terminez l'enregistrement avant de changer de modèle.")
             : @tr("Choisissez un modèle : il se télécharge et se charge tout seul. Tout tourne sur ce Mac.");
 
-        StatusIndicator {
+        KitBadge {
             text: root.model-phase == TranscriptionPhase.download-required ? @tr("Téléchargement requis")
                 : root.model-phase == TranscriptionPhase.downloading ? @tr("Téléchargement…")
                 : root.model-phase == TranscriptionPhase.load-required ? @tr("Chargement requis")
@@ -56,7 +60,7 @@ export component ModelSection inherits VerticalLayout {
                 : root.model-phase == TranscriptionPhase.failed ? @tr("Erreur du modèle")
                 : root.model-phase == TranscriptionPhase.audio-failed ? @tr("Erreur de capture audio")
                 : "";
-            indicator-color: root.ready ? Theme.accent : Theme.warning;
+            tone: root.ready ? Tone.accent : Tone.warning;
         }
     }
 
@@ -68,14 +72,15 @@ export component ModelSection inherits VerticalLayout {
             height: Theme.settings-control-height;
             vertical-stretch: 0;
             clip: true;
-            ThemedComboBox {
+            CatalogPicker {
                 control-label: @tr("Modèle de transcription");
                 width: parent.width;
                 combo-width: parent.width;
                 model: root.model-labels;
-                current-value: root.selected-model-label;
+                option-values: root.model-ids;
+                current-value: root.selected-model-id;
                 enabled: !root.busy && !root.capture-busy;
-                selected(value) => { root.model-changed(value); }
+                value-chosen(value) => { root.model-changed(value); }
             }
         }
     }
@@ -99,9 +104,11 @@ export component ModelSection inherits VerticalLayout {
         }
         HorizontalLayout {
             alignment: start;
-            ThemedButton {
+            KitButton {
+                theme: KitThemeContext.current;
+                modal-layer: 0;
                 text: @tr("Ouvrir Langue et région");
-                clicked => { root.open-system-settings-requested(SystemSettingsPane.language-and-region); }
+                activated => { root.open-system-settings-requested(SystemSettingsPane.language-and-region); }
             }
         }
     }
@@ -137,38 +144,27 @@ export component ModelSection inherits VerticalLayout {
         if root.apple-speech-unavailable-reason == TranscriptionUnavailableReason.locale-unsupported
             || root.apple-speech-unavailable-reason == TranscriptionUnavailableReason.assets-unsupported: HorizontalLayout {
             alignment: start;
-            ThemedButton {
+            KitButton {
+                theme: KitThemeContext.current;
+                modal-layer: 0;
                 text: @tr("Ouvrir Langue et région");
-                clicked => { root.open-system-settings-requested(SystemSettingsPane.language-and-region); }
+                activated => { root.open-system-settings-requested(SystemSettingsPane.language-and-region); }
             }
         }
         if root.apple-speech-unavailable-reason == TranscriptionUnavailableReason.os-unsupported: HorizontalLayout {
             alignment: start;
-            ThemedButton {
+            KitButton {
+                theme: KitThemeContext.current;
+                modal-layer: 0;
                 text: @tr("Ouvrir Mise à jour de logiciels");
-                clicked => { root.open-system-settings-requested(SystemSettingsPane.software-update); }
+                activated => { root.open-system-settings-requested(SystemSettingsPane.software-update); }
             }
         }
     }
 
-    if root.downloading: VerticalLayout {
-        spacing: 4px;
-        AppText {
-            text: root.download-progress-label;
-            typography: Typography.caption;
-            color: Theme.text-muted;
-        }
-        Rectangle {
-            height: 6px;
-            border-radius: 3px;
-            background: Theme.surface-3;
-            Rectangle {
-                height: 6px;
-                width: parent.width * max(0.05, root.download-progress-fraction);
-                border-radius: 3px;
-                background: Theme.accent;
-            }
-        }
+    if root.downloading: KitProgress {
+        label: root.download-progress-label;
+        value: root.download-progress-fraction;
     }
 
     if root.error-message != "": AppText {
@@ -178,15 +174,27 @@ export component ModelSection inherits VerticalLayout {
         wrap: word-wrap;
     }
 
-    if !root.apple-speech-selected: SettingsField {
+    if !root.apple-speech-selected: KitFieldRow {
+        theme: KitThemeContext.current;
+        modal-layer: 0;
+        orientation: Theme.settings-field-orientation(self.width);
+        padding: KitMetrics.field-gap(self.theme);
+        show-divider: true;
+        focus-requested => { timeout-picker.take-focus(); }
+        private property <bool> control-focused: timeout-picker.has-focus;
+        changed control-focused => {
+            if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
+        }
         label: @tr("Délai avant déchargement");
         description: @tr("Décharger le modèle de la mémoire après une période d'inactivité.");
 
-        ThemedComboBox {
+        timeout-picker := CatalogPicker {
+            theme: KitThemeContext.current;
+            modal-layer: 0;
             control-label: @tr("Délai avant déchargement");
             model: root.unload-timeout-labels;
             current-value: root.unload-timeout-label;
-            selected(value) => { root.unload-timeout-changed(value); }
+            value-chosen(value) => { root.unload-timeout-changed(value); }
         }
     }
     }

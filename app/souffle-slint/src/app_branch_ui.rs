@@ -232,7 +232,7 @@ pub(crate) struct Editor {
 
 impl Editor {
     fn project_routing(&self, window: &MainWindow, settings: &AppSettings) {
-        let provider_available = window.get_settings_summary_unusable_message().is_empty();
+        let provider_available = !window.get_settings_summary_provider_unavailable();
         ia_ui::populate_dictation_polish(window, settings, provider_available);
         let displayed_id = window.get_settings_active_dictation_polish_id();
         self.drafts
@@ -644,7 +644,7 @@ mod tests {
         let _ = slint::platform::set_platform(Box::new(TestPlatform {
             registering: Cell::new(true),
         }));
-        MainWindow::new().unwrap()
+        crate::settings_kit::new_window().unwrap()
     }
 
     fn pump() {
@@ -859,10 +859,6 @@ mod tests {
             active.id
         );
         assert_eq!(
-            window.get_settings_active_dictation_polish_label().as_str(),
-            ia_ui::dictation_polish_label(active)
-        );
-        assert_eq!(
             window
                 .get_settings_active_dictation_polish_prompt()
                 .as_str(),
@@ -892,8 +888,8 @@ mod tests {
         let test = BlockedEditor::new();
         ia_ui::populate_dictation_polish(&test.window, &AppSettings::load(&test.db).unwrap(), true);
         assert_eq!(
-            test.window.get_settings_active_dictation_polish_label(),
-            "__CLEANUP__"
+            test.window.get_settings_active_dictation_polish_id(),
+            "clean"
         );
         test.window
             .invoke_settings_dictation_polish_template_changed(
@@ -985,8 +981,8 @@ mod tests {
         window.invoke_settings_app_branch_enabled(row.id.clone(), true);
         settle(&io, &window);
         assert_eq!(
-            window.get_settings_active_dictation_polish_label(),
-            "__PROFESSIONAL_EMAIL__"
+            window.get_settings_active_dictation_polish_id(),
+            souffle_lib::summary::TEMPLATE_EMAIL
         );
         assert_eq!(
             window.get_settings_active_dictation_polish_prompt(),
@@ -1100,10 +1096,7 @@ mod tests {
             cache.known_snapshot().unwrap().dictation_polish_template_id,
             souffle_lib::summary::TEMPLATE_EMAIL
         );
-        assert_eq!(
-            window.get_settings_active_dictation_polish_label(),
-            "__CLEANUP__"
-        );
+        assert_eq!(window.get_settings_active_dictation_polish_id(), "clean");
         assert_eq!(
             AppSettings::load(&db).unwrap().dictation_polish_template_id,
             souffle_lib::summary::TEMPLATE_EMAIL
@@ -1230,8 +1223,8 @@ mod tests {
             souffle_lib::summary::TEMPLATE_EMAIL
         );
         assert_eq!(
-            test.window.get_settings_active_dictation_polish_label(),
-            "__PROFESSIONAL_EMAIL__"
+            test.window.get_settings_active_dictation_polish_id(),
+            souffle_lib::summary::TEMPLATE_EMAIL
         );
     }
 
@@ -2076,20 +2069,21 @@ mod tests {
                 "Unmoved unsaved draft"
             );
         }
-        let revision = io.current_revision();
         click_pattern_input(&window, &moved_inputs[1]);
+        settle(&io, &window);
         pump();
-        assert_eq!(
-            io.current_revision(),
-            revision,
-            "blur must not save another rule's text"
-        );
         let canonical = AppSettings::load(&db).unwrap();
         assert_eq!(
             canonical.dictation_app_branches[0].app_pattern,
             next.app_pattern.as_str()
         );
         assert_eq!(canonical.dictation_app_branches[1].app_pattern, "Messages");
+        if inputs.len() >= 3 {
+            assert_eq!(
+                canonical.dictation_app_branches[2].app_pattern, "Unmoved unsaved draft",
+                "blur saves the draft to the rule that owns the field"
+            );
+        }
     }
 
     #[test]
@@ -2198,11 +2192,11 @@ mod tests {
         render_rules(&window);
         let inputs = pattern_inputs(&window);
         assert!(inputs.len() >= 2);
-        inputs[1].set_accessible_value("Another unsaved draft");
         click_pattern_input(&window, &inputs[0]);
         clear_pattern_input(&window);
         pattern_key(&window, "Messages".into());
         pattern_key(&window, slint::platform::Key::Return.into());
+        inputs[1].set_accessible_value("Another unsaved draft");
         settle(&io, &window);
         pump();
         assert!(cache.known_snapshot().is_none());
@@ -2221,6 +2215,10 @@ mod tests {
             initial.dictation_app_branches[0].app_pattern
         );
         read_failed.store(false, Ordering::SeqCst);
+        click_pattern_input(&window, &inputs[0]);
+        settle(&io, &window);
+        render_rules(&window);
+        click_pattern_input(&window, &inputs[0]);
         clear_pattern_input(&window);
         pattern_key(&window, "Messages".into());
         pattern_key(&window, slint::platform::Key::Return.into());
@@ -2231,7 +2229,11 @@ mod tests {
             inputs[1].accessible_value().unwrap(),
             "Another unsaved draft"
         );
-        assert_eq!(writes.load(Ordering::SeqCst), 2);
+        assert_eq!(
+            writes.load(Ordering::SeqCst),
+            3,
+            "leaving the draft field saves it once, then the retry saves the edit"
+        );
         assert!(!window.get_settings_save_error_unavailable());
         assert_eq!(
             AppSettings::load(&db).unwrap().dictation_app_branches[0].app_pattern,
@@ -2278,10 +2280,10 @@ mod tests {
         let revision = io.current_revision();
         let rules = window.get_settings_app_branch_rules();
         let labels = window.get_settings_app_branch_target_labels();
-        inputs[1].set_accessible_value("Other uncommitted draft");
-        click_pattern_input(&window, &inputs[1]);
         inputs[0].set_accessible_value("");
         assert_eq!(inputs[0].accessible_value().unwrap(), "");
+        inputs[1].set_accessible_value("Other uncommitted draft");
+        pump();
         window.invoke_settings_app_branch_pattern_changed(original.id.clone(), "".into());
         pump();
         assert_eq!(inputs[0].accessible_value().unwrap(), original.app_pattern);
@@ -2412,10 +2414,9 @@ mod tests {
         render_rules(&window);
         let inputs = pattern_inputs(&window);
         assert!(inputs.len() >= 2);
-        inputs[1].set_accessible_value("Another unsaved draft");
         let original = window.get_settings_app_branch_rules().row_data(0).unwrap();
         inputs[0].set_accessible_value("Messages");
-        window.invoke_settings_app_branch_pattern_changed(original.id.clone(), "Messages".into());
+        inputs[1].set_accessible_value("Another unsaved draft");
         settle(&io, &window);
         pump();
         assert_eq!(inputs[0].accessible_value().unwrap(), original.app_pattern);

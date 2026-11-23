@@ -3,9 +3,10 @@
 import { TypefaceWeight } from "@typography";
 export { TypefaceWeight }
 // (kept as plain `string` in milestones 1-5 for recording-mode/kind-filter/
-// TimelineEntry.kind/notes-save-state - corrected here before more state
+// HistoryEntry.kind/notes-save-state - corrected here before more state
 // like this accumulates in the milestones ahead).
 
+@rust-attr(derive(strum::VariantArray))
 export enum RecordingMode { idle, dictation, meeting }
 export enum AppBranchFallback { polish-disabled, app-unavailable, no-match, invalid-pattern, missing-template }
 export enum AppBranchTestPhase { idle, waiting, resolving, result }
@@ -81,6 +82,7 @@ export enum MarkdownBlockKind { heading, bullet, paragraph, link }
 
 // Projection of souffle_lib::engine::TranscriptionRuntimePhase. The Rust
 // AppStateMachine owns every transition; Slint only derives presentation.
+@rust-attr(derive(strum::VariantArray))
 export enum TranscriptionPhase { download-required, downloading, load-required, loading, ready, unloading, failed, audio-failed }
 export enum TranscriptionUnavailableReason { os-unsupported, device-unsupported, build-unsupported, locale-unsupported, assets-unsupported, check-failed }
 export enum SystemSettingsPane { apple-intelligence, language-and-region, software-update }
@@ -92,21 +94,28 @@ export enum UpcomingPhase { past, now, next, later }
 // Closed settings sets. Declared once here, converted exhaustively at the
 // Rust boundary (`settings_ui.rs`) from the matching `souffle_lib` enums.
 // Never pass these as strings through a property or callback.
+@rust-attr(derive(strum::VariantArray))
 export enum SettingsTab { transcription, ai, audio, interface, meetings, system }
 export enum SettingsInteraction { open, tab, theme, menu, number }
 
+@rust-attr(derive(strum::VariantArray))
 export enum AppTheme { dark, light, system }
 
+@rust-attr(derive(strum::VariantArray))
 export enum AppLocale { en, fr }
 
 // `typing` not `type`: `type` is reserved in Slint. Maps to PasteMethod::Type.
+@rust-attr(derive(strum::VariantArray))
 export enum PasteMethod { clipboard, typing, ax }
 export enum DictionaryLearningMode { disabled, suggestions, automatic }
 
+@rust-attr(derive(strum::VariantArray))
 export enum MeetingLanguage { auto, en, fr }
 
+@rust-attr(derive(strum::VariantArray))
 export enum LogLevel { error, warn, info, debug, trace }
 
+@rust-attr(derive(strum::VariantArray))
 export enum AudioRetention { off, keep-7d, keep-30d, keep-forever }
 
 export enum AccessState { granted, denied, unknown, unsupported, no-device }
@@ -131,8 +140,10 @@ export enum ModelDeletionError { managed-asset, transition-busy, active-model, o
 // (`export_format_from_slint` in main.rs, exhaustive match). Used by
 // MeetingDetail's Export menu only - never a free string across this
 // callback.
+@rust-attr(derive(strum::VariantArray))
 export enum MeetingExportFormat { markdown, json, srt, vtt }
 
+@rust-attr(derive(strum::VariantArray))
 export enum SummaryProvider { auto, apple-intelligence, ollama }
 
 // Normalized at the FoundationModels FFI boundary. `unknown` is the real

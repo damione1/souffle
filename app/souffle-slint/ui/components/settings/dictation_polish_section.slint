@@ -1,23 +1,17 @@
-import { AppText, AppTextInput, Typography, TypographyStyle } from "@typography";
-import { SettingsField } from "settings_field.slint";
-import { SettingsFieldVertical } from "settings_field_vertical.slint";
-import { SettingsGroup } from "settings_group.slint";
+import { ChoiceLabelPosition, ControlWidth, KitAlert, KitButton, KitFieldRow, KitFieldSet, KitMetrics, KitSwitch, KitTextArea, KitThemeContext, KitThemes, Ownership } from "@kit";
+import { CatalogPicker } from "../catalog_picker.slint";
 import { Theme } from "../../theme.slint";
-import { ThemedSwitch } from "../themed_switch.slint";
-import { ThemedButton } from "../themed_button.slint";
-import { ThemedComboBox } from "../themed_combo.slint";
-import { ThemedTextArea } from "../themed_text_area.slint";
 
 // Port of DictationPolishSettingsSection.svelte. The active template's
 // prompt is forwarded as a plain property (`active-prompt`) rather than
 // looked up in `.slint` from a list - same reasoning as the other pickers
 // in this tab.
-export component DictationPolishSection inherits VerticalLayout {
+export component DictationPolishSection inherits KitFieldSet {
     in property <bool> enabled;
     in property <bool> provider-available;
     in property <[string]> template-ids;
     in property <[string]> template-labels;
-    in property <string> active-template-label;
+    in property <string> active-template-id;
     in-out property <string> active-prompt;
 
     callback enabled-changed(bool);
@@ -25,72 +19,100 @@ export component DictationPolishSection inherits VerticalLayout {
     callback prompt-changed(string);
     callback open-provider-settings-requested();
 
-    spacing: 22px;
-    alignment: start;
+    theme: KitThemeContext.current;
+    legend: @tr("POLISH DE LA DICTÉE");
 
-    SettingsGroup {
-        title: @tr("POLISH DE LA DICTÉE");
-
-    SettingsField {
+    KitFieldRow {
+        theme: KitThemeContext.current;
+        modal-layer: 0;
+        orientation: Theme.settings-field-orientation(self.width);
+        padding: KitMetrics.field-gap(self.theme);
+        focus-requested => { polish-switch.take-focus(); }
+        private property <bool> control-focused: polish-switch.has-focus;
+        changed control-focused => {
+            if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
+        }
         show-divider: false;
         label: @tr("Nettoyer la dictée avec l'IA");
         description: @tr("Passe le même fournisseur de résumés (Ollama ou Apple Intelligence) après transcription pour corriger ponctuation, termes techniques et autocorrections parlées, sans changer le sens.");
 
-        ThemedSwitch {
-            control-label: @tr("Nettoyer la dictée avec l'IA");
+        polish-switch := KitSwitch {
+            theme: KitThemeContext.current;
+            modal-layer: 0;
+            label-position: ChoiceLabelPosition.start;
+            padding-inline: 0px;
+            ownership: Ownership.controlled;
+            control-width: ControlWidth.intrinsic;
+            accessible-label: @tr("Nettoyer la dictée avec l'IA");
             checked: root.enabled;
             toggled(new) => { root.enabled-changed(new); }
         }
     }
 
-    if root.enabled && !root.provider-available: Rectangle {
-        border-width: 1px;
-        border-color: Theme.warning;
-        border-radius: 6px;
-        background: Theme.surface-2;
-
-        HorizontalLayout {
-            padding: 10px;
-            spacing: 10px;
-            alignment: space-between;
-
-            AppText {
-                text: @tr("Aucun fournisseur IA disponible pour la retouche.");
-                color: Theme.warning;
-                typography: Typography.small;
-                wrap: word-wrap;
-                horizontal-stretch: 1;
+    if root.enabled && !root.provider-available: provider-notice := KitAlert {
+        theme: root.theme;
+        severity: warning;
+        message: @tr("Aucun fournisseur IA disponible pour la retouche.");
+        KitButton {
+            theme: root.theme;
+            modal-layer: 0;
+            text: @tr("Choisir un fournisseur");
+            text-wrap: word-wrap;
+            focus-observed(focused) => {
+                if focused { provider-notice.ensure-visible(KitThemes.scroll-behavior(root.theme)); }
             }
-            ThemedButton {
-                text: @tr("Choisir un fournisseur");
-                clicked => { root.open-provider-settings-requested(); }
-            }
+            activated => { root.open-provider-settings-requested(); }
         }
     }
 
-    if root.enabled && root.template-labels.length > 0: SettingsField {
+    if root.enabled && root.template-labels.length > 0: KitFieldRow {
+        theme: KitThemeContext.current;
+        modal-layer: 0;
+        orientation: Theme.settings-field-orientation(self.width);
+        padding: KitMetrics.field-gap(self.theme);
+        show-divider: true;
+        focus-requested => { model-picker.take-focus(); }
+        private property <bool> control-focused: model-picker.has-focus;
+        changed control-focused => {
+            if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
+        }
         label: @tr("Modèle de retouche");
 
-        ThemedComboBox {
+        model-picker := CatalogPicker {
+            theme: KitThemeContext.current;
+            modal-layer: 0;
             control-label: @tr("Modèle de retouche");
             model: root.template-labels;
             option-values: root.template-ids;
-            current-value: root.active-template-label;
-            selected(id) => { root.template-changed(id); }
+            current-value: root.active-template-id;
+            value-chosen(id) => { root.template-changed(id); }
         }
     }
 
-    if root.enabled && root.template-labels.length > 0: SettingsFieldVertical {
+    if root.enabled && root.template-labels.length > 0: instruction-row := KitFieldRow {
+        theme: KitThemeContext.current;
+        modal-layer: 0;
+        orientation: vertical;
+        padding: KitMetrics.field-gap(self.theme);
+        padding-bottom: KitThemes.focus-outset(self.theme.focus) + KitMetrics.help-gap(self.theme);
+        show-divider: true;
+        focus-requested => { instruction-editor.take-focus(); }
+        private property <bool> control-focused: instruction-editor.has-focus;
+        changed control-focused => {
+            if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
+        }
         label: @tr("Instruction");
         description: @tr("Prompt envoyé à l'IA pour retoucher le texte transcrit.");
 
-        ThemedTextArea {
+        instruction-editor := KitTextArea {
+            theme: KitThemeContext.current;
+            modal-layer: 0;
             text <=> root.active-prompt;
-            area-height: 160px;
+            description: instruction-row.description;
+            show-description: false;
             placeholder: @tr("Instruction de retouche");
-            control-label: @tr("Instruction de retouche");
+            accessible-name: @tr("Instruction de retouche");
             edited(value) => { root.prompt-changed(value); }
         }
-    }
     }
 }

@@ -168,7 +168,7 @@ mod tests {
 
     fn meeting_window() -> MainWindow {
         let _ = slint::platform::set_platform(Box::new(TestPlatform));
-        let window = MainWindow::new().unwrap();
+        let window = crate::settings_kit::new_window().unwrap();
         crate::typography::initialize(&window).unwrap();
         window
             .window()

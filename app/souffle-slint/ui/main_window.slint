@@ -9,6 +9,11 @@ import { TypographySpecimen } from "@typography";
 export { TypographySpecimen }
 import { TypefaceWeight } from "types.slint";
 export { TypefaceWeight }
+import { KitFieldService, KitAppShell, KitRouter, KitScreen } from "@kit";
+export { MeetingExportMenu } from "meeting_detail.slint";
+export { SettingsOptions, SettingsOptionList } from "components/settings/settings_options.slint";
+export { CatalogChoices } from "components/catalog_picker.slint";
+export { PickerLabels } from "components/picker_labels.slint";
 import { IdleView } from "idle_view.slint";
 import { ActionGuards, MeetingDeletePermission } from "action_guards.slint";
 import { MeetingDeleteBlockReason } from "types.slint";
@@ -52,6 +57,7 @@ import { AppHeader } from "components/app_header.slint";
 import { LiveParagraphEditor } from "components/live_paragraph_editor.slint";
 
 export component MainWindow inherits Window {
+    init => { Theme.apply-kit-theme(); }
     title: @tr("Soufflé");
     // SOU-242: bumped from the original Tauri window (860x1040, still in
     // tauri.conf.json for the retired frontend) - onboarding/permissions and
@@ -192,7 +198,6 @@ export component MainWindow inherits Window {
     in property <[string]> meeting-detail-summary-available-models;
     in property <[string]> meeting-detail-summary-available-model-ids;
     in-out property <string> meeting-detail-summary-selected-model-id;
-    in-out property <string> meeting-detail-summary-selected-model-label;
     in property <bool> meeting-detail-can-resume: false;
     in property <string> meeting-detail-resume-error: "";
     in property <string> meeting-detail-delete-error: "";
@@ -259,7 +264,9 @@ export component MainWindow inherits Window {
     in property <int> settings-calendar-reminder-minutes-max;
     in property <[CalendarRow]> settings-calendars;
     in property <[string]> settings-audio-device-labels;
-    in property <string> settings-selected-device-label;
+    in property <[string]> settings-audio-device-ids;
+    in property <int> settings-default-device-index: -1;
+    in property <string> settings-selected-device-id;
     in property <bool> settings-pin-unavailable;
     in property <string> settings-sample-rate-label;
     in property <bool> settings-sample-rate-high;
@@ -271,6 +278,7 @@ export component MainWindow inherits Window {
     in property <bool> settings-is-laptop;
     in property <[string]> settings-clamshell-device-labels;
     in property <string> settings-clamshell-device-label;
+    in property <string> settings-clamshell-device-id;
     in property <bool> settings-system-audio-supported;
     in property <bool> settings-capture-system-audio;
     in property <bool> settings-meeting-audio-diagnostic;
@@ -321,20 +329,19 @@ export component MainWindow inherits Window {
     in property <bool> settings-summary-model-picker-visible;
     in property <[string]> settings-summary-model-ids;
     in property <[string]> settings-summary-model-labels;
-    in property <string> settings-selected-summary-model-label;
+    in property <string> settings-selected-summary-model-id;
     in property <bool> settings-show-ollama-setup;
     in property <bool> settings-ollama-pulling;
     in property <string> settings-ollama-pull-status;
     in property <string> settings-ollama-pull-error;
     in property <string> settings-recommended-ollama-model;
     in property <string> settings-summary-refresh-error;
-    in property <string> settings-summary-unusable-message;
+    in property <bool> settings-summary-provider-unavailable;
     in property <bool> settings-dictation-polish-enabled;
     in property <bool> settings-dictation-polish-provider-available;
     in property <[string]> settings-dictation-polish-template-ids;
     in property <[string]> settings-dictation-polish-template-labels;
     in property <string> settings-active-dictation-polish-id;
-    in property <string> settings-active-dictation-polish-label;
     in-out property <string> settings-active-dictation-polish-prompt;
     in property <[AppBranchRow]> settings-app-branch-rules;
     in property <[string]> settings-app-branch-target-labels;
@@ -347,19 +354,21 @@ export component MainWindow inherits Window {
     in property <string> settings-app-branch-preview-template;
     in property <[string]> settings-summary-template-ids;
     in property <[string]> settings-summary-template-labels;
-    in property <string> settings-default-summary-template-label;
-    in property <string> settings-editing-summary-template-label;
+    in property <string> settings-default-summary-template-id;
+    in property <string> settings-editing-summary-template-id;
     in property <bool> settings-editing-summary-template-is-builtin;
     in-out property <string> settings-editing-summary-template-name;
     in-out property <string> settings-editing-summary-template-prompt;
     in-out property <string> settings-new-summary-template-draft: "";
     in property <[string]> settings-model-labels;
+    in property <[string]> settings-model-ids;
     in property <string> settings-selected-model-label;
     in property <bool> settings-apple-speech-selected;
     in property <bool> settings-apple-speech-unavailable;
     in property <TranscriptionUnavailableReason> settings-apple-speech-unavailable-reason;
     changed settings-locale => { TranscriptionLabels.app-locale = root.settings-locale; }
     callback settings-open-system-settings-requested(SystemSettingsPane);
+    in property <string> settings-selected-model-id;
     // Bare model label ("STT 1B FR/EN") for AppHeader's status pill - kept
     // separate from `settings-selected-model-label` above, which is the
     // combined "Engine — Model" form the settings picker needs to
@@ -439,8 +448,23 @@ export component MainWindow inherits Window {
 
     callback settings-requested();
     callback settings-instrument-input(SettingsInteraction);
+    out property <bool> settings-log-active: root.window-visible && root.settings-open
+        && !root.onboarding-open && root.settings-tab == SettingsTab.system;
+    callback settings-log-activity-changed(bool);
+    changed settings-log-active => { root.settings-log-activity-changed(self.settings-log-active); }
+    callback permissions-dialog-changed();
+    changed settings-permissions-dialog-open => { root.permissions-dialog-changed(); }
     callback settings-tab-changed();
     callback settings-closed();
+    public function cancel-settings-capture() {
+        KitFieldService.invalidate-shortcut-session();
+        root.settings-shortcut-cancelled();
+    }
+    public function close-settings() {
+        root.cancel-settings-capture();
+        root.settings-open = false;
+        root.settings-closed();
+    }
     callback settings-quit-requested();
     callback theme-toggle-requested();
     callback settings-autostart-changed(bool);
@@ -592,10 +616,13 @@ export component MainWindow inherits Window {
     in property <bool> onboarding-repair-success;
     in property <bool> onboarding-repair-cooldown;
     in property <[string]> onboarding-device-labels;
-    in property <string> onboarding-selected-device-label;
+    in property <[string]> onboarding-device-ids;
+    in property <int> onboarding-default-device-index: -1;
+    in property <int> onboarding-selected-device-index;
     in property <ModelPhase> onboarding-model-phase: ModelPhase.pick;
     in property <[string]> onboarding-model-labels;
-    in property <string> onboarding-selected-model-label;
+    in property <[string]> onboarding-model-ids;
+    in property <int> onboarding-selected-model-index;
     in property <string> onboarding-download-progress-label;
     in property <float> onboarding-download-progress-fraction;
     in property <string> onboarding-toggle-shortcut-label;
@@ -610,9 +637,9 @@ export component MainWindow inherits Window {
     callback onboarding-grant-requested(PermissionKind);
     callback onboarding-hint-action-requested(PermissionKind);
     callback onboarding-repair-requested();
-    callback onboarding-device-changed(string);
+    callback onboarding-device-changed(int);
     callback onboarding-refresh-devices-requested();
-    callback onboarding-model-picked(string);
+    callback onboarding-model-picked(int);
     callback onboarding-shortcut-record-requested();
     callback onboarding-shortcut-captured(string, bool, bool, bool, bool);
     callback onboarding-shortcut-released(string, bool, bool, bool, bool);
@@ -676,8 +703,23 @@ export component MainWindow inherits Window {
     // `<SettingsView>` alike (see `AppHeader`'s doc comment). Onboarding
     // replaces this whole shell instead of living inside it - same as
     // App.svelte's `{#if showOnboarding} <OnboardingView /> {:else} ...`.
-    if !root.onboarding-open: VerticalLayout {
-        AppHeader {
+    if !root.onboarding-open: KitAppShell {
+        header := AppHeader {
+            // KitScreen focuses the arriving route. Restore the settings trigger
+            // once that transition has run, including a same-turn reopen veto.
+            changed settings-open => { if !self.settings-open { restore-settings-focus.start(); } else { restore-settings-focus.stop(); } }
+            private property <bool> announcements-open: root.whats-new-open || root.update-available-open;
+            changed announcements-open => { if !self.announcements-open { restore-settings-focus.start(); } }
+            restore-settings-focus := Timer {
+                interval: 0ms;
+                running: false;
+                triggered => {
+                    self.stop();
+                    if !header.announcements-open && !root.settings-permissions-dialog-open {
+                        header.focus-settings();
+                    }
+                }
+            }
             settings-open: root.settings-open;
             model-phase: root.model-runtime-phase;
 
@@ -685,8 +727,7 @@ export component MainWindow inherits Window {
             model-label: root.header-model-label;
             settings-toggled => {
                 if root.settings-open {
-                    root.settings-open = false;
-                    root.settings-closed();
+                    root.close-settings();
                 } else {
                     root.settings-tab = SettingsTab.transcription;
                     root.settings-instrument-input(SettingsInteraction.open);
@@ -696,7 +737,14 @@ export component MainWindow inherits Window {
             theme-toggle-requested => { root.theme-toggle-requested(); }
         }
 
-        Rectangle {
+        routes := KitRouter {
+            vertical-stretch: 1;
+            can-go-back: root.settings-open;
+            back => {
+                root.close-settings();
+            }
+    KitScreen {
+        active: !root.settings-open;
     if root.recording-mode == RecordingMode.idle && root.active-meeting-id == "": IdleView {
         width: 100%;
         height: 100%;
@@ -778,7 +826,6 @@ export component MainWindow inherits Window {
         summary-available-models: root.meeting-detail-summary-available-models;
         summary-available-model-ids: root.meeting-detail-summary-available-model-ids;
         summary-selected-model-id <=> root.meeting-detail-summary-selected-model-id;
-        summary-selected-model-label <=> root.meeting-detail-summary-selected-model-label;
         // Resuming appends to the transcript the summary is being built from.
         can-resume: root.meeting-detail-can-resume && !root.meeting-detail-summary-is-generating;
         resume-error: root.meeting-detail-resume-error;
@@ -836,6 +883,8 @@ export component MainWindow inherits Window {
         paragraph-edit-requested(row) => { root.live-paragraph-edit-requested(row); }
     }
 
+    }
+
     // Drawn last so it overlays whatever is behind it, mirroring App.svelte
     // hiding HomeView under the Settings overlay rather than replacing it.
     // SOU-202: retain conditional mounting. With OS/DB excluded and a forced
@@ -858,7 +907,7 @@ export component MainWindow inherits Window {
         log-spacer-after: root.settings-log-spacer-after;
         log-scroll-top <=> root.settings-log-scroll-top;
         copying-diagnostics: root.settings-copying-diagnostics;
-        theme: root.settings-theme;
+        app-theme: root.settings-theme;
         capture-busy: root.settings-backend-capture-busy || root.recording-mode != RecordingMode.idle || root.recording-starting;
         locale: root.settings-locale;
         auto-paste: root.settings-auto-paste;
@@ -891,7 +940,9 @@ export component MainWindow inherits Window {
         calendar-reminder-minutes-max: root.settings-calendar-reminder-minutes-max;
         calendars: root.settings-calendars;
         audio-device-labels: root.settings-audio-device-labels;
-        selected-device-label: root.settings-selected-device-label;
+        audio-device-ids: root.settings-audio-device-ids;
+        default-device-index: root.settings-default-device-index;
+        selected-device-id: root.settings-selected-device-id;
         pin-unavailable: root.settings-pin-unavailable;
         sample-rate-label: root.settings-sample-rate-label;
         sample-rate-high: root.settings-sample-rate-high;
@@ -902,6 +953,7 @@ export component MainWindow inherits Window {
         is-laptop: root.settings-is-laptop;
         clamshell-device-labels: root.settings-clamshell-device-labels;
         clamshell-device-label: root.settings-clamshell-device-label;
+        clamshell-device-id: root.settings-clamshell-device-id;
         system-audio-supported: root.settings-system-audio-supported;
         capture-system-audio: root.settings-capture-system-audio;
         meeting-audio-diagnostic: root.settings-meeting-audio-diagnostic;
@@ -950,19 +1002,19 @@ export component MainWindow inherits Window {
         summary-model-picker-visible: root.settings-summary-model-picker-visible;
         summary-model-ids: root.settings-summary-model-ids;
         summary-model-labels: root.settings-summary-model-labels;
-        selected-summary-model-label: root.settings-selected-summary-model-label;
+        selected-summary-model-id: root.settings-selected-summary-model-id;
         show-ollama-setup: root.settings-show-ollama-setup;
         ollama-pulling: root.settings-ollama-pulling;
         ollama-pull-status: root.settings-ollama-pull-status;
         ollama-pull-error: root.settings-ollama-pull-error;
         recommended-ollama-model: root.settings-recommended-ollama-model;
         summary-refresh-error: root.settings-summary-refresh-error;
-        summary-unusable-message: root.settings-summary-unusable-message;
+        summary-provider-unavailable: root.settings-summary-provider-unavailable;
         dictation-polish-enabled: root.settings-dictation-polish-enabled;
         dictation-polish-provider-available: root.settings-dictation-polish-provider-available;
         dictation-polish-template-ids: root.settings-dictation-polish-template-ids;
         dictation-polish-template-labels: root.settings-dictation-polish-template-labels;
-        active-dictation-polish-label: root.settings-active-dictation-polish-label;
+        active-dictation-polish-id: root.settings-active-dictation-polish-id;
         active-dictation-polish-prompt <=> root.settings-active-dictation-polish-prompt;
         app-branch-rules: root.settings-app-branch-rules;
         app-branch-target-labels: root.settings-app-branch-target-labels;
@@ -975,8 +1027,8 @@ export component MainWindow inherits Window {
         app-branch-preview-template: root.settings-app-branch-preview-template;
         summary-template-ids: root.settings-summary-template-ids;
         summary-template-labels: root.settings-summary-template-labels;
-        default-summary-template-label: root.settings-default-summary-template-label;
-        editing-summary-template-label: root.settings-editing-summary-template-label;
+        default-summary-template-id: root.settings-default-summary-template-id;
+        editing-summary-template-id: root.settings-editing-summary-template-id;
         editing-summary-template-is-builtin: root.settings-editing-summary-template-is-builtin;
         editing-summary-template-name <=> root.settings-editing-summary-template-name;
         editing-summary-template-prompt <=> root.settings-editing-summary-template-prompt;
@@ -984,11 +1036,13 @@ export component MainWindow inherits Window {
         model-phase: root.model-runtime-phase;
         model-ready: root.model-ready;
         model-labels: root.settings-model-labels;
+        model-ids: root.settings-model-ids;
         selected-model-label: root.settings-selected-model-label;
         apple-speech-selected: root.settings-apple-speech-selected;
         apple-speech-unavailable: root.settings-apple-speech-unavailable;
         apple-speech-unavailable-reason: root.settings-apple-speech-unavailable-reason;
         open-system-settings-requested(pane) => { root.settings-open-system-settings-requested(pane); }
+        selected-model-id: root.settings-selected-model-id;
         model-busy: root.settings-model-busy;
         model-downloading: root.settings-model-downloading;
         model-download-progress-label: root.settings-model-download-progress-label;
@@ -1037,10 +1091,10 @@ export component MainWindow inherits Window {
         edit-snippet-trigger-draft <=> root.settings-edit-snippet-trigger-draft;
         edit-snippet-expansion-draft <=> root.settings-edit-snippet-expansion-draft;
         close-requested => {
-            root.settings-open = false;
-            root.settings-closed();
+            root.close-settings();
         }
         tab-changed => {
+            if root.settings-tab != SettingsTab.interface { root.cancel-settings-capture(); }
             root.settings-instrument-input(SettingsInteraction.tab);
             root.settings-tab-changed();
         }
@@ -1152,10 +1206,13 @@ export component MainWindow inherits Window {
         repair-success: root.onboarding-repair-success;
         repair-cooldown: root.onboarding-repair-cooldown;
         device-labels: root.onboarding-device-labels;
-        selected-device-label: root.onboarding-selected-device-label;
+        device-ids: root.onboarding-device-ids;
+        default-device-index: root.onboarding-default-device-index;
+        selected-device-index: root.onboarding-selected-device-index;
         model-phase: root.onboarding-model-phase;
         model-labels: root.onboarding-model-labels;
-        selected-model-label: root.onboarding-selected-model-label;
+        model-ids: root.onboarding-model-ids;
+        selected-model-index: root.onboarding-selected-model-index;
         download-progress-label: root.onboarding-download-progress-label;
         download-progress-fraction: root.onboarding-download-progress-fraction;
         toggle-shortcut-label: root.onboarding-toggle-shortcut-label;
@@ -1183,6 +1240,7 @@ export component MainWindow inherits Window {
     }
 
     if root.live-edit-open && root.recording-mode == RecordingMode.meeting && !root.recording-stop-pending: LiveParagraphEditor {
+        state: { open: true, topmost: !root.settings-permissions-dialog-open && !root.whats-new-open && !root.update-available-open, busy: false };
         width: 100%;
         height: 100%;
         text <=> root.live-edit-text;
@@ -1192,7 +1250,8 @@ export component MainWindow inherits Window {
         save-requested(text) => { root.live-paragraph-edit-saved(text); }
     }
 
-    if root.settings-permissions-dialog-open: SettingsPermissionsDialog {
+    SettingsPermissionsDialog {
+        state: { open: root.settings-permissions-dialog-open, topmost: root.settings-permissions-dialog-open && !root.whats-new-open && !root.update-available-open, busy: false };
         width: 100%;
         height: 100%;
         rows: root.onboarding-permission-rows;
@@ -1206,7 +1265,10 @@ export component MainWindow inherits Window {
         repair-requested => { root.onboarding-repair-requested(); }
     }
 
-    if root.whats-new-open: WhatsNewDialog {
+    private property <bool> whats-new-visited;
+    changed whats-new-open => { if root.whats-new-open { root.whats-new-visited = true; } }
+    if root.whats-new-open || root.whats-new-visited: WhatsNewDialog {
+        state: { open: root.whats-new-open, topmost: root.whats-new-open && !root.update-available-open, busy: false };
         width: 100%;
         height: 100%;
         version: root.whats-new-version;
@@ -1218,7 +1280,10 @@ export component MainWindow inherits Window {
         link-clicked(url) => { root.whats-new-link-clicked(url); }
     }
 
-    if root.update-available-open: UpdateAvailableDialog {
+    private property <bool> update-available-visited;
+    changed update-available-open => { if root.update-available-open { root.update-available-visited = true; } }
+    if root.update-available-open || root.update-available-visited: UpdateAvailableDialog {
+        state: { open: root.update-available-open, topmost: root.update-available-open, busy: false };
         width: 100%;
         height: 100%;
         latest-version: root.update-latest-version;

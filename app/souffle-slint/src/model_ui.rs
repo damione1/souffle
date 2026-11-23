@@ -21,6 +21,11 @@ pub struct FlatModelOption {
 }
 
 impl FlatModelOption {
+    pub fn key(&self) -> String {
+        serde_json::to_string(&(&self.engine_id, &self.model_id, &self.backend_id))
+            .expect("strings serialize as a profile key")
+    }
+
     pub fn selection(&self) -> TranscriptionProfileSelection {
         TranscriptionProfileSelection {
             engine_id: self.engine_id.clone(),
@@ -75,8 +80,8 @@ pub fn list_available_model_options(catalog: &TranscriptionCatalog) -> Vec<FlatM
         .collect()
 }
 
-pub fn find_option<'a>(options: &'a [FlatModelOption], label: &str) -> Option<&'a FlatModelOption> {
-    options.iter().find(|o| o.label == label)
+pub fn find_option<'a>(options: &'a [FlatModelOption], key: &str) -> Option<&'a FlatModelOption> {
+    options.iter().find(|o| o.key() == key)
 }
 
 /// Port of `findTranscriptionModel(...)?.label` - the bare model label
@@ -230,14 +235,19 @@ pub fn populate_options(
         options.iter().map(|o| o.label.as_str().into()).collect();
     window.set_settings_model_labels(std::rc::Rc::new(slint::VecModel::from(labels)).into());
 
-    let selected_label = options
-        .iter()
-        .find(|o| {
-            o.engine_id == catalog.selected_engine_id && o.model_id == catalog.selected_model_id
-        })
-        .map(|o| o.label.clone())
-        .unwrap_or_default();
-    window.set_settings_selected_model_label(selected_label.into());
+    window.set_settings_model_ids(slint::VecModel::from_slice(
+        &options.iter().map(|o| o.key().into()).collect::<Vec<_>>(),
+    ));
+    let selected = options.iter().find(|o| {
+        o.engine_id == catalog.selected_engine_id && o.model_id == catalog.selected_model_id
+    });
+    window.set_settings_selected_model_id(selected.map(|o| o.key()).unwrap_or_default().into());
+    window.set_settings_selected_model_label(
+        selected
+            .map(|o| o.label.as_str())
+            .unwrap_or_default()
+            .into(),
+    );
 
     let timeout_labels: Vec<slint::SharedString> = unload_timeout_options
         .iter()

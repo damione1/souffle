@@ -1,44 +1,36 @@
-import { AppText, Typography } from "@typography";
-import { ModalDialog } from "modal_dialog.slint";
-import { ThemedTextArea } from "themed_text_area.slint";
-import { ThemedButton, ThemedButtonKind } from "themed_button.slint";
-import { Theme } from "../theme.slint";
+import { AlertSeverity, ButtonIntent, DialogSize, DialogTabPolicy, FieldAccess, KitAlert, KitDialog, KitTextArea } from "@kit";
 
-export component LiveParagraphEditor inherits ModalDialog {
+export component LiveParagraphEditor inherits KitDialog {
     in-out property <string> text;
     in property <bool> busy;
     in property <bool> failed;
     callback save-requested(string);
+    callback close-requested();
 
     title: @tr("Corriger le paragraphe");
-    subtitle: @tr("Seul le texte confirmé est modifié. L’enregistrement continue.");
-    panel-height: 380px;
+    description: @tr("Seul le texte confirmé est modifié. L’enregistrement continue.");
+    close-label: @tr("Fermer");
+    tab-policy: DialogTabPolicy.native;
+    modal-layer: 1;
+    size: DialogSize.medium;
+    actions: [
+        { token: 1, text: @tr("Annuler"), intent: ButtonIntent.secondary, disabled: root.busy },
+        { token: 2, text: @tr("Enregistrer"), intent: ButtonIntent.primary, disabled: root.busy || root.text == "" },
+    ];
+    dismiss(reason) => { root.close-requested(); }
+    action-activated(token) => {
+        if token == 1 { root.close-requested(); }
+        if token == 2 { root.save-requested(root.text); }
+    }
 
-    ThemedTextArea {
+    KitTextArea {
+        modal-layer: root.modal-layer;
         text <=> root.text;
-        control-label: @tr("Texte du paragraphe");
-        enabled: !root.busy;
-        area-height: 150px;
+        accessible-name: @tr("Texte du paragraphe");
+        access: root.busy ? FieldAccess.disabled : FieldAccess.editable;
     }
-    if root.failed: AppText {
-        text: @tr("Correction impossible. Fermez puis rouvrez le paragraphe pour réessayer.");
-        typography: Typography.body;
-        color: Theme.danger;
-        wrap: word-wrap;
-    }
-    HorizontalLayout {
-        alignment: end;
-        spacing: 8px;
-        ThemedButton {
-            text: @tr("Annuler");
-            enabled: !root.busy;
-            clicked => { root.close-requested(); }
-        }
-        ThemedButton {
-            text: @tr("Enregistrer");
-            kind: ThemedButtonKind.primary;
-            enabled: !root.busy && root.text != "";
-            clicked => { root.save-requested(root.text); }
-        }
+    if root.failed: KitAlert {
+        severity: AlertSeverity.error;
+        message: @tr("Correction impossible. Fermez puis rouvrez le paragraphe pour réessayer.");
     }
 }

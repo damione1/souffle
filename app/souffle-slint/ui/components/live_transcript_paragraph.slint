@@ -2,7 +2,7 @@ import { AppText, AppNumericText, Typography } from "@typography";
 import { Theme } from "../theme.slint";
 import { TranscriptBlock, SpeakerLabels } from "transcript_section.slint";
 import { TranscriptWordFlow } from "transcript_words.slint";
-import { ThemedButton, ThemedButtonKind } from "themed_button.slint";
+import { ButtonIntent, ControlSize, KitButton } from "@kit";
 
 // The card tracks the pointer once; repeated rows do not add TouchAreas
 // around their clickable words. Reserving the action prevents hover reflow.
@@ -38,15 +38,15 @@ export component LiveTranscriptParagraph inherits VerticalLayout {
             typography: Typography.micro-detail;
             text-color: Theme.text-faint;
         }
-        if root.block.can-edit: ThemedButton {
+        if root.block.can-edit: KitButton {
             // Keep the existing catalogue context when extracting this row.
             text: @tr("RecordingView" => "Corriger");
-            kind: ThemedButtonKind.ghost;
-            compact: true;
-            enabled: root.editing-enabled;
+            intent: ButtonIntent.quiet;
+            control-size: ControlSize.compact;
+            disabled: !root.editing-enabled;
             opacity: root.hovered || self.has-focus
                 ? (root.editing-enabled ? 1.0 : 0.5) : 0.0;
-            clicked => { root.edit-requested(); }
+            activated => { root.edit-requested(); }
         }
     }
     TranscriptWordFlow {

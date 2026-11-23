@@ -2,7 +2,6 @@ import { CompressionUi } from "compression.slint";
 import { CompressionSection, CompressionStorageSection } from "components/settings/compression_section.slint";
 import { SummarizationSection } from "components/settings/summarization_section.slint";
 import { SummarizationUi } from "summarization.slint";
-import { AppText, AppTextInput, Typography, TypographyStyle } from "@typography";
 import { AutostartSection } from "components/settings/autostart_section.slint";
 import { PermissionsSection } from "components/settings/permissions_section.slint";
 import { DiagnosticsSection } from "components/settings/diagnostics_section.slint";
@@ -23,21 +22,15 @@ import { ModelDeleteSection } from "components/settings/model_delete_section.sli
 import { DictionarySection, DictionaryRow, DictionarySuggestionRow, DictionaryLearningOption } from "components/settings/dictionary_section.slint";
 import { SnippetsSection, SnippetRow } from "components/settings/snippets_section.slint";
 import { Theme } from "theme.slint";
-import { ModelDeletionError } from "types.slint";
-import { TranscriptionUnavailableReason, SystemSettingsPane } from "types.slint";
-import { LucideIcon, IconSet } from "components/lucide_icon.slint";
+import { KitButton, KitAppShell, KitStack, KitFocusBackground, KitAlert, KitText, KitRouter, ButtonIntent } from "@kit";
+import { LucideArrows } from "@kit-icons/arrows.slint";
+import { SettingsOptions } from "components/settings/settings_options.slint";
 import { SettingsTabBar, SettingsTabPage } from "components/settings/settings_tabs.slint";
 import { TranscriptionPhase, AppTheme, AppLocale, PasteMethod, MeetingLanguage, LogLevel, AudioRetention, AccessState, ShortcutField, ShortcutNotice, SettingsCaptureError, SummaryProvider, AppleIntelligenceUnavailableReason, SettingsTab, InstallBlockReason, UpdateRowStatus, DictionaryLearningMode } from "types.slint";
+import { ModelDeletionError, TranscriptionUnavailableReason, SystemSettingsPane } from "types.slint";
 
-// Port of components/SettingsView.svelte's tab shell (SOU-188). Svelte
-// groups its 17 sections into 6 tabs (Transcription / IA / Audio / Interface
-// / Réunions / Système); this mirrors that same grouping one-for-one so the
-// two stay comparable file-for-file. Only the tabs whose sections are
-// actually wired below are present - see the ticket journal for which
-// milestone added which tab. `TabWidget` does not support conditional
-// (`if`/`for`) tabs (a compiler-enforced restriction), so tabs are added
-// directly in this source as each is implemented, not hidden behind a flag.
-export component SettingsView inherits Rectangle {
+// The six tab pages share one overlay and mount their sections on first visit.
+export component SettingsView inherits KitAppShell {
     in-out property <SettingsTab> tab: SettingsTab.transcription;
     in property <bool> autostart-enabled;
     in property <bool> debug-transcription;
@@ -49,8 +42,8 @@ export component SettingsView inherits Rectangle {
     in property <float> log-spacer-after: 0.0;
     in-out property <length> log-scroll-top: 0px;
     in property <bool> copying-diagnostics: false;
-    in property <AppTheme> theme;
     in property <bool> capture-busy;
+    in property <AppTheme> app-theme;
     in property <AppLocale> locale;
     in property <bool> auto-paste;
     in property <PasteMethod> paste-method;
@@ -88,7 +81,9 @@ export component SettingsView inherits Rectangle {
     in property <int> calendar-reminder-minutes-max;
     in property <[CalendarRow]> calendars;
     in property <[string]> audio-device-labels;
-    in property <string> selected-device-label;
+    in property <[string]> audio-device-ids;
+    in property <int> default-device-index: -1;
+    in property <string> selected-device-id;
     in property <bool> pin-unavailable;
     in property <string> sample-rate-label;
     in property <bool> sample-rate-high;
@@ -99,6 +94,7 @@ export component SettingsView inherits Rectangle {
     in property <bool> is-laptop;
     in property <[string]> clamshell-device-labels;
     in property <string> clamshell-device-label;
+    in property <string> clamshell-device-id;
     in property <bool> system-audio-supported;
     in property <bool> capture-system-audio;
     in property <bool> meeting-audio-diagnostic;
@@ -147,19 +143,19 @@ export component SettingsView inherits Rectangle {
     in property <bool> summary-model-picker-visible;
     in property <[string]> summary-model-ids;
     in property <[string]> summary-model-labels;
-    in property <string> selected-summary-model-label;
+    in property <string> selected-summary-model-id;
     in property <bool> show-ollama-setup;
     in property <bool> ollama-pulling;
     in property <string> ollama-pull-status;
     in property <string> ollama-pull-error;
     in property <string> recommended-ollama-model;
     in property <string> summary-refresh-error;
-    in property <string> summary-unusable-message;
+    in property <bool> summary-provider-unavailable;
     in property <bool> dictation-polish-enabled;
     in property <bool> dictation-polish-provider-available;
     in property <[string]> dictation-polish-template-ids;
     in property <[string]> dictation-polish-template-labels;
-    in property <string> active-dictation-polish-label;
+    in property <string> active-dictation-polish-id;
     in-out property <string> active-dictation-polish-prompt;
     in property <[AppBranchRow]> app-branch-rules;
     in property <[string]> app-branch-target-labels;
@@ -172,19 +168,21 @@ export component SettingsView inherits Rectangle {
     in property <string> app-branch-preview-template;
     in property <[string]> summary-template-ids;
     in property <[string]> summary-template-labels;
-    in property <string> default-summary-template-label;
-    in property <string> editing-summary-template-label;
+    in property <string> default-summary-template-id;
+    in property <string> editing-summary-template-id;
     in property <bool> editing-summary-template-is-builtin;
     in-out property <string> editing-summary-template-name;
     in-out property <string> editing-summary-template-prompt;
     in-out property <string> new-summary-template-draft: "";
     in property <bool> model-ready;
     in property <[string]> model-labels;
+    in property <[string]> model-ids;
     in property <string> selected-model-label;
     in property <bool> apple-speech-selected;
     in property <bool> apple-speech-unavailable;
     in property <TranscriptionUnavailableReason> apple-speech-unavailable-reason;
     callback open-system-settings-requested(SystemSettingsPane);
+    in property <string> selected-model-id;
     in property <bool> model-busy;
     in property <TranscriptionPhase> model-phase;
     in property <bool> model-downloading;
@@ -196,7 +194,6 @@ export component SettingsView inherits Rectangle {
     in property <string> model-delete-error;
     in property <ModelDeletionError> model-delete-error-kind: ModelDeletionError.operation-failed;
     in property <bool> model-files-deletable;
-
     in property <DictionaryLearningMode> dictionary-learning-mode;
     in property <[DictionaryLearningOption]> dictionary-learning-options;
     in property <[DictionarySuggestionRow]> dictionary-suggestions;
@@ -325,119 +322,62 @@ export component SettingsView inherits Rectangle {
     callback snippet-cancel-edit-requested();
     callback snippet-save-edit-requested(int, string, string);
 
-    // Opaque on purpose: this overlays IdleView/MeetingDetail rather than
-    // replacing them (mirrors App.svelte hiding HomeView behind Settings
-    // instead of unmounting it), so without a solid background both would
-    // paint into the same window at once.
-    background: Theme.canvas;
-
-    // The settings tree overlays a kept-alive HomeView. Painting an opaque
-    // Rectangle doesn't consume input, so empty pixels used to click through.
-    TouchArea { }
-
-    VerticalLayout {
-        padding-left: 26px;
-        padding-right: 26px;
-        padding-top: 18px;
-        padding-bottom: 12px;
-        spacing: 16px;
-
-        done := Rectangle {
-            height: 32px;
-            width: 16px + 6px + done-label.width + 20px;
-            border-radius: 4px;
-            border-width: done-focus.has-focus ? 2px : 0px;
-            border-color: Theme.accent;
-            background: done-area.pressed ? Theme.surface-3 : done-area.has-hover ? Theme.surface-2 : transparent;
-            vertical-stretch: 0;
-
-            accessible-role: button;
-            accessible-label: @tr("Fermer les paramètres");
-            accessible-action-default => { root.close-requested(); }
-
-            forward-focus: done-focus;
-
-            done-focus := FocusScope {
-                key-pressed(event) => {
-                    if event.text == Key.Return || event.text == Key.Space || event.text == Key.Escape {
-                        root.close-requested();
-                        return accept;
-                    }
-                    return reject;
-                }
-            }
-
-            LucideIcon {
-                icon: IconSet.ArrowLeft;
-                icon-color: done-area.has-hover ? Theme.text-primary : Theme.text-muted;
-                size: 16px;
-                x: 10px;
-                y: (parent.height - self.height) / 2;
-            }
-            done-label := AppText {
-                x: 32px;
-                y: (parent.height - self.height) / 2;
-                text: @tr("Terminé");
-                typography: Typography.content;
-                color: done-area.has-hover ? Theme.text-primary : Theme.text-muted;
-            }
-            done-area := TouchArea {
-                clicked => {
-                    done-focus.focus();
-                    root.close-requested();
-                }
-            }
+    KitFocusBackground {
+        KitStack {
+            alignment: stretch;
+            inset: roomy;
+        done := KitButton {
+            text: @tr("Terminé");
+            accessible-name: @tr("Fermer les paramètres");
+            intent: ButtonIntent.quiet;
+            leading-icon: LucideArrows.arrow-left();
+            activated => { root.close-requested(); }
         }
 
-        AppText {
+        KitText {
             text: @tr("Paramètres");
-            typography: Typography.settings-title;
-
-            color: Theme.text-primary;
+            role: title;
             vertical-stretch: 0;
         }
 
-        if root.save-error != "" && root.draft-save-error == "": AppText {
-            text: root.save-error-unavailable
+        if root.save-error != "" && root.draft-save-error == "": KitAlert {
+            severity: error;
+            message: root.save-error-unavailable
                 ? @tr("État des réglages enregistrés inconnu : {}", root.save-error)
                 : @tr("Enregistrement des réglages : {}", root.save-error);
-            color: Theme.danger;
-            wrap: word-wrap;
             vertical-stretch: 0;
         }
 
-        if root.draft-save-error != "": AppText {
-            text: root.draft-save-error-unavailable
+        if root.draft-save-error != "": KitAlert {
+            severity: error;
+            message: root.draft-save-error-unavailable
                 ? @tr("Brouillon conservé, état des réglages inconnu : {}", root.draft-save-error)
                 : @tr("Brouillon conservé : {}", root.draft-save-error);
-            color: Theme.danger;
-            wrap: word-wrap;
             vertical-stretch: 0;
         }
 
-        HorizontalLayout {
-            alignment: start;
-            vertical-stretch: 0;
-            SettingsTabBar {
-                current <=> root.tab;
-                changed(value) => { root.tab-changed(); }
-            }
+        SettingsTabBar {
+            current <=> root.tab;
+            changed(value) => { root.tab-changed(); }
         }
 
-        Rectangle {
+        KitRouter {
             vertical-stretch: 1;
 
                     trans-page := SettingsTabPage {
                     width: parent.width;
                     height: parent.height;
                     active: root.tab == SettingsTab.transcription;
+                    label: SettingsOptions.tab-label(SettingsTab.transcription);
 
-                        ModelSection {
+                        if trans-page.mounted: ModelSection {
                             capture-busy: root.capture-busy;
                             model-phase: root.model-phase;
                             ready: root.model-ready;
                             model-labels: root.model-labels;
+                            model-ids: root.model-ids;
                             selected-model-label: root.selected-model-label;
+                            selected-model-id: root.selected-model-id;
                             apple-speech-selected: root.apple-speech-selected;
                             apple-speech-unavailable: root.apple-speech-unavailable;
                             apple-speech-unavailable-reason: root.apple-speech-unavailable-reason;
@@ -453,7 +393,7 @@ export component SettingsView inherits Rectangle {
                             unload-timeout-changed(value) => { root.unload-timeout-changed(value); }
                         }
 
-                        DictionarySection {
+                        if trans-page.mounted: DictionarySection {
                             learning-mode: root.dictionary-learning-mode;
                             learning-options: root.dictionary-learning-options;
                             suggestions: root.dictionary-suggestions;
@@ -483,7 +423,7 @@ export component SettingsView inherits Rectangle {
                             delete-requested(id) => { root.dictionary-delete-requested(id); }
                         }
 
-                        SnippetsSection {
+                        if trans-page.mounted: SnippetsSection {
                             entries: root.snippets;
                             entry-count: root.snippets-entry-count;
                             list-content-height: root.snippets-list-content-height;
@@ -510,10 +450,11 @@ export component SettingsView inherits Rectangle {
                     width: parent.width;
                     height: parent.height;
                     active: root.tab == SettingsTab.ai;
+                    label: SettingsOptions.tab-label(SettingsTab.ai);
 
-                        SummarizationSection { }
+                        if ai-page.mounted: SummarizationSection { }
 
-                        if SummarizationUi.enabled: IntelligenceSection {
+                        if ai-page.mounted && SummarizationUi.enabled: IntelligenceSection {
                             summary-provider: root.summary-provider;
                             apple-intelligence-available: root.apple-intelligence-available;
                             apple-intelligence-reason: root.apple-intelligence-reason;
@@ -524,14 +465,14 @@ export component SettingsView inherits Rectangle {
                             model-picker-visible: root.summary-model-picker-visible;
                             model-ids: root.summary-model-ids;
                             model-labels: root.summary-model-labels;
-                            selected-model-label: root.selected-summary-model-label;
+                            selected-model-id: root.selected-summary-model-id;
                             show-ollama-setup: root.show-ollama-setup;
                             ollama-pulling: root.ollama-pulling;
                             ollama-pull-status: root.ollama-pull-status;
                             ollama-pull-error: root.ollama-pull-error;
                             recommended-model: root.recommended-ollama-model;
                             refresh-error: root.summary-refresh-error;
-                            unusable-message: root.summary-unusable-message;
+                            provider-unavailable: root.summary-provider-unavailable;
                             summary-provider-changed(value) => { root.summary-provider-changed(value); }
                             ollama-url-changed(value) => { root.ollama-url-changed(value); }
                             ollama-model-changed(value) => { root.ollama-model-changed(value); }
@@ -540,14 +481,14 @@ export component SettingsView inherits Rectangle {
                             open-apple-intelligence-settings-requested => { root.open-apple-intelligence-settings-requested(); }
                         }
 
-                        if SummarizationUi.enabled: CompressionSection { }
-                        if SummarizationUi.enabled || CompressionUi.cache-present || CompressionUi.model-error != "": CompressionStorageSection { }
+                        if ai-page.mounted && SummarizationUi.enabled: CompressionSection { }
+                        if ai-page.mounted && (SummarizationUi.enabled || CompressionUi.cache-present || CompressionUi.model-error != ""): CompressionStorageSection { }
 
-                        if SummarizationUi.enabled: SummaryTemplatesSection {
+                        if ai-page.mounted && SummarizationUi.enabled: SummaryTemplatesSection {
                             template-ids: root.summary-template-ids;
                             template-labels: root.summary-template-labels;
-                            default-template-label: root.default-summary-template-label;
-                            editing-template-label: root.editing-summary-template-label;
+                            default-template-id: root.default-summary-template-id;
+                            editing-template-id: root.editing-summary-template-id;
                             editing-is-builtin: root.editing-summary-template-is-builtin;
                             editing-name <=> root.editing-summary-template-name;
                             editing-prompt <=> root.editing-summary-template-prompt;
@@ -560,12 +501,12 @@ export component SettingsView inherits Rectangle {
                             add-requested(name) => { root.summary-template-add-requested(name); }
                         }
 
-                        DictationPolishSection {
+                        if ai-page.mounted: DictationPolishSection {
                             enabled: root.dictation-polish-enabled;
                             provider-available: root.dictation-polish-provider-available;
                             template-ids: root.dictation-polish-template-ids;
                             template-labels: root.dictation-polish-template-labels;
-                            active-template-label: root.active-dictation-polish-label;
+                            active-template-id: root.active-dictation-polish-id;
                             active-prompt <=> root.active-dictation-polish-prompt;
                             enabled-changed(value) => { root.dictation-polish-enabled-changed(value); }
                             template-changed(value) => { root.dictation-polish-template-changed(value); }
@@ -573,7 +514,7 @@ export component SettingsView inherits Rectangle {
                             open-provider-settings-requested => { root.open-apple-intelligence-settings-requested(); }
                         }
 
-                        AppBranchesSection {
+                        if ai-page.mounted: AppBranchesSection {
                             rules: root.app-branch-rules;
                             target-labels: root.app-branch-target-labels;
                             test-phase: root.app-branch-test-phase;
@@ -592,7 +533,7 @@ export component SettingsView inherits Rectangle {
                             test-requested => { root.app-branch-test-requested(); }
                         }
 
-                        if !SummarizationUi.enabled && root.dictation-polish-enabled: IntelligenceSection {
+                        if ai-page.mounted && !SummarizationUi.enabled && root.dictation-polish-enabled: IntelligenceSection {
                             for-dictation: true;
                             summary-provider: root.summary-provider;
                             apple-intelligence-available: root.apple-intelligence-available;
@@ -604,14 +545,14 @@ export component SettingsView inherits Rectangle {
                             model-picker-visible: root.summary-model-picker-visible;
                             model-ids: root.summary-model-ids;
                             model-labels: root.summary-model-labels;
-                            selected-model-label: root.selected-summary-model-label;
+                            selected-model-id: root.selected-summary-model-id;
                             show-ollama-setup: root.show-ollama-setup;
                             ollama-pulling: root.ollama-pulling;
                             ollama-pull-status: root.ollama-pull-status;
                             ollama-pull-error: root.ollama-pull-error;
                             recommended-model: root.recommended-ollama-model;
                             refresh-error: root.summary-refresh-error;
-                            unusable-message: root.summary-unusable-message;
+                            provider-unavailable: root.summary-provider-unavailable;
                             summary-provider-changed(value) => { root.summary-provider-changed(value); }
                             ollama-url-changed(value) => { root.ollama-url-changed(value); }
                             ollama-model-changed(value) => { root.ollama-model-changed(value); }
@@ -625,10 +566,13 @@ export component SettingsView inherits Rectangle {
                     width: parent.width;
                     height: parent.height;
                     active: root.tab == SettingsTab.audio;
+                    label: SettingsOptions.tab-label(SettingsTab.audio);
 
-                        MicrophoneSection {
+                        if audio-page.mounted: MicrophoneSection {
                             device-labels: root.audio-device-labels;
-                            selected-device-label: root.selected-device-label;
+                            device-ids: root.audio-device-ids;
+                            default-device-index: root.default-device-index;
+                            selected-device-id: root.selected-device-id;
                             pin-unavailable: root.pin-unavailable;
                             sample-rate-label: root.sample-rate-label;
                             sample-rate-high: root.sample-rate-high;
@@ -647,9 +591,12 @@ export component SettingsView inherits Rectangle {
                             remove-device-requested(uid) => { root.remove-device-requested(uid); }
                         }
 
-                        AudioSection {
+                        if audio-page.mounted: AudioSection {
                             is-laptop: root.is-laptop;
                             clamshell-device-labels: root.clamshell-device-labels;
+                            clamshell-device-ids: root.audio-device-ids;
+                            default-device-index: root.default-device-index;
+                            clamshell-device-id: root.clamshell-device-id;
                             clamshell-device-label: root.clamshell-device-label;
                             system-audio-supported: root.system-audio-supported;
                             capture-system-audio: root.capture-system-audio;
@@ -685,9 +632,10 @@ export component SettingsView inherits Rectangle {
                     width: parent.width;
                     height: parent.height;
                     active: root.tab == SettingsTab.interface;
+                    label: SettingsOptions.tab-label(SettingsTab.interface);
 
-                        InterfaceSection {
-                            theme: root.theme;
+                        if interface-page.mounted: InterfaceSection {
+                            theme: root.app-theme;
                             locale: root.locale;
                             auto-paste: root.auto-paste;
                             paste-method: root.paste-method;
@@ -719,7 +667,7 @@ export component SettingsView inherits Rectangle {
                             permissions-review-requested => { root.permissions-review-requested(); }
                         }
 
-                        FeedbackSoundsSection {
+                        if interface-page.mounted: FeedbackSoundsSection {
                             enabled: root.feedback-sounds-enabled;
                             volume: root.feedback-sounds-volume;
                             volume-min: root.feedback-sounds-volume-min;
@@ -733,8 +681,9 @@ export component SettingsView inherits Rectangle {
                     width: parent.width;
                     height: parent.height;
                     active: root.tab == SettingsTab.meetings;
+                    label: SettingsOptions.tab-label(SettingsTab.meetings);
 
-                        CalendarSection {
+                        if meetings-page.mounted: CalendarSection {
                             enabled: root.calendar-enabled;
                             permission: root.calendar-permission;
                             autostart-enabled: root.calendar-autostart-enabled;
@@ -754,17 +703,18 @@ export component SettingsView inherits Rectangle {
                     width: parent.width;
                     height: parent.height;
                     active: root.tab == SettingsTab.system;
+                    label: SettingsOptions.tab-label(SettingsTab.system);
 
-                        AutostartSection {
+                        if system-page.mounted: AutostartSection {
                             autostart-enabled: root.autostart-enabled;
                             autostart-changed(value) => { root.autostart-changed(value); }
                         }
 
-                        PermissionsSection {
+                        if system-page.mounted: PermissionsSection {
                             review-requested => { root.permissions-review-requested(); }
                         }
 
-                        DiagnosticsSection {
+                        if system-page.mounted: DiagnosticsSection {
                             debug-transcription: root.debug-transcription;
                             log-level: root.log-level;
                             log-lines: root.log-lines;
@@ -778,7 +728,7 @@ export component SettingsView inherits Rectangle {
                             copy-diagnostics-requested => { root.copy-diagnostics-requested(); }
                         }
 
-                        DataSection {
+                        if system-page.mounted: DataSection {
                             stats-line: root.data-stats-line;
                             recordings-line: root.data-recordings-line;
                             retention: root.meeting-audio-retention;
@@ -799,7 +749,7 @@ export component SettingsView inherits Rectangle {
                             test-mcp-requested => { root.mcp-test-requested(); }
                         }
 
-                        ModelDeleteSection {
+                        if system-page.mounted: ModelDeleteSection {
                             files-deletable: root.model-files-deletable;
                             model-phase: root.model-phase;
                             model-label: root.selected-model-label;
@@ -808,7 +758,7 @@ export component SettingsView inherits Rectangle {
                             delete-requested => { root.delete-model-requested(); }
                         }
 
-                        AboutSection {
+                        if system-page.mounted: AboutSection {
                             app-version: root.app-version;
                             transcription-label: root.about-transcription-label;
                             summary-label: root.about-summary-label;
@@ -825,5 +775,6 @@ export component SettingsView inherits Rectangle {
                         }
                     }
                 }
+    }
     }
 }
