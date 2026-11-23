@@ -93,6 +93,7 @@ impl LivePara {
             words: live_words(&self.text, tentative_suffix),
             recording_session_index: -1,
             start_time: self.start_time as f32,
+            end_time: 0.0,
             end_label: "".into(),
             start_label: "".into(),
         }

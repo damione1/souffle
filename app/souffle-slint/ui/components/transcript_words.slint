@@ -1,5 +1,5 @@
 import { AppText, Typography, TypographyStyle } from "@typography";
-import { KitModalContext, ButtonIntent, ControlSize, KitButton, KitIconButton, KitTextField } from "@kit";
+import { KitModalContext, ButtonIntent, ControlSize, KitButton, KitCard, KitIconButton, KitInline, KitTextField, KitWrap, LayoutSpace, SurfaceLevel } from "@kit";
 import { LucideMath } from "@kit-icons/math.slint";
 import { Theme } from "../theme.slint";
 
@@ -31,7 +31,7 @@ export struct TranscriptWord {
 // clickable word being a plain `Text` in a `TouchArea` - no link styling,
 // no underline (see `TranscriptBlock.words` in transcript_section.slint for
 // why not `StyledText`).
-export component TranscriptWordFlow inherits FlexboxLayout {
+export component TranscriptWordFlow inherits KitWrap {
     in property <[TranscriptWord]> words;
     in property <TypographyStyle> typography: Typography.content;
     in property <brush> color: Theme.text-primary;
@@ -39,8 +39,7 @@ export component TranscriptWordFlow inherits FlexboxLayout {
     // of its bottom-left corner (where the alias popover opens).
     callback word-clicked(string, length, length);
 
-    flex-wrap: wrap;
-    spacing: 0px;
+    gap: none;
 
     for word in root.words: Rectangle {
         width: word-label.preferred-width + trailing-label.preferred-width;
@@ -125,9 +124,6 @@ export component DictionaryAliasPopover inherits Rectangle {
     }
 
     popup := PopupWindow {
-        // Damien, 2026-09-23: the previous 260x190 with a 16px close button
-        // and an 11px title read as dated/cramped next to a full-width
-        // Save button - widened and given a touch more breathing room.
         width: 288px;
         height: 210px;
         // The default `close-policy` (`close-on-click`, now deprecated)
@@ -153,56 +149,51 @@ export component DictionaryAliasPopover inherits Rectangle {
                 }
             }
 
-            Rectangle {
-                background: Theme.surface-2;
-                border-width: 1px;
-                border-color: Theme.accent;
+            KitCard {
+                level: SurfaceLevel.popover;
+                inset: LayoutSpace.roomy;
+                gap: LayoutSpace.regular;
 
-                VerticalLayout {
-                    padding: 16px;
-                    spacing: 12px;
+                KitInline {
+                    alignment: space-between;
 
-                    HorizontalLayout {
-                        alignment: space-between;
-
-                        AppText {
-                            text: @tr("Alias de dictionnaire");
-                            typography: Typography.section;
-                            color: Theme.text-primary;
-                            vertical-alignment: center;
-                        }
-
-                        cancel-btn := KitIconButton {
-                            accessible-name: @tr("Fermer");
-                            control-size: ControlSize.compact;
-
-                            glyph: LucideMath.x();
-                            activated => { popup.close(); }
-                        }
+                    AppText {
+                        text: @tr("Alias de dictionnaire");
+                        typography: Typography.section;
+                        color: Theme.text-primary;
+                        vertical-alignment: center;
                     }
 
-                    KitTextField {
-                        accessible-name: self.placeholder;
-                        placeholder: @tr("Terme correct");
-                        text <=> root.term-draft;
-                        commit-requested => { root.save-and-close(); }
-                    }
-
-                    KitTextField {
-                        accessible-name: self.placeholder;
-                        placeholder: @tr("Prononciation entendue");
-                        text <=> root.pronunciation-draft;
-                        commit-requested => { root.save-and-close(); }
-                    }
-
-                    save-btn := KitButton {
-                        accessible-name: @tr("Enregistrer l'alias");
-                        text: @tr("Enregistrer");
+                    cancel-btn := KitIconButton {
+                        accessible-name: @tr("Fermer");
                         control-size: ControlSize.compact;
-                        intent: ButtonIntent.primary;
-                        disabled: root.term-draft == "";
-                        activated => { root.save-and-close(); }
+
+                        glyph: LucideMath.x();
+                        activated => { popup.close(); }
                     }
+                }
+
+                KitTextField {
+                    accessible-name: self.placeholder;
+                    placeholder: @tr("Terme correct");
+                    text <=> root.term-draft;
+                    commit-requested => { root.save-and-close(); }
+                }
+
+                KitTextField {
+                    accessible-name: self.placeholder;
+                    placeholder: @tr("Prononciation entendue");
+                    text <=> root.pronunciation-draft;
+                    commit-requested => { root.save-and-close(); }
+                }
+
+                save-btn := KitButton {
+                    accessible-name: @tr("Enregistrer l'alias");
+                    text: @tr("Enregistrer");
+                    control-size: ControlSize.compact;
+                    intent: ButtonIntent.primary;
+                    disabled: root.term-draft == "";
+                    activated => { root.save-and-close(); }
                 }
             }
         }

@@ -19,7 +19,7 @@ import { ActionGuards, MeetingDeletePermission } from "action_guards.slint";
 import { MeetingDeleteBlockReason } from "types.slint";
 export { ActionGuards, MeetingDeletePermission, MeetingDeleteBlockReason }
 import { RecordingView } from "recording_view.slint";
-import { MeetingDetail, MeetingParticipantChip, MeetingMeta } from "meeting_detail.slint";
+import { MeetingDetail, MeetingDetailView, MeetingParticipantChip, MeetingMeta } from "meeting_detail.slint";
 import { SettingsView } from "settings_view.slint";
 import { OnboardingView } from "onboarding_view.slint";
 import { PermissionRow } from "components/onboarding/permissions_step.slint";
@@ -35,7 +35,7 @@ import { AppBranchRow } from "components/settings/app_branches_section.slint";
 import { AppBranchFallback, AppBranchTestPhase } from "types.slint";
 export { AppBranchFallback, AppBranchTestPhase }
 import { TimelineDayGroup, UpcomingEvent } from "components/timeline_section.slint";
-import { TranscriptBlock } from "components/transcript_section.slint";
+import { TranscriptBlock, TranscriptLayout } from "components/transcript_section.slint";
 import { TranscriptWord } from "components/transcript_words.slint";
 import { StructuredActionItem } from "components/summary_section.slint";
 import { RecordingMode, LiveSystemAudio, MicStall, MeetingIdleBanner, WakeResumeNotice,SpeakerRole, TimelineFilter, TimelineKind, NotesSaveState, ModelPhase, TranscriptionPhase, UpcomingPhase, SettingsTab, SettingsInteraction, AppTheme, AppLocale, PasteMethod, MeetingLanguage, LogLevel, AudioRetention, AccessState, PermissionKind, ShortcutField, ShortcutNotice, SettingsCaptureError, SummaryProvider, AppleIntelligenceUnavailableReason, OnboardingStep, UpdatePhase, InstallBlockReason, UpdateRowStatus, MeetingExportFormat, DictionaryLearningMode } from "types.slint";
@@ -160,10 +160,16 @@ export component MainWindow inherits Window {
     in property <float> meeting-detail-audio-progress;
     in property <string> meeting-detail-audio-position-label;
     in property <string> meeting-detail-audio-duration-label;
+    in property <float> meeting-detail-audio-position-seconds;
+    in property <int> meeting-detail-audio-session-index: -1;
     in property <[TranscriptBlock]> meeting-detail-transcript-blocks;
     in property <int> meeting-detail-transcript-segment-count;
     in property <float> meeting-detail-transcript-spacer-before: 0.0;
     in property <float> meeting-detail-transcript-spacer-after: 0.0;
+    in property <string> meeting-detail-transcript-preview;
+    in-out property <string> meeting-detail-transcript-search;
+    in-out property <TranscriptLayout> meeting-detail-transcript-layout: TranscriptLayout.conversation;
+    callback transcript-search-changed(string);
     // `length`-typed so it can two-way bind all the way down to the real
     // Flickable inside TranscriptSection (see that component's doc comment
     // on `scroll-top`) - internal plumbing only, not read directly by Rust.
@@ -184,6 +190,7 @@ export component MainWindow inherits Window {
     // needed (unlike the transcript above, it isn't virtualized), just
     // reset on navigation like meeting-detail-transcript-scroll-top below.
     in-out property <length> meeting-detail-page-scroll-top: 0px;
+    in-out property <MeetingDetailView> meeting-detail-view: MeetingDetailView.reading;
     in property <string> meeting-detail-summary;
     in property <bool> meeting-detail-summary-is-stale;
     in property <string> meeting-detail-summary-model-label;
@@ -599,6 +606,14 @@ export component MainWindow inherits Window {
     // scrolled to wherever meeting A's page was left (past the header,
     // Notes hidden) instead of at the top.
     public function reset-meeting-detail-transcript-scroll() {
+        root.meeting-detail-transcript-search = "";
+        root.meeting-detail-transcript-layout = TranscriptLayout.conversation;
+        root.reset-meeting-detail-transcript-scroll-position();
+        root.meeting-detail-view = MeetingDetailView.reading;
+    }
+
+    // Back to the top without leaving the transcript, for a new search result.
+    public function reset-meeting-detail-transcript-scroll-position() {
         root.meeting-detail-transcript-scroll-top = 0px;
         root.meeting-detail-page-scroll-top = 0px;
     }
@@ -805,12 +820,19 @@ export component MainWindow inherits Window {
                 audio-progress: root.meeting-detail-audio-progress;
                 audio-position-label: root.meeting-detail-audio-position-label;
                 audio-duration-label: root.meeting-detail-audio-duration-label;
+                audio-position-seconds: root.meeting-detail-audio-position-seconds;
+                audio-session-index: root.meeting-detail-audio-session-index;
+                transcript-preview: root.meeting-detail-transcript-preview;
+                transcript-search <=> root.meeting-detail-transcript-search;
+                transcript-layout <=> root.meeting-detail-transcript-layout;
+                transcript-search-changed(query) => { root.transcript-search-changed(query); }
                 transcript-blocks: root.meeting-detail-transcript-blocks;
                 transcript-segment-count: root.meeting-detail-transcript-segment-count;
                 transcript-spacer-before: root.meeting-detail-transcript-spacer-before;
                 transcript-spacer-after: root.meeting-detail-transcript-spacer-after;
                 transcript-scroll-top <=> root.meeting-detail-transcript-scroll-top;
                 page-scroll-top <=> root.meeting-detail-page-scroll-top;
+                view <=> root.meeting-detail-view;
                 summary: root.meeting-detail-summary;
                 summary-is-stale: root.meeting-detail-summary-is-stale;
                 summary-model-label: root.meeting-detail-summary-model-label;

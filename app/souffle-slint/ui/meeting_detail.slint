@@ -1,7 +1,7 @@
 import { CompactTranscriptSection } from "components/compact_transcript_section.slint";
 import { SummarizationUi } from "summarization.slint";
-import { AppText, AppTextInput, Typography, TypographyStyle } from "@typography";
-import { ButtonIntent, ControlSize, ControlWidth, KitBadge, KitButton, KitDropdownMenu, KitIcon, KitKeyResult, KitPressable, KitTextArea, KitTextField, OptionRow, TextEscapeBehavior, Tone } from "@kit";
+import { AppText, Typography } from "@typography";
+import { AlertSeverity, ButtonIntent, ContentWidth, ControlSize, ControlWidth, KitAlert, KitBadge, KitButton, KitCard, KitDropdownMenu, KitEmptyState, KitFocusBackground, KitIcon, KitInline, KitKeyResult, KitLayoutMetrics, KitPressable, KitScrollArea, KitSegmentedControl, KitStack, KitText, KitTextArea, KitTextField, KitThemeContext, KitWrap, LayoutSpace, OptionRow, Ownership, SurfaceLevel, TextEscapeBehavior, Tone, TypographyRole } from "@kit";
 import { LucideDesign } from "@kit-icons/design.slint";
 import { LucideAccount } from "@kit-icons/account.slint";
 import { LucideFiles } from "@kit-icons/files.slint";
@@ -10,27 +10,12 @@ import { NotesSaveState, MeetingExportFormat, WakeResumeNotice } from "types.sli
 import { ActionGuards, MeetingDeletePermission } from "action_guards.slint";
 import { StatusBanner } from "components/status_banner.slint";
 import { AudioPlayerSection } from "components/audio_player_section.slint";
-import { TranscriptSection, TranscriptBlock } from "components/transcript_section.slint";
+import { TranscriptSection, TranscriptToolbar, TranscriptBlock, TranscriptLayout } from "components/transcript_section.slint";
 import { SummarySection, StructuredActionItem } from "components/summary_section.slint";
 import { Theme } from "theme.slint";
 
-// Port of MeetingHeaderSection.svelte + MeetingNotesSection.svelte -
-// completed-meeting variant only. The live-recording variant of
-// MeetingHeaderSection (stop button, recording badge, system-audio notice)
-// is out of scope: this app shows RecordingView instead while a meeting is
-// live (see main_window.slint), never this component.
-//
-// Milestones 6-9 scope, said here rather than hidden: header (title,
-// rename, date/duration/segment count, participants) + notes (load, edit,
-// debounced autosave) + native audio playback/waveform + read-only
-// transcript with speaker labels, virtualized for long meetings +
-// summary (raw + structured, generation included, Copy) + whole-meeting
-// export (Markdown/JSON/SRT/VTT through the native save panel), audio
-// download and a transcript "Copy" (SOU-195-slice) + resume + delete. Not
-// yet ported: transcript bulk/per-word edit (the "Edit" affordance next to
-// the Transcription title - a materially bigger feature than copy/export,
-// left for its own ticket).
-//
+export enum MeetingDetailView { reading, transcript }
+
 // Parts of the header meta line (date, duration, segment and session
 // counts). Zero-padded strings from Rust; the order and wording are @tr()
 // patterns below, so English can read the date month-first (SOU-246).
@@ -80,19 +65,23 @@ export component MeetingDetail inherits Rectangle {
     in property <float> audio-progress;
     in property <string> audio-position-label;
     in property <string> audio-duration-label;
+    in property <float> audio-position-seconds: 0.0;
+    in property <int> audio-session-index: -1;
     in property <[TranscriptBlock]> transcript-blocks;
     in property <int> transcript-segment-count;
     in property <float> transcript-spacer-before: 0.0;
     in property <float> transcript-spacer-after: 0.0;
+    // The page's scroll position while the transcript is shown: the list has
+    // no scroller of its own, so `main.rs` windows it from the page scroll.
     in-out property <length> transcript-scroll-top: 0px;
-    // The page's own single-scroll region (SOU-243) - unlike
-    // transcript-scroll-top above, this has no reason to persist any
-    // particular position across meetings, but MeetingDetail is a
-    // keep-alive component (reused, not recreated, per meeting), so
-    // page-scroll's Flickable would otherwise keep whatever scroll
-    // offset was last left on it. Exposed so main_window.slint can reset
-    // it to 0px on navigation, the same way it already resets
-    // meeting-detail-transcript-scroll-top.
+    // Opening of the transcript as running text for the reading view, from
+    // the whole meeting (`transcript-blocks` is only the mounted slice).
+    in property <string> transcript-preview;
+    in-out property <string> transcript-search;
+    in-out property <TranscriptLayout> transcript-layout: TranscriptLayout.conversation;
+    // MeetingDetail is keep-alive (reused per meeting), so the page scroll
+    // would keep the last offset: exposed so main_window.slint can reset it
+    // on navigation like meeting-detail-transcript-scroll-top.
     in-out property <length> page-scroll-top: 0px;
     in property <string> summary;
     in property <bool> summary-is-stale: false;
@@ -107,6 +96,7 @@ export component MeetingDetail inherits Rectangle {
     in property <[string]> summary-available-models;
     in property <[string]> summary-available-model-ids;
     in-out property <string> summary-selected-model-id;
+    in-out property <MeetingDetailView> view: MeetingDetailView.reading;
     in property <bool> can-resume: true;
     in property <string> resume-error;
     // SOU-295: only `interrupted` is shown here (the recording view shows
@@ -132,6 +122,7 @@ export component MeetingDetail inherits Rectangle {
     callback audio-seek-requested(float);
     callback transcript-paragraph-clicked(int, float);
     callback transcript-alias-save-requested(string, string);
+    callback transcript-search-changed(string);
     // Whole-meeting export (notes + summary + transcript) to a file the
     // user picks via the native save panel (SOU-195-slice, SOU-191's
     // dialog). `format` is the export's file format, not the confirmed
@@ -145,12 +136,28 @@ export component MeetingDetail inherits Rectangle {
     property <bool> editing-title: false;
     property <string> title-draft;
     property <bool> confirming-delete: false;
+    property <length> column-width: min(root.width - 2 * KitLayoutMetrics.space(KitThemeContext.current, LayoutSpace.roomy), KitLayoutMetrics.width-limit(KitThemeContext.current, ContentWidth.reading));
+    property <bool> is-empty-meeting: !root.has-audio && root.transcript-segment-count == 0 && root.summary == "";
+    property <bool> show-transcript: !root.is-empty-meeting && root.view == MeetingDetailView.transcript;
+    property <bool> show-reading: !root.show-transcript;
+    property <[OptionRow]> view-options: [
+        { token: 0, generation: 0, label: @tr("Lecture"), description: "", disabled: false },
+        { token: 1, generation: 0, label: @tr("Transcription"), description: "", disabled: false },
+    ];
 
     function confirm-delete() {
         if root.delete-permission.blocked { return; }
         root.delete-requested();
     }
-    property <bool> is-empty-meeting: !root.has-audio && root.transcript-segment-count == 0 && root.summary == "";
+    function show-view(next: MeetingDetailView) {
+        if root.view == next { return; }
+        root.view = next;
+        root.page-scroll-top = 0px;
+        root.transcript-scroll-top = 0px;
+    }
+    changed page-scroll-top => {
+        if root.show-transcript { root.transcript-scroll-top = root.page-scroll-top; }
+    }
     function commit-title(value: string) {
         // `accepted` (Enter) removes the field, which then also reports a
         // focus loss: only the first of the two may commit.
@@ -161,343 +168,415 @@ export component MeetingDetail inherits Rectangle {
         }
     }
 
-    // Click-away focus sink. A plain `TouchArea` click does not move
-    // keyboard focus in Slint, so without this the title field or the notes
-    // editor kept focus (and its highlighted border) after the user clicked
-    // somewhere else on the page. Declared before `content` so it sits
-    // underneath it: it only receives clicks nothing in the page handled.
-    focus-sink := FocusScope {
-        focus-on-tab-navigation: false;
-        width: 0px;
-        height: 0px;
-    }
-    TouchArea {
-        clicked => { focus-sink.focus(); }
-        // Wheel/trackpad anywhere on the page scrolls it, like a web page:
-        // page-scroll only spans the centred column, so the side gutters
-        // (and the sticky header) used to swallow the scroll. Scrolls over
-        // the transcript box never get here - its own Flickable takes them.
-        scroll-event(event) => {
-            root.page-scroll-top = clamp(root.page-scroll-top + event.delta-y, min(0px, page-scroll.height - page-scroll.content-height), 0px);
-            accept
-        }
-    }
+    // A plain click does not move keyboard focus in Slint: this background
+    // takes it so the title field or the notes editor release theirs.
+    focus-bg := KitFocusBackground {
+        VerticalLayout {
+            padding-top: KitLayoutMetrics.space(KitThemeContext.current, LayoutSpace.section);
+            spacing: KitLayoutMetrics.space(KitThemeContext.current, LayoutSpace.regular);
 
-    content := VerticalLayout {
-        width: min(root.width - 52px, 720px);
-        height: root.height;
-        x: (root.width - self.width) / 2;
-        padding-top: 26px;
-        // No bottom padding here: it would sit under page-scroll as a dead
-        // strip that overflowing content stops short of, like a cut-off UI.
-        // The breathing room lives at the end of page-inner instead, so
-        // scrolled content runs to the window's last pixel.
-        spacing: 14px;
+            HorizontalLayout {
+                alignment: center;
+                vertical-stretch: 0;
 
-        back-btn := KitButton {
-            accessible-name: @tr("Retour \u{e0} l'historique");
-            text: @tr("Historique");
-            control-size: ControlSize.compact;
-            width: self.preferred-width;
-            intent: ButtonIntent.quiet;
-            leading-icon: LucideArrows.arrow-left();
-            activated => { root.back-requested(); }
-        }
+                KitStack {
+                    width: root.column-width;
+                    gap: regular;
 
-        HorizontalLayout {
-            spacing: 14px;
-            vertical-stretch: 0;
-
-            VerticalLayout {
-                horizontal-stretch: 1;
-                spacing: 14px;
-
-                if !root.editing-title: title-btn := KitPressable {
-                    control-width: ControlWidth.fill;
-                    intent: ButtonIntent.quiet;
-                    height: 34px;
-                    padding-inline: 0px;
-                    padding-block: 0px;
-                    horizontal-stretch: 1;
-                    accessible-name: @tr("Renommer la réunion");
-                    activated => { root.title-draft = root.title; root.editing-title = true; }
-                    AppText {
-                        text: root.title;
-                        color: Theme.text-primary;
-                        typography: Typography.title;
-                        width: parent.width;
-                        overflow: elide;
-                        vertical-alignment: center;
-                    }
-                }
-
-                // Created on demand, so `init` is the moment the user just
-                // asked to rename: focus the field right away instead of
-                // making them click into it a second time.
-                if root.editing-title: KitTextField {
-                    text <=> root.title-draft;
-                    accessible-name: @tr("Titre de la réunion");
-                    text-size: 22px;
-                    init => { self.take-focus(); }
-                    escape-behavior: TextEscapeBehavior.cancel;
-                    cancelled => { root.editing-title = false; }
-                    commit-requested(value) => { root.commit-title(value); }
-                    // MeetingHeaderSection.svelte commits on blur too, so
-                    // clicking anywhere else ends the edit instead of leaving
-                    // a focused field stranded in the header.
-                    focus-observed(focused) => { if !focused { root.commit-title(self.text); } }
-                }
-
-                HorizontalLayout {
-                    height: 26px;
-                    vertical-stretch: 0;
-                    spacing: 9px;
-                    alignment: start;
-
-                    AppText {
-                        text: root.meta.sessions > 1
-                            ? @tr("{0}/{1}/{2} {3}:{4} · {5} · {6} segments · {7} sessions", root.meta.day, root.meta.month, root.meta.year, root.meta.hour, root.meta.minute, root.meta.duration, root.meta.segments, root.meta.sessions)
-                            : @tr("{0}/{1}/{2} {3}:{4} · {5} · {6} segments", root.meta.day, root.meta.month, root.meta.year, root.meta.hour, root.meta.minute, root.meta.duration, root.meta.segments);
-                        color: Theme.text-muted;
-                        typography: Typography.secondary;
-                        vertical-alignment: center;
-                    }
-
-                    if root.model-label != "": KitBadge {
-                        text: root.model-label;
-                        tone: Tone.accent;
-                    }
-                }
-
-                // MeetingHeaderSection.svelte's participant row: a Users icon
-                // then one outlined chip per name, same 1px square outline
-                // as the model chip above. Flexbox so a long invite list
-                // wraps instead of overflowing the header.
-                if root.participants.length > 0: HorizontalLayout {
-                    spacing: 7px;
-                    alignment: start;
-
-                    Rectangle {
-                        width: 13px;
-                        height: 22px;
-                        horizontal-stretch: 0;
-                        vertical-stretch: 0;
-
-                        KitIcon {
-                            width: 13px; height: 13px;
-                            y: (parent.height - self.height) / 2;
-                            glyph: LucideAccount.users();
-                            ink: Theme.text-muted;
+                    KitInline {
+                        back-btn := KitButton {
+                            accessible-name: @tr("Retour \u{e0} l'historique");
+                            text: @tr("Historique");
+                            control-size: ControlSize.compact;
+                            intent: ButtonIntent.quiet;
+                            leading-icon: LucideArrows.arrow-left();
+                            activated => { root.back-requested(); }
                         }
                     }
 
-                    FlexboxLayout {
-                        flex-wrap: wrap;
-                        spacing: 7px;
-                        horizontal-stretch: 1;
+                    KitInline {
+                        gap: roomy;
+                        alignment: stretch;
 
-                        for participant in root.participants: KitBadge {
-                            text: participant.is-organizer && participant.is-current-user ? @tr("{} (organisateur) (vous)", participant.name)
-                                                                : participant.is-organizer ? @tr("{} (organisateur)", participant.name)
-                                                                : participant.is-current-user ? @tr("{} (vous)", participant.name)
-                                                                : participant.name;
+                        KitStack {
+                            horizontal-stretch: 1;
+                            gap: compact;
+
+                            if !root.editing-title: title-btn := KitPressable {
+                                control-width: ControlWidth.fill;
+                                intent: ButtonIntent.quiet;
+                                padding-inline: 0px;
+                                padding-block: 0px;
+                                height: Typography.title-display.size * 1.4;
+                                accessible-name: @tr("Renommer la réunion");
+                                activated => { root.title-draft = root.title; root.editing-title = true; }
+                                AppText {
+                                    text: root.title;
+                                    color: Theme.text-primary;
+                                    typography: Typography.title-display;
+                                    width: parent.width;
+                                    overflow: elide;
+                                    vertical-alignment: center;
+                                }
+                            }
+
+                            // Created on demand, so `init` is the moment the user just
+                            // asked to rename: focus the field right away.
+                            if root.editing-title: KitTextField {
+                                text <=> root.title-draft;
+                                accessible-name: @tr("Titre de la réunion");
+                                text-size: Typography.title-display.size;
+                                init => { self.take-focus(); }
+                                escape-behavior: TextEscapeBehavior.cancel;
+                                cancelled => { root.editing-title = false; }
+                                commit-requested(value) => { root.commit-title(value); }
+                                focus-observed(focused) => { if !focused { root.commit-title(self.text); } }
+                            }
+
+                            KitInline {
+                                gap: compact;
+                                alignment: start;
+
+                                AppText {
+                                    text: root.meta.sessions > 1
+                                        ? @tr("{0}/{1}/{2} {3}:{4} · {5} · {6} segments · {7} sessions", root.meta.day, root.meta.month, root.meta.year, root.meta.hour, root.meta.minute, root.meta.duration, root.meta.segments, root.meta.sessions)
+                                        : @tr("{0}/{1}/{2} {3}:{4} · {5} · {6} segments", root.meta.day, root.meta.month, root.meta.year, root.meta.hour, root.meta.minute, root.meta.duration, root.meta.segments);
+                                    color: Theme.text-muted;
+                                    typography: Typography.content;
+                                    vertical-alignment: center;
+                                }
+
+                                if root.model-label != "": KitBadge {
+                                    text: root.model-label;
+                                    tone: Tone.accent;
+                                }
+                            }
+
+                            if root.participants.length > 0: KitInline {
+                                gap: compact;
+
+                                KitIcon {
+                                    glyph: LucideAccount.users();
+                                    ink: Theme.text-muted;
+                                    vertical-stretch: 0;
+                                }
+
+                                KitWrap {
+                                    horizontal-stretch: 1;
+
+                                    for participant in root.participants: KitBadge {
+                                        text: participant.is-organizer && participant.is-current-user ? @tr("{} (organisateur) (vous)", participant.name)
+                                                                            : participant.is-organizer ? @tr("{} (organisateur)", participant.name)
+                                                                            : participant.is-current-user ? @tr("{} (vous)", participant.name)
+                                                                            : participant.name;
+                                    }
+                                }
+                            }
                         }
-                    }
-                }
-            }
 
-            if !root.is-empty-meeting || root.can-resume || root.resume-error != "" || root.export-error != "" || root.audio-export-error != "": VerticalLayout {
-                spacing: 8px;
-                alignment: start;
-                horizontal-stretch: 0;
+                        if !root.is-empty-meeting || root.can-resume || root.resume-error != "" || root.export-error != "" || root.audio-export-error != "": KitStack {
+                            horizontal-stretch: 0;
+                            gap: compact;
 
-                // MeetingHeaderSection.svelte: Resume then a ghost
-                // "Export" button opening a format menu, on one row.
-                HorizontalLayout {
-                    spacing: 8px;
-                    alignment: end;
-                    vertical-stretch: 0;
+                            KitInline {
+                                alignment: end;
 
-                    if root.can-resume: resume-btn := KitButton {
-                        accessible-name: @tr("Reprendre l'enregistrement");
-                        text: @tr("Reprendre");
-                        control-size: ControlSize.compact;
-                        intent: ButtonIntent.primary;
-                        activated => { root.resume-requested(); }
-                    }
+                                if root.can-resume: resume-btn := KitButton {
+                                    accessible-name: @tr("Reprendre l'enregistrement");
+                                    text: @tr("Reprendre");
+                                    control-size: ControlSize.compact;
+                                    intent: ButtonIntent.primary;
+                                    activated => { root.resume-requested(); }
+                                }
 
-                    if !root.is-empty-meeting: export-btn := KitDropdownMenu {
-                        control-size: ControlSize.compact;
-                        text: @tr("Exporter");
-                        accessible-name: @tr("Exporter la réunion");
-                        leading-icon: LucideArrows.download();
-                        options: MeetingExportMenu.rows(root.has-audio, @tr("Audio (.ogg)"));
-                        chosen(row) => {
-                            if row.token >= 0 && row.token < MeetingExportMenu.formats.length {
-                                root.export-requested(MeetingExportMenu.formats[row.token]);
-                            } else if root.has-audio && row.token == MeetingExportMenu.formats.length {
-                                root.export-audio-requested();
+                                if !root.is-empty-meeting: export-btn := KitDropdownMenu {
+                                    control-size: ControlSize.compact;
+                                    text: @tr("Exporter");
+                                    accessible-name: @tr("Exporter la réunion");
+                                    leading-icon: LucideArrows.download();
+                                    options: MeetingExportMenu.rows(root.has-audio, @tr("Audio (.ogg)"));
+                                    chosen(row) => {
+                                        if row.token >= 0 && row.token < MeetingExportMenu.formats.length {
+                                            root.export-requested(MeetingExportMenu.formats[row.token]);
+                                        } else if root.has-audio && row.token == MeetingExportMenu.formats.length {
+                                            root.export-audio-requested();
+                                        }
+                                    }
+                                }
+                            }
+
+                            if root.export-error != "": AppText {
+                                text: root.export-error;
+                                color: Theme.danger;
+                                typography: Typography.caption;
+                                horizontal-alignment: right;
+                                wrap: word-wrap;
+                            }
+
+                            if root.audio-export-error != "": AppText {
+                                text: root.audio-export-error;
+                                color: Theme.danger;
+                                typography: Typography.caption;
+                                horizontal-alignment: right;
+                                wrap: word-wrap;
+                            }
+
+                            if root.resume-error != "": AppText {
+                                text: root.resume-error;
+                                color: Theme.danger;
+                                typography: Typography.caption;
+                                horizontal-alignment: right;
+                                wrap: word-wrap;
                             }
                         }
                     }
-                }
 
-                if root.export-error != "": AppText {
-                    text: root.export-error;
-                    color: Theme.danger;
-                    typography: Typography.caption;
-                    horizontal-alignment: right;
-                    wrap: word-wrap;
-                }
+                    if !root.is-empty-meeting: KitInline {
+                        KitSegmentedControl {
+                            ownership: Ownership.controlled;
+                            label: @tr("Affichage de la réunion");
+                            options: root.view-options;
+                            selected: { present: true, token: root.view == MeetingDetailView.transcript ? 1 : 0 };
+                            chosen(row) => { root.show-view(row.token == 1 ? MeetingDetailView.transcript : MeetingDetailView.reading); }
+                        }
+                    }
 
-                if root.audio-export-error != "": AppText {
-                    text: root.audio-export-error;
-                    color: Theme.danger;
-                    typography: Typography.caption;
-                    horizontal-alignment: right;
-                    wrap: word-wrap;
-                }
+                    if root.show-transcript && root.transcript-segment-count > 0: TranscriptToolbar {
+                        search <=> root.transcript-search;
+                        layout <=> root.transcript-layout;
+                        search-changed(query) => { root.transcript-search-changed(query); }
+                        copy-requested => { root.copy-transcript-requested(); }
+                    }
 
-                if root.resume-error != "": AppText {
-                    text: root.resume-error;
-                    color: Theme.danger;
-                    typography: Typography.caption;
+                    if root.wake-resume-notice == WakeResumeNotice.interrupted: StatusBanner {
+                        message: @tr("La mise en veille a interrompu cette réunion. Reprenez l'enregistrement pour continuer.");
+                        action-label: root.can-resume ? @tr("Reprendre") : "";
+                        action-triggered => { root.resume-requested(); }
+                        dismissed => { root.wake-resume-notice-dismissed(); }
+                    }
                 }
             }
-        }
 
-        Rectangle {
-            height: 1px;
-            vertical-stretch: 0;
-            background: Theme.surface-4;
-        }
+            // The header above stays on screen; everything below it is the
+            // page's single scroll region. The transcript is virtualized
+            // against that region (`transcript-scroll-top`) so long meetings
+            // never mount thousands of paragraphs at once.
+            KitScrollArea {
+                vertical-stretch: 1;
+                gap: none;
+                content-y <=> root.page-scroll-top;
 
-        if root.wake-resume-notice == WakeResumeNotice.interrupted: StatusBanner {
-            vertical-stretch: 0;
-            message: @tr("La mise en veille a interrompu cette réunion. Reprenez l'enregistrement pour continuer.");
-            dismissed => { root.wake-resume-notice-dismissed(); }
-        }
+                HorizontalLayout {
+                    alignment: center;
 
-        // Single scroll region (SOU-243 AC1): everything from Notes down is
-        // one Flickable, so the page scrolls as a whole instead of Notes/
-        // Summary each negotiating their own capped-height inner scroll.
-        // The header above (back-btn, title row, divider) lives outside this
-        // Flickable and stays on screen (sticky) while this area scrolls.
-        // Transcript is the one exception (AC2, see transcript_section.slint):
-        // it keeps its own internal virtualized Flickable rather than being
-        // flattened into this flow, so long meetings never mount thousands
-        // of paragraphs at once.
-        page-scroll := Flickable {
-            vertical-stretch: 1;
-            content-width: self.width;
-            content-height: page-inner.preferred-height;
-            content-y <=> root.page-scroll-top;
+                    KitStack {
+                        width: root.column-width;
+                        gap: roomy;
+                        padding-bottom: KitLayoutMetrics.space(KitThemeContext.current, LayoutSpace.section);
 
-            // Same click-away sink as the root one, inside the scroller: a
-            // Flickable keeps any press its content does not handle, so the
-            // root sink never sees clicks made on the page body.
-            TouchArea {
-                width: parent.content-width;
-                height: parent.content-height;
-                clicked => { focus-sink.focus(); }
+                        if root.is-empty-meeting: KitCard {
+                            level: SurfaceLevel.raised;
+                            inset: none;
+                            KitEmptyState {
+                                centered: true;
+                                title: @tr("Cette réunion ne contient aucun enregistrement.");
+                                description: @tr("Aucun audio, aucune transcription et aucun résumé.");
+                            }
+                        }
+
+                        if !root.is-empty-meeting && root.show-reading: AudioPlayerSection {
+                            has-audio: root.has-audio;
+                            is-playing: root.audio-is-playing;
+                            loading: root.audio-loading;
+                            waveform-commands: root.audio-waveform-commands;
+                            waveform-bars: root.audio-waveform-bars;
+                            progress: root.audio-progress;
+                            position-label: root.audio-position-label;
+                            duration-label: root.audio-duration-label;
+                            play-pause-requested => { root.audio-play-pause-requested(); }
+                            seek-requested(fraction) => { root.audio-seek-requested(fraction); }
+                        }
+
+                        if SummarizationUi.enabled && !root.is-empty-meeting && root.show-reading: SummarySection {
+                            summary: root.summary;
+                            summary-is-stale: root.summary-is-stale;
+                            summary-model-label: root.summary-model-label;
+                            available-models: root.summary-available-models;
+                            available-model-ids: root.summary-available-model-ids;
+                            selected-model-id <=> root.summary-selected-model-id;
+                            key-points: root.summary-key-points;
+                            decisions: root.summary-decisions;
+                            action-items: root.summary-action-items;
+                            open-questions: root.summary-open-questions;
+                            is-generating: root.summary-is-generating;
+                            generation-progress: root.summary-generation-progress;
+                            generation-error: root.summary-generation-error;
+                            generate-requested => { root.summarize-requested(); }
+                            copy-requested => { root.copy-summary-requested(); }
+                        }
+
+                        if SummarizationUi.enabled && root.show-reading: CompactTranscriptSection { }
+
+                        if root.show-reading: KitCard {
+                            level: SurfaceLevel.raised;
+                            inset: regular;
+                            gap: compact;
+
+                            KitInline {
+                                KitIcon {
+                                    glyph: LucideDesign.pen-line();
+                                    ink: Theme.accent;
+                                    vertical-stretch: 0;
+                                }
+
+                                KitText {
+                                    text: @tr("Notes");
+                                    role: TypographyRole.subtitle;
+                                    vertical-alignment: center;
+                                    horizontal-stretch: 1;
+                                }
+
+                                if root.notes-save-state == NotesSaveState.saved: KitText {
+                                    text: @tr("Enregistr\u{e9}");
+                                    role: TypographyRole.caption;
+                                    vertical-alignment: center;
+                                }
+                                if root.notes-save-state == NotesSaveState.pending: KitText {
+                                    text: @tr("Enregistrement\u{2026}");
+                                    role: TypographyRole.caption;
+                                    vertical-alignment: center;
+                                }
+                            }
+
+                            notes-edit := KitTextArea {
+                                text <=> root.notes;
+                                min-lines: 4;
+                                max-lines: 4;
+                                placeholder: @tr("Ajoutez les décisions, actions et noms importants…");
+                                accessible-name: @tr("Notes de la réunion");
+                                edited(value) => { root.notes-changed(value); }
+                            }
+
+                            KitText {
+                                text: @tr("Les notes sont enregistr\u{e9}es avec la r\u{e9}union et am\u{e9}liorent le r\u{e9}sum\u{e9}.");
+                                role: TypographyRole.caption;
+                            }
+                        }
+
+                        if !root.is-empty-meeting && root.show-reading: KitCard {
+                            level: SurfaceLevel.raised;
+                            inset: regular;
+                            gap: compact;
+
+                            KitInline {
+                                KitText {
+                                    text: @tr("Transcription");
+                                    role: TypographyRole.subtitle;
+                                    vertical-alignment: center;
+                                    horizontal-stretch: 1;
+                                }
+
+                                if root.transcript-segment-count > 0: KitButton {
+                                    text: @tr("Voir la transcription complète");
+                                    control-size: ControlSize.compact;
+                                    intent: ButtonIntent.secondary;
+                                    activated => { root.show-view(MeetingDetailView.transcript); }
+                                }
+                            }
+
+                            if root.transcript-segment-count == 0: AppText {
+                                text: @tr("Aucun texte transcrit pour cette r\u{e9}union.");
+                                color: Theme.text-muted;
+                                typography: Typography.secondary;
+                            }
+
+                            if root.transcript-preview != "": AppText {
+                                text: root.transcript-preview;
+                                color: Theme.text-muted;
+                                typography: Typography.content;
+                                wrap: word-wrap;
+                                overflow: elide;
+                                height: min(self.preferred-height, 3 * 1.4 * Typography.content.size);
+                            }
+                        }
+
+                        if root.show-transcript: TranscriptSection {
+                            blocks: root.transcript-blocks;
+                            segment-count: root.transcript-segment-count;
+                            has-audio: root.has-audio;
+                            spacer-before: root.transcript-spacer-before;
+                            spacer-after: root.transcript-spacer-after;
+                            layout: root.transcript-layout;
+                            filtered: root.transcript-search != "";
+                            audio-position-seconds: root.audio-position-seconds;
+                            audio-session-index: root.audio-session-index;
+                            paragraph-clicked(session, time) => { root.transcript-paragraph-clicked(session, time); }
+                            background-clicked => { focus-bg.focus(); }
+                            alias-save-requested(term, pronunciation) => { root.transcript-alias-save-requested(term, pronunciation); }
+                        }
+
+                        if root.show-reading: KitInline {
+                            gap: compact;
+
+                            if !root.confirming-delete || root.delete-permission.blocked: delete-link := KitButton {
+                                accessible-name: @tr("Supprimer la réunion");
+                                text: @tr("Supprimer la réunion");
+                                control-size: ControlSize.compact;
+                                intent: ButtonIntent.quiet;
+                                disabled: root.delete-permission.blocked;
+                                leading-icon: LucideFiles.trash();
+                                activated => { if !root.delete-permission.blocked { root.confirming-delete = true; } }
+                            }
+
+                            if root.confirming-delete && !root.delete-permission.blocked: AppText {
+                                text: @tr("Supprimer cette réunion définitivement ?");
+                                typography: Typography.section;
+                                color: Theme.text-primary;
+                                vertical-alignment: center;
+                            }
+
+                            if root.confirming-delete && !root.delete-permission.blocked: confirm-btn := KitButton {
+                                accessible-name: @tr("Oui, supprimer");
+                                text: @tr("Oui, supprimer");
+                                control-size: ControlSize.compact;
+                                intent: ButtonIntent.destructive;
+                                init => { self.take-focus(); }
+                                key-event(event) => {
+                                    if event.text == Key.Escape { root.confirming-delete = false; return KitKeyResult.accept; }
+                                    return KitKeyResult.reject;
+                                }
+                                activated => { root.confirm-delete(); }
+                            }
+
+                            if root.confirming-delete && !root.delete-permission.blocked: KitButton {
+                                text: @tr("Annuler");
+                                control-size: ControlSize.compact;
+                                intent: ButtonIntent.quiet;
+                                activated => { root.confirming-delete = false; }
+                            }
+                        }
+
+                        if root.show-reading && root.delete-permission.blocked: AppText {
+                            text: ActionGuards.reason(root.delete-permission);
+                            typography: Typography.secondary;
+                            color: Theme.text-muted;
+                            wrap: word-wrap;
+                        }
+                        if root.show-reading && root.delete-error != "": KitAlert {
+                            severity: AlertSeverity.error;
+                            message: @tr("Impossible de supprimer la réunion : {}", root.delete-error);
+                        }
+                    }
+                }
             }
 
-            page-inner := VerticalLayout {
-                width: page-scroll.width;
-                padding-bottom: 34px;
-                spacing: 22px;
+            if root.show-transcript: HorizontalLayout {
+                alignment: center;
+                vertical-stretch: 0;
+                padding-bottom: KitLayoutMetrics.space(KitThemeContext.current, LayoutSpace.regular);
 
-                VerticalLayout {
-                    spacing: 10px;
-
-                    HorizontalLayout {
-                        height: 24px;
-                        vertical-stretch: 0;
-                        spacing: 8px;
-
-                        KitIcon {
-                            width: 18px;
-                            height: 18px;
-                            glyph: LucideDesign.pen-line();
-                            ink: Theme.accent;
-                        }
-
-                        AppText {
-                            color: Theme.text-primary;
-                            text: @tr("Notes");
-                            typography: Typography.section;
-
-                            vertical-alignment: center;
-                        }
-
-                        Rectangle { horizontal-stretch: 1; }
-
-                        if root.notes-save-state == NotesSaveState.saved: AppText {
-                            text: @tr("Enregistr\u{e9}");
-                            typography: Typography.caption;
-                            color: Theme.text-muted;
-                            vertical-alignment: center;
-                        }
-                        if root.notes-save-state == NotesSaveState.pending: AppText {
-                            text: @tr("Enregistrement\u{2026}");
-                            typography: Typography.caption;
-                            color: Theme.text-muted;
-                            vertical-alignment: center;
-                        }
-                    }
-
-                    notes-edit := KitTextArea {
-                        text <=> root.notes;
-                        min-lines: 4;
-                        max-lines: 4;
-                        placeholder: @tr("Ajoutez les décisions, actions et noms importants…");
-                        accessible-name: @tr("Notes de la réunion");
-                        edited(value) => { root.notes-changed(value); }
-                    }
-
-                    AppText {
-                        text: @tr("Les notes sont enregistr\u{e9}es avec la r\u{e9}union et am\u{e9}liorent le r\u{e9}sum\u{e9}.");
-                        color: Theme.text-muted;
-                        typography: Typography.caption;
-                    }
-                }
-
-                Rectangle {
-                    height: 1px;
-                    vertical-stretch: 0;
-                    background: Theme.surface-4;
-                }
-
-                if root.is-empty-meeting: Rectangle {
-                    height: 84px;
-                    vertical-stretch: 0;
-                    border-radius: 4px;
-                    border-width: 1px;
-                    border-color: Theme.border-soft;
-
-                    VerticalLayout {
-                        padding: 16px;
-                        spacing: 5px;
-                        alignment: center;
-
-                        AppText {
-                            text: @tr("Cette réunion ne contient aucun enregistrement.");
-                            typography: Typography.section;
-
-                            color: Theme.text-secondary;
-                            horizontal-alignment: center;
-                        }
-                        AppText {
-                            text: @tr("Aucun audio, aucune transcription et aucun résumé.");
-                            typography: Typography.small;
-                            color: Theme.text-muted;
-                            horizontal-alignment: center;
-                        }
-                    }
-                }
-
-                if !root.is-empty-meeting: AudioPlayerSection {
-                    vertical-stretch: 0;
+                AudioPlayerSection {
+                    width: root.column-width;
                     has-audio: root.has-audio;
                     is-playing: root.audio-is-playing;
                     loading: root.audio-loading;
@@ -508,108 +587,6 @@ export component MeetingDetail inherits Rectangle {
                     duration-label: root.audio-duration-label;
                     play-pause-requested => { root.audio-play-pause-requested(); }
                     seek-requested(fraction) => { root.audio-seek-requested(fraction); }
-                }
-
-                if !root.is-empty-meeting: TranscriptSection {
-                    blocks: root.transcript-blocks;
-                    segment-count: root.transcript-segment-count;
-                    has-audio: root.has-audio;
-                    spacer-before: root.transcript-spacer-before;
-                    spacer-after: root.transcript-spacer-after;
-                    scroll-top <=> root.transcript-scroll-top;
-                    paragraph-clicked(session, time) => { root.transcript-paragraph-clicked(session, time); }
-                    background-clicked => { focus-sink.focus(); }
-                    alias-save-requested(term, pronunciation) => { root.transcript-alias-save-requested(term, pronunciation); }
-                    copy-requested => { root.copy-transcript-requested(); }
-                }
-
-                if SummarizationUi.enabled: CompactTranscriptSection { }
-
-                if SummarizationUi.enabled && !root.is-empty-meeting: SummarySection {
-                    vertical-stretch: 0;
-                    summary: root.summary;
-                    summary-is-stale: root.summary-is-stale;
-                    summary-model-label: root.summary-model-label;
-                    available-models: root.summary-available-models;
-                    available-model-ids: root.summary-available-model-ids;
-                    selected-model-id <=> root.summary-selected-model-id;
-                    key-points: root.summary-key-points;
-                    decisions: root.summary-decisions;
-                    action-items: root.summary-action-items;
-                    open-questions: root.summary-open-questions;
-                    is-generating: root.summary-is-generating;
-                    generation-progress: root.summary-generation-progress;
-                    generation-error: root.summary-generation-error;
-                    generate-requested => { root.summarize-requested(); }
-                    copy-requested => { root.copy-summary-requested(); }
-                }
-
-                // MeetingDetail.svelte's ConfirmAction at the bottom of the
-                // page: a danger ghost link, then an inline "are you sure"
-                // row (same two-step convention as the timeline's
-                // hover-delete, no modal). "Annuler" or Escape drops it.
-                // Wrapped in a start-aligned row: a fixed-width child placed
-                // straight in this VerticalLayout caps the layout's max width
-                // and shrank the whole page column to the link's width.
-                HorizontalLayout {
-                alignment: start;
-                vertical-stretch: 0;
-
-                if !root.confirming-delete || root.delete-permission.blocked: delete-link := KitButton {
-                    accessible-name: @tr("Supprimer la réunion");
-                    text: @tr("Supprimer la réunion");
-                    control-size: ControlSize.compact;
-                    intent: ButtonIntent.quiet;
-                    disabled: root.delete-permission.blocked;
-                    leading-icon: LucideFiles.trash();
-                    activated => { if !root.delete-permission.blocked { root.confirming-delete = true; } }
-                }
-
-                if root.confirming-delete && !root.delete-permission.blocked: HorizontalLayout {
-                    spacing: 8px;
-                    alignment: start;
-                    vertical-stretch: 0;
-                    horizontal-stretch: 1;
-
-                    AppText {
-                        text: @tr("Supprimer cette réunion définitivement ?");
-                        typography: Typography.content;
-                        color: Theme.text-muted;
-                        vertical-alignment: center;
-                    }
-
-                    confirm-btn := KitButton {
-                        accessible-name: @tr("Oui, supprimer");
-                        text: @tr("Oui, supprimer");
-                        control-size: ControlSize.compact;
-                        intent: ButtonIntent.destructive;
-                        init => { self.take-focus(); }
-                        key-event(event) => {
-                            if event.text == Key.Escape { root.confirming-delete = false; return KitKeyResult.accept; }
-                            return KitKeyResult.reject;
-                        }
-                        activated => { root.confirm-delete(); }
-                    }
-
-                    KitButton {
-                        text: @tr("Annuler");
-                        intent: ButtonIntent.quiet;
-                        activated => { root.confirming-delete = false; }
-                    }
-                }
-                }
-
-                if root.delete-permission.blocked: AppText {
-                    text: ActionGuards.reason(root.delete-permission);
-                    typography: Typography.secondary;
-                    color: Theme.text-muted;
-                    wrap: word-wrap;
-                }
-                if root.delete-error != "": AppText {
-                    text: @tr("Impossible de supprimer la réunion : {}", root.delete-error);
-                    typography: Typography.secondary;
-                    color: Theme.danger;
-                    wrap: word-wrap;
                 }
             }
         }

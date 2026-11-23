@@ -78,11 +78,12 @@ type AppHandle = Arc<AppState>;
 /// features/meeting/controller.svelte.ts.
 const NOTES_DEBOUNCE: Duration = Duration::from_millis(800);
 
-/// Matches `TranscriptSection`'s fixed `height: 260px` Rectangle - the
-/// windowing math below only needs to be approximately right (it pads with
-/// `TRANSCRIPT_SCROLL_MARGIN` on each side), not pixel-exact.
-const TRANSCRIPT_VIEWPORT_HEIGHT: f32 = 260.0;
-const TRANSCRIPT_SCROLL_MARGIN: f32 = 3.0 * TRANSCRIPT_VIEWPORT_HEIGHT;
+/// Upper bound of the meeting page's scroll region, which the transcript
+/// list scrolls in - the windowing math below only needs to be approximately
+/// right (it pads with `TRANSCRIPT_SCROLL_MARGIN` on each side), not
+/// pixel-exact.
+const TRANSCRIPT_VIEWPORT_HEIGHT: f32 = 900.0;
+const TRANSCRIPT_SCROLL_MARGIN: f32 = 1.5 * TRANSCRIPT_VIEWPORT_HEIGHT;
 
 /// Matches `DiagnosticsSettingsSection.svelte`'s `TAIL_LINES`/`POLL_MS`.
 const SETTINGS_LOG_TAIL_LINES: u32 = 80;
@@ -95,6 +96,7 @@ const ARCHIVE_EXPORT_POLL: Duration = Duration::from_millis(150);
 /// property only ever holds the current visible slice of this, never the
 /// whole thing - that's the actual virtualization.
 struct TranscriptState {
+    source: Vec<TranscriptBlock>,
     blocks: Vec<TranscriptBlock>,
     offsets: Vec<f32>,
     mounted_start: usize,
@@ -637,7 +639,9 @@ fn load_meeting_transcript_window(
     let blocks =
         transcript::build_transcript_blocks(&meeting.segments, &meeting.recording_sessions);
     let offsets = transcript::compute_offsets(&blocks);
+    window.set_meeting_detail_transcript_preview(transcript::preview_text(&blocks).into());
     *transcript_state.borrow_mut() = Some(TranscriptState {
+        source: blocks.clone(),
         blocks,
         offsets,
         mounted_start: usize::MAX,
@@ -685,6 +689,27 @@ fn update_transcript_window(
     // `transcript::tests::visible_window_slices_a_huge_transcript_to_a_bounded_count`
     // for the automated version of this same claim.
     eprintln!("transcript window: {mounted}/{total} blocks mounted (SOU-187 AC15)");
+}
+
+/// Narrows the mounted transcript to the paragraphs containing `query` (all
+/// of them when it is blank), then re-windows from the top.
+fn filter_transcript_window(
+    window: &MainWindow,
+    transcript_state: &Rc<RefCell<Option<TranscriptState>>>,
+    query: &str,
+) {
+    {
+        let mut guard = transcript_state.borrow_mut();
+        let Some(state) = guard.as_mut() else {
+            return;
+        };
+        state.blocks = transcript::filter_blocks(&state.source, query);
+        state.offsets = transcript::compute_offsets(&state.blocks);
+        state.mounted_start = usize::MAX;
+        state.mounted_end = usize::MAX;
+    }
+    window.invoke_reset_meeting_detail_transcript_scroll_position();
+    update_transcript_window(window, transcript_state, 0.0);
 }
 
 /// Drops the transcript window state - mirrors `stop_audio_player`.
@@ -859,6 +884,8 @@ fn restore_meeting_audio_on_show(window: &MainWindow) {
 /// tick only runs during playback (SOU-284).
 fn project_audio_position(window: &MainWindow, p: &audio_player::AudioPlayer) {
     window.set_meeting_detail_audio_progress(p.progress());
+    window.set_meeting_detail_audio_position_seconds(p.position_seconds() as f32);
+    window.set_meeting_detail_audio_session_index(p.session_index() as i32);
     window.set_meeting_detail_audio_position_label(
         timeline::format_duration(p.position_seconds()).into(),
     );
@@ -1835,6 +1862,8 @@ fn reset_meeting_audio_labels(window: &MainWindow) {
     window.set_meeting_detail_audio_duration_label("".into());
     window.set_meeting_detail_audio_position_label(timeline::format_duration(0.0).into());
     window.set_meeting_detail_audio_progress(0.0);
+    window.set_meeting_detail_audio_position_seconds(0.0);
+    window.set_meeting_detail_audio_session_index(-1);
     window.set_meeting_detail_audio_is_playing(false);
 }
 
@@ -4284,6 +4313,13 @@ fn wire_callbacks(
     window.on_transcript_scroll_changed(move |scroll_top_px| {
         if let Some(window) = weak.upgrade() {
             update_transcript_window(&window, &transcript_state_for_scroll, -scroll_top_px);
+        }
+    });
+    let weak = window.as_weak();
+    let transcript_state_for_search = transcript_state.clone();
+    window.on_transcript_search_changed(move |query| {
+        if let Some(window) = weak.upgrade() {
+            filter_transcript_window(&window, &transcript_state_for_search, &query);
         }
     });
     let upcoming_cache: Rc<RefCell<Vec<CalendarEvent>>> = Rc::new(RefCell::new(Vec::new()));
@@ -8774,6 +8810,7 @@ mod tests {
         let player = Rc::new(RefCell::new(None));
         let timer = Rc::new(RefCell::new(Some(slint::Timer::default())));
         let transcript = Rc::new(RefCell::new(Some(TranscriptState {
+            source: vec![],
             blocks: vec![],
             offsets: vec![],
             mounted_start: 0,

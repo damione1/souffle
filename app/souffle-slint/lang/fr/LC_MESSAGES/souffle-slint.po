@@ -156,6 +156,7 @@ msgstr "Code"
 msgctxt "PickerLabels"
 msgid "Modèle introuvable"
 msgstr "Modèle introuvable"
+
 msgctxt "ActionGuards"
 msgid "Cette réunion est en cours de démarrage."
 msgstr "Cette réunion est en cours de démarrage."
@@ -335,11 +336,6 @@ msgctxt "RecordingView"
 msgid "TRANSCRIPTION EN DIRECT"
 msgstr "TRANSCRIPTION EN DIRECT"
 
-#: app/souffle-slint/ui/recording_view.slint:337
-msgctxt "RecordingView"
-msgid "Audio système demandé"
-msgstr "Audio système demandé"
-
 msgctxt "RecordingView"
 msgid "Audio système actif"
 msgstr "Audio système actif"
@@ -367,11 +363,6 @@ msgstr "La génération du résumé a échoué : {}"
 msgctxt "SummarySection"
 msgid "Générer"
 msgstr "Générer"
-
-#: app/souffle-slint/ui/recording_view.slint:337
-msgctxt "RecordingView"
-msgid "Audio système indisponible"
-msgstr "Audio système indisponible"
 
 #: app/souffle-slint/ui/recording_view.slint:426
 msgctxt "RecordingView"
@@ -472,11 +463,6 @@ msgctxt "OnboardingView"
 msgid "Actualiser"
 msgstr "Actualiser"
 
-#: app/souffle-slint/ui/onboarding_view.slint:243
-msgctxt "OnboardingView"
-msgid "Le microphone peut être changé plus tard dans les Réglages."
-msgstr "Le microphone peut être changé plus tard dans les Réglages."
-
 #: app/souffle-slint/ui/onboarding_view.slint:255
 msgctxt "OnboardingView"
 msgid "Téléchargement du modèle…"
@@ -498,15 +484,6 @@ msgid ""
 "Cliquez sur le raccourci, puis appuyez sur les touches voulues. Échap annule."
 msgstr ""
 "Cliquez sur le raccourci, puis appuyez sur les touches voulues. Échap annule."
-
-#: app/souffle-slint/ui/onboarding_view.slint:347
-msgctxt "OnboardingView"
-msgid ""
-"À l'arrêt, colle la transcription dans l'app que vous utilisiez. Nécessite "
-"Accessibilité."
-msgstr ""
-"À l'arrêt, colle la transcription dans l'app que vous utilisiez. Nécessite "
-"Accessibilité."
 
 #: app/souffle-slint/ui/onboarding_view.slint:374
 msgctxt "OnboardingView"
@@ -581,21 +558,6 @@ msgstr "Réunions"
 msgctxt "IdleView"
 msgid "Dictées"
 msgstr "Dictées"
-
-#: app/souffle-slint/ui/components/themed_spin.slint:12
-msgctxt "ThemedSpinBox"
-msgid "Valeur"
-msgstr "Valeur"
-
-#: app/souffle-slint/ui/components/themed_slider.slint:11
-msgctxt "ThemedSlider"
-msgid "Valeur"
-msgstr "Valeur"
-
-#: app/souffle-slint/ui/components/themed_combo.slint:16
-msgctxt "ThemedComboBox"
-msgid "Sélection"
-msgstr "Sélection"
 
 #: app/souffle-slint/ui/components/themed_combo.slint:76
 msgctxt "PickerLabels"
@@ -727,26 +689,6 @@ msgctxt "AudioPlayerSection"
 msgid "Lecture"
 msgstr "Lecture"
 
-#: app/souffle-slint/ui/components/audio_player_section.slint:60
-msgctxt "AudioPlayerSection"
-msgid "⏸"
-msgstr "⏸"
-
-#: app/souffle-slint/ui/components/audio_player_section.slint:60
-msgctxt "AudioPlayerSection"
-msgid "▶"
-msgstr "▶"
-
-#: app/souffle-slint/ui/components/audio_player_section.slint:67
-msgctxt "AudioPlayerSection"
-msgid " / {}"
-msgstr " / {}"
-
-#: app/souffle-slint/ui/components/audio_player_section.slint:81
-msgctxt "AudioPlayerSection"
-msgid "Position de lecture"
-msgstr "Position de lecture"
-
 #: app/souffle-slint/ui/components/timeline_section.slint:63
 msgctxt "TimelineSection"
 msgid "À VENIR AUJOURD'HUI"
@@ -813,11 +755,6 @@ msgid ""
 msgstr ""
 "Essayez d'autres mots-clés : la recherche couvre toutes les transcriptions."
 
-#: app/souffle-slint/ui/components/themed_switch.slint:9
-msgctxt "ThemedSwitch"
-msgid "Interrupteur"
-msgstr "Interrupteur"
-
 #: app/souffle-slint/ui/components/app_header.slint:34
 msgctxt "AppHeader"
 msgid "Enregistrement"
@@ -873,11 +810,6 @@ msgctxt "AppHeader"
 msgid "Réglages"
 msgstr "Réglages"
 
-#: app/souffle-slint/ui/components/summary_section.slint:44
-msgctxt "SummarySection"
-msgid "Résumé"
-msgstr "Résumé"
-
 #: app/souffle-slint/ui/components/summary_section.slint:76
 msgctxt "SummarySection"
 msgid "Générer le résumé (expérimental)"
@@ -902,11 +834,6 @@ msgstr "Résumé obsolète (audio ajouté depuis)"
 msgctxt "SummarySection"
 msgid "Décisions"
 msgstr "Décisions"
-
-#: app/souffle-slint/ui/components/summary_section.slint:260
-msgctxt "SummarySection"
-msgid "• {}"
-msgstr "• {}"
 
 #: app/souffle-slint/ui/components/summary_section.slint:271
 msgctxt "SummarySection"
@@ -978,11 +905,6 @@ msgctxt "ActionHero"
 msgid "Transcrire en direct avec l’audio système"
 msgstr "Transcrire en direct avec l’audio système"
 
-#: app/souffle-slint/ui/components/themed_checkbox.slint:27
-msgctxt "ThemedCheckbox"
-msgid "✓"
-msgstr "✓"
-
 #: app/souffle-slint/ui/components/transcript_section.slint:118
 msgctxt "DictionaryAliasPopover"
 msgid "Alias de dictionnaire"
@@ -992,11 +914,6 @@ msgstr "Alias de dictionnaire"
 msgctxt "DictionaryAliasPopover"
 msgid "Fermer"
 msgstr "Fermer"
-
-#: app/souffle-slint/ui/components/transcript_section.slint:138
-msgctxt "TranscriptSection"
-msgid "✕"
-msgstr "✕"
 
 #: app/souffle-slint/ui/components/transcript_section.slint:146
 msgctxt "DictionaryAliasPopover"
@@ -1029,7 +946,7 @@ msgid "Aucun texte transcrit pour cette réunion."
 msgstr "Aucun texte transcrit pour cette réunion."
 
 #: app/souffle-slint/ui/components/transcript_section.slint:253
-msgctxt "TranscriptSection"
+msgctxt "TranscriptRowHeader"
 msgid "Aller à {}"
 msgstr "Aller à {}"
 
@@ -1184,15 +1101,6 @@ msgctxt "SummaryTemplatesSection"
 msgid "MODÈLES DE RÉSUMÉ"
 msgstr "MODÈLES DE RÉSUMÉ"
 
-#: app/souffle-slint/ui/components/settings/summary_templates_section.slint:44
-msgctxt "SummaryTemplatesSection"
-msgid ""
-"Le modèle par défaut est utilisé pour résumer automatiquement une réunion "
-"terminée."
-msgstr ""
-"Le modèle par défaut est utilisé pour résumer automatiquement une réunion "
-"terminée."
-
 #: app/souffle-slint/ui/components/settings/summary_templates_section.slint:53
 msgctxt "SummaryTemplatesSection"
 msgid "Modèle par défaut"
@@ -1281,11 +1189,6 @@ msgid ""
 msgstr ""
 "Vérifiez chaque autorisation. La réparation réinitialise uniquement l’entrée "
 "Accessibilité avant de redemander l’accès."
-
-#: app/souffle-slint/ui/components/settings/settings_permissions_dialog.slint:54
-msgctxt "SettingsPermissionsDialog"
-msgid "Vous pourrez les accorder plus tard."
-msgstr "Vous pourrez les accorder plus tard."
 
 #: app/souffle-slint/ui/components/settings/settings_permissions_dialog.slint:62
 msgctxt "SettingsPermissionsDialog"
@@ -1786,36 +1689,6 @@ msgctxt "MicrophoneSection"
 msgid "Utilisé quand plusieurs micros sont branchés en même temps."
 msgstr "Utilisé quand plusieurs micros sont branchés en même temps."
 
-#: app/souffle-slint/ui/components/settings/microphone_section.slint:257
-msgctxt "MicrophoneSection"
-msgid "Intégré"
-msgstr "Intégré"
-
-#: app/souffle-slint/ui/components/settings/microphone_section.slint:258
-msgctxt "MicrophoneSection"
-msgid "USB"
-msgstr "USB"
-
-#: app/souffle-slint/ui/components/settings/microphone_section.slint:259
-msgctxt "MicrophoneSection"
-msgid "Bluetooth"
-msgstr "Bluetooth"
-
-#: app/souffle-slint/ui/components/settings/microphone_section.slint:260
-msgctxt "MicrophoneSection"
-msgid "Virtuel"
-msgstr "Virtuel"
-
-#: app/souffle-slint/ui/components/settings/microphone_section.slint:261
-msgctxt "MicrophoneSection"
-msgid "Agrégé"
-msgstr "Agrégé"
-
-#: app/souffle-slint/ui/components/settings/microphone_section.slint:262
-msgctxt "MicrophoneSection"
-msgid "Inconnu"
-msgstr "Inconnu"
-
 #: app/souffle-slint/ui/components/settings/microphone_section.slint:263
 msgctxt "MicrophoneSection"
 msgid " · par défaut"
@@ -1932,20 +1805,6 @@ msgstr "Tous les calendriers sont inclus ; décochez ceux à masquer."
 msgctxt "DictionarySection"
 msgid "DICTIONNAIRE PERSONNALISÉ"
 msgstr "DICTIONNAIRE PERSONNALISÉ"
-
-#: app/souffle-slint/ui/components/settings/dictionary_section.slint:59
-msgctxt "DictionarySection"
-msgid "Apprendre depuis les corrections après collage"
-msgstr "Apprendre depuis les corrections après collage"
-
-#: app/souffle-slint/ui/components/settings/dictionary_section.slint:60
-msgctxt "DictionarySection"
-msgid ""
-"Quand le collage auto est actif, retenir les corrections mot à mot faites "
-"dans l'app cible pour les dictées suivantes."
-msgstr ""
-"Quand le collage auto est actif, retenir les corrections mot à mot faites "
-"dans l'app cible pour les dictées suivantes."
 
 #: app/souffle-slint/ui/components/settings/dictionary_section.slint:77
 msgctxt "DictionarySection"
@@ -2729,53 +2588,6 @@ msgctxt "UpdateAvailableDialog"
 msgid "Ouvrir la page de release"
 msgstr "Ouvrir la page de release"
 
-#~ msgctxt "RecordingView"
-#~ msgid "Moi"
-#~ msgstr "Moi"
-
-#~ msgctxt "RecordingView"
-#~ msgid "Eux"
-#~ msgstr "Eux"
-
-#~ msgctxt "StatusBanner"
-#~ msgid "×"
-#~ msgstr "×"
-
-#~ msgctxt "UpdateAvailableDialog"
-#~ msgid "Installation impossible pour l'instant : {}"
-#~ msgstr "Installation impossible pour l'instant : {}"
-
-#~ msgctxt "UpdateAvailableDialog"
-#~ msgid "Voir sur GitHub"
-#~ msgstr "Voir sur GitHub"
-
-#~ msgctxt "UpdateAvailableDialog"
-#~ msgid "Télécharger"
-#~ msgstr "Télécharger"
-
-#~ msgctxt "OnboardingView"
-#~ msgid "Dictée et transcription de réunion, 100% locale."
-#~ msgstr "Dictée et transcription de réunion, 100% locale."
-
-#~ msgctxt "OnboardingView"
-#~ msgid "Le modèle est en erreur."
-#~ msgstr "Le modèle est en erreur."
-
-#~ msgctxt "OnboardingView"
-#~ msgid "Le collage automatique nécessite la permission Accessibilité."
-#~ msgstr "Le collage automatique nécessite la permission Accessibilité."
-
-#~ msgctxt "OnboardingView"
-#~ msgid "Vérifier"
-#~ msgstr "Vérifier"
-
-#~ msgctxt "OnboardingView"
-#~ msgid "Les permissions peuvent être accordées plus tard."
-#~ msgstr "Les permissions peuvent être accordées plus tard."
-
-#~ msgctxt "SummarySection"
-#~ msgid "Aucun résumé pour cette réunion."
-#~ msgstr "Aucun résumé pour cette réunion."
 msgctxt "MeetingDetail"
 msgid "Supprimer la réunion"
 msgstr "Supprimer la réunion"
@@ -2945,10 +2757,6 @@ msgid "Audio (.ogg)"
 msgstr "Audio (.ogg)"
 
 msgctxt "MeetingDetail"
-msgid "Format d'export"
-msgstr "Format d'export"
-
-msgctxt "MeetingDetail"
 msgid "Exporter la réunion"
 msgstr "Exporter la réunion"
 
@@ -2956,15 +2764,15 @@ msgctxt "MeetingDetail"
 msgid "Exporter"
 msgstr "Exporter"
 
-msgctxt "TranscriptSection"
+msgctxt "TranscriptToolbar"
 msgid "Copier la transcription"
 msgstr "Copier la transcription"
 
-msgctxt "TranscriptSection"
+msgctxt "TranscriptToolbar"
 msgid "Copier"
 msgstr "Copier"
 
-msgctxt "TranscriptSection"
+msgctxt "TranscriptToolbar"
 msgid "Copié"
 msgstr "Copié"
 
@@ -3066,10 +2874,6 @@ msgid ""
 msgstr ""
 "La mise en veille a interrompu cette réunion. Reprenez l'enregistrement pour "
 "continuer."
-
-msgctxt "ThemedComboBox"
-msgid "Apple Speech — assets système"
-msgstr "Apple Speech — assets système"
 
 #: app/souffle-slint/ui/components/settings/interface_section.slint:14
 msgctxt "ShortcutNoticeText"
@@ -3250,10 +3054,6 @@ msgid "Enregistrer"
 msgstr "Enregistrer"
 
 msgctxt "AudioSection"
-msgid "AUDIO AVANCÉ"
-msgstr "AUDIO AVANCÉ"
-
-msgctxt "AudioSection"
 msgid "Capture diagnostique avant AEC"
 msgstr "Capture diagnostique avant AEC"
 
@@ -3356,10 +3156,6 @@ msgstr "Pourcentage de texte à conserver"
 msgctxt "CompressionSection"
 msgid "{} %"
 msgstr "{} %"
-
-msgctxt "CompressionSection"
-msgid "LLMLingua-2 de Microsoft, local et hors ligne après installation."
-msgstr "LLMLingua-2 de Microsoft, local et hors ligne après installation."
 
 msgctxt "CompactTranscriptSection"
 msgid "Version compacte (expérimentale)"
@@ -3788,3 +3584,78 @@ msgstr "Version compacte"
 msgctxt "IdleView"
 msgid "Historique"
 msgstr "Historique"
+
+#: app/souffle-slint/ui/meeting_detail.slint:134
+msgctxt "MeetingDetail"
+msgid "Lecture"
+msgstr "Lecture"
+
+#: app/souffle-slint/ui/meeting_detail.slint:135 app/souffle-slint/ui/meeting_detail.slint:453
+msgctxt "MeetingDetail"
+msgid "Transcription"
+msgstr "Transcription"
+
+#: app/souffle-slint/ui/meeting_detail.slint:324
+msgctxt "MeetingDetail"
+msgid "Affichage de la réunion"
+msgstr "Affichage de la réunion"
+
+#: app/souffle-slint/ui/meeting_detail.slint:460
+msgctxt "MeetingDetail"
+msgid "Voir la transcription complète"
+msgstr "Voir la transcription complète"
+
+#: app/souffle-slint/ui/meeting_detail.slint:468
+msgctxt "MeetingDetail"
+msgid "Aucun texte transcrit pour cette réunion."
+msgstr "Aucun texte transcrit pour cette réunion."
+
+#: app/souffle-slint/ui/components/audio_player_section.slint:20
+msgctxt "AudioPlayerSection"
+msgid "Position de lecture"
+msgstr "Position de lecture"
+
+#: app/souffle-slint/ui/components/summary_section.slint:23
+msgctxt "SummaryTitle"
+msgid "Résumé"
+msgstr "Résumé"
+
+#: app/souffle-slint/ui/components/summary_section.slint:143
+msgctxt "SummarySection"
+msgid "Réessayer"
+msgstr "Réessayer"
+
+#: app/souffle-slint/ui/components/summary_section.slint:203
+msgctxt "SummarySection"
+msgid "Points clés"
+msgstr "Points clés"
+
+#: app/souffle-slint/ui/components/transcript_section.slint
+msgctxt "TranscriptToolbar"
+msgid "Conversation"
+msgstr "Conversation"
+
+#: app/souffle-slint/ui/components/transcript_section.slint
+msgctxt "TranscriptToolbar"
+msgid "Texte"
+msgstr "Texte"
+
+#: app/souffle-slint/ui/components/transcript_section.slint
+msgctxt "TranscriptToolbar"
+msgid "Effacer"
+msgstr "Effacer"
+
+#: app/souffle-slint/ui/components/transcript_section.slint
+msgctxt "TranscriptToolbar"
+msgid "Rechercher dans la transcription"
+msgstr "Rechercher dans la transcription"
+
+#: app/souffle-slint/ui/components/transcript_section.slint
+msgctxt "TranscriptToolbar"
+msgid "Affichage de la transcription"
+msgstr "Affichage de la transcription"
+
+#: app/souffle-slint/ui/components/transcript_section.slint
+msgctxt "TranscriptSection"
+msgid "Aucun passage ne correspond à la recherche."
+msgstr "Aucun passage ne correspond à la recherche."

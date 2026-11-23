@@ -112,9 +112,18 @@ fn paragraph_blocks(
     segments: &[TranscriptionSegment],
     session_index: Option<usize>,
 ) -> Vec<TranscriptBlock> {
-    group_into_paragraphs(segments, PAUSE_THRESHOLD_SECONDS)
+    let paragraphs = group_into_paragraphs(segments, PAUSE_THRESHOLD_SECONDS);
+    let run_end = segments.iter().map(|s| s.end_time).fold(0.0, f64::max);
+    let ends: Vec<f64> = paragraphs
+        .iter()
+        .skip(1)
+        .map(|p| p.start_time)
+        .chain(std::iter::once(run_end))
+        .collect();
+    paragraphs
         .into_iter()
-        .map(|p| {
+        .zip(ends)
+        .map(|(p, end_time)| {
             let (has_speaker, speaker) = speaker_fields(p.speaker);
             TranscriptBlock {
                 can_edit: false,
@@ -126,6 +135,7 @@ fn paragraph_blocks(
                 text: p.text.into(),
                 recording_session_index: session_index.map(|i| i as i32).unwrap_or(-1),
                 start_time: p.start_time as f32,
+                end_time: end_time as f32,
                 end_label: "".into(),
                 start_label: "".into(),
             }
@@ -144,6 +154,7 @@ fn session_break_block() -> TranscriptBlock {
         words: slint::ModelRc::new(slint::VecModel::from(Vec::<TranscriptWord>::new())),
         recording_session_index: -1,
         start_time: 0.0,
+        end_time: 0.0,
         end_label: "Fin de l'enregistrement pr\u{e9}c\u{e9}dent".into(),
         start_label: "Nouvelle session d'enregistrement".into(),
     }
@@ -238,15 +249,16 @@ pub fn build_transcript_blocks(
 // language ahead of actually laying a row out.
 
 /// Rough text-wrap estimate, not real Slint text layout: assumes a fixed
-/// character-per-line count for the transcript column's known width/font
-/// size (13px body text in a ~370px-wide column, see
-/// `components/transcript_section.slint`). A few px of error per row only
-/// affects spacer sizing (scrollbar proportion), never the actually
-/// mounted rows: those are still laid out for real inside a `VerticalLayout`.
-const CHARS_PER_LINE: usize = 55;
-const LINE_HEIGHT_PX: f32 = 18.0;
-const HEADER_HEIGHT_PX: f32 = 20.0;
-const BLOCK_SPACING_PX: f32 = 12.0; // matches the VerticalLayout's `spacing: 12px`
+/// character-per-line count for a chat bubble holding 78% of the 820px
+/// transcript column at the 14px control size, and the row's fixed parts
+/// (speaker and timestamp header, bubble padding, row gap). A few px of error
+/// per row only affects spacer sizing (scrollbar proportion), never the
+/// actually mounted rows: those are still laid out for real inside a
+/// `VerticalLayout`.
+const CHARS_PER_LINE: usize = 80;
+const LINE_HEIGHT_PX: f32 = 22.0;
+const HEADER_HEIGHT_PX: f32 = 62.0; // header row + bubble padding
+const BLOCK_SPACING_PX: f32 = 18.0; // the list's `gap`
 const SESSION_BREAK_HEIGHT_PX: f32 = 30.0;
 
 fn estimate_block_height(block: &TranscriptBlock) -> f32 {
@@ -257,6 +269,39 @@ fn estimate_block_height(block: &TranscriptBlock) -> f32 {
         HEADER_HEIGHT_PX + lines * LINE_HEIGHT_PX
     };
     content_height + BLOCK_SPACING_PX
+}
+
+const PREVIEW_MAX_CHARS: usize = 600;
+
+/// The opening of the transcript as running text for the reading view, taken
+/// from the full block list so it never depends on the mounted slice.
+pub fn preview_text(blocks: &[TranscriptBlock]) -> String {
+    let mut preview = String::new();
+    for block in blocks.iter().filter(|b| !b.is_session_break) {
+        if !preview.is_empty() {
+            preview.push(' ');
+        }
+        preview.push_str(block.text.trim());
+        if preview.chars().count() >= PREVIEW_MAX_CHARS {
+            break;
+        }
+    }
+    preview
+}
+
+/// The paragraphs whose text contains `query`, case-insensitively. Session
+/// breaks only separate paragraphs that follow each other, so they are
+/// dropped while a query is active.
+pub fn filter_blocks(blocks: &[TranscriptBlock], query: &str) -> Vec<TranscriptBlock> {
+    let query = query.trim().to_lowercase();
+    if query.is_empty() {
+        return blocks.to_vec();
+    }
+    blocks
+        .iter()
+        .filter(|b| !b.is_session_break && b.text.to_lowercase().contains(&query))
+        .cloned()
+        .collect()
 }
 
 /// Cumulative estimated y-offsets: `offsets[i]` is the top of `blocks[i]`,
@@ -470,9 +515,47 @@ mod tests {
             text: text.into(),
             recording_session_index: -1,
             start_time: 0.0,
+            end_time: 0.0,
             end_label: "".into(),
             start_label: "".into(),
         }
+    }
+
+    #[test]
+    fn filter_blocks_matches_case_insensitively_and_drops_session_breaks() {
+        let blocks = vec![
+            plain_block("Le planning est valid\u{e9}"),
+            session_break_block(),
+            plain_block("Autre sujet"),
+        ];
+        let hits = filter_blocks(&blocks, "  PLANNING ");
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].text, "Le planning est valid\u{e9}");
+        assert_eq!(filter_blocks(&blocks, "").len(), 3);
+        assert!(filter_blocks(&blocks, "absent").is_empty());
+    }
+
+    #[test]
+    fn preview_text_joins_the_opening_paragraphs_and_skips_breaks() {
+        let blocks = vec![
+            plain_block("Bonjour"),
+            session_break_block(),
+            plain_block("tout le monde"),
+        ];
+        assert_eq!(preview_text(&blocks), "Bonjour tout le monde");
+        assert_eq!(preview_text(&[]), "");
+    }
+
+    #[test]
+    fn paragraph_blocks_end_where_the_next_paragraph_starts() {
+        let segments = vec![
+            seg("Premier", 0.0, 2.0, None),
+            seg("Second", 60.0, 63.0, None),
+        ];
+        let blocks = paragraph_blocks(&segments, None);
+        assert_eq!(blocks.len(), 2);
+        assert_eq!(blocks[0].end_time, 60.0);
+        assert_eq!(blocks[1].end_time, 63.0);
     }
 
     #[test]

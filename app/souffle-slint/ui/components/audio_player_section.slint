@@ -1,22 +1,13 @@
-import { AppText, AppTextInput, AppNumericText, Typography, TypographyStyle } from "@typography";
-import { KitModalContext, ControlSize, KitIconButton } from "@kit";
+import { ButtonIntent, ControlSize, KitCard, KitIconButton, KitInline, KitStack, KitText, SurfaceLevel, TextViewFont, TypographyRole } from "@kit";
+import { ProWaveformSeek } from "@kit-pro";
 import { LucideMultimedia } from "@kit-icons/multimedia.slint";
 import { LucideArrows } from "@kit-icons/arrows.slint";
-import { Theme } from "../theme.slint";
-// Native audio player for MeetingDetail (SOU-187 milestone 7, AC14/AC16).
-// New engineering, not a port: MeetingAudioPlayerSection.svelte is a bare
-// `<input type="range">` next to an HTML `<audio>` element, no waveform at
-// all. Click-to-seek only (no drag-to-scrub) - a real, honest v1 boundary,
-// not a hidden gap.
-export component AudioPlayerSection inherits VerticalLayout {
+
+export component AudioPlayerSection inherits KitStack {
     in property <bool> has-audio: false;
     in property <bool> is-playing: false;
-    // SOU-258: decoding + opening the output stream runs on a worker, so
-    // the section shows (from the cached summary) before playback is ready.
     in property <bool> loading: false;
-    // One SVG path for the whole overview (`audio_player::waveform_commands`)
-    // in a `waveform-bars` x 1 viewbox: two `Path` items instead of a layout
-    // and a `Rectangle` per bar. Empty until a summary is known.
+    // One SVG path for the whole overview in a `waveform-bars` x 1 viewbox.
     in property <string> waveform-commands;
     in property <int> waveform-bars: 0;
     in property <float> progress; // 0.0..1.0
@@ -26,106 +17,65 @@ export component AudioPlayerSection inherits VerticalLayout {
     callback play-pause-requested();
     callback seek-requested(float); // 0.0..1.0
 
-    spacing: 8px;
-
-    if !root.has-audio: AppText {
+    if !root.has-audio: KitText {
         text: @tr("Aucun enregistrement audio pour cette r\u{e9}union.");
-        color: Theme.text-muted;
-        typography: Typography.secondary;
+        role: TypographyRole.caption;
     }
 
-    if root.has-audio: HorizontalLayout {
-        spacing: 10px;
+    if root.has-audio: KitCard {
+        level: SurfaceLevel.raised;
+        inset: regular;
+        gap: none;
 
-        play-btn := KitIconButton {
-            accessible-name: root.loading ? @tr("Chargement de l'audio…") : root.is-playing ? @tr("Pause") : @tr("Lecture");
-            control-size: ControlSize.compact;
-            disabled: root.loading;
-            glyph: root.is-playing ? LucideMultimedia.pause() : LucideArrows.play();
-            activated => { root.play-pause-requested(); }
-        }
+        KitInline {
+            gap: regular;
+            alignment: stretch;
 
-        AppNumericText {
-            text: root.duration-label == "" ? @tr("Chargement de l'audio…") : root.position-label + @tr(" / {}", root.duration-label);
-            text-color: Theme.text-muted;
-            typography: Typography.caption;
+            KitStack {
+                alignment: center;
 
-            vertical-alignment: center;
-        }
-    }
-
-    if root.has-audio: waveform-area := Rectangle {
-        height: 56px;
-        border-width: waveform-focus.has-focus ? 2px : 0px;
-        border-color: Theme.accent;
-
-        accessible-role: slider;
-        accessible-label: @tr("Position de lecture");
-        accessible-value: root.position-label;
-        accessible-value-minimum: 0;
-        accessible-value-maximum: 100;
-        accessible-value-step: 5;
-
-        forward-focus: waveform-focus;
-        waveform-focus := FocusScope {
-            enabled: !KitModalContext.inert(0);
-            key-pressed(event) => {
-                if event.text == Key.LeftArrow {
-                    root.seek-requested(max(0, root.progress - 0.05));
-                    return accept;
+                KitIconButton {
+                    accessible-name: root.loading ? @tr("Chargement de l'audio…") : root.is-playing ? @tr("Pause") : @tr("Lecture");
+                    intent: ButtonIntent.primary;
+                    control-size: ControlSize.comfortable;
+                    disabled: root.loading;
+                    glyph: root.is-playing ? LucideMultimedia.pause() : LucideArrows.play();
+                    activated => { root.play-pause-requested(); }
                 }
-                if event.text == Key.RightArrow {
-                    root.seek-requested(min(1, root.progress + 0.05));
-                    return accept;
+            }
+
+            KitStack {
+                gap: compact;
+                horizontal-stretch: 1;
+
+                ProWaveformSeek {
+                    accessible-name: @tr("Position de lecture");
+                    commands: root.waveform-commands;
+                    bars: root.waveform-bars;
+                    progress: root.progress;
+                    position-label: root.position-label;
+                    drag-seeking: false;
+                    seek-requested(fraction) => { root.seek-requested(fraction); }
                 }
-                return reject;
-            }
-        }
 
-        seek-area := TouchArea {
-            clicked => {
-                waveform-focus.focus();
-                root.seek-requested(self.mouse-x / self.width);
+                if root.duration-label == "": KitText {
+                    text: @tr("Chargement de l'audio…");
+                    role: TypographyRole.caption;
+                }
+                if root.duration-label != "": KitInline {
+                    alignment: space-between;
+                    KitText {
+                        text: root.position-label;
+                        role: TypographyRole.caption;
+                        font: TextViewFont.monospace;
+                    }
+                    KitText {
+                        text: root.duration-label;
+                        role: TypographyRole.caption;
+                        font: TextViewFont.monospace;
+                    }
+                }
             }
-        }
-
-        // Bars centred on the middle line (the usual mirrored waveform
-        // look). The played part is the same path in the accent colour,
-        // clipped to `progress`.
-        if root.waveform-bars > 0: Path {
-            x: 0px;
-            y: 0px;
-            width: waveform-area.width;
-            height: waveform-area.height;
-            commands: root.waveform-commands;
-            viewbox-width: root.waveform-bars;
-            viewbox-height: 1;
-            fit: fill;
-            fill: Theme.surface-4;
-        }
-        if root.waveform-bars > 0: Rectangle {
-            x: 0px;
-            y: 0px;
-            width: waveform-area.width * clamp(root.progress, 0, 1);
-            height: waveform-area.height;
-            clip: true;
-
-            Path {
-                x: 0px;
-                y: 0px;
-                width: waveform-area.width;
-                height: waveform-area.height;
-                commands: root.waveform-commands;
-                viewbox-width: root.waveform-bars;
-                viewbox-height: 1;
-                fit: fill;
-                fill: Theme.accent;
-            }
-        }
-        if root.waveform-bars == 0: Rectangle {
-            y: (waveform-area.height - self.height) / 2;
-            height: 2px;
-            background: Theme.surface-4;
         }
     }
 }

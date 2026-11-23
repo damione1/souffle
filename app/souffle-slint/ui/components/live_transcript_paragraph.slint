@@ -1,5 +1,6 @@
 import { AppText, AppNumericText, Typography } from "@typography";
 import { Theme } from "../theme.slint";
+import { SpeakerRole } from "../types.slint";
 import { TranscriptBlock, SpeakerLabels } from "transcript_section.slint";
 import { TranscriptWordFlow } from "transcript_words.slint";
 import { ButtonIntent, ControlSize, KitButton } from "@kit";
@@ -22,7 +23,7 @@ export component LiveTranscriptParagraph inherits VerticalLayout {
         && root.pointer-y < root.absolute-position.y + root.height;
 
     alignment: start;
-    spacing: 2px;
+    spacing: 5px;
 
     HorizontalLayout {
         alignment: start;
@@ -31,7 +32,7 @@ export component LiveTranscriptParagraph inherits VerticalLayout {
         AppText {
             text: root.block.has-speaker ? SpeakerLabels.of(root.block.speaker) : "";
             typography: Typography.small-emphasis;
-            color: Theme.accent;
+            color: root.block.speaker == SpeakerRole.me ? Theme.accent : Theme.secondary;
         }
         AppNumericText {
             text: root.block.timestamp;
@@ -53,7 +54,7 @@ export component LiveTranscriptParagraph inherits VerticalLayout {
         width: parent.width;
         words: root.block.words;
         typography: Typography.action-body;
-        color: Theme.text-secondary;
+        color: Theme.text-primary;
         word-clicked(word, at-x, at-y) => { root.word-clicked(word, at-x, at-y); }
     }
 }

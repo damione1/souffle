@@ -237,6 +237,7 @@ pub const STYLES: &[TextStyle] = &[
     TextStyle::new("settings-title", 20., Weight::Bold, 0.),
     TextStyle::new("title-input", 22., Weight::Regular, 0.),
     TextStyle::new("title", 24., Weight::Bold, 0.),
+    TextStyle::new("title-display", 30., Weight::Bold, -0.6),
     TextStyle::new("table-heading", 10.5, Weight::Bold, 1.),
     TextStyle::new("date-heading", 10.5, Weight::SemiBold, 0.6),
     TextStyle::new("timeline-heading", 11., Weight::SemiBold, 1.1),

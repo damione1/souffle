@@ -1,5 +1,5 @@
-import { AppText, AppNumericText, Typography } from "@typography";
-import { ButtonIntent, ControlSize, KitButton } from "@kit";
+import { AppText, Typography } from "@typography";
+import { ButtonIntent, ChatBubbleTone, ChatSide, ControlSize, KitButton, KitCard, KitChatBubble, KitDivider, KitInline, KitSearchField, KitSegmentedControl, KitStack, KitText, KitThemeContext, OptionRow, Ownership, SurfaceLevel, TypographyRole } from "@kit";
 import { LucideText } from "@kit-icons/text.slint";
 import { LucideNotifications } from "@kit-icons/notifications.slint";
 import { Theme } from "../theme.slint";
@@ -13,6 +13,8 @@ import { SpeakerRole } from "../types.slint";
 // popover (TranscriptWordLine.svelte, milestone 8d). Not yet ported: bulk
 // edit mode (the "Edit" affordance next to this title) - copying and
 // exporting the transcript (SOU-195-slice) don't need it.
+
+export enum TranscriptLayout { conversation, text }
 
 // Display names of the Me/Them lanes, shared by this post-meeting view
 // and the live view (recording_view.slint).
@@ -51,14 +53,116 @@ export struct TranscriptBlock {
     // -1 when the paragraph isn't attributed to any recorded audio session.
     recording-session-index: int,
     start-time: float,
+    end-time: float,
     end-label: string,
     start-label: string,
 }
 
-export component TranscriptSection inherits VerticalLayout {
+// The search, layout and copy controls of the transcript view. They sit above
+// the page's scroll region, so they stay on screen while the list scrolls.
+export component TranscriptToolbar inherits KitCard {
+    in-out property <string> search;
+    in-out property <TranscriptLayout> layout: TranscriptLayout.conversation;
+    in property <bool> can-copy: true;
+
+    callback search-changed(string);
+    // Rust renders the text fresh from the full, un-windowed meeting: the
+    // list is only the on-screen slice (AC15), never a safe source for a copy.
+    callback copy-requested();
+
+    property <bool> just-copied: false;
+    property <[OptionRow]> layout-options: [
+        { token: 0, generation: 0, label: @tr("Conversation"), description: "", disabled: false },
+        { token: 1, generation: 0, label: @tr("Texte"), description: "", disabled: false },
+    ];
+    function copy-transcript() {
+        root.copy-requested();
+        root.just-copied = true;
+    }
+    Timer {
+        interval: 1.5s;
+        running: root.just-copied;
+        triggered => { root.just-copied = false; }
+    }
+
+    level: SurfaceLevel.raised;
+    inset: compact;
+
+    KitInline {
+        gap: regular;
+
+        KitSearchField {
+            horizontal-stretch: 1;
+            control-size: ControlSize.compact;
+            clear-label: @tr("Effacer");
+            accessible-name: @tr("Rechercher dans la transcription");
+            placeholder: @tr("Rechercher dans la transcription");
+            text <=> root.search;
+            edited(text) => { root.search-changed(text); }
+        }
+
+        KitSegmentedControl {
+            ownership: Ownership.controlled;
+            horizontal-stretch: 0;
+            preferred-width: KitThemeContext.current.spacing.unit * 56;
+            control-size: ControlSize.compact;
+            label: @tr("Affichage de la transcription");
+            options: root.layout-options;
+            selected: { present: true, token: root.layout == TranscriptLayout.text ? 1 : 0 };
+            chosen(row) => { root.layout = row.token == 1 ? TranscriptLayout.text : TranscriptLayout.conversation; }
+        }
+
+        if root.can-copy: KitButton {
+            accessible-name: @tr("Copier la transcription");
+            text: root.just-copied ? @tr("Copié") : @tr("Copier");
+            control-size: ControlSize.compact;
+            intent: ButtonIntent.quiet;
+            leading-icon: root.just-copied ? LucideNotifications.check() : LucideText.copy();
+            activated => { root.copy-transcript(); }
+        }
+    }
+}
+
+component TranscriptRowHeader inherits HorizontalLayout {
+    in property <TranscriptBlock> block;
+    in property <bool> has-audio;
+    in property <bool> mirrored;
+    callback seek-requested();
+
+    spacing: 2 * KitThemeContext.current.spacing.unit;
+    alignment: root.mirrored ? end : start;
+
+    if root.mirrored: KitButton {
+        accessible-name: @tr("Aller à {}", root.block.timestamp);
+        text: root.block.timestamp;
+        control-size: ControlSize.compact;
+        intent: ButtonIntent.quiet;
+        disabled: !root.has-audio;
+        activated => { root.seek-requested(); }
+    }
+
+    if root.block.has-speaker: AppText {
+        text: SpeakerLabels.of(root.block.speaker);
+        typography: Typography.caption-strong;
+        color: root.block.speaker == SpeakerRole.me ? Theme.accent : Theme.secondary;
+        vertical-alignment: center;
+        wrap: no-wrap;
+    }
+
+    if !root.mirrored: KitButton {
+        accessible-name: @tr("Aller à {}", root.block.timestamp);
+        text: root.block.timestamp;
+        control-size: ControlSize.compact;
+        intent: ButtonIntent.quiet;
+        disabled: !root.has-audio;
+        activated => { root.seek-requested(); }
+    }
+}
+
+export component TranscriptSection inherits KitStack {
     // Only the currently visible slice of the transcript, not the whole
     // thing - `main.rs` owns the full block list and pushes a new slice in
-    // whenever `scroll-top` moves far enough (AC15: only on-screen rows +
+    // whenever the page scroll moves far enough (AC15: only on-screen rows +
     // margin are ever mounted here, verifiable by `blocks.length` staying
     // small regardless of how many total paragraphs the meeting has).
     in property <[TranscriptBlock]> blocks;
@@ -73,187 +177,119 @@ export component TranscriptSection inherits VerticalLayout {
     // items instead of just `blocks.length` of them.
     in property <float> spacer-before: 0.0;
     in property <float> spacer-after: 0.0;
-    // Two-way bound down from `MeetingDetail`/`MainWindow` to
-    // `flick.content-y` below, so `main.rs` can react to the real scroll
-    // position and decide the next slice - see the doc comment on
-    // `visible_window` in `transcript.rs` for why this can't be pure Slint
-    // (variable-height rows need real text layout to size precisely, which
-    // only the already-mounted rows have; the rest are estimates).
-    in-out property <length> scroll-top: 0px;
+    in property <TranscriptLayout> layout: TranscriptLayout.conversation;
+    // True while a search narrows the list, so an empty slice reads as "no
+    // match" and not as an empty meeting.
+    in property <bool> filtered: false;
+    // The paragraph holding the audio position gets the brand ring.
+    in property <float> audio-position-seconds: 0.0;
+    in property <int> audio-session-index: -1;
 
     // (recording-session-index, start-time) of the clicked paragraph.
     callback paragraph-clicked(int, float);
     // (term, pronunciation) once the user saves the alias popover.
     callback alias-save-requested(string, string);
     // A click on the transcript that no word or timestamp handled - lets
-    // the page drop keyboard focus from the title/notes fields (a Flickable
+    // the page drop keyboard focus from the title/notes fields (a scroll area
     // keeps unhandled presses, so the page could never see them).
     callback background-clicked();
-    // Copy the transcript text to the pasteboard (SOU-195-slice). Rust
-    // renders it fresh from the full, un-windowed meeting - `blocks` above
-    // is only the on-screen slice (AC15), never a safe source for a full
-    // copy.
-    callback copy-requested();
 
-    // "Copié" feedback for 1.5s after a copy, like the Tauri CopyButton
-    // (and the summary's Copy, summary_section.slint).
-    property <bool> just-copied: false;
-    function copy-transcript() {
-        root.copy-requested();
-        root.just-copied = true;
-    }
-    Timer {
-        interval: 1.5s;
-        running: root.just-copied;
-        triggered => { root.just-copied = false; }
+    property <length> unit: KitThemeContext.current.spacing.unit;
+    property <length> ring-width: 2px;
+    // KitChatBubble pads its content slot by 3.5 units on every side.
+    property <length> bubble-padding: 3.5 * root.unit;
+
+    pure function playing(block: TranscriptBlock) -> bool {
+        return root.has-audio
+            && (block.recording-session-index < 0 || block.recording-session-index == root.audio-session-index)
+            && root.audio-position-seconds >= block.start-time
+            && root.audio-position-seconds < block.end-time;
     }
 
-    // SOU-243: this component now sits in the page's single scroll flow
-    // (meeting_detail.slint) instead of a fixed-height column, so it can no
-    // longer rely on `vertical-stretch: 1` to fill leftover window space -
-    // there is no bounded "leftover" inside a Flickable's own content, only
-    // a preferred-height. It gets an explicit height instead: the smaller of
-    // its natural content height (so a short transcript never reserves dead
-    // space or an internal scrollbar it doesn't need, AC3) and this cap (so
-    // a long transcript still gets a bounded box for `flick` below to
-    // virtualize inside, AC2/AC15, rather than expanding to its full
-    // unvirtualized height inside the page scroll). The cap is a
-    // placeholder: chosen to read as clearly the primary section without
-    // crowding Notes/Audio/Résumé out of view, but not visually verified
-    // (see SOU-243 PR) - a value Damien should confirm/adjust on screen.
-    property <length> max-visible-height: 440px;
-
-    spacing: 8px;
-
-    HorizontalLayout {
-        vertical-stretch: 0;
-        alignment: space-between;
-
-        AppText {
-            text: @tr("Transcription");
-            typography: Typography.section;
-            color: Theme.text-primary;
-            vertical-alignment: center;
-        }
-
-        if root.segment-count > 0: copy-btn := KitButton {
-            accessible-name: @tr("Copier la transcription");
-            text: root.just-copied ? @tr("Copié") : @tr("Copier");
-            control-size: ControlSize.compact;
-            intent: ButtonIntent.quiet;
-            leading-icon: root.just-copied ? LucideNotifications.check() : LucideText.copy();
-            activated => { root.copy-transcript(); }
-        }
-    }
-
-    if root.segment-count == 0: AppText {
+    if root.segment-count == 0: KitText {
         text: @tr("Aucun texte transcrit pour cette r\u{e9}union.");
-        color: Theme.text-muted;
-        typography: Typography.secondary;
+        role: TypographyRole.caption;
     }
 
-    if root.segment-count > 0: Rectangle {
-        height: min(flick-inner.preferred-height, root.max-visible-height);
-        border-width: 1px;
-        border-color: Theme.surface-4;
-        clip: true;
+    if root.segment-count > 0 && root.filtered && root.blocks.length == 0: KitText {
+        text: @tr("Aucun passage ne correspond à la recherche.");
+        role: TypographyRole.caption;
+    }
 
-        // One shared popover rather than one instance per word (there can
-        // be hundreds of words on screen at once even virtualized). Opens
-        // under the clicked word.
+    if root.segment-count > 0 && root.blocks.length > 0: Rectangle {
+        preferred-height: list.preferred-height;
+
+        // One shared popover rather than one instance per word. Opens under
+        // the clicked word.
         alias-popup := DictionaryAliasPopover {
             save-requested(term, pronunciation) => { root.alias-save-requested(term, pronunciation); }
         }
 
-        flick := Flickable {
-            width: parent.width - 10px;
-            height: 100%;
-            content-width: self.width;
-            content-y <=> root.scroll-top;
+        TouchArea {
+            clicked => { root.background-clicked(); }
+        }
 
-            TouchArea {
-                width: parent.content-width;
-                height: parent.content-height;
-                clicked => { root.background-clicked(); }
-            }
+        list := KitStack {
+            y: 0px;
+            width: parent.width;
+            height: self.preferred-height;
+            gap: regular;
 
-            flick-inner := VerticalLayout {
-                width: flick.width;
-                padding: 12px;
-                spacing: 12px;
-                alignment: start;
+            Rectangle { height: root.spacer-before * 1px; }
 
-                Rectangle { height: root.spacer-before * 1px; }
+            for block in root.blocks: VerticalLayout {
+                if !block.is-session-break: VerticalLayout {
+                    spacing: root.unit;
 
-                for block in root.blocks: VerticalLayout {
-                    if !block.is-session-break: VerticalLayout {
-                        spacing: 2px;
+                    TranscriptRowHeader {
+                        block: block;
+                        has-audio: root.has-audio;
+                        mirrored: root.layout == TranscriptLayout.conversation && block.speaker == SpeakerRole.me && block.has-speaker;
+                        seek-requested => { root.paragraph-clicked(block.recording-session-index, block.start-time); }
+                    }
 
-                        HorizontalLayout {
-                            spacing: 8px;
-                            alignment: start;
+                    // SOU-223: click-to-correct words, no underline and no
+                    // link look. Always the word flow, never swapped for a
+                    // wrapped Text on hover: the two break lines differently
+                    // (SOU-258).
+                    if root.layout == TranscriptLayout.conversation: KitChatBubble {
+                        side: block.speaker == SpeakerRole.me && block.has-speaker ? ChatSide.end : ChatSide.start;
+                        tone: block.speaker == SpeakerRole.me && block.has-speaker ? ChatBubbleTone.accent-subtle : ChatBubbleTone.surface;
+                        content-share: 0.78;
 
-                            if block.has-speaker: AppText {
-                                text: SpeakerLabels.of(block.speaker);
-                                typography: Typography.caption-emphasis;
-                                color: Theme.accent;
-                                vertical-alignment: center;
+                        Rectangle {
+                            preferred-height: bubble-flow.preferred-height;
+
+                            if root.playing(block): Rectangle {
+                                x: -root.bubble-padding - root.ring-width;
+                                y: -root.bubble-padding - root.ring-width;
+                                width: parent.width + 2 * (root.bubble-padding + root.ring-width);
+                                height: parent.height + 2 * (root.bubble-padding + root.ring-width);
+                                border-width: root.ring-width;
+                                border-color: Theme.brand;
+                                border-radius: KitThemeContext.current.shape.radius-container + root.ring-width;
                             }
 
-                            ts-btn := KitButton {
-                                accessible-name: @tr("Aller à {}", block.timestamp);
-                                text: block.timestamp;
-                                control-size: ControlSize.compact;
-                                intent: ButtonIntent.quiet;
-                                disabled: !root.has-audio;
-                                padding-inline: 2px;
-                                activated => { root.paragraph-clicked(block.recording-session-index, block.start-time); }
+                            bubble-flow := TranscriptWordFlow {
+                                width: parent.width;
+                                words: block.words;
+                                word-clicked(word, at-x, at-y) => { alias-popup.open(word, at-x, at-y); }
                             }
-                        }
-
-                        // SOU-223: click-to-correct (AC1/AC2/AC4) with no
-                        // underline and no web-link appearance (AC3) - see
-                        // the `words` doc comment on `TranscriptBlock` above.
-                        // Clickable words are plain `Text` in a `TouchArea`;
-                        // literal runs (whitespace/punctuation/short/numeric
-                        // tokens) are plain `Text` with no touch handling.
-                        // Always the word flow, never swapped for a cheaper
-                        // wrapped `Text` on hover: the two break lines
-                        // differently, so the text would jump under the
-                        // pointer. Virtualized, it costs ~12 ms on open in a
-                        // release build (SOU-258).
-                        TranscriptWordFlow {
-                            width: parent.width;
-                            words: block.words;
-                            word-clicked(word, at-x, at-y) => { alias-popup.open(word, at-x, at-y); }
                         }
                     }
 
-                    if block.is-session-break: HorizontalLayout {
-                        spacing: 8px;
-                        padding-top: 4px;
-                        padding-bottom: 4px;
-
-                        Rectangle {
-                            height: 1px;
-                            background: Theme.surface-4;
-                            vertical-stretch: 1;
-                        }
-                        AppText {
-                            text: @tr("Fin de l'enregistrement précédent") + " / " + @tr("Nouvelle session d'enregistrement");
-                            typography: Typography.micro;
-                            color: Theme.text-faint;
-                        }
-                        Rectangle {
-                            height: 1px;
-                            background: Theme.surface-4;
-                            vertical-stretch: 1;
-                        }
+                    if root.layout == TranscriptLayout.text: TranscriptWordFlow {
+                        words: block.words;
+                        word-clicked(word, at-x, at-y) => { alias-popup.open(word, at-x, at-y); }
                     }
                 }
 
-                Rectangle { height: root.spacer-after * 1px; }
+                if block.is-session-break: KitDivider {
+                    label: @tr("Fin de l'enregistrement précédent") + " / " + @tr("Nouvelle session d'enregistrement");
+                }
             }
+
+            Rectangle { height: root.spacer-after * 1px; }
         }
     }
 }
