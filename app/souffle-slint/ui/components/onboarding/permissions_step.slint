@@ -1,6 +1,12 @@
-import { AppText, Typography } from "@typography";
-import { Theme } from "../../theme.slint";
-import { KitBadge, KitButton, Tone } from "@kit";
+import {
+    AlertSeverity, ButtonIntent, ControlSize, KitAlert, KitAvatar, KitBadge, KitButton, KitDivider,
+    KitFieldDescription, KitText, KitThemeContext, Tone, TypographyRole, AvatarShape
+} from "@kit";
+import { IconGlyph } from "@kit";
+import { LucideCommunication } from "@kit-icons/communication.slint";
+import { LucideMultimedia } from "@kit-icons/multimedia.slint";
+import { LucideDevices } from "@kit-icons/devices.slint";
+import { LucideTime } from "@kit-icons/time.slint";
 import { AccessState, PermissionKind } from "../../types.slint";
 
 // Port of PermissionsStep.svelte. Each row's status comes from a real,
@@ -15,6 +21,7 @@ export struct PermissionRow {
 
 export component PermissionsStep inherits VerticalLayout {
     in property <int> modal-layer;
+    in property <bool> compact;
 
     pure function row-label(kind: PermissionKind) -> string {
         if kind == PermissionKind.microphone { return @tr("Microphone"); }
@@ -27,7 +34,14 @@ export component PermissionsStep inherits VerticalLayout {
         if kind == PermissionKind.microphone { return @tr("Nécessaire pour la dictée et les réunions."); }
         if kind == PermissionKind.system-audio { return @tr("Capture l'autre côté d'un appel dans les réunions."); }
         if kind == PermissionKind.accessibility { return @tr("Nécessaire pour le collage automatique et certains raccourcis."); }
+        if kind == PermissionKind.calendar { return @tr("Affiche vos réunions du jour sur l'accueil."); }
         return "";
+    }
+    pure function row-icon(kind: PermissionKind) -> IconGlyph {
+        if kind == PermissionKind.microphone { return LucideCommunication.mic(); }
+        if kind == PermissionKind.system-audio { return LucideMultimedia.volume-2(); }
+        if kind == PermissionKind.accessibility { return LucideDevices.keyboard(); }
+        return LucideTime.calendar-clock();
     }
     pure function row-action-label(kind: PermissionKind) -> string {
         if kind == PermissionKind.accessibility { return @tr("Ouvrir les Réglages"); }
@@ -55,107 +69,98 @@ export component PermissionsStep inherits VerticalLayout {
     callback hint-action-requested(PermissionKind);
     callback repair-requested();
 
-    spacing: 4px;
+    private property <length> unit: KitThemeContext.current.spacing.unit;
 
-    for row in root.rows: VerticalLayout {
-        spacing: 4px;
+    spacing: root.unit * 3;
 
-        Rectangle {
-            height: 1px;
-            background: Theme.rule;
-        }
+    VerticalLayout {
+        for row in root.rows: VerticalLayout {
+            KitDivider {}
 
-        HorizontalLayout {
-            padding-top: 8px;
-            padding-bottom: 8px;
-            spacing: 10px;
-            alignment: space-between;
+            HorizontalLayout {
+                padding-top: root.compact ? root.unit * 2.75 : root.unit * 3.5;
+                padding-bottom: root.compact ? root.unit * 2.75 : root.unit * 3.5;
+                spacing: root.unit * 3.5;
+                cross-axis-alignment: CrossAxisAlignment.center;
 
-            VerticalLayout {
-                spacing: 1px;
-                horizontal-stretch: 1;
-                AppText {
-                    text: row-label(row.kind);
-                    typography: Typography.hint-emphasis;
-
-                    color: Theme.text-primary;
+                KitAvatar {
+                    shape: AvatarShape.rounded;
+                    size: root.unit * 8;
+                    tone: Tone.neutral;
+                    muted: true;
+                    bordered: false;
+                    decorative: true;
+                    fallback-icon: row-icon(row.kind);
                 }
-                AppText {
-                    text: row-description(row.kind);
-                    typography: Typography.caption;
-                    color: Theme.text-muted;
-                    wrap: word-wrap;
+
+                VerticalLayout {
+                    horizontal-stretch: 1;
+                    alignment: center;
+                    KitText {
+                        text: row-label(row.kind);
+                        role: TypographyRole.control;
+                    }
+                    if !root.compact: KitFieldDescription { text: row-description(row.kind); }
+                }
+
+                if row.state == AccessState.granted: KitBadge {
+                    text: @tr("Accordé");
+                    tone: Tone.success;
+                    subtle: true;
+                    dot: true;
+                }
+                if row.state == AccessState.unsupported: KitText {
+                    text: @tr("Non pris en charge");
+                    role: TypographyRole.caption;
+                    vertical-alignment: center;
+                }
+                if row.state != AccessState.granted && row.state != AccessState.unsupported: KitButton {
+                    modal-layer: root.modal-layer;
+                    control-size: ControlSize.compact;
+                    intent: ButtonIntent.secondary;
+                    text: row.busy ? @tr("Vérification…") : row-action-label(row.kind);
+                    disabled: row.busy;
+                    activated => { root.grant-requested(row.kind); }
                 }
             }
 
-            if row.state == AccessState.granted: KitBadge {
-                text: @tr("Accordé");
-                tone: Tone.success;
-            }
-            if row.state == AccessState.unsupported: AppText {
-                text: @tr("Non pris en charge");
-                color: Theme.text-faint;
-                typography: Typography.caption;
-                vertical-alignment: center;
-            }
-            if row.state != AccessState.granted && row.state != AccessState.unsupported: KitButton {
-                modal-layer: root.modal-layer;
-                text: row.busy ? @tr("Vérification…") : row-action-label(row.kind);
-                disabled: row.busy;
-                activated => { root.grant-requested(row.kind); }
+            if row-hint(row.kind, row.state) != "": KitAlert {
+                severity: AlertSeverity.information;
+                message: row-hint(row.kind, row.state);
+                if row-hint-action-label(row.kind, row.state) != "": KitButton {
+                    modal-layer: root.modal-layer;
+                    control-size: ControlSize.compact;
+                    intent: ButtonIntent.link;
+                    text: row-hint-action-label(row.kind, row.state);
+                    activated => { root.hint-action-requested(row.kind); }
+                }
             }
         }
-
-        if row-hint(row.kind, row.state) != "": HorizontalLayout {
-            spacing: 8px;
-            alignment: space-between;
-
-            AppText {
-                text: row-hint(row.kind, row.state);
-                typography: Typography.micro-detail;
-                color: Theme.text-muted;
-                wrap: word-wrap;
-                horizontal-stretch: 1;
-            }
-            if row-hint-action-label(row.kind, row.state) != "": KitButton {
-                modal-layer: root.modal-layer;
-                text: row-hint-action-label(row.kind, row.state);
-                activated => { root.hint-action-requested(row.kind); }
-            }
-        }
-    }
-
-    Rectangle {
-        height: 1px;
-        background: Theme.rule;
+        KitDivider {}
     }
 
     HorizontalLayout {
-        padding-top: 8px;
-        spacing: 10px;
-        alignment: space-between;
+        spacing: root.unit * 3;
 
-        AppText {
+        KitFieldDescription {
             text: root.repair-success
                 ? @tr("Réparation effectuée, en attente de confirmation macOS.")
                 : @tr("Un problème persiste ? Réparez l'entrée Accessibilité.");
-            typography: Typography.micro-detail;
-            color: Theme.text-muted;
-            wrap: word-wrap;
             horizontal-stretch: 1;
+            vertical-alignment: center;
         }
         KitButton {
             modal-layer: root.modal-layer;
+            control-size: ControlSize.compact;
+            intent: ButtonIntent.quiet;
             text: root.repair-busy ? @tr("Vérification…") : @tr("Réparer");
             disabled: root.repair-busy || root.repair-cooldown;
             activated => { root.repair-requested(); }
         }
     }
 
-    if root.error-message != "": AppText {
-        text: root.error-message;
-        wrap: word-wrap;
-        color: Theme.danger;
-        typography: Typography.caption;
+    if root.error-message != "": KitAlert {
+        severity: AlertSeverity.error;
+        message: root.error-message;
     }
 }

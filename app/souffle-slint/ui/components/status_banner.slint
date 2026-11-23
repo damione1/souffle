@@ -9,7 +9,7 @@ export component StatusBanner inherits KitAlert {
     dismiss-label: @tr("Fermer");
     if root.action-label != "": KitButton {
         text: root.action-label;
-        intent: ButtonIntent.primary;
+        intent: ButtonIntent.secondary;
         control-size: ControlSize.compact;
         activated => { root.action-triggered(); }
     }

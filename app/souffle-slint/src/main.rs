@@ -21,6 +21,7 @@ mod mic_stall_ui;
 mod microphone_list;
 mod model_ui;
 mod onboarding_flags;
+mod onboarding_level;
 mod onboarding_ui;
 mod permissions_ui;
 mod quit_shutdown;
@@ -2941,6 +2942,7 @@ struct OnboardingState {
     selected_model_index: Option<usize>,
     toggle_shortcut: String,
     pending_modifier: Option<String>,
+    level: onboarding_level::LevelMonitor,
 }
 
 fn project_startup_settings(
@@ -3056,6 +3058,13 @@ fn show_onboarding_step(
     window.set_onboarding_step(step);
     window.set_onboarding_step_index(step_index);
     window.set_onboarding_step_count(step_count);
+    {
+        let mut guard = ob.borrow_mut();
+        let uid = guard.selected_device.clone();
+        guard
+            .level
+            .sync(window, step == OnboardingStep::Microphone, &uid);
+    }
     window.set_onboarding_busy(false);
     window.set_onboarding_continue_enabled(true);
     // Otherwise an error from a previous step (e.g. a failed download)
@@ -3236,9 +3245,10 @@ fn wire_onboarding_callbacks(
         } else {
             return;
         };
-        guard.selected_device = uid;
+        guard.selected_device = uid.clone();
         if let Some(window) = weak.upgrade() {
             window.set_onboarding_selected_device_index(index);
+            guard.level.sync(&window, true, &uid);
         }
     });
 
@@ -3250,8 +3260,11 @@ fn wire_onboarding_callbacks(
         let Some(window) = weak.upgrade() else {
             return;
         };
-        ob_for_refresh.borrow_mut().devices =
-            souffle_lib::commands::list_audio_devices().unwrap_or_default();
+        {
+            let mut guard = ob_for_refresh.borrow_mut();
+            guard.devices = souffle_lib::commands::list_audio_devices().unwrap_or_default();
+            guard.level.stop(&window);
+        }
         show_onboarding_step(
             &window,
             &handle,

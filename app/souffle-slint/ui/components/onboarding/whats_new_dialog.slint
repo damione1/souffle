@@ -1,4 +1,4 @@
-import { DialogTabPolicy, ButtonIntent, KitDialog } from "@kit";
+import { DialogSize, DialogTabPolicy, ButtonIntent, KitDialog } from "@kit";
 import { MarkdownBlock } from "markdown_block.slint";
 import { MarkdownView } from "markdown_view.slint";
 
@@ -6,6 +6,8 @@ import { MarkdownView } from "markdown_view.slint";
 export component WhatsNewDialog inherits KitDialog {
     tab-policy: DialogTabPolicy.native;
     modal-layer: 2;
+    size: DialogSize.medium;
+    body-label: @tr("Notes de version");
     close-label: @tr("SettingsPermissionsDialog" => "Fermer");
     in property <string> version;
     in property <[MarkdownBlock]> content-blocks;

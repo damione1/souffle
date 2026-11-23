@@ -11,23 +11,22 @@ export component MarkdownView inherits VerticalLayout {
     callback link-clicked(string);
 
     alignment: start;
-    spacing: 6px;
+    spacing: 8px;
 
     for block in root.blocks: VerticalLayout {
         if block.kind == MarkdownBlockKind.heading: AppText {
             text: block.text;
-            typography: Typography.field-strong;
-
+            typography: Typography.body-emphasis;
             color: Theme.text-primary;
             wrap: word-wrap;
         }
         if block.kind == MarkdownBlockKind.bullet: HorizontalLayout {
-            spacing: 6px;
-            AppText { text: @tr("•"); color: Theme.text-muted; typography: Typography.secondary; }
+            spacing: 8px;
+            AppText { text: @tr("•"); color: Theme.accent; typography: Typography.content; }
             AppText {
                 text: block.text;
                 color: Theme.text-secondary;
-                typography: Typography.secondary;
+                typography: Typography.content;
                 wrap: word-wrap;
                 horizontal-stretch: 1;
             }
@@ -35,7 +34,7 @@ export component MarkdownView inherits VerticalLayout {
         if block.kind == MarkdownBlockKind.paragraph: AppText {
             text: block.text;
             color: Theme.text-secondary;
-            typography: Typography.secondary;
+            typography: Typography.content;
             wrap: word-wrap;
         }
         if block.kind == MarkdownBlockKind.link: KitButton {

@@ -47,6 +47,7 @@ export component AppHeader inherits KitSurface {
         padding-right: KitLayoutMetrics.space(root.theme, roomy);
         padding-top: KitLayoutMetrics.space(root.theme, compact);
         padding-bottom: self.padding-top;
+        min-height: Theme.header-height;
         brand := KitWrap {
             flex-wrap: no-wrap;
             cross-axis-alignment: center;
@@ -90,6 +91,8 @@ export component AppHeader inherits KitSurface {
                 text: root.status-label;
                 tone: root.recording-mode != RecordingMode.idle ? Tone.danger
                     : root.model-phase == TranscriptionPhase.ready ? Tone.accent : Tone.warning;
+                subtle: true;
+                dot: true;
             }
             theme-area := KitIconButton {
                 theme: root.theme;

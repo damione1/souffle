@@ -5779,6 +5779,34 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b4596b6d070b27117e987119b4dac604f3c58cfb0b191112e24771b2faeac1a6"
 
 [[package]]
+name = "plotters"
+version = "0.3.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5aeb6f403d7a4911efb1e33402027fc44f29b5bf6def3effcc22d7bb75f2b747"
+dependencies = [
+ "num-traits",
+ "plotters-backend",
+ "plotters-bitmap",
+ "wasm-bindgen",
+ "web-sys",
+]
+
+[[package]]
+name = "plotters-backend"
+version = "0.3.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "df42e13c12958a16b3f7f4386b9ab1f3e7933914ecea48da7139435263a4172a"
+
+[[package]]
+name = "plotters-bitmap"
+version = "0.3.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "72ce181e3f6bf82d6c1dc569103ca7b1bd964c60ba03d7e6cdfbb3e3eb7f7405"
+dependencies = [
+ "plotters-backend",
+]
+
+[[package]]
 name = "png"
 version = "0.18.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7124,7 +7152,6 @@ dependencies = [
 [[package]]
 name = "slint-kit"
 version = "0.9.0"
-source = "git+https://github.com/damione1/slint-kit.git?rev=56782318abde3cc539266eecd60283452a8c8db8#56782318abde3cc539266eecd60283452a8c8db8"
 dependencies = [
  "slint",
  "slint-build",
@@ -7135,7 +7162,6 @@ dependencies = [
 [[package]]
 name = "slint-kit-build"
 version = "0.9.0"
-source = "git+https://github.com/damione1/slint-kit.git?rev=56782318abde3cc539266eecd60283452a8c8db8#56782318abde3cc539266eecd60283452a8c8db8"
 dependencies = [
  "slint-build",
  "slint-kit-core",
@@ -7145,7 +7171,6 @@ dependencies = [
 [[package]]
 name = "slint-kit-core"
 version = "0.9.0"
-source = "git+https://github.com/damione1/slint-kit.git?rev=56782318abde3cc539266eecd60283452a8c8db8#56782318abde3cc539266eecd60283452a8c8db8"
 dependencies = [
  "chrono",
  "chrono-tz",
@@ -7160,9 +7185,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "slint-kit-pro"
+version = "0.1.0"
+dependencies = [
+ "plotters",
+ "slint",
+ "slint-build",
+ "slint-kit",
+ "slint-kit-build",
+]
+
+[[package]]
+name = "slint-kit-pro-build"
+version = "0.1.0"
+dependencies = [
+ "slint-build",
+ "slint-kit-build",
+]
+
+[[package]]
 name = "slint-kit-slint"
 version = "0.9.0"
-source = "git+https://github.com/damione1/slint-kit.git?rev=56782318abde3cc539266eecd60283452a8c8db8#56782318abde3cc539266eecd60283452a8c8db8"
 dependencies = [
  "paste",
  "slint",
@@ -7499,6 +7542,8 @@ dependencies = [
  "slint",
  "slint-kit",
  "slint-kit-build",
+ "slint-kit-pro",
+ "slint-kit-pro-build",
  "souffle",
  "souffle-schema",
  "souffle-typography",

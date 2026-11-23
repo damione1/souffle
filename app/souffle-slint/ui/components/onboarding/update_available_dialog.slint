@@ -1,9 +1,7 @@
-import { AppText, AppTextInput, Typography, TypographyStyle } from "@typography";
-import { DialogTabPolicy, ButtonIntent, KitButton, KitDialog } from "@kit";
+import { DialogTabPolicy, ButtonIntent, DialogAction, KitDialog, KitText, KitProgress, ProgressMode, TypographyRole, Tone } from "@kit";
 import { MarkdownBlock } from "markdown_block.slint";
 import { MarkdownView } from "markdown_view.slint";
 import { InstallBlockReason, UpdatePhase } from "../../types.slint";
-import { Theme } from "../../theme.slint";
 import { UpdateCopy } from "../update_copy.slint";
 
 // Port of UpdateAvailableDialog.svelte + UpdateAction.svelte. `download_update`/
@@ -39,9 +37,27 @@ export component UpdateAvailableDialog inherits KitDialog {
     callback dismiss-requested();
     callback link-clicked(string);
 
+    private property <DialogAction> later: {token: 1, text: @tr("Plus tard"), intent: ButtonIntent.quiet};
+
     title: @tr("Mise à jour disponible");
     description: @tr("Version {}", root.latest-version);
+    actions: root.phase == UpdatePhase.downloading
+        ? [root.later, {token: 2, text: @tr("Téléchargement…"), intent: ButtonIntent.primary, disabled: true}]
+        : root.phase == UpdatePhase.ready
+        ? [root.later, {token: 3, text: @tr("Installer et redémarrer"), intent: ButtonIntent.primary, disabled: root.install-blocked}]
+        : root.phase == UpdatePhase.failed
+        ? [root.later,
+           {token: 5, text: @tr("Ouvrir la page de release"), intent: ButtonIntent.quiet},
+           {token: 4, text: @tr("Réessayer"), intent: ButtonIntent.primary}]
+        : [root.later, {token: 2, text: @tr("Télécharger la mise à jour"), intent: ButtonIntent.primary}];
+
     dismiss(reason) => { root.dismiss-requested(); }
+    action-activated(token) => {
+        if token == 1 { root.dismiss-requested(); }
+        else if token == 2 || token == 4 { root.download-requested(); }
+        else if token == 3 { root.install-requested(); }
+        else if token == 5 { root.open-release-requested(); }
+    }
 
     MarkdownView {
         modal-layer: root.modal-layer;
@@ -49,63 +65,19 @@ export component UpdateAvailableDialog inherits KitDialog {
         link-clicked(url) => { root.link-clicked(url); }
     }
 
-    if root.error-message != "": AppText {
+    if root.phase == UpdatePhase.downloading: KitProgress {
+        mode: ProgressMode.indeterminate;
+        label: @tr("Téléchargement…");
+    }
+
+    if root.error-message != "": KitText {
         text: root.error-message;
-        color: Theme.danger-soft;
-        typography: Typography.secondary;
-        wrap: word-wrap;
-        vertical-stretch: 0;
+        role: TypographyRole.body;
+        tone: Tone.danger;
     }
 
-    if root.phase == UpdatePhase.ready && root.install-blocked: AppText {
+    if root.phase == UpdatePhase.ready && root.install-blocked: KitText {
         text: UpdateCopy.install-block-label(root.install-block-reason);
-        color: Theme.text-muted;
-        typography: Typography.secondary;
-        wrap: word-wrap;
-        vertical-stretch: 0;
-    }
-
-    HorizontalLayout {
-        alignment: end;
-        spacing: 8px;
-        vertical-stretch: 0;
-
-        KitButton {
-            modal-layer: root.modal-layer;
-            text: @tr("Plus tard");
-            activated => { root.dismiss-requested(); }
-        }
-
-        if root.phase == UpdatePhase.idle: KitButton {
-            modal-layer: root.modal-layer;
-            text: @tr("Télécharger la mise à jour");
-            intent: ButtonIntent.primary;
-            activated => { root.download-requested(); }
-        }
-        if root.phase == UpdatePhase.downloading: KitButton {
-            modal-layer: root.modal-layer;
-            text: @tr("Téléchargement…");
-            intent: ButtonIntent.primary;
-            disabled: true;
-        }
-        if root.phase == UpdatePhase.ready: KitButton {
-            modal-layer: root.modal-layer;
-            text: @tr("Installer et redémarrer");
-            intent: ButtonIntent.primary;
-            disabled: root.install-blocked;
-            activated => { root.install-requested(); }
-        }
-        if root.phase == UpdatePhase.failed: KitButton {
-            modal-layer: root.modal-layer;
-            text: @tr("Réessayer");
-            intent: ButtonIntent.primary;
-            activated => { root.download-requested(); }
-        }
-        if root.phase == UpdatePhase.failed: KitButton {
-            modal-layer: root.modal-layer;
-            text: @tr("Ouvrir la page de release");
-            intent: ButtonIntent.quiet;
-            activated => { root.open-release-requested(); }
-        }
+        role: TypographyRole.caption;
     }
 }

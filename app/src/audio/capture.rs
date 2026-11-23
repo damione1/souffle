@@ -2407,7 +2407,7 @@ fn cpal_device_uid(device: &Device) -> Option<String> {
 }
 
 /// Locate a cpal device by UID without probing supported configs.
-fn find_cpal_device_by_uid(host: &cpal::Host, uid: &str) -> Option<Device> {
+pub(super) fn find_cpal_device_by_uid(host: &cpal::Host, uid: &str) -> Option<Device> {
     host.devices()
         .ok()?
         .find(|device| cpal_device_uid(device).as_deref() == Some(uid))
@@ -4573,7 +4573,7 @@ impl AudioCapture {
         }
     }
 
-    fn preferred_config(device: &Device) -> Result<StreamConfig, String> {
+    pub(super) fn preferred_config(device: &Device) -> Result<StreamConfig, String> {
         let supported: Vec<_> = device
             .supported_input_configs()
             .map_err(|e| format!("Failed to get supported configs: {e}"))?

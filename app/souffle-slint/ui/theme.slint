@@ -180,6 +180,7 @@ export global Theme {
         return available < 2 * root.settings-control-width * KitThemeContext.current.text-scale
             ? Orientation.vertical : Orientation.horizontal;
     }
+    out property <length> header-height: 56px;
     out property <length> settings-control-height: KitMetrics.control-height(KitThemeContext.current, ControlSize.compact);
     out property <length> settings-inset: KitMetrics.field-gap(KitThemeContext.current) - KitThemeContext.current.spacing.unit;
 }

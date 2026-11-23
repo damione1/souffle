@@ -42,7 +42,12 @@ fn main() {
     if std::fs::read_to_string(&typography).map_or(true, |existing| existing != projection) {
         std::fs::write(&typography, projection).expect("Typography projection failed");
     }
-    let library = HashMap::from([("typography".to_string(), typography)]);
+    let pro = slint_kit_pro_build::ui_directory().join("kit-pro.slint");
+    let library = HashMap::from([
+        ("typography".to_string(), typography),
+        ("kit-pro".to_string(), pro.clone()),
+        ("kit_pro".to_string(), pro),
+    ]);
     // Element ids are only kept with debug info; the layout tests in
     // `live_view.rs` look elements up by id (SOU-256). Debug builds only, so
     // release binaries stay exactly as before.
@@ -50,7 +55,7 @@ fn main() {
     let config = slint_kit_build::config_with_libraries(library)
         .with_bundled_translations("lang")
         .with_debug_info(debug_build);
-    slint_kit_build::compile_with_config("ui/main_window.slint", config)
+    slint_kit_pro_build::compile_with_config("ui/main_window.slint", config)
         .expect("Slint build failed");
     println!("cargo:rerun-if-changed=lang");
 }

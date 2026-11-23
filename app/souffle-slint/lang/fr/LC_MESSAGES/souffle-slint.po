@@ -457,11 +457,6 @@ msgctxt "OnboardingView"
 msgid "Transcription vocale locale pour la dictée et les meetings."
 msgstr "Transcription vocale locale pour la dictée et les meetings."
 
-#: app/souffle-slint/ui/onboarding_view.slint:143
-msgctxt "OnboardingView"
-msgid "100 % local — rien ne quitte votre Mac. Pas de compte, pas de cloud."
-msgstr "100 % local — rien ne quitte votre Mac. Pas de compte, pas de cloud."
-
 #: app/souffle-slint/ui/onboarding_view.slint:155
 msgctxt "OnboardingView"
 msgid "English"
@@ -3749,3 +3744,43 @@ msgstr "Aucun modèle Ollama compatible n'est installé."
 msgctxt "LiveParagraphEditor"
 msgid "Fermer"
 msgstr "Fermer"
+
+msgctxt "OnboardingView"
+msgid "100 % local : rien ne quitte votre Mac. Pas de compte, pas de cloud."
+msgstr "100 % local : rien ne quitte votre Mac. Pas de compte, pas de cloud."
+
+msgctxt "OnboardingView"
+msgid "Étape {} sur {}"
+msgstr "Étape {} sur {}"
+
+msgctxt "OnboardingView"
+msgid "Étape {{current}} sur {{total}}"
+msgstr "Étape {{current}} sur {{total}}"
+
+msgctxt "OnboardingView"
+msgid "Étape en cours"
+msgstr "Étape en cours"
+
+msgctxt "OnboardingView"
+msgid "Aucun microphone détecté ? Branchez-en un puis actualisez."
+msgstr "Aucun microphone détecté ? Branchez-en un puis actualisez."
+
+msgctxt "OnboardingView"
+msgid "Une seule fois. Tout tourne ensuite hors ligne."
+msgstr "Une seule fois. Tout tourne ensuite hors ligne."
+
+msgctxt "WhatsNewDialog"
+msgid "Notes de version"
+msgstr "Notes de version"
+
+msgctxt "PermissionsStep"
+msgid "Affiche vos réunions du jour sur l'accueil."
+msgstr "Affiche vos réunions du jour sur l'accueil."
+
+msgctxt "OnboardingView"
+msgid "Niveau d'entrée"
+msgstr "Niveau d'entrée"
+
+msgctxt "OnboardingView"
+msgid "Parlez pour vérifier que le micro capte votre voix."
+msgstr "Parlez pour vérifier que le micro capte votre voix."
