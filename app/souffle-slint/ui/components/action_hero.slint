@@ -1,5 +1,5 @@
 import { AppText, Typography } from "@typography";
-import { ButtonIntent, IconGlyph, KitBadge, KitIcon, KitPressable, KitThemeContext } from "@kit";
+import { AvatarShape, ButtonIntent, ButtonRecipe, ControlSize, IconGlyph, KitAvatar, KitKeycap, KitPressable, KitThemeContext, KitThemes, SurfaceLevel } from "@kit";
 import { LucideAccount } from "@kit-icons/account.slint";
 import { LucideCommunication } from "@kit-icons/communication.slint";
 import { Theme } from "../theme.slint";
@@ -7,33 +7,53 @@ import { Theme } from "../theme.slint";
 component CaptureAction inherits KitPressable {
     in property <IconGlyph> glyph;
     in property <color> ink;
+    in property <color> tint;
     in property <string> title;
     in property <length> subtitle-height;
     out property <length> natural-subtitle-height: subtitle-content.preferred-height;
 
+    private property <ButtonRecipe> base: KitThemes.button-recipe(KitThemeContext.current, ButtonIntent.outline, ControlSize.medium);
     intent: ButtonIntent.outline;
+    recipe: {
+        fill: KitThemes.surface-recipe(KitThemeContext.current, SurfaceLevel.raised).fill,
+        hover-fill: KitThemeContext.current.hover,
+        pressed-fill: KitThemeContext.current.pressed,
+        disabled-fill: KitThemes.surface-recipe(KitThemeContext.current, SurfaceLevel.raised).fill,
+        foreground: root.base.foreground,
+        disabled-foreground: root.base.disabled-foreground,
+        border: KitThemes.surface-recipe(KitThemeContext.current, SurfaceLevel.raised).border,
+        radius: KitThemes.surface-recipe(KitThemeContext.current, SurfaceLevel.raised).radius,
+        padding-inline: 0px,
+        padding-block: 0px,
+        border-width: KitThemes.surface-recipe(KitThemeContext.current, SurfaceLevel.raised).border-width,
+        elevation: KitThemes.surface-recipe(KitThemeContext.current, SurfaceLevel.raised).elevation,
+        shadow: KitThemes.surface-recipe(KitThemeContext.current, SurfaceLevel.raised).shadow,
+        focus: root.base.focus,
+    };
     padding-block: 0px;
     padding-inline: 0px;
     min-height: content.preferred-height;
 
-    content := HorizontalLayout {
-        padding: KitThemeContext.current.spacing.unit * 4;
-        spacing: KitThemeContext.current.spacing.unit * 3;
+    content := VerticalLayout {
+        padding: KitThemeContext.current.spacing.unit * 5;
+        spacing: KitThemeContext.current.spacing.unit * 3.5;
         alignment: start;
 
-        VerticalLayout {
-            alignment: center;
-            KitIcon {
-                glyph: root.glyph;
+        HorizontalLayout {
+            alignment: start;
+            KitAvatar {
+                shape: AvatarShape.rounded;
+                size: KitThemeContext.current.spacing.unit * 10;
+                bordered: false;
+                decorative: true;
+                fill: root.tint;
                 ink: root.ink;
-                width: 22px;
-                height: 22px;
+                fallback-icon: root.glyph;
             }
         }
 
         VerticalLayout {
-            spacing: KitThemeContext.current.spacing.unit;
-            alignment: center;
+            spacing: KitThemeContext.current.spacing.unit * 0.75;
             AppText {
                 text: root.title;
                 typography: Typography.action-title;
@@ -42,10 +62,10 @@ component CaptureAction inherits KitPressable {
 
             VerticalLayout {
                 height: root.subtitle-height;
-                alignment: center;
+                alignment: start;
                 subtitle-content := HorizontalLayout {
                     alignment: start;
-                    spacing: KitThemeContext.current.spacing.unit;
+                    spacing: KitThemeContext.current.spacing.unit * 2;
                     @children
                 }
             }
@@ -62,7 +82,7 @@ export component ActionHero inherits HorizontalLayout {
     callback dictate-requested();
     callback meeting-requested();
 
-    spacing: KitThemeContext.current.spacing.unit * 3;
+    spacing: KitThemeContext.current.spacing.unit * 4;
     property <length> subtitle-height: max(dictate.natural-subtitle-height, meeting.natural-subtitle-height);
 
     dictate := CaptureAction {
@@ -74,6 +94,7 @@ export component ActionHero inherits HorizontalLayout {
         title: @tr("Dicter");
         glyph: LucideCommunication.mic();
         ink: Theme.accent;
+        tint: Theme.accent-tint;
 
         AppText {
             text: root.dictation-shortcut == "" ? @tr("Définissez un raccourci") : @tr("Appuyez sur");
@@ -81,7 +102,10 @@ export component ActionHero inherits HorizontalLayout {
             color: Theme.text-muted;
             vertical-alignment: center;
         }
-        if root.dictation-shortcut != "": KitBadge { text: root.dictation-shortcut; }
+        if root.dictation-shortcut != "": VerticalLayout {
+            alignment: center;
+            KitKeycap { text: root.dictation-shortcut; }
+        }
     }
 
     meeting := CaptureAction {
@@ -93,6 +117,7 @@ export component ActionHero inherits HorizontalLayout {
         title: @tr("Démarrer une réunion");
         glyph: LucideAccount.users();
         ink: Theme.secondary;
+        tint: Theme.secondary-tint;
 
         AppText {
             text: @tr("Transcrire en direct avec l’audio système");

@@ -809,9 +809,9 @@ msgstr "Aucun résultat"
 #: app/souffle-slint/ui/components/timeline_section.slint:272
 msgctxt "TimelineSection"
 msgid ""
-"Essayez d'autres mots-clés — la recherche couvre toutes les transcriptions."
+"Essayez d'autres mots-clés : la recherche couvre toutes les transcriptions."
 msgstr ""
-"Essayez d'autres mots-clés — la recherche couvre toutes les transcriptions."
+"Essayez d'autres mots-clés : la recherche couvre toutes les transcriptions."
 
 #: app/souffle-slint/ui/components/themed_switch.slint:9
 msgctxt "ThemedSwitch"
@@ -3450,10 +3450,6 @@ msgid "Modèle local prêt ({})"
 msgstr "Modèle local prêt ({})"
 
 msgctxt "CompressionStatus"
-msgid "Le téléchargement a échoué : {}"
-msgstr "Le téléchargement a échoué : {}"
-
-msgctxt "CompressionStatus"
 msgid "Réessayer le téléchargement"
 msgstr "Réessayer le téléchargement"
 
@@ -3784,3 +3780,11 @@ msgstr "Niveau d'entrée"
 msgctxt "OnboardingView"
 msgid "Parlez pour vérifier que le micro capte votre voix."
 msgstr "Parlez pour vérifier que le micro capte votre voix."
+
+msgctxt "CompactTranscriptSection"
+msgid "Version compacte"
+msgstr "Version compacte"
+
+msgctxt "IdleView"
+msgid "Historique"
+msgstr "Historique"

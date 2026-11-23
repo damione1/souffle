@@ -1,16 +1,55 @@
-import { AppText, Typography } from "@typography";
-import { ListView } from "std-widgets.slint";
-import { Theme } from "../theme.slint";
+import { AlertSeverity, ButtonIntent, ControlSize, ControlWidth, KitAlert, KitButton, KitCard, KitInline, KitPressable, KitProgress, KitScrollArea, KitStack, KitText, KitThemeContext, ProgressMode, TypographyRole } from "@kit";
 import { CompressionUi } from "../compression.slint";
 import { CompactJobPhase } from "../types.slint";
-import { ButtonIntent, ControlSize, KitButton } from "@kit";
 import { CompressionStatus } from "compression_status.slint";
-export component CompactTranscriptSection inherits VerticalLayout {
-    spacing: 10px;
-    vertical-stretch: 0;
-    HorizontalLayout {
-        spacing: 8px;
-        AppText { text: @tr("Version compacte (expérimentale)"); typography: Typography.section; color: Theme.text-primary; vertical-alignment: center; horizontal-stretch: 1; }
+
+component CompactLine inherits Rectangle {
+    in property <string> text;
+    in property <bool> timed;
+    in property <bool> expanded;
+    in property <length> pad;
+    in property <length> collapsed-height;
+    callback activated();
+
+    height: root.expanded ? row-text.preferred-height + 2 * root.pad : root.collapsed-height;
+
+    if root.timed: KitPressable {
+        intent: ButtonIntent.quiet;
+        control-width: ControlWidth.fill;
+        width: parent.width;
+        height: parent.height;
+        padding-inline: 0px;
+        padding-block: 0px;
+        accessible-name: root.text;
+        activated => { root.activated(); }
+    }
+    row-text := KitText {
+        x: root.pad;
+        y: root.pad;
+        width: parent.width - 2 * root.pad;
+        height: root.expanded ? self.preferred-height : root.collapsed-height - 2 * root.pad;
+        text: root.text;
+        overflow: root.expanded ? clip : elide;
+        accessible-role: none;
+    }
+}
+
+export component CompactTranscriptSection inherits KitStack {
+    property <length> row-padding: KitThemeContext.current.spacing.unit * 3;
+    property <length> collapsed-row-height: 72px;
+    property <bool> waiting: CompressionUi.job-phase == CompactJobPhase.waiting-for-model || CompressionUi.job-phase == CompactJobPhase.queued;
+
+    gap: compact;
+
+    KitInline {
+        gap: compact;
+        alignment: stretch;
+        KitText {
+            text: @tr("Version compacte (expérimentale)");
+            role: TypographyRole.subtitle;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+        }
         if !CompressionUi.busy: KitButton {
             text: CompressionUi.has-compact ? @tr("Régénérer") : @tr("Générer");
             intent: ButtonIntent.primary;
@@ -21,46 +60,65 @@ export component CompactTranscriptSection inherits VerticalLayout {
         if CompressionUi.busy: KitButton { text: @tr("Annuler"); control-size: ControlSize.compact; activated => { CompressionUi.cancel(); } }
         if CompressionUi.has-compact: KitButton { text: CompressionUi.copied ? @tr("Copié") : @tr("Copier"); control-size: ControlSize.compact; activated => { CompressionUi.copy(); } }
     }
-    if CompressionUi.ongoing: AppText { text: @tr("Disponible une fois l'enregistrement terminé."); typography: Typography.secondary; color: Theme.text-muted; }
-    if CompressionUi.stale: AppText { text: @tr("Cette version compacte précède les dernières modifications de la transcription. Régénérez-la avant de l'utiliser."); typography: Typography.secondary; color: Theme.text-muted; wrap: word-wrap; }
-    if CompressionUi.job-phase != CompactJobPhase.idle: AppText {
-        text: CompressionUi.job-phase == CompactJobPhase.waiting-for-model ? @tr("En attente du modèle…")
-            : CompressionUi.job-phase == CompactJobPhase.queued ? @tr("En attente du moteur de compression…")
-            : CompressionUi.job-phase == CompactJobPhase.compressing ? @tr("Compression : {}%", CompressionUi.progress)
-            : CompressionUi.job-phase == CompactJobPhase.failed ? @tr("La compression a échoué : {}", CompressionUi.job-error)
-            : CompressionUi.job-phase == CompactJobPhase.source-changed ? @tr("La transcription a changé. Relancez la compression.")
-            : @tr("Compression interrompue par un enregistrement. Réessayez après l'enregistrement.");
-        typography: Typography.secondary; color: Theme.text-muted; wrap: word-wrap;
+
+    if CompressionUi.ongoing: KitText { text: @tr("Disponible une fois l'enregistrement terminé."); role: TypographyRole.caption; }
+    if CompressionUi.stale: KitAlert {
+        severity: AlertSeverity.warning;
+        message: @tr("Cette version compacte précède les dernières modifications de la transcription. Régénérez-la avant de l'utiliser.");
     }
-    if CompressionUi.job-error != "" && CompressionUi.job-phase != CompactJobPhase.failed: AppText {
-        text: @tr("L'opération a échoué : {}", CompressionUi.job-error);
-        typography: Typography.secondary; color: Theme.text-muted; wrap: word-wrap;
+    if root.waiting: KitProgress {
+        mode: ProgressMode.indeterminate;
+        label: CompressionUi.job-phase == CompactJobPhase.waiting-for-model ? @tr("En attente du modèle…") : @tr("En attente du moteur de compression…");
     }
+    if CompressionUi.job-phase == CompactJobPhase.compressing: KitProgress {
+        value: CompressionUi.progress / 100.0;
+        label: @tr("Compression : {}%", CompressionUi.progress);
+    }
+    if CompressionUi.job-phase == CompactJobPhase.failed: KitAlert {
+        severity: AlertSeverity.error;
+        message: @tr("La compression a échoué : {}", CompressionUi.job-error);
+    }
+    if CompressionUi.job-phase == CompactJobPhase.source-changed: KitAlert {
+        severity: AlertSeverity.warning;
+        message: @tr("La transcription a changé. Relancez la compression.");
+    }
+    if CompressionUi.job-phase == CompactJobPhase.interrupted-by-recording: KitAlert {
+        severity: AlertSeverity.warning;
+        message: @tr("Compression interrompue par un enregistrement. Réessayez après l'enregistrement.");
+    }
+    if CompressionUi.job-error != "" && CompressionUi.job-phase != CompactJobPhase.failed: KitAlert {
+        severity: AlertSeverity.error;
+        message: @tr("L'opération a échoué : {}", CompressionUi.job-error);
+    }
+
     if !CompressionUi.has-compact || CompressionUi.busy: CompressionStatus { }
-    if CompressionUi.has-compact: AppText { text: @tr("LLMLingua-2 · cible {}% · {} · environ {} jetons", CompressionUi.compact-rate, CompressionUi.generated-at, CompressionUi.approx-tokens); typography: Typography.hint; color: Theme.text-muted; wrap: word-wrap; }
-    if CompressionUi.has-compact: ListView {
+
+    if CompressionUi.has-compact: KitText {
+        text: @tr("LLMLingua-2 · cible {}% · {} · environ {} jetons", CompressionUi.compact-rate, CompressionUi.generated-at, CompressionUi.approx-tokens);
+        role: TypographyRole.caption;
+    }
+
+    if CompressionUi.has-compact: KitCard {
+        inset: none;
+        gap: none;
         height: CompressionUi.expanded ? 320px : 160px;
-        for line in CompressionUi.lines: Rectangle {
-            height: CompressionUi.expanded ? row-text.preferred-height + 12px : 72px;
-            background: area.has-hover && line.timed ? Theme.surface-2 : transparent;
-            accessible-role: list-item;
-            accessible-label: line.text;
-            accessible-action-default => { if line.timed { CompressionUi.seek(line.session-index, line.seconds); } }
-            forward-focus: row-focus;
-            row-focus := FocusScope {
-                enabled: line.timed;
-                key-pressed(event) => {
-                    if event.text == Key.Return || event.text == Key.Space { CompressionUi.seek(line.session-index, line.seconds); return accept; }
-                    return reject;
-                }
+        KitScrollArea {
+            label: @tr("Version compacte");
+            height: CompressionUi.expanded ? 320px : 160px;
+            gap: none;
+            for line in CompressionUi.lines: CompactLine {
+                text: line.text;
+                timed: line.timed;
+                expanded: CompressionUi.expanded;
+                pad: root.row-padding;
+                collapsed-height: root.collapsed-row-height;
+                activated => { CompressionUi.seek(line.session-index, line.seconds); }
             }
-            row-text := AppText { x: 8px; y: 6px; width: parent.width - 16px; height: CompressionUi.expanded ? self.preferred-height : 60px; text: line.text; typography: Typography.secondary; color: Theme.text-secondary; wrap: word-wrap; overflow: CompressionUi.expanded ? clip : elide; }
-            area := TouchArea { mouse-cursor: line.timed ? pointer : default; clicked => { if line.timed { CompressionUi.seek(line.session-index, line.seconds); } } }
         }
     }
-    if CompressionUi.has-compact: HorizontalLayout {
-        alignment: start;
+
+    if CompressionUi.has-compact: KitInline {
         KitButton { text: CompressionUi.expanded ? @tr("Réduire l'aperçu") : @tr("Développer l'aperçu"); control-size: ControlSize.compact; activated => { CompressionUi.expand(); } }
     }
-    if CompressionUi.has-compact && CompressionUi.compact-rate < CompressionUi.rate-default: AppText { text: @tr("Une valeur basse omet des mots."); typography: Typography.hint; color: Theme.text-muted; wrap: word-wrap; }
+    if CompressionUi.has-compact && CompressionUi.compact-rate < CompressionUi.rate-default: KitText { text: @tr("Une valeur basse omet des mots."); role: TypographyRole.caption; }
 }

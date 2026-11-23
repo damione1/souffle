@@ -8217,8 +8217,7 @@ mod tests {
                 });
             }
             let rows: Vec<_> =
-                ElementHandle::find_by_element_id(&window, "CompactTranscriptSection::row-text")
-                    .collect();
+                ElementHandle::find_by_element_id(&window, "CompactLine::row-text").collect();
             assert!(!rows.is_empty(), "compact rows must be rendered");
             for row in rows {
                 assert!(

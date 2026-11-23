@@ -1,5 +1,5 @@
 import { AppText, AppTextInput, Typography, TypographyStyle } from "@typography";
-import { KitChipButton, KitScrollArea, KitSearchField } from "@kit";
+import { ControlSize, KitChipButton, KitScrollArea, KitSearchField, KitThemeContext } from "@kit";
 import { Theme } from "theme.slint";
 import { ActionHero } from "components/action_hero.slint";
 import { StatusBanner } from "components/status_banner.slint";
@@ -81,7 +81,7 @@ export component IdleView inherits Rectangle {
             timeline-section.dismiss-delete-confirmation();
         }
         scroll-event(event) => {
-            history-scroll.content-y = clamp(history-scroll.content-y + event.delta-y, min(0px, history-scroll.height - history-scroll.content-height), 0px);
+            history-scroll.content-y = clamp(history-scroll.content-y + event.delta-y, min(0px, history-scroll.visible-height - history-scroll.content-height), 0px);
             accept
         }
     }
@@ -89,11 +89,11 @@ export component IdleView inherits Rectangle {
     // No settings button here: `AppHeader` (mounted once in
     // `main_window.slint`, above every view) owns that control now.
     VerticalLayout {
-        width: min(root.width - 52px, 720px);
+        width: min(root.width - KitThemeContext.current.spacing.unit * 13, Theme.page-column-width);
         height: 100%;
         x: (root.width - self.width) / 2;
-        padding-top: 26px;
-        spacing: 26px;
+        padding-top: Theme.page-top-padding;
+        spacing: KitThemeContext.current.spacing.unit * 6;
 
         if root.transcription-status-message != "" || root.mic-stall-visible || root.dictation-finalizing
             || root.dictation-recovery-text != "" || root.meeting-status-message != "": notices := KitScrollArea {
@@ -144,76 +144,93 @@ export component IdleView inherits Rectangle {
             meeting-requested => { root.meeting-requested(); }
         }
 
-        if !root.timeline-is-empty || root.search-query != "": KitSearchField {
-            clear-label: @tr("InterfaceSection" => "Effacer");
-            accessible-name: @tr("SearchField" => "Rechercher les transcriptions et réunions");
-            vertical-stretch: 0;
-            text <=> root.search-query;
-            placeholder: @tr("Rechercher transcriptions et réunions");
-            edited(text) => { root.search-changed(text); }
-        }
-
         if !root.timeline-is-empty || root.search-query != "": HorizontalLayout {
             vertical-stretch: 0;
-            spacing: 6px;
-            alignment: start;
+            spacing: KitThemeContext.current.spacing.unit * 3.5;
 
-            KitChipButton {
-                label: @tr("Tout");
-                selected: root.kind-filter == TimelineFilter.all;
-                activate => { root.filter-changed(TimelineFilter.all); }
+            KitSearchField {
+                horizontal-stretch: 1;
+                control-size: ControlSize.comfortable;
+                clear-label: @tr("InterfaceSection" => "Effacer");
+                accessible-name: @tr("SearchField" => "Rechercher les transcriptions et réunions");
+                text <=> root.search-query;
+                placeholder: @tr("Rechercher transcriptions et réunions");
+                edited(text) => { root.search-changed(text); }
             }
-            KitChipButton {
-                label: @tr("Réunions");
-                selected: root.kind-filter == TimelineFilter.meeting;
-                activate => { root.filter-changed(TimelineFilter.meeting); }
-            }
-            KitChipButton {
-                label: @tr("Dictées");
-                selected: root.kind-filter == TimelineFilter.dictation;
-                activate => { root.filter-changed(TimelineFilter.dictation); }
+
+            HorizontalLayout {
+                horizontal-stretch: 0;
+                spacing: KitThemeContext.current.spacing.unit * 1.5;
+                alignment: center;
+
+                KitChipButton {
+                    label: @tr("Tout");
+                    selected: root.kind-filter == TimelineFilter.all;
+                    activate => { root.filter-changed(TimelineFilter.all); }
+                }
+                KitChipButton {
+                    label: @tr("Réunions");
+                    selected: root.kind-filter == TimelineFilter.meeting;
+                    activate => { root.filter-changed(TimelineFilter.meeting); }
+                }
+                KitChipButton {
+                    label: @tr("Dictées");
+                    selected: root.kind-filter == TimelineFilter.dictation;
+                    activate => { root.filter-changed(TimelineFilter.dictation); }
+                }
             }
         }
 
         // Stretch pool leftover. Do not bind `content-height` to the
         // child's `.height` (binding loop, see transcript_section.slint).
-        history-scroll := Flickable {
-            width: parent.width;
+        history-scroll := KitScrollArea {
             vertical-stretch: 1;
-            content-width: self.width;
+            focusable: self.scrollable;
+            label: @tr("Historique");
             // Desktop history scrolls by wheel/trackpad. Disabling mouse
             // drag-panning lets a plain press/release in an empty content
             // gap reach the page underlay and cancel delete confirmation;
             // touch panning and wheel scrolling remain available.
             mouse-drag-pan-enabled: false;
 
-            VerticalLayout {
-                width: parent.width;
-                alignment: start;
-                padding-bottom: 34px;
+            // The scroll viewport swallows presses, so the page underlay
+            // cannot see clicks on empty gaps inside the column.
+            Rectangle {
+                width: history-scroll.visible-width;
+                height: max(history-content.preferred-height, history-scroll.visible-height);
 
-                timeline-section := TimelineSection {
-                    width: history-scroll.width;
-                    groups: root.timeline-groups;
-                    is-empty: root.timeline-is-empty;
-                    has-matches: root.timeline-has-matches;
-                    live-meeting-id: root.live-meeting-id;
-                    expanded-dictation-id: root.expanded-dictation-id;
-                    calendar-enabled: root.calendar-enabled;
-                    calendar-permission: root.calendar-permission;
-                    upcoming: root.upcoming;
-                    can-start-event: root.model-ready;
-                    item-opened(kind, id) => {
-                        if kind == TimelineKind.dictation {
-                            root.expanded-dictation-id = root.expanded-dictation-id == id ? "" : id;
-                        } else {
-                            root.timeline-item-opened(kind, id);
+                TouchArea {
+                    clicked => { timeline-section.dismiss-delete-confirmation(); }
+                }
+
+                history-content := VerticalLayout {
+                    width: history-scroll.visible-width;
+                    alignment: start;
+                    padding-bottom: KitThemeContext.current.spacing.unit * 9;
+
+                    timeline-section := TimelineSection {
+                        width: history-scroll.visible-width;
+                        groups: root.timeline-groups;
+                        is-empty: root.timeline-is-empty;
+                        has-matches: root.timeline-has-matches;
+                        live-meeting-id: root.live-meeting-id;
+                        expanded-dictation-id: root.expanded-dictation-id;
+                        calendar-enabled: root.calendar-enabled;
+                        calendar-permission: root.calendar-permission;
+                        upcoming: root.upcoming;
+                        can-start-event: root.model-ready;
+                        item-opened(kind, id) => {
+                            if kind == TimelineKind.dictation {
+                                root.expanded-dictation-id = root.expanded-dictation-id == id ? "" : id;
+                            } else {
+                                root.timeline-item-opened(kind, id);
+                            }
                         }
+                        item-removed(kind, id) => { root.timeline-item-removed(kind, id); }
+                        item-copy-requested(text) => { root.timeline-item-copy-requested(text); }
+                        calendar-setup-requested => { root.calendar-setup-requested(); }
+                        event-start-requested(id) => { root.calendar-event-start-requested(id); }
                     }
-                    item-removed(kind, id) => { root.timeline-item-removed(kind, id); }
-                    item-copy-requested(text) => { root.timeline-item-copy-requested(text); }
-                    calendar-setup-requested => { root.calendar-setup-requested(); }
-                    event-start-requested(id) => { root.calendar-event-start-requested(id); }
                 }
             }
         }

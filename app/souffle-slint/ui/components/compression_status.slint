@@ -3,25 +3,28 @@ import { Theme } from "../theme.slint";
 import { CompressionUi } from "../compression.slint";
 import { SummarizationUi } from "../summarization.slint";
 import { CompressionModelPhase } from "../types.slint";
-import { ButtonIntent, ControlSize, KitButton } from "@kit";
+import { AlertSeverity, ButtonIntent, ControlSize, KitAlert, KitButton, KitProgress, ProgressMode } from "@kit";
 export component CompressionStatus inherits VerticalLayout {
     in property <bool> allow-removal: false;
     property <bool> confirming: false;
     spacing: 6px;
     vertical-stretch: 0;
-    AppText {
-        text: CompressionUi.model-phase == CompressionModelPhase.not-downloaded ? @tr("Modèle de compression non téléchargé ({})", CompressionUi.model-size)
-            : CompressionUi.model-phase == CompressionModelPhase.queued ? @tr("Installation du modèle en attente…")
-            : CompressionUi.model-phase == CompressionModelPhase.deleting ? @tr("Suppression du modèle…")
+    if CompressionUi.model-phase == CompressionModelPhase.queued || CompressionUi.model-phase == CompressionModelPhase.downloading || CompressionUi.model-phase == CompressionModelPhase.preparing: KitProgress {
+        mode: ProgressMode.indeterminate;
+        label: CompressionUi.model-phase == CompressionModelPhase.queued ? @tr("Installation du modèle en attente…")
             : CompressionUi.model-phase == CompressionModelPhase.downloading ? @tr("Téléchargement du modèle : {}", CompressionUi.download-progress)
-            : CompressionUi.model-phase == CompressionModelPhase.preparing ? @tr("Préparation locale du modèle fp16…")
+            : @tr("Préparation locale du modèle fp16…");
+    }
+    if CompressionUi.model-phase != CompressionModelPhase.queued && CompressionUi.model-phase != CompressionModelPhase.downloading && CompressionUi.model-phase != CompressionModelPhase.preparing: AppText {
+        text: CompressionUi.model-phase == CompressionModelPhase.not-downloaded ? @tr("Modèle de compression non téléchargé ({})", CompressionUi.model-size)
+            : CompressionUi.model-phase == CompressionModelPhase.deleting ? @tr("Suppression du modèle…")
             : CompressionUi.model-phase == CompressionModelPhase.ready ? @tr("Modèle local prêt ({})", CompressionUi.model-size)
             : @tr("Le modèle de compression doit être réinstallé.");
         typography: Typography.secondary;
         color: Theme.text-muted;
         wrap: word-wrap;
     }
-    if CompressionUi.model-error != "": AppText { text: CompressionUi.model-error; typography: Typography.secondary; color: Theme.text-muted; wrap: word-wrap; }
+    if CompressionUi.model-error != "": KitAlert { severity: AlertSeverity.error; message: CompressionUi.model-error; vertical-stretch: 0; }
     HorizontalLayout {
         alignment: start;
         spacing: 8px;
@@ -31,15 +34,16 @@ export component CompressionStatus inherits VerticalLayout {
             activated => { CompressionUi.download(); }
         }
         if CompressionUi.model-phase == CompressionModelPhase.queued || CompressionUi.model-phase == CompressionModelPhase.downloading || CompressionUi.model-phase == CompressionModelPhase.preparing: KitButton {
-            text: @tr("Annuler le téléchargement"); control-size: ControlSize.compact;
+            text: @tr("Annuler le téléchargement"); intent: ButtonIntent.outline; control-size: ControlSize.compact;
             activated => { CompressionUi.cancel-download(); }
         }
         if root.allow-removal && CompressionUi.cache-present && CompressionUi.model-phase != CompressionModelPhase.deleting: KitButton {
             text: root.confirming ? @tr("Confirmer la suppression") : @tr("Supprimer le modèle de compression");
+            intent: root.confirming ? ButtonIntent.destructive : ButtonIntent.outline;
             control-size: ControlSize.compact;
             activated => { if root.confirming { CompressionUi.remove-model(); root.confirming = false; } else { root.confirming = true; } }
         }
-        if root.confirming: KitButton { text: @tr("Annuler"); control-size: ControlSize.compact; activated => { root.confirming = false; } }
+        if root.confirming: KitButton { text: @tr("Annuler"); intent: ButtonIntent.quiet; control-size: ControlSize.compact; activated => { root.confirming = false; } }
     }
     if root.confirming: AppText { text: @tr("Les versions compactes et les préférences seront conservées. Le modèle pourra être téléchargé à nouveau."); typography: Typography.hint; color: Theme.text-muted; wrap: word-wrap; }
 }

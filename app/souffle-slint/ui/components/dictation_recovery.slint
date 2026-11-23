@@ -1,60 +1,43 @@
-import { AppText, AppTextInput, Typography, TypographyStyle } from "@typography";
-import { ButtonIntent, KitButton, KitTextArea } from "@kit";
+import { ButtonIntent, KitButton, KitCard, KitCardHeader, KitInline, KitTextArea, SurfaceLevel } from "@kit";
+import { LucideText } from "@kit-icons/text.slint";
 import { Theme } from "../theme.slint";
 
 // Kept on the home screen when stopping succeeded but persistence or text
 // insertion did not. The transcript remains selectable/editable until the
 // user explicitly copies or discards it; an error can therefore never turn
 // into silent data loss merely because RecordingView unmounted.
-export component DictationRecovery inherits Rectangle {
+export component DictationRecovery inherits KitCard {
     in-out property <string> text;
 
     callback copy-requested();
     callback discard-requested();
 
-    height: content.preferred-height;
-    vertical-stretch: 0;
-    border-width: 1px;
+    level: SurfaceLevel.raised;
+    inset: regular;
     border-color: Theme.warning;
-    border-radius: 6px;
-    background: Theme.surface-2;
 
-    content := VerticalLayout {
-        padding: 12px;
-        spacing: 8px;
-        alignment: start;
-
-        AppText {
-            text: @tr("Dictée à récupérer");
-            color: Theme.text-primary;
-            typography: Typography.body-emphasis;
-
+    KitCardHeader {
+        title: @tr("Dictée à récupérer");
+        description: @tr("Le texte reste ici tant que vous ne l’avez pas copié ou supprimé.");
+    }
+    KitTextArea {
+        text <=> root.text;
+        min-lines: 4;
+        max-lines: 4;
+        accessible-name: @tr("Texte de dictée à récupérer");
+    }
+    KitInline {
+        alignment: end;
+        KitButton {
+            text: @tr("Supprimer");
+            intent: ButtonIntent.quiet;
+            activated => { root.discard-requested(); }
         }
-        AppText {
-            text: @tr("Le texte reste ici tant que vous ne l’avez pas copié ou supprimé.");
-            color: Theme.text-muted;
-            typography: Typography.secondary;
-            wrap: word-wrap;
-        }
-        KitTextArea {
-            text <=> root.text;
-            min-lines: 4;
-            max-lines: 4;
-            accessible-name: @tr("Texte de dictée à récupérer");
-        }
-        HorizontalLayout {
-            spacing: 8px;
-            alignment: end;
-            KitButton {
-                text: @tr("Supprimer");
-                intent: ButtonIntent.quiet;
-                activated => { root.discard-requested(); }
-            }
-            KitButton {
-                text: @tr("Copier le texte");
-                intent: ButtonIntent.primary;
-                activated => { root.copy-requested(); }
-            }
+        KitButton {
+            text: @tr("Copier le texte");
+            intent: ButtonIntent.primary;
+            leading-icon: LucideText.copy();
+            activated => { root.copy-requested(); }
         }
     }
 }

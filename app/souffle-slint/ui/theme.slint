@@ -181,6 +181,8 @@ export global Theme {
             ? Orientation.vertical : Orientation.horizontal;
     }
     out property <length> header-height: 56px;
+    out property <length> page-column-width: 760px;
+    out property <length> page-top-padding: 30px;
     out property <length> settings-control-height: KitMetrics.control-height(KitThemeContext.current, ControlSize.compact);
     out property <length> settings-inset: KitMetrics.field-gap(KitThemeContext.current) - KitThemeContext.current.spacing.unit;
 }

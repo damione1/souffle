@@ -1,4 +1,4 @@
-import { ButtonIntent, ControlSize, KitButton, KitIcon, KitPressable } from "@kit";
+import { AvatarShape, ButtonIntent, ControlSize, KitAvatar, KitButton, KitDivider, KitIcon, KitPressable, Tone } from "@kit";
 import { LucideCursors } from "@kit-icons/cursors.slint";
 import { LucideAccount } from "@kit-icons/account.slint";
 import { LucideText } from "@kit-icons/text.slint";
@@ -27,6 +27,7 @@ export component TimelineItemRow inherits Rectangle {
     in property <HistoryEntry> entry;
     in property <bool> is-live: false;
     in property <bool> expanded: false;
+    in property <bool> first: false;
 
     // Driven by the parent list (`TimelineSection`), not owned locally: a
     // plain `TouchArea` click doesn't grab keyboard focus in Slint, so a
@@ -67,10 +68,7 @@ export component TimelineItemRow inherits Rectangle {
             }
         }
 
-        Rectangle {
-            height: 1px;
-            background: Theme.rule;
-        }
+        if !root.first: KitDivider {}
 
         content := Rectangle {
         background: root.actions-visible ? Theme.surface-2 : transparent;
@@ -85,20 +83,24 @@ export component TimelineItemRow inherits Rectangle {
             }
         }
         HorizontalLayout {
-            padding-top: 12px;
-            padding-bottom: 12px;
-            padding-left: 16px;
-            padding-right: 16px;
-            spacing: 16px;
+            padding-top: 13px;
+            padding-bottom: 13px;
+            padding-left: 18px;
+            padding-right: 18px;
+            spacing: 14px;
 
             VerticalLayout {
                 alignment: root.is-dictation && root.expanded ? start : center;
-                width: 16px;
+                horizontal-stretch: 0;
 
-                KitIcon {
-                    glyph: root.entry.kind == TimelineKind.meeting ? LucideAccount.users() : LucideFiles.file-text();
-                    ink: root.entry.kind == TimelineKind.meeting ? Theme.accent : Theme.text-muted;
-                    width: 16px; height: 16px;
+                KitAvatar {
+                    shape: AvatarShape.rounded;
+                    size: 32px;
+                    bordered: false;
+                    decorative: true;
+                    tone: root.is-dictation ? Tone.neutral : Tone.accent;
+                    muted: root.is-dictation;
+                    fallback-icon: root.is-dictation ? LucideFiles.file-text() : LucideAccount.users();
                 }
             }
 
@@ -115,7 +117,7 @@ export component TimelineItemRow inherits Rectangle {
                 // axis. Expanded dictations still grow downward.
                 vertical-alignment: root.is-dictation && root.expanded ? top : center;
                 typography: Typography.field-label;
-                color: Theme.text-secondary;
+                color: Theme.text-primary;
             }
 
             VerticalLayout {
@@ -139,7 +141,7 @@ export component TimelineItemRow inherits Rectangle {
                         glyph: {stroke: LucideCursors.sparkles().stroke, fill: LucideCursors.sparkles().stroke, viewbox: LucideCursors.sparkles().viewbox};
                         ink: root.entry.summary-is-stale ? Theme.warning : Theme.accent;
 
-                        width: 14px; height: 14px;
+                        width: 15px; height: 15px;
                         y: (parent.height - self.height) / 2;
                     }
 
