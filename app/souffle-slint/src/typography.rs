@@ -131,6 +131,8 @@ fn project_kit_typography(window: &MainWindow) {
     typography.weight_medium = semibold;
     typography.weight_semibold = semibold;
     typography.weight_bold = i32::from(souffle_typography::Weight::Bold.number());
+    typography.weight_select = i32::from(souffle_typography::Weight::Medium.number());
+    typography.weight_keycap = semibold;
     typography.size_caption = role("hint").size;
     typography.size_control = role("content").size;
     typography.size_body = souffle_typography::BODY.size;

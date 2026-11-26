@@ -1,4 +1,4 @@
-import { ButtonIntent, ControlSize, KitBadge, KitIconButton, KitImage, KitWrap, KitSurface, KitDivider, KitText, KitLayoutMetrics, KitMetrics, Tone } from "@kit";
+import { ButtonIntent, ControlSize, ElevationLevel, KitBadge, KitIconButton, KitImage, KitWrap, KitSurface, KitDivider, KitText, KitLayoutMetrics, KitMetrics, Tone } from "@kit";
 import { LucideAccount } from "@kit-icons/account.slint";
 import { LucideAccessibility } from "@kit-icons/accessibility.slint";
 import { Theme } from "../theme.slint";
@@ -32,6 +32,7 @@ export component AppHeader inherits KitSurface {
 
     public function focus-settings() { settings-area.take-focus(); }
     border: none;
+    elevation: ElevationLevel.none;
     corner-radius: 0px;
     inset: none;
     gap: none;

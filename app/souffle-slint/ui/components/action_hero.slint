@@ -56,7 +56,7 @@ component CaptureAction inherits KitPressable {
             spacing: KitThemeContext.current.spacing.unit * 0.75;
             AppText {
                 text: root.title;
-                typography: Typography.action-title;
+                typography: Typography.hero-title;
                 color: Theme.text-primary;
             }
 
@@ -98,7 +98,7 @@ export component ActionHero inherits HorizontalLayout {
 
         AppText {
             text: root.dictation-shortcut == "" ? @tr("Définissez un raccourci") : @tr("Appuyez sur");
-            typography: Typography.hint;
+            typography: Typography.content;
             color: Theme.text-muted;
             vertical-alignment: center;
         }
@@ -121,7 +121,7 @@ export component ActionHero inherits HorizontalLayout {
 
         AppText {
             text: @tr("Transcrire en direct avec l’audio système");
-            typography: Typography.hint;
+            typography: Typography.content;
             color: Theme.text-muted;
             vertical-alignment: center;
             wrap: word-wrap;

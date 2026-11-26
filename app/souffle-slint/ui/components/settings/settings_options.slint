@@ -108,7 +108,7 @@ export global SettingsOptions {
 }
 
 export component ClosedSettingsPicker inherits KitSelect {
-    control-size: ControlSize.compact;
+    control-size: ControlSize.medium;
     in property <SettingsOptionList> choices;
     ownership: Ownership.controlled;
     options: root.choices.rows;

@@ -1,5 +1,5 @@
 import { SettingsOptions, ClosedSettingsPicker } from "settings_options.slint";
-import { AlertSeverity, ButtonIntent, ChoiceLabelPosition, ControlSize, ControlWidth, FieldAccess, KitAlert, KitButton, KitFieldRow, KitFieldSet, KitMetrics, KitModalContext, KitNumberStepper, KitSegmentedControl, KitSwitch, KitText, KitThemeContext, KitThemes, Ownership, TypographyRole } from "@kit";
+import { AlertSeverity, ButtonIntent, ChoiceLabelPosition, ControlSize, ControlWidth, FieldAccess, KeycapSize, KitAlert, KitButton, KitFieldRow, KitFieldSet, KitKeycap, KitMetrics, KitModalContext, KitNumberStepper, KitSegmentedControl, KitSwitch, KitText, KitThemeContext, KitThemes, Ownership, TypographyRole } from "@kit";
 import { SettingsNoticeRow } from "settings_notice_row.slint";
 import { Theme } from "../../theme.slint";
 import { AppTheme, AppLocale, PasteMethod, ShortcutField, ShortcutNotice, SettingsCaptureError } from "../../types.slint";
@@ -29,7 +29,13 @@ export global ShortcutNoticeText {
 // component only owns focus/recording UI state. Exported so
 // `onboarding_view.slint`'s shortcut step (SOU-190) reuses it instead of a
 // second FocusScope implementation.
+// `keycap` shows the shortcut as a large key cap instead of a button.
+export enum ShortcutPresentation { button, keycap }
+
 export component ShortcutRecorderButton inherits FocusScope {
+    in property <ShortcutPresentation> presentation: ShortcutPresentation.button;
+    private property <bool> as-keycap: root.presentation == ShortcutPresentation.keycap && !root.recording;
+    private property <string> display-label: root.recording ? @tr("Appuyez…") : (root.shortcut-label == "" ? @tr("Non défini") : root.shortcut-label);
     enabled: !KitModalContext.inert(0);
     in property <string> shortcut-label;
     in property <bool> recording;
@@ -45,20 +51,30 @@ export component ShortcutRecorderButton inherits FocusScope {
     callback cleared();
     callback cancelled();
 
-    width: 128px;
-    height: Theme.settings-control-height;
+    width: root.as-keycap ? cap-measure.preferred-width : 128px;
+    height: KitMetrics.control-height(KitThemeContext.current, root.presentation == ShortcutPresentation.keycap ? ControlSize.medium : ControlSize.compact);
+    cap-measure := KitKeycap { visible: false; size: KeycapSize.large; text: root.display-label; }
 
     public function take-focus() { trigger.take-focus(); }
 
     trigger := KitButton {
         width: parent.width;
-        text: root.recording ? @tr("Appuyez…") : (root.shortcut-label == "" ? @tr("Non défini") : root.shortcut-label);
+        height: parent.height;
+        control-size: root.presentation == ShortcutPresentation.keycap ? ControlSize.medium : ControlSize.compact;
+        text: root.as-keycap ? "" : root.display-label;
+        accessible-name: root.display-label;
         disabled: !root.enabled;
-        intent: root.recording ? ButtonIntent.primary : ButtonIntent.secondary;
+        intent: root.recording ? ButtonIntent.primary : root.as-keycap ? ButtonIntent.quiet : ButtonIntent.secondary;
         activated => {
             root.focus();
             root.record-requested();
         }
+    }
+
+    if root.as-keycap: KitKeycap {
+        width: parent.width;
+        size: KeycapSize.large;
+        text: root.display-label;
     }
 
     key-pressed(event) => {
