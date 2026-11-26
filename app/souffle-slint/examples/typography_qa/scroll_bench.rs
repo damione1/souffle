@@ -36,10 +36,13 @@ fn thread_cpu_ms() -> f64 {
 
 /// How the bench reads and moves a list, in px scrolled down from the top.
 pub(super) struct View<W> {
-    pub(super) travel: Box<dyn Fn(&W) -> f32>,
-    pub(super) position: Box<dyn Fn(&W) -> f32>,
-    pub(super) scroll_to: Box<dyn Fn(&W, f32)>,
+    pub(super) travel: Reading<W>,
+    pub(super) position: Reading<W>,
+    pub(super) scroll_to: ScrollTo<W>,
 }
+
+pub(super) type Reading<W> = Box<dyn Fn(&W) -> f32>;
+pub(super) type ScrollTo<W> = Box<dyn Fn(&W, f32)>;
 
 impl<W: ComponentHandle + 'static> View<W> {
     /// A list scrolled like a user does, by wheel events at (`x`, `y`). The
@@ -260,22 +263,28 @@ pub(super) fn start_growth<W: ComponentHandle + 'static>(
     let weak = window.as_weak();
     let timer = Rc::new(slint::Timer::default());
     let ticking = timer.clone();
-    let state = RefCell::new((0usize, Samples::default(), None::<(Instant, f64)>));
+    #[derive(Default)]
+    struct Growth {
+        done: usize,
+        samples: Samples,
+        started: Option<(Instant, f64)>,
+    }
+    let state = RefCell::new(Growth::default());
     let tick = move || {
         let Some(window) = weak.upgrade() else {
             return;
         };
         let mut state = state.borrow_mut();
         let now = (Instant::now(), thread_cpu_ms());
-        if let Some((wall, cpu)) = state.2.replace(now) {
-            state.1.cpu.push(now.1 - cpu);
-            state.1.wall.push((now.0 - wall).as_secs_f64() * 1e3);
+        if let Some((wall, cpu)) = state.started.replace(now) {
+            state.samples.cpu.push(now.1 - cpu);
+            state.samples.wall.push((now.0 - wall).as_secs_f64() * 1e3);
         }
-        if state.0 >= steps {
+        if state.done >= steps {
             let quarter = (steps / 4).max(1);
             let part = |range: std::ops::Range<usize>| Samples {
-                cpu: state.1.cpu[range.clone()].to_vec(),
-                wall: state.1.wall[range].to_vec(),
+                cpu: state.samples.cpu[range.clone()].to_vec(),
+                wall: state.samples.wall[range].to_vec(),
             };
             report("first_quarter", &label, &part(0..quarter));
             report("last_quarter", &label, &part(steps - quarter..steps));
@@ -283,8 +292,8 @@ pub(super) fn start_growth<W: ComponentHandle + 'static>(
             slint::quit_event_loop().unwrap();
             return;
         }
-        let index = state.0;
-        state.0 += 1;
+        let index = state.done;
+        state.done += 1;
         drop(state);
         step(&window, index);
     };
