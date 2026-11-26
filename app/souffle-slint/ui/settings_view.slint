@@ -81,11 +81,8 @@ export component SettingsView inherits KitAppShell {
     in property <int> calendar-reminder-minutes-min;
     in property <int> calendar-reminder-minutes-max;
     in property <[CalendarRow]> calendars;
-    in property <[string]> audio-device-labels;
     in property <[string]> audio-device-ids;
     in property <int> default-device-index: -1;
-    in property <string> selected-device-id;
-    in property <bool> pin-unavailable;
     in property <string> sample-rate-label;
     in property <bool> sample-rate-high;
     in property <bool> resetting-sample-rate;
@@ -252,8 +249,6 @@ export component SettingsView inherits KitAppShell {
     callback calendar-reminder-minutes-changed(int);
     callback calendar-toggled(string);
     callback calendar-open-system-settings-requested();
-    callback device-changed(string);
-    callback refresh-devices-requested();
     callback reset-sample-rate-requested();
     callback move-device-requested(string, int);
     callback remove-device-requested(string);
@@ -578,18 +573,11 @@ export component SettingsView inherits KitAppShell {
                             label: SettingsOptions.tab-label(SettingsTab.audio);
 
                                 if audio-page.mounted: MicrophoneSection {
-                                    device-labels: root.audio-device-labels;
-                                    device-ids: root.audio-device-ids;
-                                    default-device-index: root.default-device-index;
-                                    selected-device-id: root.selected-device-id;
-                                    pin-unavailable: root.pin-unavailable;
                                     sample-rate-label: root.sample-rate-label;
                                     sample-rate-high: root.sample-rate-high;
                                     resetting-sample-rate: root.resetting-sample-rate;
                                     capture-busy: root.capture-busy;
                                     microphones: root.microphones;
-                                    device-changed(value) => { root.device-changed(value); }
-                                    refresh-requested => { root.refresh-devices-requested(); }
                                     reset-sample-rate-requested => { root.reset-sample-rate-requested(); }
                                     move-device-requested(uid, direction) => { root.move-device-requested(uid, direction); }
                                     remove-device-requested(uid) => { root.remove-device-requested(uid); }

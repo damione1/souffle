@@ -683,10 +683,9 @@ mod tests {
             if populate_settings {
                 settings_ui::populate(&window, &initial);
             }
-            audio_ui::populate_device_pickers(
+            audio_ui::populate_clamshell_picker(
                 &window,
                 &devices.borrow(),
-                initial.audio_device.as_deref().unwrap_or_default(),
                 initial.clamshell_audio_device.as_deref(),
             );
             ia_ui::populate_intelligence(&window, &initial, summary.borrow().as_ref().unwrap());

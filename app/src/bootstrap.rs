@@ -205,6 +205,9 @@ pub fn bootstrap() -> Arc<AppState> {
                             {
                                 warn!("Input route refresh failed: {e}");
                             }
+                            crate::native::bridge::dispatch(
+                                crate::native::bridge::NativeAction::InputDevicesChanged,
+                            );
                         }
                         ChangeKind::DefaultOutput => {}
                     }

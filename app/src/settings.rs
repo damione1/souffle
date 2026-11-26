@@ -1,7 +1,8 @@
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
-use crate::audio::InputPriority;
+use crate::audio::device::migrate_stored_device_id;
+use crate::audio::{AudioInputDevice, InputPriority};
 use crate::constants::OLLAMA_DEFAULT_URL;
 use crate::db::Database;
 use crate::engine::{
@@ -21,7 +22,8 @@ const OLLAMA_MODEL_KEY: &str = "ollama_model";
 const SUMMARY_PROVIDER_KEY: &str = "summary_provider";
 /// Read from `debug` as well, which is why this one is `pub`.
 pub const DEBUG_TRANSCRIPTION_KEY: &str = "debug_transcription";
-const AUDIO_DEVICE_KEY: &str = "audio_device";
+// Read once by `migrate_pinned_device`, then deleted.
+const PINNED_DEVICE_MIGRATION_KEY: &str = "audio_device";
 const CLAMSHELL_AUDIO_DEVICE_KEY: &str = "clamshell_audio_device";
 const INPUT_PRIORITY_KEY: &str = "input_priority";
 const TRANSCRIPTION_ENGINE_ID_KEY: &str = "transcription_engine_id";
@@ -251,8 +253,6 @@ pub struct AppSettings {
     pub debug_transcription: bool,
     /// Global tracing verbosity for the `souffle` crate.
     pub log_level: LogLevel,
-    /// Pinned input device UID (`kAudioDevicePropertyDeviceUID`).
-    pub audio_device: Option<String>,
     /// Preferred microphone UID while the lid is closed with an external display
     /// attached (clamshell mode). `None` means just follow whatever macOS
     /// reports as the default input, the previous behavior.
@@ -436,7 +436,6 @@ impl Default for AppSettings {
             summary_compression_rate: default_compression_rate(),
             debug_transcription: false,
             log_level: LogLevel::default(),
-            audio_device: None,
             clamshell_audio_device: None,
             input_priority: InputPriority::default(),
             transcription_engine_id: KYUTAI_ENGINE_ID.to_string(),
@@ -553,9 +552,6 @@ impl AppSettings {
         }
         if let Some(log_level) = read_json_setting::<LogLevel>(db, LOG_LEVEL_KEY)? {
             settings.log_level = log_level;
-        }
-        if let Some(audio_device) = read_json_setting::<String>(db, AUDIO_DEVICE_KEY)? {
-            settings.audio_device = Some(audio_device);
         }
         if let Some(clamshell_audio_device) =
             read_json_setting::<String>(db, CLAMSHELL_AUDIO_DEVICE_KEY)?
@@ -730,42 +726,52 @@ impl AppSettings {
         Ok(settings.sanitized())
     }
 
-    /// Best-effort upgrade from legacy name pins to stable CoreAudio UIDs.
     fn migrate_audio_device_preferences(
         settings: &mut AppSettings,
         db: &Database,
     ) -> Result<(), String> {
-        #[cfg(target_os = "macos")]
-        {
-            use crate::audio::device::migrate_stored_device_id;
-            use crate::audio::device_watch::list_devices;
+        let devices = connected_input_devices();
+        Self::migrate_pinned_device(settings, db, &devices)?;
+        Self::migrate_clamshell_device_name(settings, db, &devices)
+    }
 
-            let devices = list_devices();
-            let mut changed = false;
+    /// One-shot upgrade from the retired pinned microphone: it becomes the
+    /// top of the preference order. The old row is deleted in the same
+    /// transaction, so a later load never promotes it again.
+    fn migrate_pinned_device(
+        settings: &mut AppSettings,
+        db: &Database,
+        devices: &[AudioInputDevice],
+    ) -> Result<(), String> {
+        let Some(stored) = read_json_setting::<String>(db, PINNED_DEVICE_MIGRATION_KEY)? else {
+            return Ok(());
+        };
+        let stored = stored.trim();
+        if !stored.is_empty() {
+            // Old pins can be display names.
+            let (uid, _) = migrate_stored_device_id(stored, devices);
+            settings.input_priority.promote(&uid);
+        }
+        let priority = &settings.input_priority;
+        db.with_settings_transaction(|transaction| {
+            write_json_setting_in_transaction(transaction, INPUT_PRIORITY_KEY, priority)?;
+            delete_setting_in_transaction(transaction, PINNED_DEVICE_MIGRATION_KEY)
+        })
+    }
 
-            if let Some(stored) = settings.audio_device.as_ref() {
-                let (migrated, did_change) = migrate_stored_device_id(stored, &devices);
-                if did_change {
-                    settings.audio_device = Some(migrated);
-                    changed = true;
-                }
-            }
-            if let Some(stored) = settings.clamshell_audio_device.as_ref() {
-                let (migrated, did_change) = migrate_stored_device_id(stored, &devices);
-                if did_change {
-                    settings.clamshell_audio_device = Some(migrated);
-                    changed = true;
-                }
-            }
-
-            if changed {
-                if let Some(audio_device) = settings.audio_device.as_ref() {
-                    write_json_setting(db, AUDIO_DEVICE_KEY, audio_device)?;
-                }
-                if let Some(clamshell_audio_device) = settings.clamshell_audio_device.as_ref() {
-                    write_json_setting(db, CLAMSHELL_AUDIO_DEVICE_KEY, clamshell_audio_device)?;
-                }
-            }
+    /// Best-effort upgrade from a legacy name to a stable CoreAudio UID.
+    fn migrate_clamshell_device_name(
+        settings: &mut AppSettings,
+        db: &Database,
+        devices: &[AudioInputDevice],
+    ) -> Result<(), String> {
+        let Some(stored) = settings.clamshell_audio_device.as_ref() else {
+            return Ok(());
+        };
+        let (migrated, changed) = migrate_stored_device_id(stored, devices);
+        if changed {
+            write_json_setting(db, CLAMSHELL_AUDIO_DEVICE_KEY, &migrated)?;
+            settings.clamshell_audio_device = Some(migrated);
         }
         Ok(())
     }
@@ -808,37 +814,13 @@ impl AppSettings {
         normalized.transcription_model_id = normalized.transcription_model_id.trim().to_string();
         normalized.transcription_backend_id =
             normalized.transcription_backend_id.trim().to_string();
-        normalized.audio_device = normalized
-            .audio_device
-            .as_ref()
-            .map(|device| device.trim().to_string())
-            .filter(|device| !device.is_empty());
         normalized.clamshell_audio_device = normalized
             .clamshell_audio_device
             .as_ref()
             .map(|device| device.trim().to_string())
             .filter(|device| !device.is_empty());
 
-        normalized.input_priority.priorities =
-            sanitize_uid_list(&normalized.input_priority.priorities);
-        normalized.input_priority.known = normalized
-            .input_priority
-            .known
-            .iter()
-            .filter_map(|entry| {
-                let uid = entry.uid.trim();
-                let name = entry.name.trim();
-                if uid.is_empty() || name.is_empty() {
-                    return None;
-                }
-                Some(crate::audio::KnownDevice {
-                    uid: uid.to_string(),
-                    name: name.to_string(),
-                    last_seen: entry.last_seen,
-                })
-            })
-            .collect();
-        dedupe_known_devices(&mut normalized.input_priority.known);
+        normalized.input_priority.sanitize();
 
         if normalized.ollama_url.is_empty() {
             normalized.ollama_url = OLLAMA_DEFAULT_URL.to_string();
@@ -981,30 +963,36 @@ impl AppSettings {
     /// only the input-priority JSON. Used when CoreAudio reports a device
     /// list or default-input change.
     pub fn sync_input_priority_from_devices(db: &Database) -> Result<InputPriority, String> {
-        let mut settings = Self::load(db)?;
-        #[cfg(target_os = "macos")]
-        {
-            use crate::audio::device_watch::list_devices;
-            use crate::audio::touch_known;
+        // Run the one-shot migrations before touching the key they write.
+        Self::load(db)?;
+        Self::touch_known_devices(db, &connected_input_devices())
+    }
 
-            touch_known(&mut settings.input_priority, &list_devices());
-        }
-        let normalized = settings.sanitize_for_save()?;
-        write_json_setting(db, INPUT_PRIORITY_KEY, &normalized.input_priority)?;
-        Ok(normalized.input_priority)
+    // The key is read and written inside one transaction: a preference order
+    // saved from Settings meanwhile must not be overwritten by a stale copy.
+    fn touch_known_devices(
+        db: &Database,
+        devices: &[AudioInputDevice],
+    ) -> Result<InputPriority, String> {
+        let mut synced = InputPriority::default();
+        db.with_settings_transaction(|transaction| {
+            let mut priority: InputPriority =
+                read_json_setting_in_transaction(transaction, INPUT_PRIORITY_KEY)?
+                    .unwrap_or_default();
+            crate::audio::touch_known(&mut priority, devices);
+            priority.sanitize();
+            write_json_setting_in_transaction(transaction, INPUT_PRIORITY_KEY, &priority)?;
+            synced = priority;
+            Ok::<(), String>(())
+        })?;
+        Ok(synced)
     }
 
     /// Fully validate and normalize the snapshot, including the current audio
     /// device catalogue, before any database or machine-state lock is held.
     pub(crate) fn prepare_for_save(&self) -> Result<Self, String> {
         let mut normalized = self.sanitize_for_save()?;
-        #[cfg(target_os = "macos")]
-        {
-            use crate::audio::device_watch::list_devices;
-            use crate::audio::touch_known;
-
-            touch_known(&mut normalized.input_priority, &list_devices());
-        }
+        crate::audio::touch_known(&mut normalized.input_priority, &connected_input_devices());
         Ok(normalized)
     }
 
@@ -1272,12 +1260,6 @@ impl AppSettings {
                 &normalized.last_seen_version,
             )?;
 
-            if let Some(audio_device) = normalized.audio_device.as_ref() {
-                write_json_setting_in_transaction(transaction, AUDIO_DEVICE_KEY, audio_device)?;
-            } else {
-                delete_setting_in_transaction(transaction, AUDIO_DEVICE_KEY)?;
-            }
-
             if let Some(clamshell_audio_device) = normalized.clamshell_audio_device.as_ref() {
                 write_json_setting_in_transaction(
                     transaction,
@@ -1306,19 +1288,15 @@ impl AppSettings {
     }
 }
 
-fn sanitize_uid_list(values: &[String]) -> Vec<String> {
-    let mut out: Vec<String> = values
-        .iter()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-        .collect();
-    out.dedup();
-    out
-}
-
-fn dedupe_known_devices(known: &mut Vec<crate::audio::KnownDevice>) {
-    let mut seen = std::collections::HashSet::new();
-    known.retain(|entry| seen.insert(entry.uid.clone()));
+fn connected_input_devices() -> Vec<AudioInputDevice> {
+    #[cfg(target_os = "macos")]
+    {
+        crate::audio::device_watch::list_devices()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Vec::new()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -1550,8 +1528,9 @@ mod tests {
     }
 
     use super::{
-        AUDIO_DEVICE_KEY, AppSettings, CLAMSHELL_AUDIO_DEVICE_KEY, MeetingAudioRetention,
-        PasteMethod, SettingsOptions, ShortcutSettings, SummaryProviderChoice, Theme,
+        AppSettings, CLAMSHELL_AUDIO_DEVICE_KEY, INPUT_PRIORITY_KEY, MeetingAudioRetention,
+        PINNED_DEVICE_MIGRATION_KEY, PasteMethod, SettingsOptions, ShortcutSettings,
+        SummaryProviderChoice, Theme,
     };
     use crate::audio::InputPriority;
     use crate::constants::OLLAMA_DEFAULT_URL;
@@ -1627,7 +1606,6 @@ mod tests {
             summary_compression_rate: super::default_compression_rate(),
             debug_transcription: true,
             log_level: LogLevel::Debug,
-            audio_device: Some("BlackHole".into()),
             clamshell_audio_device: Some("USB Mic".into()),
             input_priority: InputPriority::default(),
             transcription_engine_id: "kyutai".into(),
@@ -1740,8 +1718,8 @@ mod tests {
     #[test]
     fn read_only_snapshot_never_runs_audio_migration_writes() {
         let (db, _dir) = test_db();
-        db.set_setting(AUDIO_DEVICE_KEY, r#""Legacy Microphone""#)
-            .expect("save legacy audio device");
+        db.set_setting(PINNED_DEVICE_MIGRATION_KEY, r#""Legacy Microphone""#)
+            .expect("save legacy pinned device");
         db.set_setting(
             CLAMSHELL_AUDIO_DEVICE_KEY,
             r#""Legacy Clamshell Microphone""#,
@@ -1761,7 +1739,7 @@ mod tests {
         .expect("install read-only trigger");
 
         let settings = AppSettings::load_read_only(&db).expect("load read-only snapshot");
-        assert_eq!(settings.audio_device.as_deref(), Some("Legacy Microphone"));
+        assert!(settings.input_priority.priorities.is_empty());
         assert_eq!(
             settings.clamshell_audio_device.as_deref(),
             Some("Legacy Clamshell Microphone")
@@ -1810,17 +1788,123 @@ mod tests {
         assert!(!AppSettings::load(&db).expect("load").autostart_enabled);
     }
 
-    #[test]
-    fn blank_audio_device_is_removed_on_save() {
-        let (db, _dir) = test_db();
-        let settings = AppSettings {
-            audio_device: Some("   ".into()),
-            ..AppSettings::default()
+    fn input_device(uid: &str, name: &str) -> crate::audio::AudioInputDevice {
+        crate::audio::AudioInputDevice {
+            uid: uid.into(),
+            name: name.into(),
+            transport: crate::audio::TransportType::Usb,
+            is_default: false,
+        }
+    }
+
+    fn stored_priority(db: &crate::db::Database) -> InputPriority {
+        let raw = db
+            .get_setting(INPUT_PRIORITY_KEY)
+            .expect("read input priority")
+            .expect("input priority is stored");
+        serde_json::from_str(&raw).expect("parse input priority")
+    }
+
+    fn seed_pin(db: &crate::db::Database, pin: &str, priorities: &[&str]) {
+        db.set_setting(
+            PINNED_DEVICE_MIGRATION_KEY,
+            &serde_json::to_string(pin).unwrap(),
+        )
+        .expect("seed the pinned device");
+        seed_priorities(db, priorities);
+    }
+
+    fn seed_priorities(db: &crate::db::Database, priorities: &[&str]) {
+        let priority = InputPriority {
+            priorities: priorities.iter().map(|uid| uid.to_string()).collect(),
+            known: Vec::new(),
         };
+        db.set_setting(
+            INPUT_PRIORITY_KEY,
+            &serde_json::to_string(&priority).unwrap(),
+        )
+        .expect("seed the preference order");
+    }
 
-        settings.save(&db).expect("save settings");
+    fn migrate_pin(
+        db: &crate::db::Database,
+        devices: &[crate::audio::AudioInputDevice],
+    ) -> AppSettings {
+        let mut settings = AppSettings::load_read_only(db).expect("load stored settings");
+        AppSettings::migrate_pinned_device(&mut settings, db, devices).expect("migrate the pin");
+        settings
+    }
 
-        assert_eq!(db.get_setting("audio_device").expect("get setting"), None);
+    #[test]
+    fn a_pinned_microphone_becomes_the_top_of_the_preference_order() {
+        let (db, _dir) = test_db();
+        seed_pin(&db, "usb-uid", &["builtin-uid"]);
+
+        let settings = migrate_pin(&db, &[input_device("usb-uid", "USB Mic")]);
+
+        assert_eq!(
+            settings.input_priority.priorities,
+            ["usb-uid", "builtin-uid"]
+        );
+        assert_eq!(stored_priority(&db).priorities, ["usb-uid", "builtin-uid"]);
+        assert_eq!(db.get_setting(PINNED_DEVICE_MIGRATION_KEY).unwrap(), None);
+    }
+
+    #[test]
+    fn a_microphone_pinned_by_name_is_promoted_by_its_uid() {
+        let (db, _dir) = test_db();
+        seed_pin(&db, "USB Mic", &["builtin-uid"]);
+
+        migrate_pin(&db, &[input_device("usb-uid", "USB Mic")]);
+
+        assert_eq!(stored_priority(&db).priorities, ["usb-uid", "builtin-uid"]);
+    }
+
+    #[test]
+    fn a_pinned_microphone_already_ranked_moves_up_without_a_duplicate() {
+        let (db, _dir) = test_db();
+        seed_pin(&db, "usb-uid", &["builtin-uid", "usb-uid", "webcam-uid"]);
+
+        migrate_pin(&db, &[input_device("usb-uid", "USB Mic")]);
+
+        assert_eq!(
+            stored_priority(&db).priorities,
+            ["usb-uid", "builtin-uid", "webcam-uid"]
+        );
+    }
+
+    #[test]
+    fn the_pin_migration_runs_once() {
+        let (db, _dir) = test_db();
+        seed_pin(&db, "usb-uid", &["builtin-uid"]);
+        AppSettings::load(&db).expect("first load migrates");
+
+        // The user then ranks another microphone first.
+        let mut reordered = stored_priority(&db);
+        reordered.promote("builtin-uid");
+        db.set_setting(
+            INPUT_PRIORITY_KEY,
+            &serde_json::to_string(&reordered).unwrap(),
+        )
+        .unwrap();
+
+        let loaded = AppSettings::load(&db).expect("second load");
+        assert_eq!(loaded.input_priority.priorities, ["builtin-uid", "usb-uid"]);
+        assert_eq!(stored_priority(&db).priorities, ["builtin-uid", "usb-uid"]);
+    }
+
+    #[test]
+    fn a_device_event_keeps_an_order_saved_since_the_last_load() {
+        let (db, _dir) = test_db();
+        seed_priorities(&db, &["builtin-uid", "usb-uid"]);
+
+        let synced = AppSettings::touch_known_devices(&db, &[input_device("usb-uid", "USB Mic")])
+            .expect("sync known devices");
+
+        assert_eq!(synced.priorities, ["builtin-uid", "usb-uid"]);
+        assert_eq!(synced.known.len(), 1);
+        assert_eq!(synced.known[0].uid, "usb-uid");
+        assert_eq!(stored_priority(&db), synced);
     }
 
     #[test]

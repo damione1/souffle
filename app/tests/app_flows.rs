@@ -198,10 +198,6 @@ fn recording_settings_commands_refuse_reset_and_rebind_but_keep_hot_swap() {
             .is_err()
         );
         assert_eq!(h.db.get_all_settings().unwrap(), before);
-        commands::select_audio_device(h.state.clone(), "fixture-hot-swap".into()).unwrap();
-        assert!(
-            matches!(h.audio_cmd_rx.try_recv().unwrap(), AudioCommand::SelectDevice(uid) if uid == "fixture-hot-swap")
-        );
         assert!(h.audio_cmd_rx.try_recv().is_err());
         h.state.capture_start.abandon(1);
     }

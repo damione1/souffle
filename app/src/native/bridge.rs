@@ -57,6 +57,10 @@ pub enum NativeAction {
     /// AC5). The UI re-reads `commands::get_mic_stall_notice` once, instead
     /// of polling it (SOU-281).
     MicStallChanged,
+    /// CoreAudio reported a device-list or default-input change and the
+    /// known devices were stored. An open Settings page rebuilds its
+    /// microphone list.
+    InputDevicesChanged,
     /// The Mac woke from sleep (SOU-295). The UI checks
     /// `commands::peek_sleep_paused_meeting` and resumes the meeting the
     /// sleep stopped, the port of the Svelte-era `SystemWokeUp` event.

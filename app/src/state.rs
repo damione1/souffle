@@ -51,7 +51,6 @@ pub enum AudioCommand {
         session_id: u64,
         done: crossbeam_channel::Sender<()>,
     },
-    SelectDevice(String),
     /// Configure (or clear) the preferred microphone to use while the lid is
     /// closed with an external display attached (clamshell mode). Sent at
     /// startup and whenever the setting changes; `None` means "just follow
@@ -63,7 +62,7 @@ pub enum AudioCommand {
         priority: crate::audio::InputPriority,
     },
     /// Re-run input resolution and hot-swap the mic leg when needed (device
-    /// list or default-input change, priority update, explicit pin change).
+    /// list or default-input change, priority update).
     RefreshInputRoute,
 }
 

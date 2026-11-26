@@ -1325,7 +1325,7 @@ fn opened_device_replaced(opened_id: Option<u32>, current_id: Option<u32>) -> bo
 }
 
 /// Whether the capture leg should be torn down and reopened. UID-only
-/// comparison misses dock reboots: the pin still resolves, the stream is
+/// comparison misses dock reboots: the UID still resolves, the stream is
 /// just bound to a dead HAL object.
 fn should_rebuild_mic(
     stream_failed: bool,
@@ -2205,7 +2205,7 @@ mod meeting_backend_tests {
             .unwrap(),
             "webcam"
         );
-        // The normal resolver deliberately falls back when a pin or clamshell
+        // The normal resolver deliberately falls back when the clamshell
         // preference disappears. Apple QA must reject that different input.
         assert!(
             native_input_uid(
@@ -2451,8 +2451,6 @@ pub struct AudioCapture {
     native_owner: super::native_voice::owner::Owner,
     audio_sender: Sender<AudioMessage>,
     audio_budget: Arc<AudioQueueBudget>,
-    /// Pinned input device UID (or legacy name during migration).
-    selected_device: Option<String>,
     /// Preferred microphone UID while the lid is closed with an external display
     /// attached (clamshell mode); `None` disables the override entirely, so
     /// `find_device` never pays for the `is_clamshell()` probe.
@@ -2582,7 +2580,6 @@ impl AudioCapture {
                     native_owner: super::native_voice::owner::Owner::default(),
                     audio_sender: audio_tx,
                     audio_budget,
-                    selected_device: None,
                     clamshell_device: None,
                     input_priority: InputPriority::default(),
                     active_session_id: Arc::new(AtomicU64::new(0)),
@@ -2729,18 +2726,6 @@ impl AudioCapture {
                             capture.discard(session_id);
                             let _ = done.send(());
                         }
-                        AudioCommand::SelectDevice(uid) => {
-                            if uid.is_empty() {
-                                info!("Cleared explicit input device pin");
-                                capture.selected_device = None;
-                            } else {
-                                info!("Selected input device UID: {uid}");
-                                capture.selected_device = Some(uid);
-                            }
-                            if capture.refresh_input_route() {
-                                break;
-                            }
-                        }
                         AudioCommand::SetClamshellDevice(uid) => {
                             if let Some(ref uid) = uid {
                                 info!("Clamshell-mode microphone preference UID: {uid}");
@@ -2782,17 +2767,14 @@ impl AudioCapture {
         Ok((cmd_tx, audio_receiver))
     }
 
-    /// Which device UID `find_device` should target, given the user's pin,
-    /// clamshell preference and priority list.
+    /// Which device UID `find_device` should target, given the clamshell
+    /// preference and priority list.
     fn resolved_input_uid(&self, connected: &[AudioInputDevice]) -> Option<String> {
-        let clamshell_active = self.selected_device.is_none()
-            && self.clamshell_device.is_some()
-            && crate::power::is_clamshell();
+        let clamshell_active = self.clamshell_device.is_some() && crate::power::is_clamshell();
 
         resolve_input(
             connected,
             ResolveInputParams {
-                pin: self.selected_device.as_deref(),
                 clamshell_pref: self.clamshell_device.as_deref(),
                 clamshell_active,
                 priority: &self.input_priority,
@@ -2814,15 +2796,6 @@ impl AudioCapture {
             // Bluetooth headset into HFP mono. This runs on every session
             // start and every mic rebuild.
             if let Some(device) = find_cpal_device_by_uid(&host, &uid) {
-                return Ok(device);
-            }
-
-            // Legacy pin stored as a display name: map through our snapshot
-            // (cheap CoreAudio list) then look up by UID. Never cpal name().
-            if let Some(mapped) = known_devices.iter().find(|d| d.name == uid)
-                && mapped.uid != uid
-                && let Some(device) = find_cpal_device_by_uid(&host, &mapped.uid)
-            {
                 return Ok(device);
             }
 
@@ -3067,11 +3040,10 @@ impl AudioCapture {
                 MeetingBackend::Software => {}
                 #[cfg(all(target_os = "macos", feature = "experimental-native-aec"))]
                 MeetingBackend::Apple => {
-                    let explicit = self.selected_device.as_deref().or_else(|| {
-                        self.clamshell_device
-                            .as_deref()
-                            .filter(|_| crate::power::is_clamshell())
-                    });
+                    let explicit = self
+                        .clamshell_device
+                        .as_deref()
+                        .filter(|_| crate::power::is_clamshell());
                     let uid = native_input_uid(
                         &known_devices,
                         explicit,

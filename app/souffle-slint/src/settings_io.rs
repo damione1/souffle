@@ -468,6 +468,35 @@ impl SettingsIoCoordinator {
         revision
     }
 
+    /// Re-read the stored snapshot after a writer outside this coordinator
+    /// changed it: the input-route thread stores the known microphones. The
+    /// worker cache then stops predating that write.
+    pub(crate) fn reload_stored_snapshot(
+        self: &Rc<Self>,
+        completion: impl FnOnce(SettingsResponseOrder, &SettingsSaveOutcome) + 'static,
+    ) -> u64 {
+        let revision = self.sequence.borrow_mut().submit();
+        self.callbacks
+            .borrow_mut()
+            .insert(revision, Box::new(completion));
+        if self
+            .requests
+            .send(WorkerRequest::Refresh {
+                revision,
+                lane: SettingsSaveLane::General,
+                trace: None,
+            })
+            .is_err()
+        {
+            self.settle(WorkerResponse {
+                revision,
+                origin: WorkerResponseOrigin::Refresh,
+                outcome: worker_failure("Settings worker is unavailable"),
+            });
+        }
+        revision
+    }
+
     /// Serialize the Settings-open effective refresh behind any writes that
     /// were already queued before the sheet opened. This is the only refresh
     /// that consults ServiceManagement, through the explicit Autostart lane.
@@ -1497,6 +1526,81 @@ mod tests {
         assert_eq!(durable.locale, "fr");
         assert!(durable.autostart_enabled);
         assert_eq!(autostart_loads.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn a_stored_snapshot_reload_keeps_what_another_writer_stored() {
+        let window = test_window();
+        let cache = SettingsCache::with_observed(&window, AppSettings::default());
+        let durable = Arc::new(Mutex::new(AppSettings::default()));
+        let general_load_state = Arc::clone(&durable);
+        let autostart_load_state = Arc::clone(&durable);
+        let general_save_state = Arc::clone(&durable);
+        let autostart_save_state = Arc::clone(&durable);
+        let observing_cache = cache.clone();
+        let coordinator = SettingsIoCoordinator::with_functions(
+            cache,
+            move || Ok(general_load_state.lock().unwrap().clone()),
+            move || Ok(autostart_load_state.lock().unwrap().clone()),
+            move |settings| {
+                *general_save_state.lock().unwrap() = settings.clone();
+                SettingsSaveOutcome::Observed {
+                    settings: Box::new(settings),
+                    result: Ok(()),
+                }
+            },
+            move |settings| {
+                *autostart_save_state.lock().unwrap() = settings.clone();
+                SettingsSaveOutcome::Observed {
+                    settings: Box::new(settings),
+                    result: Ok(()),
+                }
+            },
+        );
+        let settle = |coordinator: &Rc<SettingsIoCoordinator>| {
+            let deadline = std::time::Instant::now() + Duration::from_secs(1);
+            while !coordinator.is_idle_for_test() {
+                coordinator.drain_for_test();
+                assert!(std::time::Instant::now() < deadline);
+                std::thread::yield_now();
+            }
+        };
+        // The worker now holds a snapshot of its own.
+        coordinator.submit(
+            SettingsSaveLane::General,
+            |settings| settings.locale = "fr".into(),
+            |_, _| {},
+        );
+        settle(&coordinator);
+
+        // The input-route thread stores a microphone outside the worker.
+        durable
+            .lock()
+            .unwrap()
+            .input_priority
+            .priorities
+            .push("usb-mic".into());
+        coordinator.reload_stored_snapshot(|_, _| {});
+        settle(&coordinator);
+        assert_eq!(
+            observing_cache
+                .borrow()
+                .as_ref()
+                .unwrap()
+                .input_priority
+                .priorities,
+            ["usb-mic"]
+        );
+
+        coordinator.submit(
+            SettingsSaveLane::General,
+            |settings| settings.paste_delay_ms = 250,
+            |_, _| {},
+        );
+        settle(&coordinator);
+        let durable = durable.lock().unwrap();
+        assert_eq!(durable.paste_delay_ms, 250);
+        assert_eq!(durable.input_priority.priorities, ["usb-mic"]);
     }
 
     #[test]

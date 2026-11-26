@@ -122,6 +122,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 | NativeAction::Quit
                 | NativeAction::QuitFailed(_)
                 | NativeAction::MicStallChanged
+                | NativeAction::InputDevicesChanged
                 | NativeAction::SystemWokeUp
                 | NativeAction::UpdateAvailable { .. } => {}
             }

@@ -263,11 +263,8 @@ export component MainWindow inherits Window {
     in property <int> settings-calendar-reminder-minutes-min;
     in property <int> settings-calendar-reminder-minutes-max;
     in property <[CalendarRow]> settings-calendars;
-    in property <[string]> settings-audio-device-labels;
     in property <[string]> settings-audio-device-ids;
     in property <int> settings-default-device-index: -1;
-    in property <string> settings-selected-device-id;
-    in property <bool> settings-pin-unavailable;
     in property <string> settings-sample-rate-label;
     in property <bool> settings-sample-rate-high;
     in property <bool> settings-resetting-sample-rate;
@@ -468,8 +465,6 @@ export component MainWindow inherits Window {
     callback settings-calendar-reminder-minutes-changed(int);
     callback settings-calendar-toggled(string);
     callback settings-calendar-open-system-settings-requested();
-    callback settings-device-changed(string);
-    callback settings-refresh-devices-requested();
     callback settings-reset-sample-rate-requested();
     callback settings-move-device-requested(string, int);
     callback settings-remove-device-requested(string);
@@ -939,11 +934,8 @@ export component MainWindow inherits Window {
                 calendar-reminder-minutes-min: root.settings-calendar-reminder-minutes-min;
                 calendar-reminder-minutes-max: root.settings-calendar-reminder-minutes-max;
                 calendars: root.settings-calendars;
-                audio-device-labels: root.settings-audio-device-labels;
                 audio-device-ids: root.settings-audio-device-ids;
                 default-device-index: root.settings-default-device-index;
-                selected-device-id: root.settings-selected-device-id;
-                pin-unavailable: root.settings-pin-unavailable;
                 sample-rate-label: root.settings-sample-rate-label;
                 sample-rate-high: root.settings-sample-rate-high;
                 resetting-sample-rate: root.settings-resetting-sample-rate;
@@ -1114,8 +1106,6 @@ export component MainWindow inherits Window {
                 calendar-reminder-minutes-changed(value) => { root.settings-calendar-reminder-minutes-changed(value); }
                 calendar-toggled(id) => { root.settings-calendar-toggled(id); }
                 calendar-open-system-settings-requested => { root.settings-calendar-open-system-settings-requested(); }
-                device-changed(value) => { root.settings-device-changed(value); }
-                refresh-devices-requested => { root.settings-refresh-devices-requested(); }
                 reset-sample-rate-requested => { root.settings-reset-sample-rate-requested(); }
                 move-device-requested(uid, direction) => { root.settings-move-device-requested(uid, direction); }
                 remove-device-requested(uid) => { root.settings-remove-device-requested(uid); }

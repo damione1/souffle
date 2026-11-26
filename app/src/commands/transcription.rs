@@ -2045,7 +2045,6 @@ mod tests {
                 crate::state::AudioCommand::Start { .. }
                 | crate::state::AudioCommand::ConfirmStart { .. }
                 | crate::state::AudioCommand::Stop
-                | crate::state::AudioCommand::SelectDevice(_)
                 | crate::state::AudioCommand::SetClamshellDevice(_)
                 | crate::state::AudioCommand::SetInputPolicy { .. }
                 | crate::state::AudioCommand::RefreshInputRoute => panic!("expected keyed discard"),

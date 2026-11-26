@@ -204,7 +204,6 @@ mod tests {
             resolve_input(
                 &present,
                 ResolveInputParams {
-                    pin: None,
                     clamshell_pref: None,
                     clamshell_active: false,
                     priority: &priority,

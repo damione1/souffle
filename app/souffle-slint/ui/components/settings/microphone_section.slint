@@ -1,12 +1,10 @@
-import { FieldSetAppearance, FieldRowAppearance, AlertActions,
-    AlertSeverity, ButtonIntent,
-    KitAlert, KitBadge, KitButton, KitFieldRow, KitFieldSet, KitIconButton,
+import { FieldSetAppearance, AlertActions, AlertSeverity,
+    KitAlert, KitButton, KitFieldRow, KitFieldSet, KitIconButton,
     KitModalContext,
-    KitThemeContext, KitThemes, KitWrap, ListView, KitFieldSeparator, KitInline
+    KitThemeContext, KitThemes, ListView, KitFieldSeparator, KitInline
 } from "@kit";
 import { LucideArrows } from "@kit-icons/arrows.slint";
 import { LucideFiles } from "@kit-icons/files.slint";
-import { CatalogPicker } from "../catalog_picker.slint";
 import { PickerLabels } from "../picker_labels.slint";
 import { SettingsNoticeRow } from "settings_notice_row.slint";
 import { Theme } from "../../theme.slint";
@@ -115,20 +113,14 @@ export component MicrophoneSection inherits KitFieldSet {
         return @tr("il y a {} j", Math.floor(age / 86400));
     }
 
-    in property <[string]> device-labels;
-    in property <[string]> device-ids;
-    in property <int> default-device-index: -1;
-    in property <string> selected-device-id;
-    in property <bool> pin-unavailable;
-    in property <string> sample-rate-label; // "" hides the row
+    in property <string> sample-rate-label; // shown by the high rate alert
     in property <bool> sample-rate-high;
     in property <bool> resetting-sample-rate;
     in property <bool> capture-busy;
     in property <[MicrophoneRow]> microphones;
     private property <length> device-row-height: 61px;
+    private property <string> rate-warning: @tr("Le microphone est réglé sur {}. Cette fréquence élevée peut perturber les appels en visioconférence pendant l'enregistrement.", root.sample-rate-label);
 
-    callback device-changed(string);
-    callback refresh-requested();
     callback reset-sample-rate-requested();
     callback move-device-requested(string, int);
     callback remove-device-requested(string);
@@ -136,97 +128,6 @@ export component MicrophoneSection inherits KitFieldSet {
     theme: KitThemeContext.current;
     legend: @tr("MICROPHONE");
     appearance: FieldSetAppearance.card;
-
-    device-field := KitFieldRow {
-        theme: root.theme;
-        modal-layer: 0;
-        orientation: Theme.settings-field-orientation(self.width);
-        appearance: FieldRowAppearance.inset;
-        show-divider: true;
-        label: @tr("Périphérique d'entrée");
-        description: @tr("Choisissez le microphone que Soufflé écoute et configurez le traitement audio.");
-        focus-requested => { device-picker.take-focus(); }
-        private property <bool> picker-focused: device-picker.has-focus;
-        changed picker-focused => {
-            if self.picker-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
-        }
-
-        KitWrap {
-            theme: root.theme;
-            cross-axis-alignment: center;
-            device-picker := CatalogPicker {
-                theme: root.theme;
-                modal-layer: device-field.modal-layer;
-                control-label: @tr("Microphone actif");
-                model: root.device-labels;
-                option-values: root.device-ids;
-                default-device-index: root.default-device-index;
-                current-value: root.selected-device-id;
-                value-chosen(value) => { root.device-changed(value); }
-            }
-            KitIconButton {
-                theme: root.theme;
-                modal-layer: device-field.modal-layer;
-                control-size: compact;
-                intent: ButtonIntent.secondary;
-                glyph: LucideArrows.refresh-cw();
-                accessible-name: @tr("Actualiser les microphones");
-                activated => { root.refresh-requested(); }
-                focus-observed(focused) => {
-                    if focused { device-field.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
-                }
-            }
-        }
-    }
-
-    if root.pin-unavailable: SettingsNoticeRow {
-        KitAlert { bordered: false; corner-radius: 12px; inset: 12px; actions-placement: AlertActions.trailing;
-            theme: root.theme;
-            severity: AlertSeverity.warning;
-            message: @tr("Le périphérique choisi n'est plus disponible ; un autre est utilisé en attendant.");
-        }
-    }
-
-    if root.sample-rate-label != "": KitFieldRow {
-        theme: root.theme;
-        modal-layer: 0;
-        orientation: Theme.settings-field-orientation(self.width);
-        appearance: FieldRowAppearance.inset;
-        show-divider: true;
-        label: @tr("Fréquence d'échantillonnage");
-        description: @tr("Fréquence native du périphérique sélectionné.");
-
-        KitBadge {
-            theme: root.theme;
-            subtle: true;
-            text: root.sample-rate-label;
-        }
-    }
-
-    if root.sample-rate-high: SettingsNoticeRow {
-        rate-alert := KitAlert { bordered: false; corner-radius: 12px; inset: 12px; actions-placement: AlertActions.trailing;
-            theme: root.theme;
-            severity: AlertSeverity.warning;
-            message: root.capture-busy
-                ? @tr("Cette fréquence élevée peut perturber les appels en visioconférence pendant l'enregistrement.") + " " + @tr("Terminez l'enregistrement avant de réinitialiser la fréquence du microphone.")
-                : @tr("Cette fréquence élevée peut perturber les appels en visioconférence pendant l'enregistrement.");
-
-            KitButton {
-                theme: root.theme;
-                modal-layer: 0;
-                control-size: compact;
-                text-wrap: word-wrap;
-                text: root.resetting-sample-rate ? @tr("Réinitialisation…") : @tr("Réinitialiser à 48 kHz");
-                disabled: root.resetting-sample-rate || root.capture-busy;
-                activated => { root.reset-sample-rate-requested(); }
-                focus-observed(focused) => {
-                    if focused { rate-alert.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
-                }
-            }
-        }
-    }
-
-    KitFieldSeparator { theme: root.theme; }
 
     priority := KitFieldRow {
         theme: root.theme;
@@ -236,7 +137,7 @@ export component MicrophoneSection inherits KitFieldSet {
         padding-top: 14px;
         padding-bottom: 6px;
         label: @tr("Ordre de préférence");
-        description: @tr("Utilisé quand plusieurs micros sont branchés en même temps.");
+        description: @tr("Soufflé écoute le premier micro branché de la liste. Descendez ceux que vous ne voulez pas utiliser.");
     }
 
     if root.microphones.length > 0: priority-list := ListView {
@@ -266,6 +167,29 @@ export component MicrophoneSection inherits KitFieldSet {
                 accessible-item-count: root.microphones.length;
                 move-requested(uid, direction) => { root.move-device-requested(uid, direction); }
                 remove-requested(uid) => { root.remove-device-requested(uid); }
+            }
+        }
+    }
+
+    if root.sample-rate-high: SettingsNoticeRow {
+        rate-alert := KitAlert { bordered: false; corner-radius: 12px; inset: 12px; actions-placement: AlertActions.trailing;
+            theme: root.theme;
+            severity: AlertSeverity.warning;
+            message: root.capture-busy
+                ? root.rate-warning + " " + @tr("Terminez l'enregistrement avant de réinitialiser la fréquence du microphone.")
+                : root.rate-warning;
+
+            KitButton {
+                theme: root.theme;
+                modal-layer: 0;
+                control-size: compact;
+                text-wrap: word-wrap;
+                text: root.resetting-sample-rate ? @tr("Réinitialisation…") : @tr("Réinitialiser à 48 kHz");
+                disabled: root.resetting-sample-rate || root.capture-busy;
+                activated => { root.reset-sample-rate-requested(); }
+                focus-observed(focused) => {
+                    if focused { rate-alert.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
+                }
             }
         }
     }

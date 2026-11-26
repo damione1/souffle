@@ -2589,58 +2589,6 @@ msgctxt "MicrophoneSection"
 msgid "MICROPHONE"
 msgstr "MICROPHONE"
 
-#: ui/components/settings/microphone_section.slint:174
-msgctxt "MicrophoneSection"
-msgid "Périphérique d'entrée"
-msgstr "Périphérique d'entrée"
-
-#: ui/components/settings/microphone_section.slint:175
-msgctxt "MicrophoneSection"
-msgid ""
-"Choisissez le microphone que Soufflé écoute et configurez le traitement "
-"audio."
-msgstr ""
-"Choisissez le microphone que Soufflé écoute et configurez le traitement "
-"audio."
-
-#: ui/components/settings/microphone_section.slint:188
-msgctxt "MicrophoneSection"
-msgid "Microphone actif"
-msgstr "Microphone actif"
-
-#: ui/components/settings/microphone_section.slint:201
-msgctxt "MicrophoneSection"
-msgid "Actualiser les microphones"
-msgstr "Actualiser les microphones"
-
-#: ui/components/settings/microphone_section.slint:225
-msgctxt "MicrophoneSection"
-msgid ""
-"Le périphérique choisi n'est plus disponible ; un autre est utilisé en "
-"attendant."
-msgstr ""
-"Le périphérique choisi n'est plus disponible ; un autre est utilisé en "
-"attendant."
-
-#: ui/components/settings/microphone_section.slint:235
-msgctxt "MicrophoneSection"
-msgid "Fréquence d'échantillonnage"
-msgstr "Fréquence d'échantillonnage"
-
-#: ui/components/settings/microphone_section.slint:236
-msgctxt "MicrophoneSection"
-msgid "Fréquence native du périphérique sélectionné."
-msgstr "Fréquence native du périphérique sélectionné."
-
-#: ui/components/settings/microphone_section.slint:250
-msgctxt "MicrophoneSection"
-msgid ""
-"Cette fréquence élevée peut perturber les appels en visioconférence pendant "
-"l'enregistrement."
-msgstr ""
-"Cette fréquence élevée peut perturber les appels en visioconférence pendant "
-"l'enregistrement."
-
 #: ui/components/settings/microphone_section.slint:250
 msgctxt "MicrophoneSection"
 msgid ""
@@ -2663,10 +2611,13 @@ msgctxt "MicrophoneSection"
 msgid "Ordre de préférence"
 msgstr "Ordre de préférence"
 
-#: ui/components/settings/microphone_section.slint:278
 msgctxt "MicrophoneSection"
-msgid "Utilisé quand plusieurs micros sont branchés en même temps."
-msgstr "Utilisé quand plusieurs micros sont branchés en même temps."
+msgid "Soufflé écoute le premier micro branché de la liste. Descendez ceux que vous ne voulez pas utiliser."
+msgstr "Soufflé écoute le premier micro branché de la liste. Descendez ceux que vous ne voulez pas utiliser."
+
+msgctxt "MicrophoneSection"
+msgid "Le microphone est réglé sur {}. Cette fréquence élevée peut perturber les appels en visioconférence pendant l'enregistrement."
+msgstr "Le microphone est réglé sur {}. Cette fréquence élevée peut perturber les appels en visioconférence pendant l'enregistrement."
 
 #: ui/components/settings/model_delete_section.slint:32
 msgctxt "ModelDeleteSection"

@@ -22,11 +22,43 @@ pub struct InputPriority {
     pub known: Vec<KnownDevice>,
 }
 
+impl InputPriority {
+    /// Trim every entry, then drop blank and repeated ones.
+    pub fn sanitize(&mut self) {
+        self.priorities = self
+            .priorities
+            .iter()
+            .map(|uid| uid.trim().to_string())
+            .filter(|uid| !uid.is_empty())
+            .collect();
+        self.priorities.dedup();
+        self.known = self
+            .known
+            .iter()
+            .filter_map(|entry| {
+                let uid = entry.uid.trim();
+                let name = entry.name.trim();
+                (!uid.is_empty() && !name.is_empty()).then(|| KnownDevice {
+                    uid: uid.to_string(),
+                    name: name.to_string(),
+                    last_seen: entry.last_seen,
+                })
+            })
+            .collect();
+        let mut seen = std::collections::HashSet::new();
+        self.known.retain(|entry| seen.insert(entry.uid.clone()));
+    }
+
+    /// Move `uid` to the top of the preference order.
+    pub fn promote(&mut self, uid: &str) {
+        self.priorities.retain(|entry| entry != uid);
+        self.priorities.insert(0, uid.to_string());
+    }
+}
+
 /// Parameters for [`resolve_input`]; kept separate so resolution stays pure.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ResolveInputParams<'a> {
-    /// Explicit user pin (settings `audio_device`), if any.
-    pub pin: Option<&'a str>,
     /// Clamshell-mode preference UID, if configured.
     pub clamshell_pref: Option<&'a str>,
     /// Whether clamshell mode is active right now.
@@ -65,21 +97,14 @@ pub fn touch_known(priority: &mut InputPriority, connected: &[AudioInputDevice])
 
 /// Pick the input UID to capture on, or `None` when no device is connected.
 ///
-/// Order: explicit pin (if connected) -> clamshell preference (when active and
-/// connected) -> first connected priority entry -> system default.
+/// Order: clamshell preference (when active and connected) -> first connected
+/// priority entry -> system default.
 pub fn resolve_input(
     connected: &[AudioInputDevice],
     params: ResolveInputParams<'_>,
 ) -> Option<String> {
     if connected.is_empty() {
         return None;
-    }
-
-    if let Some(pin) = params
-        .pin
-        .filter(|uid| is_connected(connected, uid).is_some())
-    {
-        return Some(pin.to_string());
     }
 
     if params.clamshell_active
@@ -139,13 +164,11 @@ mod tests {
     }
 
     fn params<'a>(
-        pin: Option<&'a str>,
         clamshell_pref: Option<&'a str>,
         clamshell_active: bool,
         priority: &'a InputPriority,
     ) -> ResolveInputParams<'a> {
         ResolveInputParams {
-            pin,
             clamshell_pref,
             clamshell_active,
             priority,
@@ -153,59 +176,18 @@ mod tests {
     }
 
     #[test]
-    fn pin_wins_when_connected() {
-        let connected = vec![
-            device("builtin", "Built-in", TransportType::BuiltIn, true),
-            device("usb", "USB", TransportType::Usb, false),
-        ];
-        assert_eq!(
-            resolve_input(
-                &connected,
-                params(Some("usb"), None, false, &empty_priority()),
-            ),
-            Some("usb".into()),
-        );
-    }
-
-    #[test]
-    fn disconnected_pin_falls_through() {
-        let connected = vec![device("builtin", "Built-in", TransportType::BuiltIn, true)];
-        assert_eq!(
-            resolve_input(
-                &connected,
-                params(Some("ghost"), None, false, &empty_priority()),
-            ),
-            Some("builtin".into()),
-        );
-    }
-
-    #[test]
-    fn clamshell_applies_without_pin() {
+    fn clamshell_wins_over_the_order_when_active() {
         let connected = vec![
             device("builtin", "Built-in", TransportType::BuiltIn, true),
             device("webcam", "Webcam", TransportType::Usb, false),
         ];
+        let priority = InputPriority {
+            priorities: vec!["builtin".into()],
+            known: Vec::new(),
+        };
         assert_eq!(
-            resolve_input(
-                &connected,
-                params(None, Some("webcam"), true, &empty_priority()),
-            ),
+            resolve_input(&connected, params(Some("webcam"), true, &priority),),
             Some("webcam".into()),
-        );
-    }
-
-    #[test]
-    fn pin_wins_over_clamshell() {
-        let connected = vec![
-            device("builtin", "Built-in", TransportType::BuiltIn, true),
-            device("webcam", "Webcam", TransportType::Usb, false),
-        ];
-        assert_eq!(
-            resolve_input(
-                &connected,
-                params(Some("builtin"), Some("webcam"), true, &empty_priority()),
-            ),
-            Some("builtin".into()),
         );
     }
 
@@ -216,10 +198,7 @@ mod tests {
             device("webcam", "Webcam", TransportType::Usb, false),
         ];
         assert_eq!(
-            resolve_input(
-                &connected,
-                params(None, Some("webcam"), false, &empty_priority()),
-            ),
+            resolve_input(&connected, params(Some("webcam"), false, &empty_priority()),),
             Some("builtin".into()),
         );
     }
@@ -236,7 +215,7 @@ mod tests {
             known: Vec::new(),
         };
         assert_eq!(
-            resolve_input(&connected, params(None, None, false, &priority)),
+            resolve_input(&connected, params(None, false, &priority)),
             Some("hdmi".into()),
         );
     }
@@ -251,7 +230,7 @@ mod tests {
             device("usb", "USB", TransportType::Usb, false),
         ];
         assert_eq!(
-            resolve_input(&connected, params(None, None, false, &priority)),
+            resolve_input(&connected, params(None, false, &priority)),
             Some("usb".into()),
         );
     }
@@ -267,7 +246,7 @@ mod tests {
             known: Vec::new(),
         };
         assert_eq!(
-            resolve_input(&connected, params(None, None, false, &priority)),
+            resolve_input(&connected, params(None, false, &priority)),
             Some("bt".into()),
         );
     }
@@ -279,7 +258,7 @@ mod tests {
             device("bt", "AirPods", TransportType::Bluetooth, true),
         ];
         assert_eq!(
-            resolve_input(&connected, params(None, None, false, &empty_priority())),
+            resolve_input(&connected, params(None, false, &empty_priority())),
             Some("bt".into()),
         );
     }
@@ -287,9 +266,21 @@ mod tests {
     #[test]
     fn empty_connected_returns_none() {
         assert_eq!(
-            resolve_input(&[], params(None, None, false, &empty_priority())),
+            resolve_input(&[], params(None, false, &empty_priority())),
             None,
         );
+    }
+
+    #[test]
+    fn promote_moves_a_ranked_device_to_the_top_without_duplicating_it() {
+        let mut priority = InputPriority {
+            priorities: vec!["a".into(), "b".into(), "c".into()],
+            known: Vec::new(),
+        };
+        priority.promote("c");
+        assert_eq!(priority.priorities, ["c", "a", "b"]);
+        priority.promote("new");
+        assert_eq!(priority.priorities, ["new", "c", "a", "b"]);
     }
 
     #[test]

@@ -947,7 +947,7 @@
               ],
               [
                 "The wrong microphone is picked",
-                "Pin an input, and a separate one for clamshell mode, in Settings → Audio."
+                "Move the microphone you want to the top of the preference order, and pick a separate one for clamshell mode, in Settings → Audio."
               ],
               [
                 "Polish or summaries do nothing",

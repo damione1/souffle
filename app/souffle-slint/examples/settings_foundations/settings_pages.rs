@@ -421,15 +421,11 @@ pub(super) async fn exercise(w: &MainWindow, path: &Path) {
     );
 }
 
-async fn device_popup(w: &MainWindow, page: &ElementHandle, clamshell: bool) {
+async fn clamshell_popup(w: &MainWindow, page: &ElementHandle) {
     use slint::platform::PointerEventButton;
     let devices = sample_devices(3);
-    audio_ui::populate_device_pickers(w, &devices, "fixture-0", Some("fixture-0"));
-    let id = if clamshell {
-        "AudioSection::clamshell-picker"
-    } else {
-        "MicrophoneSection::device-picker"
-    };
+    audio_ui::populate_clamshell_picker(w, &devices, Some("fixture-0"));
+    let id = "AudioSection::clamshell-picker";
     let picker = reveal(w, page, id);
     let trigger = picker
         .query_descendants()
@@ -439,20 +435,10 @@ async fn device_popup(w: &MainWindow, page: &ElementHandle, clamshell: bool) {
     let choices = Rc::new(std::cell::RefCell::new(Vec::new()));
     let accepted = choices.clone();
     let weak = w.as_weak();
-    let choose = move |uid: slint::SharedString| {
-        let window = weak.unwrap();
-        if clamshell {
-            window.set_settings_clamshell_device_id(uid.clone());
-        } else {
-            window.set_settings_selected_device_id(uid.clone());
-        }
+    w.on_settings_clamshell_device_changed(move |uid| {
+        weak.unwrap().set_settings_clamshell_device_id(uid.clone());
         accepted.borrow_mut().push(uid);
-    };
-    if clamshell {
-        w.on_settings_clamshell_device_changed(choose);
-    } else {
-        w.on_settings_device_changed(choose);
-    }
+    });
     let rows = || {
         ElementQuery::from_root(w)
             .match_inherits("KitOption")
@@ -488,12 +474,7 @@ async fn device_popup(w: &MainWindow, page: &ElementHandle, clamshell: bool) {
     let mut refreshed = devices;
     refreshed.swap(0, 1);
     slint::Timer::single_shot(std::time::Duration::from_millis(10), move || {
-        audio_ui::populate_device_pickers(
-            &weak.unwrap(),
-            &refreshed,
-            "fixture-1",
-            Some("fixture-1"),
-        );
+        audio_ui::populate_clamshell_picker(&weak.unwrap(), &refreshed, Some("fixture-1"));
     });
     rows()[0].single_click(PointerEventButton::Left).await;
     settle(w);
@@ -513,20 +494,15 @@ async fn audio(w: &MainWindow, path: &Path) {
     w.set_settings_sample_rate_high(true);
     settle(w);
     let page = id(w, "SettingsView::audio-page");
-    device_popup(w, &page, false).await;
-    device_popup(w, &page, true).await;
+    clamshell_popup(w, &page).await;
     for n in [0, 1, 100, 1000] {
         let devices = sample_devices(n);
-        audio_ui::populate_device_pickers(w, &devices, "fixture-1", Some("fixture-1"));
-        assert_eq!(w.get_settings_pin_unavailable(), n < 2);
+        audio_ui::populate_clamshell_picker(w, &devices, Some("fixture-1"));
         audio_ui::populate_microphones(
             w,
             &microphone_list::build_microphone_list(&devices, &InputPriority::default()),
         );
         settle(w);
-        if n == 1 {
-            frame(w, path, "fallback");
-        }
         if n > 0 {
             reveal(
                 w,
@@ -662,8 +638,6 @@ async fn audio_actions(w: &MainWindow, path: &Path) {
         w.on_settings_reset_sample_rate_requested(move || {
             l5.borrow_mut().push("reset-rate".into())
         });
-        let l6 = log.clone();
-        w.on_settings_refresh_devices_requested(move || l6.borrow_mut().push("refresh".into()));
     }
     record!(on_settings_capture_system_audio_changed, "system-audio");
     record!(on_settings_meeting_autostop_enabled_changed, "autostop");
@@ -785,21 +759,6 @@ async fn audio_actions(w: &MainWindow, path: &Path) {
     model.set_row_data(1, microphone("b", true, false, false));
     settle(w);
     println!("rebound delegates: no gesture reaches the replacement device");
-
-    reveal(w, &page, "MicrophoneSection::device-picker");
-    let refresh = items(w, "KitIconButton").into_iter().find(|e| {
-        e.accessible_label().as_deref()
-            == Some(if en {
-                "Refresh microphones"
-            } else {
-                "Actualiser les microphones"
-            })
-    });
-    refresh
-        .expect("refresh button")
-        .invoke_accessible_default_action();
-    assert_eq!(log.borrow().as_slice(), ["refresh"]);
-    log.borrow_mut().clear();
 
     reveal(w, &page, "MicrophoneSection::rate-alert");
     let rate = items(w, "KitButton").into_iter().find(|e| {

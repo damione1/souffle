@@ -954,7 +954,7 @@ fn settings(window: &MainWindow) {
         ),
         device("airpods", "AirPods", TransportType::Bluetooth, false),
     ];
-    audio_ui::populate_device_pickers(window, &devices, "builtin", None);
+    audio_ui::populate_clamshell_picker(window, &devices, None);
     window.set_settings_sample_rate_label("96 kHz".into());
     window.set_settings_sample_rate_high(true);
     // SOU276_MICROPHONES=mixed puts the unplugged row between two connected

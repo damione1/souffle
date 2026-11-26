@@ -1111,11 +1111,6 @@ async fn start_meeting_from_event(
     .await
 }
 
-/// Refreshes the audio device list, both device pickers, and the
-/// microphone priority list, then kicks off an async sample-rate fetch for
-/// whichever device `resolve_sample_rate_device_uid` picks - mirrors
-/// `refreshDevices()` + the `$effect` that calls `refreshInputSampleRate()`
-/// on device/selection change in controller.svelte.ts.
 /// Runs the real `check_summary_providers()` network/availability check and
 /// repopulates the whole IA tab from the result - shared by settings-open
 /// and the "Retry" button, since both need the same round trip. `slint::
@@ -1479,221 +1474,188 @@ fn settle_model_selection_save(
     Ok(())
 }
 
-enum AudioDeviceSaveSettlement {
-    Committed {
-        uid: String,
-        canonical: Option<Box<AppSettings>>,
-    },
-    Rejected {
-        canonical: Option<Box<AppSettings>>,
-    },
+/// Orders the asynchronous steps of the microphone list refreshes, which
+/// overlap freely: Settings opening, a list edit, a device plugged in.
+#[derive(Default)]
+struct AudioDeviceLoadState {
+    load: Cell<u64>,
+    rate_request: Cell<u64>,
+    /// The microphone whose sample rate the page shows; the reset targets it.
+    rate_device: RefCell<Option<String>>,
+    reload_pending: Cell<bool>,
+    reload_again: Cell<bool>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum AudioDeviceProjectionState {
-    Canonical { generation: u64 },
-    PendingSave { generation: u64, uid: String },
-    CommittedUnknown { generation: u64, uid: String },
-}
+impl AudioDeviceLoadState {
+    fn begin_load(&self) -> u64 {
+        let load = self.load.get().wrapping_add(1);
+        self.load.set(load);
+        load
+    }
 
-impl AudioDeviceProjectionState {
-    fn generation(&self) -> u64 {
-        match self {
-            Self::Canonical { generation }
-            | Self::PendingSave { generation, .. }
-            | Self::CommittedUnknown { generation, .. } => *generation,
+    fn is_latest_load(&self, load: u64) -> bool {
+        self.load.get() == load
+    }
+
+    /// Starts a rate reading for `uid`. The flag tells whether the rate on
+    /// screen belongs to another microphone and must be cleared meanwhile.
+    fn begin_rate_reading(&self, uid: Option<&str>) -> (u64, bool) {
+        let request = self.rate_request.get().wrapping_add(1);
+        self.rate_request.set(request);
+        let mut shown = self.rate_device.borrow_mut();
+        let changed = shown.as_deref() != uid;
+        *shown = uid.map(String::from);
+        (request, changed)
+    }
+
+    fn accepts_rate_reading(&self, request: u64) -> bool {
+        self.rate_request.get() == request
+    }
+
+    fn rate_device(&self) -> Option<String> {
+        self.rate_device.borrow().clone()
+    }
+
+    /// Whether a finished reset of `uid` may publish its rate. Accepting it
+    /// retires any reading started before the reset.
+    fn accepts_rate_reset(&self, uid: &str) -> bool {
+        if self.rate_device.borrow().as_deref() != Some(uid) {
+            return false;
         }
-    }
-
-    fn begin_pending(&mut self, uid: String) {
-        *self = Self::PendingSave {
-            generation: self.generation().wrapping_add(1),
-            uid,
-        };
-    }
-
-    fn commit_unknown(&mut self, uid: String) {
-        let generation = match self {
-            Self::PendingSave { generation, .. } => *generation,
-            Self::Canonical { .. } | Self::CommittedUnknown { .. } => {
-                self.generation().wrapping_add(1)
-            }
-        };
-        *self = Self::CommittedUnknown { generation, uid };
-    }
-
-    fn observe_canonical(&mut self) {
-        *self = Self::Canonical {
-            generation: self.generation().wrapping_add(1),
-        };
-    }
-}
-
-impl AudioDeviceSaveSettlement {
-    fn has_observed_canonical(&self) -> bool {
-        match self {
-            Self::Committed { canonical, .. } | Self::Rejected { canonical } => canonical.is_some(),
-        }
-    }
-}
-
-fn apply_audio_device_projection_settlement(
-    settlement: &AudioDeviceSaveSettlement,
-    projection: &mut AudioDeviceProjectionState,
-) {
-    match settlement {
-        AudioDeviceSaveSettlement::Committed {
-            uid,
-            canonical: None,
-        } => projection.commit_unknown(uid.clone()),
-        AudioDeviceSaveSettlement::Committed {
-            canonical: Some(_), ..
-        }
-        | AudioDeviceSaveSettlement::Rejected { .. } => projection.observe_canonical(),
-    }
-}
-
-fn settle_audio_device_save(
-    outcome: &SettingsSaveOutcome,
-    fallback: &Option<AppSettings>,
-    submitted_uid: &str,
-) -> AudioDeviceSaveSettlement {
-    match (
-        outcome,
-        settings_values::save_outcome_commit_status(outcome),
-    ) {
-        (
-            SettingsSaveOutcome::Observed { settings, .. },
-            settings_values::SettingsCommitStatus::Committed,
-        ) => AudioDeviceSaveSettlement::Committed {
-            uid: settings.audio_device.clone().unwrap_or_default(),
-            canonical: Some(settings.clone()),
-        },
-        (
-            SettingsSaveOutcome::Unavailable { .. },
-            settings_values::SettingsCommitStatus::Committed,
-        ) => AudioDeviceSaveSettlement::Committed {
-            uid: submitted_uid.to_string(),
-            canonical: None,
-        },
-        (
-            SettingsSaveOutcome::Observed { settings, .. },
-            settings_values::SettingsCommitStatus::NotCommitted,
-        ) => AudioDeviceSaveSettlement::Rejected {
-            canonical: Some(settings.clone()),
-        },
-        (
-            SettingsSaveOutcome::Unavailable { .. },
-            settings_values::SettingsCommitStatus::NotCommitted,
-        ) => AudioDeviceSaveSettlement::Rejected {
-            canonical: fallback.clone().map(Box::new),
-        },
+        self.rate_request
+            .set(self.rate_request.get().wrapping_add(1));
+        true
     }
 }
 
 fn audio_device_load_configuration(
     settings_state: &SettingsCache,
-    projection_state: &Rc<RefCell<AudioDeviceProjectionState>>,
-) -> Option<(
-    u64,
-    String,
-    Option<String>,
-    souffle_lib::audio::InputPriority,
-)> {
-    let known = settings_state.known_snapshot();
-    let last_observed = settings_state.borrow().clone();
-    let settings = known.as_ref().or(last_observed.as_ref())?;
-    let mut projection = projection_state.borrow_mut();
-    let selected = match projection.clone() {
-        AudioDeviceProjectionState::Canonical { .. } => {
-            settings.audio_device.clone().unwrap_or_default()
-        }
-        AudioDeviceProjectionState::PendingSave { uid, .. } => uid,
-        AudioDeviceProjectionState::CommittedUnknown { uid, .. } => {
-            if known.is_some() {
-                projection.observe_canonical();
-                settings.audio_device.clone().unwrap_or_default()
-            } else {
-                uid
-            }
-        }
-    };
+) -> Option<(Option<String>, souffle_lib::audio::InputPriority)> {
+    let settings = settings_state.borrow();
+    let settings = settings.as_ref()?;
     Some((
-        projection.generation(),
-        selected,
         settings.clamshell_audio_device.clone(),
         settings.input_priority.clone(),
     ))
 }
 
+/// Rebuilds the clamshell picker and the microphone order from the connected
+/// devices, then reads the sample rate of the microphone a capture would use.
 fn load_audio_devices(
     window: &MainWindow,
     settings_state: &SettingsCache,
     audio_devices_state: &Rc<RefCell<Vec<AudioInputDevice>>>,
-    projection_state: &Rc<RefCell<AudioDeviceProjectionState>>,
+    load_state: &Rc<AudioDeviceLoadState>,
     settings_io: Rc<settings_io::SettingsIoCoordinator>,
 ) {
     let Some(token) = settings_io.current_load_token() else {
         return;
     };
+    let load = load_state.begin_load();
     let weak = window.as_weak();
     let devices_state = audio_devices_state.clone();
     let settings_state = settings_state.clone();
-    let projection_state = projection_state.clone();
-    let worker =
-        souffle_lib::async_runtime::spawn_blocking(souffle_lib::commands::list_audio_devices);
+    let load_state = load_state.clone();
+    let worker = souffle_lib::async_runtime::spawn_blocking(|| {
+        (
+            souffle_lib::commands::list_audio_devices(),
+            souffle_lib::commands::is_clamshell(),
+        )
+    });
     slint::spawn_local(async move {
-        let devices = match worker.await {
-            Ok(Ok(devices)) => devices,
-            Ok(Err(error)) => {
+        let (devices, lid_closed) = match worker.await {
+            Ok((Ok(devices), lid_closed)) => (devices, lid_closed),
+            Ok((Err(error), lid_closed)) => {
                 eprintln!("Failed to list audio devices: {error}");
-                Vec::new()
+                (Vec::new(), lid_closed)
             }
             Err(error) => {
                 eprintln!("Failed to join audio device worker: {error}");
-                Vec::new()
+                (Vec::new(), false)
             }
         };
-        if !settings_io.accepts_load(token) {
+        if !settings_io.accepts_load(token) || !load_state.is_latest_load(load) {
             return;
         }
-        // Resolve the selected UID only after the CoreAudio wait. A device
-        // save may have settled while the worker was blocked; capturing this
-        // before `await` would let the old UID overwrite the newer picker.
-        let Some((generation, selected, clamshell, priority)) =
-            audio_device_load_configuration(&settings_state, &projection_state)
-        else {
+        // Read the settings only after the CoreAudio wait: a save may have
+        // settled while the worker was blocked.
+        let Some((clamshell, priority)) = audio_device_load_configuration(&settings_state) else {
             return;
         };
         let Some(window) = weak.upgrade() else {
             return;
         };
-        audio_ui::populate_device_pickers(&window, &devices, &selected, clamshell.as_deref());
+        audio_ui::populate_clamshell_picker(&window, &devices, clamshell.as_deref());
         let list = microphone_list::build_microphone_list(&devices, &priority);
         audio_ui::populate_microphones(&window, &list);
-        let rate_uid =
-            audio_ui::resolve_sample_rate_device_uid(&selected, &devices).map(String::from);
+        let rate_uid = souffle_lib::commands::resolve_capture_device(
+            &devices,
+            clamshell.as_deref(),
+            lid_closed,
+            &priority,
+        );
         *devices_state.borrow_mut() = devices;
-        window.set_settings_sample_rate_label("".into());
-        window.set_settings_sample_rate_high(false);
+        let (request, rate_device_changed) = load_state.begin_rate_reading(rate_uid.as_deref());
+        // Kept while the same microphone is re-read, so the alert does not
+        // flicker on every device event.
+        if rate_device_changed {
+            project_sample_rate(&window, None);
+        }
         drop(window);
-        if let Some(uid) = rate_uid {
-            let rate = souffle_lib::commands::get_input_sample_rate(uid).await;
-            if !settings_io.accepts_load(token) {
-                return;
-            }
-            if projection_state.borrow().generation() != generation {
-                return;
-            }
-            if let Ok(hz) = rate
-                && let Some(window) = weak.upgrade()
-            {
-                window.set_settings_sample_rate_label(audio_ui::format_sample_rate_hz(hz).into());
-                window.set_settings_sample_rate_high(audio_ui::sample_rate_blocks_conferencing(hz));
-            }
+        let Some(uid) = rate_uid else {
+            return;
+        };
+        let rate = souffle_lib::commands::get_input_sample_rate(uid).await;
+        if !settings_io.accepts_load(token) || !load_state.accepts_rate_reading(request) {
+            return;
+        }
+        if let Some(window) = weak.upgrade() {
+            project_sample_rate(&window, rate.ok());
         }
     })
     .expect("slint event loop not running");
+}
+
+fn project_sample_rate(window: &MainWindow, hz: Option<u32>) {
+    window.set_settings_sample_rate_label(
+        hz.map(audio_ui::format_sample_rate_hz)
+            .unwrap_or_default()
+            .into(),
+    );
+    window.set_settings_sample_rate_high(hz.is_some_and(audio_ui::sample_rate_blocks_conferencing));
+}
+
+/// A microphone was plugged in or removed. The input-route thread stored the
+/// known devices outside the Settings worker, so its snapshot is re-read
+/// first: the list would otherwise be rebuilt, and the next save written,
+/// from a copy that predates the event. Bursts collapse into one more pass.
+fn reload_input_devices(
+    weak: slint::Weak<MainWindow>,
+    settings_state: SettingsCache,
+    audio_devices_state: Rc<RefCell<Vec<AudioInputDevice>>>,
+    load_state: Rc<AudioDeviceLoadState>,
+    settings_io: Rc<settings_io::SettingsIoCoordinator>,
+) {
+    if load_state.reload_pending.replace(true) {
+        load_state.reload_again.set(true);
+        return;
+    }
+    let io = settings_io.clone();
+    settings_io.reload_stored_snapshot(move |_order, _outcome| {
+        load_state.reload_pending.set(false);
+        if let Some(window) = weak.upgrade() {
+            load_audio_devices(
+                &window,
+                &settings_state,
+                &audio_devices_state,
+                &load_state,
+                io.clone(),
+            );
+        }
+        if load_state.reload_again.replace(false) {
+            reload_input_devices(weak, settings_state, audio_devices_state, load_state, io);
+        }
+    });
 }
 
 /// Bumped by every [`stop_audio_player`] (UI thread only). A background
@@ -2876,6 +2838,17 @@ struct OnboardingState {
     level: onboarding_level::LevelMonitor,
 }
 
+/// The microphone the wizard preselects: the top of the preference order, or
+/// the automatic entry when nothing is ranked yet.
+fn preferred_microphone(settings: &AppSettings) -> String {
+    settings
+        .input_priority
+        .priorities
+        .first()
+        .cloned()
+        .unwrap_or_default()
+}
+
 fn project_startup_settings(
     window: &MainWindow,
     settings: &AppSettings,
@@ -2888,7 +2861,7 @@ fn project_startup_settings(
     window.set_settings_locale(locale);
     select_app_locale(window, locale);
     let mut onboarding = onboarding.borrow_mut();
-    onboarding.selected_device = settings.audio_device.clone().unwrap_or_default();
+    onboarding.selected_device = preferred_microphone(settings);
     dark
 }
 
@@ -2947,7 +2920,7 @@ fn initialize_onboarding(
     guard.steps = onboarding_flags::wizard_steps(startup.setup_flags);
     guard.recovery_only = startup.setup_flags.setup_done;
     guard.devices = startup.devices.clone();
-    guard.selected_device = startup.settings.audio_device.clone().unwrap_or_default();
+    guard.selected_device = preferred_microphone(&startup.settings);
     guard.model_options = model_ui::list_available_model_options(&startup.catalog);
     guard.selected_model_index = guard.model_options.iter().position(|option| {
         option.engine_id == startup.catalog.selected_engine_id
@@ -3359,9 +3332,18 @@ fn wire_onboarding_callbacks(
             }
             OnboardingStep::Microphone => {
                 let uid = ob_for_continue.borrow().selected_device.clone();
+                // The automatic entry leaves the preference order as it is.
+                if uid.is_empty() {
+                    advance_onboarding_step(
+                        &window,
+                        &handle,
+                        &ob_for_continue,
+                        &permissions_for_continue,
+                    );
+                    return;
+                }
                 window.set_onboarding_busy(true);
                 window.set_onboarding_continue_enabled(false);
-                let uid_for_save = uid.clone();
                 let completion_weak = weak.clone();
                 let retained_weak = weak.clone();
                 let completion_handle = handle.clone();
@@ -3369,36 +3351,19 @@ fn wire_onboarding_callbacks(
                 let completion_permissions = permissions_for_continue.clone();
                 settings_io_for_continue.submit(
                     souffle_lib::commands::SettingsSaveLane::General,
-                    move |settings| {
-                        settings.audio_device = if uid_for_save.is_empty() {
-                            None
-                        } else {
-                            Some(uid_for_save)
-                        };
-                    },
+                    move |settings| settings.input_priority.promote(&uid),
                     move |_, outcome| {
-                        log_settings_save_outcome("onboarding audio device", outcome);
+                        log_settings_save_outcome("onboarding microphone", outcome);
                         settle_onboarding_completion(
                             outcome,
                             move || {
-                                let Some(window) = completion_weak.upgrade() else {
-                                    return;
-                                };
-                                match souffle_lib::commands::select_audio_device(
-                                    completion_handle.clone(),
-                                    uid,
-                                ) {
-                                    Ok(()) => advance_onboarding_step(
+                                if let Some(window) = completion_weak.upgrade() {
+                                    advance_onboarding_step(
                                         &window,
                                         &completion_handle,
                                         &completion_ob,
                                         &completion_permissions,
-                                    ),
-                                    Err(error) => {
-                                        window.set_onboarding_busy(false);
-                                        window.set_onboarding_continue_enabled(true);
-                                        window.set_onboarding_status_message(error.into());
-                                    }
+                                    );
                                 }
                             },
                             move |message| {
@@ -5134,13 +5099,10 @@ fn wire_callbacks(
     // a real key (-> that combo wins instead) - mirrors `modifierDownEvent`
     // in controller.svelte.ts's `handleKeyDown`/`handleKeyUp`.
     let pending_modifier: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(None));
-    // Cached so device-picker/microphone-list callbacks (move/hide/remove,
-    // label->uid resolution) don't each re-query CoreAudio.
+    // Cached so the clamshell picker and microphone list callbacks don't
+    // each re-query CoreAudio.
     let audio_devices_state: Rc<RefCell<Vec<AudioInputDevice>>> = Rc::new(RefCell::new(Vec::new()));
-    let audio_device_projection_state =
-        Rc::new(RefCell::new(AudioDeviceProjectionState::Canonical {
-            generation: 0,
-        }));
+    let audio_device_load_state = Rc::new(AudioDeviceLoadState::default());
     // Cached so the model picker/download button don't each re-query Ollama.
     let summary_status_state: Rc<RefCell<Option<souffle_lib::summary::SummaryProvidersStatus>>> =
         Rc::new(RefCell::new(None));
@@ -5176,7 +5138,7 @@ fn wire_callbacks(
     let settings_state_for_open = settings_state.clone();
     let shortcuts_state_for_open = shortcuts_state.clone();
     let audio_devices_state_for_open = audio_devices_state.clone();
-    let audio_device_projection_for_open = audio_device_projection_state.clone();
+    let audio_device_load_for_open = audio_device_load_state.clone();
     let summary_refresh_state_for_open = summary_refresh_state.clone();
     let summary_template_editing_for_open = summary_template_editing.clone();
     let model_options_state_for_open = model_options_state.clone();
@@ -5224,7 +5186,7 @@ fn wire_callbacks(
         let core_io = settings_io_for_open.clone();
         let core_state = settings_state_for_open.clone();
         let core_devices = audio_devices_state_for_open.clone();
-        let core_device_projection = audio_device_projection_for_open.clone();
+        let core_device_load = audio_device_load_for_open.clone();
         let core_summary_refresh = summary_refresh_state_for_open.clone();
         let core_editing = summary_template_editing_for_open.clone();
         let core_models = model_options_state_for_open.clone();
@@ -5245,13 +5207,12 @@ fn wire_callbacks(
             settings_ui::populate(&window, &settings);
             data_ui::populate(&window, &settings);
             core_values.observe_loaded(&settings);
-            core_device_projection.borrow_mut().observe_canonical();
             load_calendars_if_enabled(&window, &core_state, finish_core_io.clone());
             load_audio_devices(
                 &window,
                 &core_state,
                 &core_devices,
-                &core_device_projection,
+                &core_device_load,
                 finish_core_io.clone(),
             );
             refresh_summary_providers(
@@ -5760,135 +5721,20 @@ fn wire_callbacks(
     });
 
     let weak = window.as_weak();
-    let handle = tauri_handle.clone();
-    let settings_state_for_device = settings_state.clone();
-    let settings_io_for_device = settings_io.clone();
-    let audio_devices_state_for_device = audio_devices_state.clone();
-    let audio_device_projection_for_device = audio_device_projection_state.clone();
-    let device_selection_revision = Arc::new(std::sync::atomic::AtomicU64::new(0));
-    let device_effect_lock = Arc::new(Mutex::new(()));
-    window.on_settings_device_changed(move |id| {
-        let Some(uid) = audio_ui::device_choice(&audio_devices_state_for_device.borrow(), &id)
-        else {
-            return;
-        };
-        let uid = uid.unwrap_or_default();
-        let revision = device_selection_revision.fetch_add(1, Ordering::AcqRel) + 1;
-        audio_device_projection_for_device
-            .borrow_mut()
-            .begin_pending(uid.clone());
-        let uid_for_save = uid.clone();
-        let weak = weak.clone();
-        let settings_state = settings_state_for_device.clone();
-        let devices = audio_devices_state_for_device.clone();
-        let publication_io = settings_io_for_device.clone();
-        let selection_handle = handle.clone();
-        let projection_state = audio_device_projection_for_device.clone();
-        let latest_revision = Arc::clone(&device_selection_revision);
-        let effect_lock = Arc::clone(&device_effect_lock);
-        save_settings_field_then(
-            &settings_io_for_device,
-            souffle_lib::commands::SettingsSaveLane::General,
-            move |settings| {
-                settings.audio_device = if uid_for_save.is_empty() {
-                    None
-                } else {
-                    Some(uid_for_save)
-                };
-            },
-            move |_order, outcome| {
-                if revision != latest_revision.load(Ordering::Acquire) {
-                    return;
-                }
-                let fallback = settings_state.borrow().clone();
-                let settlement = settle_audio_device_save(outcome, &fallback, &uid);
-                // An unavailable reread deliberately leaves the actor cache
-                // marked unknown while preserving its last observed value.
-                // Never reload the picker from that stale snapshot after the
-                // native effect; the user's submitted label remains visible
-                // until a later serialized refresh observes persistence.
-                let reload_after_effect = settlement.has_observed_canonical();
-                apply_audio_device_projection_settlement(
-                    &settlement,
-                    &mut projection_state.borrow_mut(),
-                );
-                let (target_uid, canonical) = match settlement {
-                    AudioDeviceSaveSettlement::Committed { uid, canonical } => {
-                        (Some(uid), canonical)
-                    }
-                    AudioDeviceSaveSettlement::Rejected { canonical } => {
-                        let uid = canonical
-                            .as_ref()
-                            .map(|settings| settings.audio_device.clone().unwrap_or_default());
-                        (uid, canonical)
-                    }
-                };
-                if let Some(window) = weak.upgrade()
-                    && window.get_settings_open()
-                    && let Some(settings) = canonical.as_deref()
-                {
-                    audio_ui::populate_device_pickers(
-                        &window,
-                        &devices.borrow(),
-                        settings.audio_device.as_deref().unwrap_or_default(),
-                        settings.clamshell_audio_device.as_deref(),
-                    );
-                }
-                let Some(target_uid) = target_uid else {
-                    return;
-                };
-                let worker_revision = Arc::clone(&latest_revision);
-                let worker = souffle_lib::async_runtime::spawn_blocking(move || {
-                    let _guard = effect_lock
-                        .lock()
-                        .unwrap_or_else(|error| error.into_inner());
-                    if revision != worker_revision.load(Ordering::Acquire) {
-                        return Ok(());
-                    }
-                    souffle_lib::commands::select_audio_device(selection_handle, target_uid)
-                });
-                slint::spawn_local(async move {
-                    match worker.await {
-                        Ok(Ok(())) => {}
-                        Ok(Err(error)) => eprintln!("Failed to select audio device: {error}"),
-                        Err(error) => {
-                            eprintln!("Failed to join audio device selection worker: {error}")
-                        }
-                    }
-                    if reload_after_effect
-                        && revision == latest_revision.load(Ordering::Acquire)
-                        && let Some(window) = weak.upgrade()
-                        && window.get_settings_open()
-                    {
-                        load_audio_devices(
-                            &window,
-                            &settings_state,
-                            &devices,
-                            &projection_state,
-                            publication_io,
-                        );
-                    }
-                })
-                .expect("slint event loop not running");
-            },
-        );
-    });
-
-    let weak = window.as_weak();
-    let settings_state_for_refresh = settings_state.clone();
-    let audio_devices_state_for_refresh = audio_devices_state.clone();
-    let audio_device_projection_for_refresh = audio_device_projection_state.clone();
-    let settings_io_for_refresh = settings_io.clone();
-    window.on_settings_refresh_devices_requested(move || {
-        if let Some(window) = weak.upgrade() {
-            load_audio_devices(
-                &window,
-                &settings_state_for_refresh,
-                &audio_devices_state_for_refresh,
-                &audio_device_projection_for_refresh,
-                settings_io_for_refresh.clone(),
+    let settings_state_for_devices_changed = settings_state.clone();
+    let audio_devices_state_for_devices_changed = audio_devices_state.clone();
+    let audio_device_load_for_devices_changed = audio_device_load_state.clone();
+    let settings_io_for_devices_changed = settings_io.clone();
+    INPUT_DEVICES_CHANGED.with(|slot| {
+        *slot.borrow_mut() = Some(Box::new(move || {
+            reload_input_devices(
+                weak.clone(),
+                settings_state_for_devices_changed.clone(),
+                audio_devices_state_for_devices_changed.clone(),
+                audio_device_load_for_devices_changed.clone(),
+                settings_io_for_devices_changed.clone(),
             );
-        }
+        }));
     });
 
     let weak = window.as_weak();
@@ -5972,7 +5818,7 @@ fn wire_callbacks(
     let weak = window.as_weak();
     let settings_state_for_move = settings_state.clone();
     let audio_devices_state_for_move = audio_devices_state.clone();
-    let audio_device_projection_for_move = audio_device_projection_state.clone();
+    let audio_device_load_for_move = audio_device_load_state.clone();
     let settings_io_for_move = settings_io.clone();
     window.on_settings_move_device_requested(move |uid, direction| {
         let devices = audio_devices_state_for_move.borrow().clone();
@@ -5980,7 +5826,7 @@ fn wire_callbacks(
         let weak = weak.clone();
         let state = settings_state_for_move.clone();
         let device_state = audio_devices_state_for_move.clone();
-        let projection_state = audio_device_projection_for_move.clone();
+        let load_state = audio_device_load_for_move.clone();
         let publication_io = settings_io_for_move.clone();
         save_settings_field_then(
             &settings_io_for_move,
@@ -5998,13 +5844,7 @@ fn wire_callbacks(
                     return;
                 }
                 if let Some(window) = weak.upgrade() {
-                    load_audio_devices(
-                        &window,
-                        &state,
-                        &device_state,
-                        &projection_state,
-                        publication_io,
-                    );
+                    load_audio_devices(&window, &state, &device_state, &load_state, publication_io);
                 }
             },
         );
@@ -6013,14 +5853,14 @@ fn wire_callbacks(
     let weak = window.as_weak();
     let settings_state_for_remove = settings_state.clone();
     let audio_devices_state_for_remove = audio_devices_state.clone();
-    let audio_device_projection_for_remove = audio_device_projection_state.clone();
+    let audio_device_load_for_remove = audio_device_load_state.clone();
     let settings_io_for_remove = settings_io.clone();
     window.on_settings_remove_device_requested(move |uid| {
         let uid = uid.to_string();
         let weak = weak.clone();
         let state = settings_state_for_remove.clone();
         let devices = audio_devices_state_for_remove.clone();
-        let projection_state = audio_device_projection_for_remove.clone();
+        let load_state = audio_device_load_for_remove.clone();
         let publication_io = settings_io_for_remove.clone();
         save_settings_field_then(
             &settings_io_for_remove,
@@ -6028,9 +5868,6 @@ fn wire_callbacks(
             move |settings| {
                 settings.input_priority =
                     microphone_list::remove_known_device(&settings.input_priority, &uid);
-                if settings.audio_device.as_deref() == Some(uid.as_str()) {
-                    settings.audio_device = None;
-                }
                 if settings.clamshell_audio_device.as_deref() == Some(uid.as_str()) {
                     settings.clamshell_audio_device = None;
                 }
@@ -6040,22 +5877,14 @@ fn wire_callbacks(
                     return;
                 }
                 if let Some(window) = weak.upgrade() {
-                    load_audio_devices(
-                        &window,
-                        &state,
-                        &devices,
-                        &projection_state,
-                        publication_io,
-                    );
+                    load_audio_devices(&window, &state, &devices, &load_state, publication_io);
                 }
             },
         );
     });
 
     let weak = window.as_weak();
-    let settings_state_for_reset_rate = settings_state.clone();
-    let audio_devices_state_for_reset_rate = audio_devices_state.clone();
-    let audio_device_projection_for_reset_rate = audio_device_projection_state;
+    let audio_device_load_for_reset_rate = audio_device_load_state;
     let handle_for_reset_rate = tauri_handle.clone();
     window.on_settings_reset_sample_rate_requested(move || {
         let Some(window) = weak.upgrade() else {
@@ -6064,43 +5893,27 @@ fn wire_callbacks(
         if !settings_capture_action_allowed(&handle_for_reset_rate) {
             return;
         }
-        let Some((generation, selected, _, _)) = audio_device_load_configuration(
-            &settings_state_for_reset_rate,
-            &audio_device_projection_for_reset_rate,
-        ) else {
-            return;
-        };
-        let devices = audio_devices_state_for_reset_rate.borrow().clone();
-        let Some(uid) =
-            audio_ui::resolve_sample_rate_device_uid(&selected, &devices).map(String::from)
-        else {
+        // The write goes to the microphone whose rate the alert shows.
+        let Some(uid) = audio_device_load_for_reset_rate.rate_device() else {
             return;
         };
         window.set_settings_resetting_sample_rate(true);
         let weak = weak.clone();
-        let projection_state = audio_device_projection_for_reset_rate.clone();
+        let load_state = audio_device_load_for_reset_rate.clone();
         let state = handle_for_reset_rate.clone();
         slint::spawn_local(async move {
-            let result = souffle_lib::commands::reset_input_sample_rate(state, uid).await;
-            if projection_state.borrow().generation() != generation {
-                if let Some(window) = weak.upgrade() {
-                    window.set_settings_resetting_sample_rate(false);
-                }
+            let result = souffle_lib::commands::reset_input_sample_rate(state, uid.clone()).await;
+            let Some(window) = weak.upgrade() else {
                 return;
-            }
-            if let Some(window) = weak.upgrade() {
-                window.set_settings_resetting_sample_rate(false);
-                match result {
-                    Ok(hz) => {
-                        window.set_settings_sample_rate_label(
-                            audio_ui::format_sample_rate_hz(hz).into(),
-                        );
-                        window.set_settings_sample_rate_high(
-                            audio_ui::sample_rate_blocks_conferencing(hz),
-                        );
+            };
+            window.set_settings_resetting_sample_rate(false);
+            match result {
+                Ok(hz) => {
+                    if load_state.accepts_rate_reset(&uid) {
+                        project_sample_rate(&window, Some(hz));
                     }
-                    Err(e) => eprintln!("Failed to reset sample rate: {e}"),
                 }
+                Err(e) => eprintln!("Failed to reset sample rate: {e}"),
             }
         })
         .expect("slint event loop not running");
@@ -7282,6 +7095,11 @@ fn dispatch_native_action(
             window.invoke_settings_tab_changed();
             let _ = show_main_window(window);
         }
+        NativeAction::InputDevicesChanged => INPUT_DEVICES_CHANGED.with(|slot| {
+            if let Some(reload) = slot.borrow().as_ref() {
+                reload();
+            }
+        }),
         NativeAction::MicStallChanged => MIC_STALL_BANNER.with(|slot| {
             if let Some(banner) = slot.borrow().as_ref() {
                 banner.borrow_mut().project(
@@ -7778,6 +7596,9 @@ thread_local! {
     // loop runs, so no action is dispatched before it exists.
     static MIC_STALL_BANNER: RefCell<Option<Rc<RefCell<mic_stall_ui::MicStallBanner>>>> =
         const { RefCell::new(None) };
+    // Run on each `NativeAction::InputDevicesChanged`. Set once by the
+    // Settings wiring.
+    static INPUT_DEVICES_CHANGED: RefCell<Option<Box<dyn Fn()>>> = const { RefCell::new(None) };
 }
 
 /// SOU-126 AC5: name a microphone stuck inside CoreAudio and offer to
@@ -7878,18 +7699,17 @@ fn quit_after_finalizing_recording(handle: &AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::{
-        AudioDeviceProjectionState, AudioDeviceSaveSettlement, DictationEndIntent,
-        DictationTextBuffers, DictationTranscriptDisposition, MainWindow, OnboardingState,
-        SettingsCache, StartupPresentationGate, SummaryRefreshState, Theme, TimelineDayGroup,
-        TimelineKind, TranscriptState, apply_audio_device_projection_settlement,
-        audio_device_load_configuration, clear_committed_summary_add_draft,
-        dictation_transcript_disposition, finish_startup_presentation, merge_recovery_text,
-        model_selection_matches_settings, persist_shortcut_candidate,
-        prime_summary_template_editor, project_model_selection_snapshot, project_startup_settings,
-        reset_live_buffers, reset_stale_save_error, run_current_model_task,
-        settle_audio_device_save, settle_model_selection_save, settle_onboarding_completion,
-        should_clear_committed_summary_add_draft, wire_meeting_detail_delete,
-        wire_summary_template_edit_callbacks, wire_timeline_item_removed,
+        AudioDeviceLoadState, DictationEndIntent, DictationTextBuffers,
+        DictationTranscriptDisposition, MainWindow, OnboardingState, SettingsCache,
+        StartupPresentationGate, SummaryRefreshState, Theme, TimelineDayGroup, TimelineKind,
+        TranscriptState, clear_committed_summary_add_draft, dictation_transcript_disposition,
+        finish_startup_presentation, merge_recovery_text, model_selection_matches_settings,
+        persist_shortcut_candidate, prime_summary_template_editor,
+        project_model_selection_snapshot, project_startup_settings, reset_live_buffers,
+        reset_stale_save_error, run_current_model_task, settle_model_selection_save,
+        settle_onboarding_completion, should_clear_committed_summary_add_draft,
+        wire_meeting_detail_delete, wire_summary_template_edit_callbacks,
+        wire_timeline_item_removed,
     };
     use super::{
         DICTATIONS_FINALIZING, LiveNotesAutosave, LiveSystemAudio, LiveTranscript,
@@ -9262,7 +9082,10 @@ mod tests {
         let settings = AppSettings {
             theme: souffle_lib::settings::Theme::Light,
             locale: "fr".into(),
-            audio_device: Some("mic-1".into()),
+            input_priority: souffle_lib::audio::InputPriority {
+                priorities: vec!["mic-1".into(), "mic-2".into()],
+                known: Vec::new(),
+            },
             calendar_integration_enabled: true,
             ..AppSettings::default()
         };
@@ -9382,146 +9205,42 @@ mod tests {
     }
 
     #[test]
-    fn device_effect_settlement_ignores_global_visibility_order_and_rolls_back_rejections() {
-        let committed = AppSettings {
-            audio_device: Some("mic-b".into()),
-            ..AppSettings::default()
-        };
-        let committed_outcome = SettingsSaveOutcome::Observed {
-            settings: Box::new(committed),
-            result: Ok(()),
-        };
-        for order in [
-            crate::settings_io::SettingsResponseOrder::Intermediate,
-            crate::settings_io::SettingsResponseOrder::LatestHidden,
-        ] {
-            assert!(!order.publishes_to_open_window());
-            match settle_audio_device_save(&committed_outcome, &None, "mic-b") {
-                AudioDeviceSaveSettlement::Committed { uid, .. } => assert_eq!(uid, "mic-b"),
-                AudioDeviceSaveSettlement::Rejected { .. } => {
-                    panic!("committed device save was classified as rejected")
-                }
-            }
-        }
+    fn an_overtaken_microphone_refresh_publishes_neither_its_list_nor_its_rate() {
+        let state = AudioDeviceLoadState::default();
+        let first = state.begin_load();
+        let (first_reading, _) = state.begin_rate_reading(Some("mic-a"));
+        let second = state.begin_load();
+        assert!(!state.is_latest_load(first));
+        assert!(state.is_latest_load(second));
 
-        let previous = AppSettings {
-            audio_device: Some("mic-a".into()),
-            ..AppSettings::default()
-        };
-        let rejected = SettingsSaveOutcome::Observed {
-            settings: Box::new(previous),
-            result: Err(SettingsSaveError::Rejected {
-                message: "device rejected".into(),
-            }),
-        };
-        match settle_audio_device_save(&rejected, &None, "mic-b") {
-            AudioDeviceSaveSettlement::Rejected { canonical } => assert_eq!(
-                canonical
-                    .expect("observed rejection has canonical settings")
-                    .audio_device
-                    .as_deref(),
-                Some("mic-a")
-            ),
-            AudioDeviceSaveSettlement::Committed { .. } => {
-                panic!("rejected device save was classified as committed")
-            }
-        }
+        let (second_reading, _) = state.begin_rate_reading(Some("mic-a"));
+        assert!(!state.accepts_rate_reading(first_reading));
+        assert!(state.accepts_rate_reading(second_reading));
     }
 
     #[test]
-    fn blocked_device_load_cannot_publish_stale_uid_after_unavailable_commit() {
-        let window = test_window();
-        window.set_settings_selected_device_id("mic-b".into());
-        let fallback = AppSettings {
-            audio_device: Some("mic-a".into()),
-            ..AppSettings::default()
-        };
-        let outcome = SettingsSaveOutcome::Unavailable {
-            result: Ok(()),
-            read_error: "controlled reread failure".into(),
-        };
-        let cache = SettingsCache::with_observed(&window, fallback.clone());
-        let projection = Rc::new(RefCell::new(AudioDeviceProjectionState::Canonical {
-            generation: 0,
-        }));
-        let (load_started_tx, load_started_rx) = std::sync::mpsc::sync_channel(1);
-        let (release_load_tx, release_load_rx) = std::sync::mpsc::sync_channel(1);
-        let blocked_load = std::thread::spawn(move || {
-            load_started_tx.send(()).unwrap();
-            release_load_rx.recv().unwrap();
-        });
-        load_started_rx
-            .recv_timeout(Duration::from_secs(1))
-            .expect("controlled device load started with cached mic-a");
-
-        // While CoreAudio is blocked, B commits but the actor cannot reread
-        // persistence. This is the ordering that previously let captured A
-        // overwrite the picker when the old load completed.
-        projection.borrow_mut().begin_pending("mic-b".into());
-        cache.observe_save_outcome_silent(&outcome);
-        let settlement = settle_audio_device_save(&outcome, &Some(fallback), "mic-b");
-        assert!(!settlement.has_observed_canonical());
-        apply_audio_device_projection_settlement(&settlement, &mut projection.borrow_mut());
-        match &settlement {
-            AudioDeviceSaveSettlement::Committed { uid, canonical } => {
-                assert_eq!(uid, "mic-b");
-                assert!(canonical.is_none());
-            }
-            AudioDeviceSaveSettlement::Rejected { .. } => {
-                panic!("committed device save was classified as rejected")
-            }
-        }
-        release_load_tx.send(()).unwrap();
-        blocked_load.join().unwrap();
-        let (_, selected, _, _) = audio_device_load_configuration(&cache, &projection)
-            .expect("unknown cache still has a pending selection");
-
-        // Both the post-effect path and a manual Refresh use the pending
-        // unknown selection instead of the stale preserved cache snapshot.
-        assert_eq!(selected, "mic-b");
-        assert_eq!(window.get_settings_selected_device_id().as_str(), "mic-b");
+    fn the_shown_rate_is_cleared_only_when_the_microphone_changes() {
+        let state = AudioDeviceLoadState::default();
+        assert!(state.begin_rate_reading(Some("mic-a")).1);
+        assert!(!state.begin_rate_reading(Some("mic-a")).1);
+        assert!(state.begin_rate_reading(Some("mic-b")).1);
+        assert_eq!(state.rate_device().as_deref(), Some("mic-b"));
+        assert!(state.begin_rate_reading(None).1);
+        assert_eq!(state.rate_device(), None);
     }
 
     #[test]
-    fn later_observed_device_mutation_supersedes_committed_unknown_selection() {
-        let window = test_window();
-        let initial = AppSettings {
-            audio_device: Some("mic-a".into()),
-            ..AppSettings::default()
-        };
-        let cache = SettingsCache::with_observed(&window, initial.clone());
-        let projection = Rc::new(RefCell::new(AudioDeviceProjectionState::Canonical {
-            generation: 0,
-        }));
+    fn a_rate_reset_publishes_only_for_the_microphone_still_shown() {
+        let state = AudioDeviceLoadState::default();
+        let (reading, _) = state.begin_rate_reading(Some("mic-a"));
+        assert!(state.accepts_rate_reset("mic-a"));
+        assert!(
+            !state.accepts_rate_reading(reading),
+            "a reading older than the reset must not overwrite its rate"
+        );
 
-        projection.borrow_mut().begin_pending("mic-b".into());
-        let unavailable = SettingsSaveOutcome::Unavailable {
-            result: Ok(()),
-            read_error: "controlled reread failure".into(),
-        };
-        cache.observe_save_outcome_silent(&unavailable);
-        let settlement = settle_audio_device_save(&unavailable, &Some(initial), "mic-b");
-        apply_audio_device_projection_settlement(&settlement, &mut projection.borrow_mut());
-        let (_, selected, _, _) = audio_device_load_configuration(&cache, &projection)
-            .expect("unknown cache preserves the committed selection");
-        assert_eq!(selected, "mic-b");
-
-        let later = AppSettings {
-            audio_device: None,
-            ..AppSettings::default()
-        };
-        cache.observe_save_outcome_silent(&SettingsSaveOutcome::Observed {
-            settings: Box::new(later),
-            result: Ok(()),
-        });
-        let (_, selected, _, _) = audio_device_load_configuration(&cache, &projection)
-            .expect("later observed settings remain available");
-
-        assert!(selected.is_empty());
-        assert!(matches!(
-            *projection.borrow(),
-            AudioDeviceProjectionState::Canonical { .. }
-        ));
+        state.begin_rate_reading(Some("mic-b"));
+        assert!(!state.accepts_rate_reset("mic-a"));
     }
 
     #[test]

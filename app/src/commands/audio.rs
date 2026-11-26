@@ -14,17 +14,6 @@ pub fn list_audio_devices() -> Result<Vec<AudioInputDevice>, String> {
     Ok(list_input_devices())
 }
 
-/// Select an audio input device by stable CoreAudio UID. When the UID is not
-/// connected, the pin is kept and capture falls back through the priority
-/// policy.
-pub fn select_audio_device(state: Arc<AppState>, device_uid: String) -> Result<(), String> {
-    state
-        .audio_cmd_sender
-        .send(AudioCommand::SelectDevice(device_uid))
-        .map_err(|e| format!("Failed to send device selection: {e}"))?;
-    Ok(())
-}
-
 /// Store the current device list so the first real CoreAudio change toasts
 /// instead of being treated as boot.
 pub fn prime_input_route_snapshot(db: &Database) {
@@ -67,19 +56,33 @@ fn resolved_capture_uid(
     settings: Option<&AppSettings>,
     priority: &InputPriority,
 ) -> Option<String> {
-    let pin = settings.and_then(|s| s.audio_device.as_deref());
     let clamshell_pref = settings.and_then(|s| s.clamshell_audio_device.as_deref());
-    let clamshell_active =
-        pin.is_none() && clamshell_pref.is_some() && crate::power::is_clamshell();
+    let lid_closed = clamshell_pref.is_some() && crate::power::is_clamshell();
+    resolve_capture_device(devices, clamshell_pref, lid_closed, priority)
+}
+
+/// The microphone a capture started now would open: the clamshell choice
+/// while the lid is closed, then the preference order, then the macOS
+/// default input. `None` when nothing is connected.
+pub fn resolve_capture_device(
+    devices: &[AudioInputDevice],
+    clamshell_pref: Option<&str>,
+    lid_closed: bool,
+    priority: &InputPriority,
+) -> Option<String> {
     resolve_input(
         devices,
         ResolveInputParams {
-            pin,
             clamshell_pref,
-            clamshell_active,
+            clamshell_active: lid_closed && clamshell_pref.is_some(),
             priority,
         },
     )
+}
+
+/// Whether the lid is closed with an external display attached.
+pub fn is_clamshell() -> bool {
+    crate::power::is_clamshell()
 }
 
 /// Current `kAudioDevicePropertyNominalSampleRate` for an input device.
