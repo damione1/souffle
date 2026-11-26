@@ -1,5 +1,5 @@
 import { ControlSize, KitSelect, KitStrings, Ownership, OptionRow, SelectionRef } from "@kit";
-import { AppLocale, AppTheme, PasteMethod, AudioRetention, SummaryProvider, LogLevel, SettingsTab } from "../../types.slint";
+import { AppLocale, AppTheme, PasteMethod, AudioRetention, SummaryProvider, SettingsTab } from "../../types.slint";
 import { Theme } from "../../theme.slint";
 
 export struct SettingsOptionList { rows: [OptionRow], selected: SelectionRef }
@@ -78,17 +78,6 @@ export global SettingsOptions {
         if value == SummaryProvider.apple-intelligence { return @tr("IntelligenceSection" => "Apple Intelligence"); }
         if value == SummaryProvider.ollama { return @tr("IntelligenceSection" => "Ollama"); }
         if value == SummaryProvider.auto { return @tr("IntelligenceSection" => "Automatique"); }
-        return "";
-    }
-
-    pure callback log-level-options(LogLevel) -> SettingsOptionList;
-    pure callback log-level-value(OptionRow, LogLevel) -> LogLevel;
-    public pure function log-level-label(value: LogLevel) -> string {
-        if value == LogLevel.error { return @tr("DiagnosticsSection" => "Erreur"); }
-        if value == LogLevel.warn { return @tr("DiagnosticsSection" => "Avertissement"); }
-        if value == LogLevel.info { return @tr("DiagnosticsSection" => "Information"); }
-        if value == LogLevel.debug { return @tr("DiagnosticsSection" => "Débogage"); }
-        if value == LogLevel.trace { return @tr("DiagnosticsSection" => "Trace"); }
         return "";
     }
 

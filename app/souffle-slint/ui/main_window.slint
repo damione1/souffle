@@ -38,8 +38,8 @@ import { TimelineDayGroup, UpcomingEvent } from "components/timeline_section.sli
 import { TranscriptBlock, TranscriptLayout } from "components/transcript_section.slint";
 import { TranscriptWord } from "components/transcript_words.slint";
 import { StructuredActionItem } from "components/summary_section.slint";
-import { RecordingMode, LiveSystemAudio, MicStall, MeetingIdleBanner, WakeResumeNotice,SpeakerRole, TimelineFilter, TimelineKind, NotesSaveState, ModelPhase, TranscriptionPhase, UpcomingPhase, SettingsTab, SettingsInteraction, AppTheme, AppLocale, PasteMethod, LogLevel, AudioRetention, AccessState, PermissionKind, ShortcutField, ShortcutNotice, SettingsCaptureError, SummaryProvider, AppleIntelligenceUnavailableReason, OnboardingStep, UpdatePhase, InstallBlockReason, UpdateRowStatus, MeetingExportFormat, DictionaryLearningMode } from "types.slint";
-export { SettingsTab, SettingsInteraction, AppTheme, AppLocale, PasteMethod, LogLevel, AudioRetention, AccessState, PermissionKind, ShortcutField, SummaryProvider, AppleIntelligenceUnavailableReason, SpeakerRole }
+import { RecordingMode, LiveSystemAudio, MicStall, MeetingIdleBanner, WakeResumeNotice,SpeakerRole, TimelineFilter, TimelineKind, NotesSaveState, ModelPhase, TranscriptionPhase, UpcomingPhase, SettingsTab, SettingsInteraction, AppTheme, AppLocale, PasteMethod, AudioRetention, AccessState, PermissionKind, ShortcutField, ShortcutNotice, SettingsCaptureError, SummaryProvider, AppleIntelligenceUnavailableReason, OnboardingStep, UpdatePhase, InstallBlockReason, UpdateRowStatus, MeetingExportFormat, DictionaryLearningMode } from "types.slint";
+export { SettingsTab, SettingsInteraction, AppTheme, AppLocale, PasteMethod, AudioRetention, AccessState, PermissionKind, ShortcutField, SummaryProvider, AppleIntelligenceUnavailableReason, SpeakerRole }
 import { Theme } from "theme.slint";
 import { ModelDeletionError } from "types.slint";
 import { TranscriptionLabels } from "components/transcription_labels.slint";
@@ -215,8 +215,7 @@ export component MainWindow inherits Window {
     // The gear opens Transcription; the homepage calendar CTA opens Meetings.
     in-out property <SettingsTab> settings-tab: SettingsTab.transcription;
     in property <bool> settings-autostart-enabled;
-    in property <bool> settings-debug-transcription;
-    in property <LogLevel> settings-log-level;
+    in property <bool> settings-detailed-logging;
     in property <bool> settings-copying-diagnostics;
     in property <AppTheme> settings-theme;
     in property <AppLocale> settings-locale;
@@ -415,8 +414,7 @@ export component MainWindow inherits Window {
     callback theme-toggle-requested();
     callback settings-autostart-changed(bool);
     callback settings-permissions-review-requested();
-    callback settings-debug-transcription-changed(bool);
-    callback settings-log-level-changed(LogLevel);
+    callback settings-detailed-logging-changed(bool);
     callback settings-copy-diagnostics-requested();
     callback settings-theme-changed(AppTheme);
     callback settings-locale-changed(AppLocale);
@@ -860,8 +858,7 @@ export component MainWindow inherits Window {
                 height: 100%;
                 tab <=> root.settings-tab;
                 autostart-enabled: root.settings-autostart-enabled;
-                debug-transcription: root.settings-debug-transcription;
-                log-level: root.settings-log-level;
+                detailed-logging: root.settings-detailed-logging;
                 copying-diagnostics: root.settings-copying-diagnostics;
                 app-theme: root.settings-theme;
                 capture-busy: root.settings-backend-capture-busy || root.recording-mode != RecordingMode.idle || root.recording-starting;
@@ -1035,8 +1032,7 @@ export component MainWindow inherits Window {
                 }
                 autostart-changed(value) => { root.settings-autostart-changed(value); }
                 permissions-review-requested => { root.settings-permissions-review-requested(); }
-                debug-transcription-changed(value) => { root.settings-debug-transcription-changed(value); }
-                log-level-changed(value) => { root.settings-instrument-input(SettingsInteraction.menu); root.settings-log-level-changed(value); }
+                detailed-logging-changed(value) => { root.settings-detailed-logging-changed(value); }
                 copy-diagnostics-requested => { root.settings-copy-diagnostics-requested(); }
                 theme-changed(value) => { root.settings-instrument-input(SettingsInteraction.theme); root.settings-theme-changed(value); }
                 locale-changed(value) => { root.settings-locale-changed(value); }

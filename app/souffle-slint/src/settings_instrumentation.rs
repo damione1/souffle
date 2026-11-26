@@ -18,7 +18,6 @@ pub(crate) enum SettingsScenario {
     Open,
     Tab,
     Theme,
-    Menu,
     Number,
 }
 
@@ -28,7 +27,6 @@ impl SettingsScenario {
             Self::Open => "open",
             Self::Tab => "tab",
             Self::Theme => "theme",
-            Self::Menu => "menu",
             Self::Number => "number",
         }
     }
@@ -40,7 +38,6 @@ impl From<SettingsInteraction> for SettingsScenario {
             SettingsInteraction::Open => Self::Open,
             SettingsInteraction::Tab => Self::Tab,
             SettingsInteraction::Theme => Self::Theme,
-            SettingsInteraction::Menu => Self::Menu,
             SettingsInteraction::Number => Self::Number,
         }
     }

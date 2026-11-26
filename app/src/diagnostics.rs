@@ -16,8 +16,7 @@ pub struct DiagnosticsBundle {
     pub db_path: String,
     pub models_dir: String,
     pub machine_state: String,
-    pub log_level: String,
-    pub debug_transcription: bool,
+    pub detailed_logging: bool,
 }
 
 /// Resolve the most recently modified rolling log file under the logs directory.
@@ -102,8 +101,7 @@ pub fn collect_bundle(
             .to_string(),
         models_dir: data_dir.join("models").display().to_string(),
         machine_state,
-        log_level: settings.log_level.as_str().to_string(),
-        debug_transcription: settings.debug_transcription,
+        detailed_logging: settings.detailed_logging,
     }
 }
 
@@ -121,7 +119,7 @@ pub fn redact_home(text: &str) -> String {
 /// Drop every log line emitted on the transcript target.
 ///
 /// The tail is what the README asks people to paste into a public issue, and
-/// with "Detailed transcription logs" on those lines hold what the user said.
+/// with detailed logging on those lines hold what the user said.
 /// Returns the surviving text and how many lines were removed, so the caller
 /// can say so rather than silently shortening the log. The user's own file on
 /// disk is untouched.
@@ -149,11 +147,7 @@ pub fn format_bundle_text(bundle: &DiagnosticsBundle, log_tail: &str) -> String 
     out.push_str("===================\n");
     out.push_str(&format!("App version: {}\n", bundle.app_version));
     out.push_str(&format!("Machine state: {}\n", bundle.machine_state));
-    out.push_str(&format!("Log level: {}\n", bundle.log_level));
-    out.push_str(&format!(
-        "Detailed transcription logs: {}\n",
-        bundle.debug_transcription
-    ));
+    out.push_str(&format!("Detailed logging: {}\n", bundle.detailed_logging));
     out.push_str(&format!("Data dir: {}\n", bundle.data_dir));
     out.push_str(&format!("Database: {}\n", bundle.db_path));
     out.push_str(&format!("Models dir: {}\n", bundle.models_dir));

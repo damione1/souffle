@@ -60,7 +60,7 @@ pub fn acquire_single_instance() -> bool {
 pub fn bootstrap() -> Arc<AppState> {
     // Must run before logging or the database open the data dir.
     constants::migrate_legacy_data_dir();
-    logging::init(logging::LogLevel::Info);
+    logging::init();
     install_panic_hook();
     crate::native::notifications::request_authorization();
 
@@ -101,7 +101,6 @@ pub fn bootstrap() -> Arc<AppState> {
             std::process::exit(1);
         }
     };
-    debug::init_from_db(&database);
     match database.recover_unfinished_meetings() {
         Ok(0) => {}
         Ok(n) => info!(
@@ -137,9 +136,9 @@ pub fn bootstrap() -> Arc<AppState> {
             // Before the pill panel and tray exist, so their first sync
             // already has the right language.
             settings::remember_ui_locale(&app_settings.locale);
-            debug::set_transcription_debug(app_settings.debug_transcription);
-            if let Err(e) = logging::set_level(app_settings.log_level) {
-                warn!("Failed to apply log level: {e}");
+            debug::set_transcription_debug(app_settings.detailed_logging);
+            if let Err(e) = logging::set_detailed(app_settings.detailed_logging) {
+                warn!("Failed to apply detailed logging: {e}");
             }
             crate::pill::restore_from_db(
                 &state.db,

@@ -146,11 +146,6 @@ pub(crate) fn new_window() -> Result<MainWindow, slint::PlatformError> {
         invoke_provider_label,
         on_provider_value
     );
-    bind_options!(
-        on_log_level_options,
-        invoke_log_level_label,
-        on_log_level_value
-    );
     bind_options!(on_tab_options, invoke_tab_label, on_tab_value);
     Ok(window)
 }

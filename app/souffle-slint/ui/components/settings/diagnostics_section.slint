@@ -1,16 +1,12 @@
 import { FieldSetAppearance, FieldRowAppearance, ButtonIntent, ChoiceLabelPosition, ControlSize, ControlWidth, KitButton, KitSwitch, Ownership, KitFieldSet, KitFieldSeparator, KitThemeContext, KitThemes, KitFieldRow } from "@kit";
 import { LucideText } from "@kit-icons/text.slint";
-import { SettingsOptions, ClosedSettingsPicker } from "settings_options.slint";
 import { Theme } from "../../theme.slint";
-import { LogLevel } from "../../types.slint";
 
 export component DiagnosticsSection inherits VerticalLayout {
-    in-out property <bool> debug-transcription;
-    in property <LogLevel> log-level;
+    in property <bool> detailed-logging;
     in property <bool> copying-diagnostics: false;
 
-    callback debug-transcription-changed(bool);
-    callback log-level-changed(LogLevel);
+    callback detailed-logging-changed(bool);
     callback copy-diagnostics-requested();
 
 
@@ -29,36 +25,13 @@ export component DiagnosticsSection inherits VerticalLayout {
             orientation: Theme.settings-field-orientation(self.width);
             appearance: FieldRowAppearance.inset;
             show-divider: true;
-            focus-requested => { level-picker.take-focus(); }
-            private property <bool> control-focused: level-picker.has-focus;
-            changed control-focused => {
-                if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
-            }
-            label: @tr("Niveau de journal");
-            description: @tr("Quantité de détails que Soufflé écrit dans le fichier journal.");
-
-            level-picker := ClosedSettingsPicker {
-                theme: KitThemeContext.current;
-                modal-layer: 0;
-                label: @tr("Niveau de journal");
-                choices: SettingsOptions.log-level-options(root.log-level);
-                chosen(row) => { root.log-level-changed(SettingsOptions.log-level-value(row, root.log-level)); }
-            }
-        }
-
-        KitFieldRow {
-            theme: KitThemeContext.current;
-            modal-layer: 0;
-            orientation: Theme.settings-field-orientation(self.width);
-            appearance: FieldRowAppearance.inset;
-            show-divider: true;
             focus-requested => { logging-switch.take-focus(); }
             private property <bool> control-focused: logging-switch.has-focus;
             changed control-focused => {
                 if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
             }
-            label: @tr("Journaux détaillés de transcription");
-            description: @tr("Enregistre des détails supplémentaires sur la reconnaissance vocale pour le dépannage.");
+            label: @tr("Journalisation détaillée");
+            description: @tr("Écrit plus de détails dans le fichier journal pour le dépannage, dont le texte reconnu. Pendant une dictée ou une réunion, garde aussi les 3 premières secondes de micro dans un fichier supprimé dès la fin de la session.");
 
             logging-switch := KitSwitch {
                 theme: KitThemeContext.current;
@@ -67,9 +40,9 @@ export component DiagnosticsSection inherits VerticalLayout {
                 padding-inline: 0px;
                 ownership: Ownership.controlled;
                 control-width: ControlWidth.intrinsic;
-                accessible-label: @tr("Journaux détaillés de transcription");
-                checked: root.debug-transcription;
-                toggled(new) => { root.debug-transcription-changed(new); }
+                accessible-label: @tr("Journalisation détaillée");
+                checked: root.detailed-logging;
+                toggled(new) => { root.detailed-logging-changed(new); }
             }
         }
 

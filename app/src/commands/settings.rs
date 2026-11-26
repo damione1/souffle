@@ -221,8 +221,8 @@ fn apply_settings_effects(
     #[cfg(not(target_os = "macos"))]
     let _ = lane;
 
-    crate::debug::set_transcription_debug(settings.debug_transcription);
-    crate::logging::set_level(settings.log_level)
+    crate::debug::set_transcription_debug(settings.detailed_logging);
+    crate::logging::set_detailed(settings.detailed_logging)
         .map_err(|message| SettingsEffectFailure::Logging { message })?;
     state
         .engine_actor

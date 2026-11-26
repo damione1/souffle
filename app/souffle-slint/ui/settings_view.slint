@@ -26,7 +26,7 @@ import { KitButton, KitAppShell, KitStack, KitInline, KitFocusBackground, KitAle
 import { LucideArrows } from "@kit-icons/arrows.slint";
 import { SettingsOptions } from "components/settings/settings_options.slint";
 import { SettingsTabBar, SettingsTabPage } from "components/settings/settings_tabs.slint";
-import { TranscriptionPhase, AppTheme, AppLocale, PasteMethod, LogLevel, AudioRetention, AccessState, ShortcutField, ShortcutNotice, SettingsCaptureError, SummaryProvider, AppleIntelligenceUnavailableReason, SettingsTab, InstallBlockReason, UpdateRowStatus, DictionaryLearningMode } from "types.slint";
+import { TranscriptionPhase, AppTheme, AppLocale, PasteMethod, AudioRetention, AccessState, ShortcutField, ShortcutNotice, SettingsCaptureError, SummaryProvider, AppleIntelligenceUnavailableReason, SettingsTab, InstallBlockReason, UpdateRowStatus, DictionaryLearningMode } from "types.slint";
 import { ModelDeletionError, TranscriptionUnavailableReason, SystemSettingsPane } from "types.slint";
 
 // The six tab pages share one overlay and mount their sections on first visit.
@@ -34,8 +34,7 @@ export component SettingsView inherits KitAppShell {
     private property <length> column-width: min(root.width - 2 * KitLayoutMetrics.space(KitThemeContext.current, LayoutSpace.roomy), Theme.settings-content-width);
     in-out property <SettingsTab> tab: SettingsTab.transcription;
     in property <bool> autostart-enabled;
-    in property <bool> debug-transcription;
-    in property <LogLevel> log-level;
+    in property <bool> detailed-logging;
     // Virtualized live-log slice + spacers, owned by main.rs (SOU-224).
     in property <bool> copying-diagnostics: false;
     in property <bool> capture-busy;
@@ -212,8 +211,7 @@ export component SettingsView inherits KitAppShell {
     callback autostart-changed(bool);
     callback tab-changed();
     callback permissions-review-requested();
-    callback debug-transcription-changed(bool);
-    callback log-level-changed(LogLevel);
+    callback detailed-logging-changed(bool);
     callback copy-diagnostics-requested();
     callback theme-changed(AppTheme);
     callback locale-changed(AppLocale);
@@ -669,11 +667,9 @@ export component SettingsView inherits KitAppShell {
                                 }
 
                                 if system-page.mounted: DiagnosticsSection {
-                                    debug-transcription: root.debug-transcription;
-                                    log-level: root.log-level;
+                                    detailed-logging: root.detailed-logging;
                                     copying-diagnostics: root.copying-diagnostics;
-                                    debug-transcription-changed(value) => { root.debug-transcription-changed(value); }
-                                    log-level-changed(value) => { root.log-level-changed(value); }
+                                    detailed-logging-changed(value) => { root.detailed-logging-changed(value); }
                                     copy-diagnostics-requested => { root.copy-diagnostics-requested(); }
                                 }
 

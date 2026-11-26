@@ -7,8 +7,7 @@
 
 use crate::{
     AccessState, AppLocale, AppTheme, AudioRetention as SlintAudioRetention, CalendarRow,
-    LogLevel as SlintLogLevel, MainWindow, PasteMethod as SlintPasteMethod,
-    PermissionKind as SlintPermissionKind,
+    MainWindow, PasteMethod as SlintPasteMethod, PermissionKind as SlintPermissionKind,
 };
 use souffle_lib::calendar::CalendarInfo;
 
@@ -42,7 +41,6 @@ pub(crate) fn capture_error_to_slint(
         }
     }
 }
-use souffle_lib::logging::LogLevel;
 use souffle_lib::permissions::{PermState, PermissionKind};
 use souffle_lib::settings::{
     AppSettings, DictionaryLearningMode, MeetingAudioRetention, PasteMethod, SettingsOptions,
@@ -55,8 +53,7 @@ use souffle_lib::settings::{
 /// "Interface" tabs' fields are populated so far.
 pub fn populate(window: &MainWindow, settings: &AppSettings) {
     window.set_settings_autostart_enabled(settings.autostart_enabled);
-    window.set_settings_debug_transcription(settings.debug_transcription);
-    window.set_settings_log_level(log_level_to_slint(settings.log_level));
+    window.set_settings_detailed_logging(settings.detailed_logging);
 
     window.set_settings_theme(theme_to_slint(settings.theme));
     window.set_settings_locale(locale_to_slint(&settings.locale));
@@ -221,26 +218,6 @@ pub fn populate_shortcuts(
     let warning_visible = tap_installed == Some(false)
         && (native_bound(&shortcuts.toggle) || native_bound(&shortcuts.push_to_talk));
     window.set_settings_native_tap_warning_visible(warning_visible);
-}
-
-pub fn log_level_to_slint(value: LogLevel) -> SlintLogLevel {
-    match value {
-        LogLevel::Error => SlintLogLevel::Error,
-        LogLevel::Warn => SlintLogLevel::Warn,
-        LogLevel::Info => SlintLogLevel::Info,
-        LogLevel::Debug => SlintLogLevel::Debug,
-        LogLevel::Trace => SlintLogLevel::Trace,
-    }
-}
-
-pub fn log_level_from_slint(value: SlintLogLevel) -> LogLevel {
-    match value {
-        SlintLogLevel::Error => LogLevel::Error,
-        SlintLogLevel::Warn => LogLevel::Warn,
-        SlintLogLevel::Info => LogLevel::Info,
-        SlintLogLevel::Debug => LogLevel::Debug,
-        SlintLogLevel::Trace => LogLevel::Trace,
-    }
 }
 
 pub fn theme_to_slint(theme: Theme) -> AppTheme {

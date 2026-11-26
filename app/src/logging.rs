@@ -1,6 +1,6 @@
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, Ordering};
 
-use serde::{Deserialize, Serialize};
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
@@ -10,42 +10,22 @@ static LOG_GUARD: OnceLock<WorkerGuard> = OnceLock::new();
 static FILTER_HANDLE: OnceLock<reload::Handle<EnvFilter, tracing_subscriber::Registry>> =
     OnceLock::new();
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
-#[serde(rename_all = "lowercase")]
-pub enum LogLevel {
-    Error,
-    Warn,
-    #[default]
-    Info,
-    Debug,
-    Trace,
+/// Set when `SOUFFLE_LOG` supplied the filter at startup. That filter then
+/// stays in place: the detailed logging setting no longer replaces it.
+static ENV_FILTER_ACTIVE: AtomicBool = AtomicBool::new(false);
+
+/// Global filter for the `souffle` crate; third-party crates stay at `warn`.
+fn filter_directive(detailed: bool) -> &'static str {
+    if detailed {
+        "souffle=debug,warn"
+    } else {
+        "souffle=info,warn"
+    }
 }
 
-impl LogLevel {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Error => "error",
-            Self::Warn => "warn",
-            Self::Info => "info",
-            Self::Debug => "debug",
-            Self::Trace => "trace",
-        }
-    }
-
-    /// Global filter for the `souffle` crate; third-party crates stay at `warn`.
-    pub fn filter_directive(self) -> String {
-        format!("souffle={},warn", self.as_str())
-    }
-
-    pub fn from_str_lossy(value: &str) -> Self {
-        match value.trim().to_lowercase().as_str() {
-            "error" => Self::Error,
-            "warn" | "warning" => Self::Warn,
-            "debug" => Self::Debug,
-            "trace" => Self::Trace,
-            _ => Self::Info,
-        }
-    }
+/// The filter `SOUFFLE_LOG` asks for, or `None` when it is unset or invalid.
+fn env_filter(value: Option<&str>) -> Option<EnvFilter> {
+    value.and_then(|directives| EnvFilter::try_new(directives).ok())
 }
 
 /// Tracing target for events that carry transcribed speech. It is a child of
@@ -71,11 +51,12 @@ fn stderr_logging_wanted(stderr_is_terminal: bool, souffle_log_set: bool) -> boo
 }
 
 /// Initialize logging to a rolling file under the app data dir (and stderr for
-/// terminal or `SOUFFLE_LOG` runs). `default_level` is applied unless
-/// `SOUFFLE_LOG` overrides it.
-pub fn init(default_level: LogLevel) {
-    let filter = EnvFilter::try_from_env("SOUFFLE_LOG")
-        .unwrap_or_else(|_| EnvFilter::new(default_level.filter_directive()));
+/// terminal or `SOUFFLE_LOG` runs). The level is Info unless `SOUFFLE_LOG`
+/// overrides it.
+pub fn init() {
+    let from_env = env_filter(std::env::var("SOUFFLE_LOG").ok().as_deref());
+    ENV_FILTER_ACTIVE.store(from_env.is_some(), Ordering::Relaxed);
+    let filter = from_env.unwrap_or_else(|| EnvFilter::new(filter_directive(false)));
 
     let (filter_layer, handle) = reload::Layer::new(filter);
     let _ = FILTER_HANDLE.set(handle);
@@ -109,13 +90,18 @@ pub fn init(default_level: LogLevel) {
         .try_init();
 }
 
-pub fn set_level(level: LogLevel) -> Result<(), String> {
+/// Apply the detailed logging setting: Debug for the `souffle` crate when on,
+/// Info otherwise. A no-op while a `SOUFFLE_LOG` filter is in place.
+pub fn set_detailed(detailed: bool) -> Result<(), String> {
+    if ENV_FILTER_ACTIVE.load(Ordering::Relaxed) {
+        return Ok(());
+    }
     let handle = FILTER_HANDLE
         .get()
         .ok_or_else(|| "Logging not initialized".to_string())?;
     handle
         .modify(|filter| {
-            *filter = EnvFilter::new(level.filter_directive());
+            *filter = EnvFilter::new(filter_directive(detailed));
         })
         .map_err(|e| format!("Update log level: {e}"))
 }
@@ -126,8 +112,8 @@ mod tests {
 
     #[test]
     fn filter_directive_scopes_souffle_only() {
-        assert_eq!(LogLevel::Info.filter_directive(), "souffle=info,warn");
-        assert_eq!(LogLevel::Debug.filter_directive(), "souffle=debug,warn");
+        assert_eq!(filter_directive(false), "souffle=info,warn");
+        assert_eq!(filter_directive(true), "souffle=debug,warn");
     }
 
     #[test]
@@ -139,8 +125,9 @@ mod tests {
     }
 
     #[test]
-    fn from_str_lossy_defaults_unknown() {
-        assert_eq!(LogLevel::from_str_lossy("info"), LogLevel::Info);
-        assert_eq!(LogLevel::from_str_lossy("bogus"), LogLevel::Info);
+    fn souffle_log_counts_only_when_it_parses() {
+        assert!(env_filter(None).is_none());
+        assert!(env_filter(Some("souffle=trace,warn")).is_some());
+        assert!(env_filter(Some("souffle=not-a-level")).is_none());
     }
 }

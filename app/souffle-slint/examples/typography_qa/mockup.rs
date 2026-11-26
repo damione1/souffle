@@ -1027,7 +1027,6 @@ fn settings(window: &MainWindow) {
 
     // System
     window.set_settings_autostart_enabled(true);
-    window.set_settings_log_level(LogLevel::Info);
     window.set_settings_meeting_audio_retention(AudioRetention::Keep30d);
     window.set_settings_mcp_exists(true);
     window

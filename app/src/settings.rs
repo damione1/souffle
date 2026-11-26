@@ -9,7 +9,6 @@ use crate::engine::{
     CANDLE_BACKEND_ID, KYUTAI_ENGINE_ID, KYUTAI_MODEL_ID, TranscriptionProfileSelection,
     resolve_transcription_profile,
 };
-use crate::logging::LogLevel;
 use crate::summary::SummaryProviderChoice;
 
 const THEME_KEY: &str = "theme";
@@ -20,8 +19,7 @@ const PASTE_DELAY_MS_KEY: &str = "paste_delay_ms";
 const OLLAMA_URL_KEY: &str = "ollama_url";
 const OLLAMA_MODEL_KEY: &str = "ollama_model";
 const SUMMARY_PROVIDER_KEY: &str = "summary_provider";
-/// Read from `debug` as well, which is why this one is `pub`.
-pub const DEBUG_TRANSCRIPTION_KEY: &str = "debug_transcription";
+const DETAILED_LOGGING_KEY: &str = "detailed_logging";
 // Read once by `migrate_pinned_device`, then deleted.
 const PINNED_DEVICE_MIGRATION_KEY: &str = "audio_device";
 const CLAMSHELL_AUDIO_DEVICE_KEY: &str = "clamshell_audio_device";
@@ -59,7 +57,6 @@ const DICTATION_POLISH_TEMPLATES_KEY: &str = "dictation_polish_templates";
 const DICTATION_APP_BRANCHES_KEY: &str = "dictation_app_branches";
 const DEFAULT_SUMMARY_TEMPLATE_ID_KEY: &str = "default_summary_template_id";
 const SUMMARY_TEMPLATES_KEY: &str = "summary_templates";
-const LOG_LEVEL_KEY: &str = "log_level";
 const PASTE_METHOD_KEY: &str = "paste_method";
 const LAST_SEEN_VERSION_KEY: &str = "last_seen_version";
 
@@ -232,9 +229,9 @@ pub struct AppSettings {
     pub compact_transcript_enabled: bool,
     #[serde(default = "default_compression_rate")]
     pub summary_compression_rate: f32,
-    pub debug_transcription: bool,
-    /// Global tracing verbosity for the `souffle` crate.
-    pub log_level: LogLevel,
+    /// Debug level logging, transcript lines in the log, and the short
+    /// engine input capture that lives for the length of a session.
+    pub detailed_logging: bool,
     /// Preferred microphone UID while the lid is closed with an external display
     /// attached (clamshell mode). `None` means just follow whatever macOS
     /// reports as the default input, the previous behavior.
@@ -383,8 +380,7 @@ impl Default for AppSettings {
             summary_compression_enabled: false,
             compact_transcript_enabled: false,
             summary_compression_rate: default_compression_rate(),
-            debug_transcription: false,
-            log_level: LogLevel::default(),
+            detailed_logging: false,
             clamshell_audio_device: None,
             input_priority: InputPriority::default(),
             transcription_engine_id: KYUTAI_ENGINE_ID.to_string(),
@@ -486,11 +482,8 @@ impl AppSettings {
                 .unwrap_or_else(default_compression_rate);
         settings.summary_provider =
             SummaryProviderChoice::from_stored(stored_provider, &settings.ollama_model);
-        if let Some(debug_transcription) = read_json_setting::<bool>(db, DEBUG_TRANSCRIPTION_KEY)? {
-            settings.debug_transcription = debug_transcription;
-        }
-        if let Some(log_level) = read_json_setting::<LogLevel>(db, LOG_LEVEL_KEY)? {
-            settings.log_level = log_level;
+        if let Some(detailed_logging) = read_json_setting::<bool>(db, DETAILED_LOGGING_KEY)? {
+            settings.detailed_logging = detailed_logging;
         }
         if let Some(clamshell_audio_device) =
             read_json_setting::<String>(db, CLAMSHELL_AUDIO_DEVICE_KEY)?
@@ -991,10 +984,9 @@ impl AppSettings {
             )?;
             write_json_setting_in_transaction(
                 transaction,
-                DEBUG_TRANSCRIPTION_KEY,
-                &normalized.debug_transcription,
+                DETAILED_LOGGING_KEY,
+                &normalized.detailed_logging,
             )?;
-            write_json_setting_in_transaction(transaction, LOG_LEVEL_KEY, &normalized.log_level)?;
             write_json_setting_in_transaction(
                 transaction,
                 FILLER_REMOVAL_KEY,
@@ -1390,7 +1382,6 @@ mod tests {
     };
     use crate::audio::InputPriority;
     use crate::constants::OLLAMA_DEFAULT_URL;
-    use crate::logging::LogLevel;
     use crate::test_helpers::fixtures::test_db;
 
     /// AC2: every step the settings UI is told to offer must survive
@@ -1438,8 +1429,7 @@ mod tests {
             summary_compression_enabled: false,
             compact_transcript_enabled: false,
             summary_compression_rate: super::default_compression_rate(),
-            debug_transcription: true,
-            log_level: LogLevel::Debug,
+            detailed_logging: true,
             clamshell_audio_device: Some("USB Mic".into()),
             input_priority: InputPriority::default(),
             transcription_engine_id: "kyutai".into(),
@@ -2005,6 +1995,8 @@ mod tests {
             ("meeting_autostop_minutes", "30"),
             ("meeting_max_duration_minutes", "480"),
             ("meeting_audio_diagnostic", "true"),
+            ("log_level", "\"debug\""),
+            ("debug_transcription", "true"),
         ];
         for (key, value) in retired {
             db.set_setting(key, value).expect("seed the retired key");

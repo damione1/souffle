@@ -96,7 +96,7 @@ export enum UpcomingPhase { past, now, next, later }
 // Never pass these as strings through a property or callback.
 @rust-attr(derive(strum::VariantArray))
 export enum SettingsTab { transcription, ai, audio, interface, meetings, system }
-export enum SettingsInteraction { open, tab, theme, menu, number }
+export enum SettingsInteraction { open, tab, theme, number }
 
 @rust-attr(derive(strum::VariantArray))
 export enum AppTheme { dark, light, system }
@@ -108,9 +108,6 @@ export enum AppLocale { en, fr }
 @rust-attr(derive(strum::VariantArray))
 export enum PasteMethod { clipboard, typing, ax }
 export enum DictionaryLearningMode { disabled, suggestions, automatic }
-
-@rust-attr(derive(strum::VariantArray))
-export enum LogLevel { error, warn, info, debug, trace }
 
 @rust-attr(derive(strum::VariantArray))
 export enum AudioRetention { off, keep-7d, keep-30d, keep-forever }

@@ -5325,30 +5325,15 @@ fn wire_callbacks(
     });
 
     let weak = window.as_weak();
-    let settings_io_for_debug = settings_io.clone();
-    window.on_settings_debug_transcription_changed(move |enabled| {
+    let settings_io_for_logging = settings_io.clone();
+    window.on_settings_detailed_logging_changed(move |enabled| {
         save_settings_field(
-            &settings_io_for_debug,
+            &settings_io_for_logging,
             souffle_lib::commands::SettingsSaveLane::General,
-            move |settings| settings.debug_transcription = enabled,
+            move |settings| settings.detailed_logging = enabled,
         );
         if let Some(window) = weak.upgrade() {
-            window.set_settings_debug_transcription(enabled);
-        }
-    });
-
-    let weak = window.as_weak();
-    let settings_io_for_log_level = settings_io.clone();
-    window.on_settings_log_level_changed(move |value| {
-        settings_instrumentation::handler(settings_instrumentation::SettingsScenario::Menu);
-        let level = settings_ui::log_level_from_slint(value);
-        save_settings_field(
-            &settings_io_for_log_level,
-            souffle_lib::commands::SettingsSaveLane::General,
-            move |settings| settings.log_level = level,
-        );
-        if let Some(window) = weak.upgrade() {
-            window.set_settings_log_level(settings_ui::log_level_to_slint(level));
+            window.set_settings_detailed_logging(enabled);
         }
     });
 
