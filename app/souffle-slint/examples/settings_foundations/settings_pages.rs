@@ -611,6 +611,42 @@ async fn audio(w: &MainWindow, path: &Path) {
     println!("end of list {mounted:?}");
     assert!(mounted.contains(&Some(999)));
     frame(w, path, "last");
+    advanced_block_keyboard(w, &page);
+}
+
+/// Runs last: once the block is closed, Space lands on whatever Tab reached.
+fn advanced_block_keyboard(w: &MainWindow, page: &ElementHandle) {
+    let advanced = reveal(w, page, "KitCollapse::trigger");
+    assert_eq!(advanced.accessible_expanded(), Some(true));
+    let trigger = reveal(w, page, "AudioSection::clamshell-picker")
+        .query_descendants()
+        .match_inherits("KitSelectTrigger")
+        .find_first()
+        .unwrap();
+    click(w, &trigger);
+    send_key(w, Key::Escape.into());
+    send_key(w, " ".into());
+    assert_eq!(
+        trigger.accessible_expanded(),
+        Some(true),
+        "Space opens the focused picker"
+    );
+    send_key(w, Key::Escape.into());
+    send_key(w, Key::Backtab.into());
+    send_key(w, " ".into());
+    assert_eq!(
+        advanced.accessible_expanded(),
+        Some(false),
+        "Shift+Tab reaches the block header"
+    );
+    send_key(w, Key::Tab.into());
+    send_key(w, " ".into());
+    assert_ne!(
+        trigger.accessible_expanded(),
+        Some(true),
+        "a closed block keeps its picker out of the focus order"
+    );
+    println!("advanced block: closed, its picker is out of the focus order");
 }
 
 fn press_at(w: &MainWindow, item: &ElementHandle) -> slint::LogicalPosition {
