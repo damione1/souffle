@@ -39,6 +39,7 @@ Reunion-Etats detail-no-provider 0 1040 1180
 Reunion-Etats detail-loading 0 1040 1180
 Reunion-Etats detail-error 0 1040 1180
 Reunion-Etats detail-empty 0 1040 1180
+Reunion-Etats detail-no-audio 0 1040 1180
 Reglages-Transcription settings-transcription 0 1040 1700
 Reglages-IA settings-ai 0 1040 1720
 Reglages-IA settings-ai 0 1040 2900 full

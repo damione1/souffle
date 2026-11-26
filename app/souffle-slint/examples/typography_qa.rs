@@ -4,9 +4,10 @@
 //! |onboarding-{permissions,microphone,model,shortcut}|detail|meeting|dictation
 //! |permissions|update|whats-new|specimen|hud-{dictation,meeting,polishing}[-compact]
 //! |empty|error|loading|detail-{empty,error,loading}
-//! |alerts|search-empty|detail-{transcript,no-summary,no-provider}|update-{downloading,failed}
+//! |alerts|search-empty|detail-{transcript,no-summary,no-provider,no-audio}|update-{downloading,failed}
 //! |live-editor[-error|-loading]|settings-suggestions[-empty|-error|-loading]
 //! SOU276_LANG=fr|en, SOU276_DARK=0|1, SOU276_WIDTH=680|1040, SOU276_HEIGHT=820.
+//! SOU276_MOCKUP=1 applies the design board data (typography_qa/mockup.rs).
 //! SOU276_SNAPSHOT=<png path> renders the settled window to a file and exits
 //! (see capture_mockup_surfaces.sh; use SLINT_SCALE_FACTOR=1 to match the mockups).
 use souffle_slint::*;

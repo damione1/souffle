@@ -2,7 +2,7 @@
 //! typography fixture when SOU276_MOCKUP=1. French only, no live services.
 use super::{audio_ui, ia_ui, microphone_list, model, strings};
 use slint::{ComponentHandle, SharedString};
-use souffle_lib::audio::{AudioInputDevice, InputPriority, TransportType};
+use souffle_lib::audio::{AudioInputDevice, InputPriority, KnownDevice, TransportType};
 use souffle_lib::settings::{AppSettings, SummaryTemplate};
 use souffle_lib::summary::{
     SummaryModelDescriptor, SummaryProviderChoice, SummaryProviderKind, SummaryProvidersStatus,
@@ -365,7 +365,7 @@ fn detail(window: &MainWindow, surface: &str) {
     let peaks = (0..110)
         .map(|i| 0.3 + 0.65 * ((i as f32) * 0.53).sin().abs())
         .collect::<Vec<f32>>();
-    window.set_meeting_detail_has_audio(true);
+    window.set_meeting_detail_has_audio(surface != "detail-no-audio");
     window.set_meeting_detail_audio_loading(false);
     window.set_meeting_detail_audio_waveform_commands(waveform(&peaks).into());
     window.set_meeting_detail_audio_waveform_bars(peaks.len() as i32);
@@ -421,10 +421,10 @@ fn detail(window: &MainWindow, surface: &str) {
     window.set_meeting_detail_summary("".into());
     window.set_meeting_detail_summary_key_points(strings(&[]));
     match surface {
-        "detail-no-summary" => {}
+        "detail-no-summary" | "detail-no-audio" => {}
         "detail-error" => {
             window.set_meeting_detail_summary_generation_error(
-                "La génération du résumé a échoué : le modèle Ollama n'a pas répondu.".into(),
+                "le modèle Ollama n'a pas répondu.".into(),
             );
             window.set_meeting_detail_export_error(
                 "Impossible d'exporter l'audio : fichier introuvable.".into(),
@@ -582,7 +582,16 @@ fn settings(window: &MainWindow) {
     audio_ui::populate_device_pickers(window, &devices, "builtin", None);
     window.set_settings_sample_rate_label("96 kHz".into());
     window.set_settings_sample_rate_high(true);
-    let list = microphone_list::build_microphone_list(&devices, &InputPriority::default());
+    let priority = InputPriority {
+        priorities: vec!["builtin".into(), "airpods".into(), "usb".into()],
+        known: vec![KnownDevice {
+            uid: "usb".into(),
+            name: "Shure MV7".into(),
+            last_seen: chrono::Utc::now().timestamp() - 3 * 86_400,
+        }],
+        ..Default::default()
+    };
+    let list = microphone_list::build_microphone_list(&devices, &priority);
     audio_ui::populate_microphones(window, &list);
     window.set_settings_is_laptop(true);
     window.set_settings_system_audio_supported(true);
