@@ -61,6 +61,9 @@ pub fn bootstrap() -> Arc<AppState> {
     // Must run before logging or the database open the data dir.
     constants::migrate_legacy_data_dir();
     logging::init();
+    // A crash or a timed out quit can leave the excerpt of the last session.
+    let engine_input_capture = debug::engine_input_capture_path();
+    debug::remove_engine_input_capture(&engine_input_capture);
     install_panic_hook();
     crate::native::notifications::request_authorization();
 
@@ -92,6 +95,7 @@ pub fn bootstrap() -> Arc<AppState> {
             std::process::exit(1);
         }
     };
+    engine_actor.delete_engine_input_capture_after_sessions(engine_input_capture);
 
     let db_path = constants::app_data_dir().join(crate::constants::DB_FILENAME);
     let database = match db::Database::open(&db_path) {

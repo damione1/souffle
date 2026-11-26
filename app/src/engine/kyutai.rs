@@ -85,6 +85,13 @@ fn take_full_debug_capture(
     slot.take()
 }
 
+/// Drop the samples buffered for a debug capture that was never written.
+pub(crate) fn discard_debug_capture() {
+    if let Ok(mut samples) = DEBUG_SAMPLES.lock() {
+        *samples = None;
+    }
+}
+
 /// Kyutai STT model configuration, deserialized from config.json
 #[derive(Debug, serde::Deserialize)]
 pub struct SttConfig {
@@ -1519,7 +1526,7 @@ impl TranscriptionEngine for KyutaiEngine {
                 take_full_debug_capture(&mut dbg, &DEBUG_WAV_WRITTEN, session_start, audio)
             {
                 drop(dbg);
-                let path = crate::constants::app_data_dir().join("debug_engine_input.wav");
+                let path = crate::debug::engine_input_capture_path();
                 if let Ok(mut w) = hound::WavWriter::create(
                     &path,
                     hound::WavSpec {

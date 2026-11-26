@@ -12,6 +12,7 @@ use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
@@ -127,6 +128,8 @@ pub struct EngineActorHandle {
     /// actor. The requirements are a property of the loaded engine, not of
     /// the session mode, so they cannot change between load and start.
     engine_info: Arc<Mutex<Option<EngineInfo>>>,
+    /// See [`EngineActorHandle::delete_engine_input_capture_after_sessions`].
+    engine_input_capture: Arc<OnceLock<PathBuf>>,
 }
 
 /// A `StartSession` that has been handed to the actor but not answered yet.
@@ -199,6 +202,8 @@ impl EngineActorHandle {
         let (cmd_tx, cmd_rx) = crossbeam_channel::unbounded::<EngineCommand>();
         let engine_info = Arc::new(Mutex::new(None));
         let actor_engine_info = Arc::clone(&engine_info);
+        let engine_input_capture = Arc::new(OnceLock::new());
+        let actor_engine_input_capture = Arc::clone(&engine_input_capture);
 
         let handle = std::thread::Builder::new()
             .name("engine-actor".into())
@@ -219,6 +224,7 @@ impl EngineActorHandle {
                     state_fresh_for: None,
                     engine_info: actor_engine_info,
                     vad_engine: None,
+                    engine_input_capture: actor_engine_input_capture,
                 }
                 .run();
             })
@@ -228,7 +234,15 @@ impl EngineActorHandle {
             cmd_tx,
             handle: Mutex::new(Some(handle)),
             engine_info,
+            engine_input_capture,
         })
+    }
+
+    /// Have the actor delete the engine input capture at `path` each time a
+    /// session ends, however it ends. Only the app sets it: an actor without
+    /// a path (CLI, tests) never touches the file. The first call wins.
+    pub fn delete_engine_input_capture_after_sessions(&self, path: PathBuf) {
+        let _ = self.engine_input_capture.set(path);
     }
 
     /// Requirements of the loaded engine, `None` when no model is loaded.
@@ -431,6 +445,8 @@ struct EngineActor {
     /// 190-290 ms per dictation; it is released with the model so an
     /// auto-unload still returns its memory.
     vad_engine: Option<(PathBuf, u32, SharedVadEngine)>,
+    /// Shared with [`EngineActorHandle::delete_engine_input_capture_after_sessions`].
+    engine_input_capture: Arc<OnceLock<PathBuf>>,
 }
 
 /// Mutable filter state for an active session; rebuilt when live corrections arrive.
@@ -550,6 +566,11 @@ impl EngineActor {
                             &mut pending_unload_timeout,
                         )
                     });
+                    // Before the stop reply and on every way out of a
+                    // session, so the excerpt never outlives it.
+                    if let Some(path) = self.engine_input_capture.get() {
+                        crate::debug::remove_engine_input_capture(path);
+                    }
                     // A SetUnloadTimeout received mid-session was consumed by
                     // the session loop's command drain; apply it now instead
                     // of losing it.
@@ -2920,6 +2941,7 @@ mod tests {
             cmd_tx,
             handle: Mutex::new(Some(worker)),
             engine_info: Arc::new(Mutex::new(None)),
+            engine_input_capture: Arc::new(std::sync::OnceLock::new()),
         });
         let first_actor = Arc::clone(&actor);
         let first = std::thread::spawn(move || first_actor.shutdown().unwrap());
@@ -3795,6 +3817,95 @@ mod tests {
         actor
             .stop_session(Duration::from_secs(2))
             .expect("stop recovered session");
+    }
+
+    fn planted_engine_input_capture() -> (tempfile::TempDir, PathBuf) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("capture.wav");
+        std::fs::write(&path, b"audio").expect("plant capture");
+        (dir, path)
+    }
+
+    #[test]
+    fn engine_input_capture_is_deleted_before_the_stop_reply() {
+        let (actor, audio_tx) = spawn_with_mock(MockEngine::new());
+        let (_dir, path) = planted_engine_input_capture();
+        actor.delete_engine_input_capture_after_sessions(path.clone());
+
+        actor
+            .start_session(1, session_config(), Box::new(|_| {}))
+            .expect("start");
+        assert!(path.exists(), "the capture lives while the session runs");
+        audio_tx.send(audio_chunk(1)).unwrap();
+        audio_tx.send(end_of_stream(1)).unwrap();
+        actor.stop_session(Duration::from_secs(2)).expect("stop");
+
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn engine_input_capture_is_deleted_when_a_session_aborts() {
+        let mock = MockEngine::new().with_transcribe_response(
+            Err(crate::engine::EngineError::InferenceError(
+                "gpu lost".into(),
+            )),
+            super::MAX_CONSECUTIVE_FRAME_ERRORS as usize,
+        );
+        let (actor, audio_tx) = spawn_with_mock(mock);
+        let (_dir, path) = planted_engine_input_capture();
+        actor.delete_engine_input_capture_after_sessions(path.clone());
+
+        actor
+            .start_session(1, session_config(), Box::new(|_| {}))
+            .expect("start");
+        for _ in 0..super::MAX_CONSECUTIVE_FRAME_ERRORS {
+            audio_tx.send(audio_chunk(1)).unwrap();
+        }
+
+        assert!(wait_for(|| !path.exists(), Duration::from_secs(3)));
+    }
+
+    #[test]
+    fn engine_input_capture_is_deleted_when_a_session_fails_to_start() {
+        let (actor, _audio_tx) = spawn_with_mock(MockEngine::new());
+        actor.unload_model().expect("unload");
+        let (_dir, path) = planted_engine_input_capture();
+        actor.delete_engine_input_capture_after_sessions(path.clone());
+
+        actor
+            .start_session(1, session_config(), Box::new(|_| {}))
+            .expect_err("no model loaded");
+
+        assert!(wait_for(|| !path.exists(), Duration::from_secs(3)));
+    }
+
+    #[test]
+    fn engine_input_capture_is_deleted_when_the_app_quits_mid_session() {
+        let (actor, _audio_tx) = spawn_with_mock(MockEngine::new());
+        let (_dir, path) = planted_engine_input_capture();
+        actor.delete_engine_input_capture_after_sessions(path.clone());
+
+        actor
+            .start_session(1, session_config(), Box::new(|_| {}))
+            .expect("start");
+        actor.shutdown().expect("shutdown");
+
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn an_actor_without_a_capture_path_deletes_nothing() {
+        let (actor, audio_tx) = spawn_with_mock(MockEngine::new());
+        let (_dir, path) = planted_engine_input_capture();
+
+        actor
+            .start_session(1, session_config(), Box::new(|_| {}))
+            .expect("start");
+        audio_tx.send(audio_chunk(1)).unwrap();
+        audio_tx.send(end_of_stream(1)).unwrap();
+        actor.stop_session(Duration::from_secs(2)).expect("stop");
+
+        assert!(path.exists());
     }
 
     #[test]

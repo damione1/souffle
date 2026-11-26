@@ -416,7 +416,7 @@ fn model_delete_blocked_by_transition(machine: &AppStateMachine) -> bool {
 pub fn test_transcribe_wav(state: Arc<AppState>) -> Result<String, String> {
     use crate::constants::{SAMPLE_RATE_F64, SILENCE_SUFFIX_SAMPLES};
 
-    let wav_path = crate::constants::app_data_dir().join("debug_engine_input.wav");
+    let wav_path = crate::debug::engine_input_capture_path();
 
     if !wav_path.exists() {
         return Err("No debug WAV found. Record something first.".into());
