@@ -158,6 +158,8 @@ Open source and actively developed. Every release is signed and notarized, and t
 
 The fastest useful bug report is Settings > System > Diagnostics, which copies the app version, the current pipeline state and the log settings and paths, plus the recent tail of the log. Paste that into a [new issue](https://github.com/damione1/souffle/issues/new/choose) with your macOS version, your Mac model and what you were doing. None of it contains transcript text, though the paths do include your user name.
 
+The **Detailed logging** switch on the same page raises the log to Debug level and writes the recognised text to the log file on your Mac; those lines are removed from the copied diagnostics. While it is on, the first 3 seconds of microphone input of a dictation or meeting can also be written to a file in the data folder, which is deleted when the session ends. Developers can set `SOUFFLE_LOG` (for example `SOUFFLE_LOG=souffle=trace,warn`) to choose the log filter for one launch; it takes precedence over the switch.
+
 ## Download
 
 Install with [Homebrew](https://brew.sh/):

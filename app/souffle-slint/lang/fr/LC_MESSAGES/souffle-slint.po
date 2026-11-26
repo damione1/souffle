@@ -1731,21 +1731,6 @@ msgid ""
 msgstr ""
 "Inclure le son des haut-parleurs (l'autre côté d'un appel) dans les réunions."
 
-#: ui/components/settings/audio_section.slint:116
-msgctxt "AudioSection"
-msgid "Langue de transcription (réunions)"
-msgstr "Langue de transcription (réunions)"
-
-#: ui/components/settings/audio_section.slint:117
-msgctxt "AudioSection"
-msgid "Indice pour la détection de langue, jamais forcé sur le moteur."
-msgstr "Indice pour la détection de langue, jamais forcé sur le moteur."
-
-#: ui/components/settings/audio_section.slint:122
-msgctxt "AudioSection"
-msgid "Langue de transcription des réunions"
-msgstr "Langue de transcription des réunions"
-
 #: ui/components/settings/audio_section.slint:139
 msgctxt "AudioSection"
 msgid "Arrêt automatique des réunions"
@@ -1753,40 +1738,8 @@ msgstr "Arrêt automatique des réunions"
 
 #: ui/components/settings/audio_section.slint:140
 msgctxt "AudioSection"
-msgid "Arrêter l'enregistrement quand plus personne ne parle depuis longtemps."
-msgstr ""
-"Arrêter l'enregistrement quand plus personne ne parle depuis longtemps."
-
-#: ui/components/settings/audio_section.slint:166
-msgctxt "AudioSection"
-msgid "Délai avant arrêt"
-msgstr "Délai avant arrêt"
-
-#: ui/components/settings/audio_section.slint:171
-msgctxt "AudioSection"
-msgid "Délai avant arrêt automatique"
-msgstr "Délai avant arrêt automatique"
-
-#: ui/components/settings/audio_section.slint:189
-msgctxt "AudioSection"
-msgid "Durée maximale d'une réunion"
-msgstr "Durée maximale d'une réunion"
-
-#: ui/components/settings/audio_section.slint:212
-msgctxt "AudioSection"
-msgid "Détection de voix (VAD)"
-msgstr "Détection de voix (VAD)"
-
-#: ui/components/settings/audio_section.slint:213
-msgctxt "AudioSection"
-msgid "Ignorer les silences pour une transcription plus rapide et plus propre."
-msgstr ""
-"Ignorer les silences pour une transcription plus rapide et plus propre."
-
-#: ui/components/settings/audio_section.slint:222
-msgctxt "AudioSection"
-msgid "Détection de voix"
-msgstr "Détection de voix"
+msgid "Arrête la réunion après 10 minutes de silence, puis 2 minutes pour annuler, et dans tous les cas au bout de 4 heures. Désactivé, aucune de ces limites ne s'applique."
+msgstr "Arrête la réunion après 10 minutes de silence, puis 2 minutes pour annuler, et dans tous les cas au bout de 4 heures. Désactivé, aucune de ces limites ne s'applique."
 
 #: ui/components/settings/audio_section.slint:239
 msgctxt "AudioSection"
@@ -1798,16 +1751,6 @@ msgctxt "AudioSection"
 msgid "Retirer les \"euh\", \"hum\" et autres marqueurs d'hésitation."
 msgstr "Retirer les \"euh\", \"hum\" et autres marqueurs d'hésitation."
 
-#: ui/components/settings/audio_section.slint:266
-msgctxt "AudioSection"
-msgid "Réduction des bégaiements"
-msgstr "Réduction des bégaiements"
-
-#: ui/components/settings/audio_section.slint:267
-msgctxt "AudioSection"
-msgid "Fusionner les répétitions et faux départs."
-msgstr "Fusionner les répétitions et faux départs."
-
 #: ui/components/settings/audio_section.slint:293
 msgctxt "AudioSection"
 msgid "Correction par dictionnaire"
@@ -1817,31 +1760,6 @@ msgstr "Correction par dictionnaire"
 msgctxt "AudioSection"
 msgid "Appliquer automatiquement les corrections du dictionnaire personnel."
 msgstr "Appliquer automatiquement les corrections du dictionnaire personnel."
-
-#: ui/components/settings/audio_section.slint:320
-msgctxt "AudioSection"
-msgid "Capture diagnostique avant AEC"
-msgstr "Capture diagnostique avant AEC"
-
-#: ui/components/settings/audio_section.slint:322
-msgctxt "AudioSection"
-msgid ""
-"Activez d'abord la conservation de l'audio dans Données. Aucun diagnostic "
-"n'est enregistré sans elle."
-msgstr ""
-"Activez d'abord la conservation de l'audio dans Données. Aucun diagnostic "
-"n'est enregistré sans elle."
-
-#: ui/components/settings/audio_section.slint:323
-msgctxt "AudioSection"
-msgid ""
-"À partir de la prochaine réunion, conserve les voies brutes séparées : micro "
-"à gauche, audio système à droite. WAV sans perte : environ {} Mo/heure, {} "
-"minutes maximum. Même conservation que l'audio de réunion."
-msgstr ""
-"À partir de la prochaine réunion, conserve les voies brutes séparées : micro "
-"à gauche, audio système à droite. WAV sans perte : environ {} Mo/heure, {} "
-"minutes maximum. Même conservation que l'audio de réunion."
 
 #: ui/components/settings/app_branches_section.slint:42
 msgctxt "AppBranchesSection"
@@ -3086,21 +3004,6 @@ msgctxt "DataSection"
 msgid "Ne pas conserver"
 msgstr "Ne pas conserver"
 
-#: ui/components/settings/settings_options.slint:78
-msgctxt "AudioSection"
-msgid "Anglais"
-msgstr "Anglais"
-
-#: ui/components/settings/settings_options.slint:79
-msgctxt "AudioSection"
-msgid "Français"
-msgstr "Français"
-
-#: ui/components/settings/settings_options.slint:80
-msgctxt "AudioSection"
-msgid "Automatique"
-msgstr "Automatique"
-
 #: ui/components/settings/settings_options.slint:87
 msgctxt "IntelligenceSection"
 msgid "Apple Intelligence"
@@ -3115,31 +3018,6 @@ msgstr "Ollama"
 msgctxt "IntelligenceSection"
 msgid "Automatique"
 msgstr "Automatique"
-
-#: ui/components/settings/settings_options.slint:96
-msgctxt "DiagnosticsSection"
-msgid "Erreur"
-msgstr "Erreur"
-
-#: ui/components/settings/settings_options.slint:97
-msgctxt "DiagnosticsSection"
-msgid "Avertissement"
-msgstr "Avertissement"
-
-#: ui/components/settings/settings_options.slint:98
-msgctxt "DiagnosticsSection"
-msgid "Information"
-msgstr "Information"
-
-#: ui/components/settings/settings_options.slint:99
-msgctxt "DiagnosticsSection"
-msgid "Débogage"
-msgstr "Débogage"
-
-#: ui/components/settings/settings_options.slint:100
-msgctxt "DiagnosticsSection"
-msgid "Trace"
-msgstr "Trace"
 
 #: ui/components/settings/settings_options.slint:107
 msgctxt "SettingsTabBar"
@@ -3321,44 +3199,15 @@ msgctxt "DiagnosticsSection"
 msgid "DIAGNOSTICS"
 msgstr "DIAGNOSTICS"
 
-#: ui/components/settings/diagnostics_section.slint:56
-msgctxt "DiagnosticsSection"
-msgid "Niveau de journal"
-msgstr "Niveau de journal"
-
-#: ui/components/settings/diagnostics_section.slint:57
-msgctxt "DiagnosticsSection"
-msgid "Quantité de détails que Soufflé écrit dans le fichier journal."
-msgstr "Quantité de détails que Soufflé écrit dans le fichier journal."
-
 #: ui/components/settings/diagnostics_section.slint:79
 msgctxt "DiagnosticsSection"
-msgid "Journaux détaillés de transcription"
-msgstr "Journaux détaillés de transcription"
+msgid "Journalisation détaillée"
+msgstr "Journalisation détaillée"
 
 #: ui/components/settings/diagnostics_section.slint:80
 msgctxt "DiagnosticsSection"
-msgid ""
-"Enregistre des détails supplémentaires sur la reconnaissance vocale pour le "
-"dépannage."
-msgstr ""
-"Enregistre des détails supplémentaires sur la reconnaissance vocale pour le "
-"dépannage."
-
-#: ui/components/settings/diagnostics_section.slint:107
-msgctxt "DiagnosticsSection"
-msgid "Journal en direct"
-msgstr "Journal en direct"
-
-#: ui/components/settings/diagnostics_section.slint:112
-msgctxt "DiagnosticsSection"
-msgid "Fin du fichier journal actuel, actualisé toutes les quelques secondes."
-msgstr "Fin du fichier journal actuel, actualisé toutes les quelques secondes."
-
-#: ui/components/settings/diagnostics_section.slint:145
-msgctxt "DiagnosticsSection"
-msgid "Aucune entrée de journal pour l'instant."
-msgstr "Aucune entrée de journal pour l'instant."
+msgid "Écrit plus de détails dans le fichier journal pour le dépannage, dont le texte reconnu. Pendant une dictée ou une réunion, garde aussi les 3 premières secondes de micro dans un fichier supprimé dès la fin de la session."
+msgstr "Écrit plus de détails dans le fichier journal pour le dépannage, dont le texte reconnu. Pendant une dictée ou une réunion, garde aussi les 3 premières secondes de micro dans un fichier supprimé dès la fin de la session."
 
 #: ui/components/settings/diagnostics_section.slint:174
 msgctxt "DiagnosticsSection"

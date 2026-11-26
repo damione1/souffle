@@ -595,7 +595,7 @@
             "p": "The lifecycle is meant to be hands-off: the app notifies you when a calendar meeting begins, and today's events have a start button on Home. It detects when the meeting seems over and stops on its own after warning you, and recovers or salvages the session if the engine stalls or the microphone disappears. When the Mac goes to sleep the recording is closed cleanly, and Soufflé offers to resume it on wake. A stopped meeting can also be picked up by hand with <em>Resume recording</em>, which adds another session to the same meeting. If a microphone stops responding, a banner says so and offers <em>Restart Soufflé</em>."
           },
           {
-            "p": "A meeting stops on its own after 10 minutes without speech, with a 4-hour failsafe behind it. Both are adjustable in Settings → Audio, along with the microphone Soufflé should prefer."
+            "p": "A meeting stops on its own after 10 minutes without speech, with a 4-hour failsafe behind it. One switch in Settings → Audio turns both off, next to the microphone Soufflé should prefer."
           },
           {
             "p": "Audio recording is off by default. Turn it on in Settings → System → Data and the meeting sound is kept as compact Opus files, for 7 days, 30 days or until you delete them, replayable with click-to-seek from any line of the transcript. With system audio the file is stereo, you on the left and the others on the right, at about 1.5x the disk of mono."
@@ -730,11 +730,7 @@
               ],
               [
                 "Meeting auto-stop<br><span class=\"docs-tab\">Audio</span>",
-                "Stop after 5, 10, 15 or 30 minutes without speech, with a hard failsafe behind it."
-              ],
-              [
-                "Meeting transcription language<br><span class=\"docs-tab\">Audio</span>",
-                "A hint for language detection in meetings, never forced on the engine."
+                "One switch. On, a meeting stops after 10 minutes without speech, with 2 more minutes to cancel, and after 4 hours at the latest. Off, neither limit applies."
               ],
               [
                 "Model unload<br><span class=\"docs-tab\">Transcription</span>",

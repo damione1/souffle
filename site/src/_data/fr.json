@@ -595,7 +595,7 @@
             "p": "Le cycle de vie est pensé pour ne rien demander : l'app vous notifie au début d'une réunion du calendrier, et les événements du jour ont un bouton Démarrer sur l'accueil. Elle détecte que la réunion semble terminée et s'arrête d'elle-même après vous avoir prévenu, et récupère ou sauve la session si le moteur cale ou si le micro disparaît. Quand le Mac se met en veille, l'enregistrement est fermé proprement, et Soufflé propose de le reprendre au réveil. Une réunion arrêtée peut aussi être reprise à la main avec <em>Reprendre l'enregistrement</em>, qui ajoute une session à la même réunion. Si un micro ne répond plus, un bandeau le signale et propose <em>Redémarrer Soufflé</em>."
           },
           {
-            "p": "Une réunion s'arrête seule après 10 minutes sans parole, avec un garde-fou à 4 heures derrière. Les deux se règlent dans Paramètres → Audio, avec le micro que Soufflé doit privilégier."
+            "p": "Une réunion s'arrête seule après 10 minutes sans parole, avec un garde-fou à 4 heures derrière. Un interrupteur dans Paramètres → Audio désactive les deux, à côté du micro que Soufflé doit privilégier."
           },
           {
             "p": "L'enregistrement audio est inactif par défaut. Activez-le dans Paramètres → Système → Données et le son de la réunion est conservé en fichiers Opus compacts, pendant 7 jours, 30 jours ou jusqu'à ce que vous les effaciez, rejouables en cliquant n'importe quelle ligne de la transcription. Avec l'audio système, le fichier est en stéréo, vous à gauche et les autres à droite, pour environ 1,5 fois le disque d'un fichier mono."
@@ -730,11 +730,7 @@
               ],
               [
                 "Arrêt automatique des réunions<br><span class=\"docs-tab\">Audio</span>",
-                "Arrêt après 5, 10, 15 ou 30 minutes sans parole, avec un garde-fou de durée maximale derrière."
-              ],
-              [
-                "Langue de transcription (réunions)<br><span class=\"docs-tab\">Audio</span>",
-                "Un indice pour la détection de langue en réunion, jamais imposé au moteur."
+                "Un seul interrupteur. Activé, une réunion s'arrête après 10 minutes sans parole, avec 2 minutes de plus pour annuler, et au plus tard au bout de 4 heures. Désactivé, aucune de ces limites ne s'applique."
               ],
               [
                 "Déchargement du modèle<br><span class=\"docs-tab\">Transcription</span>",
