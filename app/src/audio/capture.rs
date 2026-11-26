@@ -2838,9 +2838,8 @@ impl AudioCapture {
         }
 
         // Also reached when `resolve_input` found no auto-eligible device
-        // (every connected mic hidden, or Bluetooth-only with the Bluetooth
-        // preference off): recording on the OS default, even an excluded
-        // one, beats not recording at all. The policy only steers the
+        // (Bluetooth-only with the Bluetooth preference off): recording on the
+        // OS default, even an excluded one, beats not recording at all. The policy only steers the
         // automatic choice among alternatives.
         host.default_input_device()
             .ok_or_else(|| "No input device available".to_string())

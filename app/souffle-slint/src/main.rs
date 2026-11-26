@@ -39,6 +39,8 @@ mod timeline;
 mod transcript;
 mod transcript_window;
 mod typography;
+#[cfg(test)]
+mod ui_feedback_tests;
 mod update_ui;
 mod wake_resume_ui;
 
@@ -6022,45 +6024,6 @@ fn wire_callbacks(
     });
 
     let weak = window.as_weak();
-    let settings_state_for_hide = settings_state.clone();
-    let audio_devices_state_for_hide = audio_devices_state.clone();
-    let audio_device_projection_for_hide = audio_device_projection_state.clone();
-    let settings_io_for_hide = settings_io.clone();
-    window.on_settings_toggle_hidden_requested(move |uid, hidden| {
-        let uid = uid.to_string();
-        let weak = weak.clone();
-        let state = settings_state_for_hide.clone();
-        let devices = audio_devices_state_for_hide.clone();
-        let projection_state = audio_device_projection_for_hide.clone();
-        let publication_io = settings_io_for_hide.clone();
-        save_settings_field_then(
-            &settings_io_for_hide,
-            souffle_lib::commands::SettingsSaveLane::General,
-            move |settings| {
-                let hidden_set = &mut settings.input_priority.hidden;
-                hidden_set.retain(|existing| existing != &uid);
-                if hidden {
-                    hidden_set.push(uid);
-                }
-            },
-            move |order, _outcome| {
-                if !order.publishes_to_open_window() {
-                    return;
-                }
-                if let Some(window) = weak.upgrade() {
-                    load_audio_devices(
-                        &window,
-                        &state,
-                        &devices,
-                        &projection_state,
-                        publication_io,
-                    );
-                }
-            },
-        );
-    });
-
-    let weak = window.as_weak();
     let settings_state_for_remove = settings_state.clone();
     let audio_devices_state_for_remove = audio_devices_state.clone();
     let audio_device_projection_for_remove = audio_device_projection_state.clone();
@@ -6143,10 +6106,6 @@ fn wire_callbacks(
                     settings
                         .input_priority
                         .priorities
-                        .retain(|uid| connected_uids.contains(uid));
-                    settings
-                        .input_priority
-                        .hidden
                         .retain(|uid| connected_uids.contains(uid));
                     settings
                         .input_priority

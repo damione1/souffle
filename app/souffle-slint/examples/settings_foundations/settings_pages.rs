@@ -626,7 +626,6 @@ fn microphone(uid: &str, connected: bool, first: bool, last: bool) -> crate::Mic
         transport_label: microphone_list::transport_label(TransportType::Usb).into(),
         is_default: false,
         connected,
-        hidden: false,
         last_seen_age_seconds: if connected { -1 } else { 7200 },
         is_first: first,
         is_last: last,
@@ -655,10 +654,6 @@ async fn audio_actions(w: &MainWindow, path: &Path) {
         let l1 = log.clone();
         w.on_settings_move_device_requested(move |uid, d| {
             l1.borrow_mut().push(format!("move {uid} {d}"))
-        });
-        let l2 = log.clone();
-        w.on_settings_toggle_hidden_requested(move |uid, hidden| {
-            l2.borrow_mut().push(format!("hide {uid} {hidden}"))
         });
         let l3 = log.clone();
         w.on_settings_remove_device_requested(move |uid| {
@@ -750,12 +745,6 @@ async fn audio_actions(w: &MainWindow, path: &Path) {
             .match_inherits("MicrophoneActionButton")
             .find_all()
     };
-    let switch = |r: &ElementHandle| {
-        r.query_descendants()
-            .match_inherits("KitSwitch")
-            .find_first()
-            .unwrap()
-    };
     frame(w, path, "actions");
     assert_eq!(buttons(&row(0)).len(), 2);
     assert_eq!(
@@ -777,35 +766,28 @@ async fn audio_actions(w: &MainWindow, path: &Path) {
     assert_eq!(buttons(&row(1))[1].accessible_enabled(), Some(true));
     buttons(&row(1))[0].invoke_accessible_default_action();
     buttons(&row(1))[1].invoke_accessible_default_action();
-    switch(&row(1)).invoke_accessible_default_action();
     buttons(&row(2))[2].invoke_accessible_default_action();
     settle(w);
     assert_eq!(
         log.borrow().as_slice(),
-        ["move b -1", "move b 1", "hide b true", "remove c"]
+        ["move b -1", "move b 1", "remove c"]
     );
     log.borrow_mut().clear();
 
-    for hold_switch in [false, true] {
-        let target = if hold_switch {
-            switch(&row(1))
-        } else {
-            buttons(&row(1))[0].clone()
-        };
-        let at = press_at(w, &target);
-        let mut replaced = microphone("a", true, false, false);
-        replaced.name = "Remplaçant".into();
-        model.set_row_data(1, replaced);
-        settle(w);
-        release_at(w, at);
-        assert!(
-            log.borrow().is_empty(),
-            "a rebound delegate must not act on the new device: {:?}",
-            log.borrow()
-        );
-        model.set_row_data(1, microphone("b", true, false, false));
-        settle(w);
-    }
+    let target = buttons(&row(1))[0].clone();
+    let at = press_at(w, &target);
+    let mut replaced = microphone("a", true, false, false);
+    replaced.name = "Remplaçant".into();
+    model.set_row_data(1, replaced);
+    settle(w);
+    release_at(w, at);
+    assert!(
+        log.borrow().is_empty(),
+        "a rebound delegate must not act on the new device: {:?}",
+        log.borrow()
+    );
+    model.set_row_data(1, microphone("b", true, false, false));
+    settle(w);
     println!("rebound delegates: no gesture reaches the replacement device");
 
     reveal(w, &page, "MicrophoneSection::device-picker");

@@ -18,7 +18,6 @@ export struct MicrophoneRow {
     transport-label: string,
     is-default: bool,
     connected: bool,
-    hidden: bool,
     last-seen-age-seconds: int,
     is-first: bool,
     is-last: bool,
@@ -37,32 +36,10 @@ component MicrophoneActionButton inherits KitIconButton {
     activated => { root.requested(root.pressed-uid); }
 }
 
-component MicrophoneHideButton inherits KitButton {
-    in property <string> device-uid;
-    in property <bool> device-hidden;
-    private property <string> pressed-uid;
-    private property <bool> pressed-hidden;
-    callback requested(string, bool);
-
-    intent: ButtonIntent.quiet;
-    control-size: compact;
-    activation-started => {
-        root.pressed-uid = root.device-uid;
-        root.pressed-hidden = root.device-hidden;
-    }
-    activation-allowed => {
-        return root.device-uid == root.pressed-uid && root.device-hidden == root.pressed-hidden;
-    }
-    changed device-uid => { root.cancel-press(); }
-    changed device-hidden => { root.cancel-press(); }
-    activated => { root.requested(root.pressed-uid, !root.pressed-hidden); }
-}
-
 component MicrophonePriorityRow inherits KitFieldRow {
     in property <MicrophoneRow> device;
     in property <string> last-seen;
     callback move-requested(string, int);
-    callback hidden-requested(string, bool);
     callback remove-requested(string);
 
     orientation: Theme.settings-field-orientation(self.width);
@@ -80,13 +57,15 @@ component MicrophonePriorityRow inherits KitFieldRow {
     accessible-role: list-item;
     accessible-label: root.label;
     accessible-description: root.description;
-    focus-requested => { hide-button.take-focus(); }
+    focus-requested => {
+        if root.device.is-first { down-button.take-focus(); } else { up-button.take-focus(); }
+    }
 
     KitInline {
         theme: root.theme;
         spacing: 2px;
 
-        MicrophoneActionButton {
+        up-button := MicrophoneActionButton {
             theme: root.theme;
             modal-layer: root.modal-layer;
             device-uid: root.device.uid;
@@ -96,7 +75,7 @@ component MicrophonePriorityRow inherits KitFieldRow {
             requested(uid) => { root.move-requested(uid, -1); }
             focus-observed(focused) => { if focused { root.ensure-visible(KitThemes.scroll-behavior(root.theme)); } }
         }
-        MicrophoneActionButton {
+        down-button := MicrophoneActionButton {
             theme: root.theme;
             modal-layer: root.modal-layer;
             device-uid: root.device.uid;
@@ -106,26 +85,22 @@ component MicrophonePriorityRow inherits KitFieldRow {
             requested(uid) => { root.move-requested(uid, 1); }
             focus-observed(focused) => { if focused { root.ensure-visible(KitThemes.scroll-behavior(root.theme)); } }
         }
-        hide-button := MicrophoneHideButton {
-            theme: root.theme;
-            modal-layer: root.modal-layer;
-            device-uid: root.device.uid;
-            device-hidden: root.device.hidden;
-            text: root.device.hidden ? @tr("MicrophoneSection" => "Afficher") : @tr("MicrophoneSection" => "Masquer");
-            accessible-name: root.device.hidden
-                ? @tr("MicrophoneSection" => "Afficher {}", root.device.name)
-                : @tr("MicrophoneSection" => "Masquer {}", root.device.name);
-            requested(uid, hidden) => { root.hidden-requested(uid, hidden); }
-            focus-observed(focused) => { if focused { root.ensure-visible(KitThemes.scroll-behavior(root.theme)); } }
-        }
-        if !root.device.connected: MicrophoneActionButton {
-            theme: root.theme;
-            modal-layer: root.modal-layer;
-            device-uid: root.device.uid;
-            glyph: LucideFiles.trash();
-            accessible-name: @tr("MicrophoneSection" => "Supprimer {}", root.device.name);
-            requested(uid) => { root.remove-requested(uid); }
-            focus-observed(focused) => { if focused { root.ensure-visible(KitThemes.scroll-behavior(root.theme)); } }
+        // Reserved on every row, so the chevrons keep one column whether or
+        // not a row can be removed.
+        trash-slot := Rectangle {
+            horizontal-stretch: 0;
+            width: down-button.preferred-width;
+            height: down-button.preferred-height;
+            if !root.device.connected: MicrophoneActionButton {
+                x: 0px; y: 0px;
+                theme: root.theme;
+                modal-layer: root.modal-layer;
+                device-uid: root.device.uid;
+                glyph: LucideFiles.trash();
+                accessible-name: @tr("MicrophoneSection" => "Supprimer {}", root.device.name);
+                requested(uid) => { root.remove-requested(uid); }
+                focus-observed(focused) => { if focused { root.ensure-visible(KitThemes.scroll-behavior(root.theme)); } }
+            }
         }
     }
 }
@@ -134,9 +109,10 @@ export component MicrophoneSection inherits KitFieldSet {
     pure function format-last-seen(age: int) -> string {
         if age < 0 { return ""; }
         if age < 60 { return @tr("à l'instant"); }
-        if age < 3600 { return @tr("il y a {} min", age / 60); }
-        if age < 86400 { return @tr("il y a {} h", age / 3600); }
-        return @tr("il y a {} j", age / 86400);
+        // A Slint integer division yields a fraction, which the text would show.
+        if age < 3600 { return @tr("il y a {} min", Math.floor(age / 60)); }
+        if age < 86400 { return @tr("il y a {} h", Math.floor(age / 3600)); }
+        return @tr("il y a {} j", Math.floor(age / 86400));
     }
 
     in property <[string]> device-labels;
@@ -159,7 +135,6 @@ export component MicrophoneSection inherits KitFieldSet {
     callback reset-sample-rate-requested();
     callback allow-bluetooth-mic-changed(bool);
     callback move-device-requested(string, int);
-    callback toggle-hidden-requested(string, bool);
     callback remove-device-requested(string);
 
     theme: KitThemeContext.current;
@@ -305,7 +280,6 @@ export component MicrophoneSection inherits KitFieldSet {
                 accessible-item-index: index;
                 accessible-item-count: root.microphones.length;
                 move-requested(uid, direction) => { root.move-device-requested(uid, direction); }
-                hidden-requested(uid, hidden) => { root.toggle-hidden-requested(uid, hidden); }
                 remove-requested(uid) => { root.remove-device-requested(uid); }
             }
         }

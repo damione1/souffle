@@ -1,5 +1,5 @@
 import { AppText, AppTextInput, Typography, TypographyStyle } from "@typography";
-import { ElevationLevel, AlertSeverity, AvatarShape, ButtonIntent, ControlSize, KitAlert, KitAvatar, KitBadge, KitButton, KitCard, KitIcon, KitImage, KitInline, KitProgress, KitScrollArea, KitStack, KitSurface, KitText, LayoutSpace, ProgressMode, SurfaceBorder, SurfaceLevel, Tone } from "@kit";
+import { ElevationLevel, AlertSeverity, AvatarShape, ButtonIntent, ControlSize, KitAlert, KitAvatar, KitBadge, KitButton, KitCard, KitIcon, KitImage, KitInline, KitLayoutMetrics, KitThemeContext, KitProgress, KitScrollArea, KitStack, KitSurface, KitText, LayoutSpace, ProgressMode, SurfaceBorder, SurfaceLevel, Tone } from "@kit";
 import { LucideArrows } from "@kit-icons/arrows.slint";
 import { ProLevelMeter, ProPager } from "@kit-pro";
 import { LucideDevelopment } from "@kit-icons/development.slint";
@@ -138,28 +138,57 @@ export component OnboardingView inherits Rectangle {
                     KitStack {
                         gap: compact;
 
-                        HorizontalLayout {
+                        // The permissions step is the tallest one: its icon sits
+                        // beside the name so the step fits without scrolling.
+                        if root.step != OnboardingStep.permissions: VerticalLayout {
+                            spacing: KitLayoutMetrics.space(KitThemeContext.current, LayoutSpace.compact);
+                            HorizontalLayout {
+                                alignment: center;
+                                KitImage {
+                                    source: @image-url("assets/icon.png");
+                                    width: 72px;
+                                }
+                            }
+                            VerticalLayout {
+                                padding-top: 6px;
+                                AppText {
+                                    text: @tr("Soufflé");
+                                    typography: Typography.onboarding-title;
+                                    color: Theme.text-primary;
+                                    horizontal-alignment: center;
+                                }
+                            }
+                            AppText {
+                                text: @tr("Transcription vocale locale pour la dictée et les meetings.");
+                                typography: Typography.reading;
+                                color: Theme.text-muted;
+                                horizontal-alignment: center;
+                                wrap: word-wrap;
+                            }
+                        }
+                        if root.step == OnboardingStep.permissions: HorizontalLayout {
                             alignment: center;
+                            spacing: 14px;
                             KitImage {
                                 source: @image-url("assets/icon.png");
-                                width: 72px;
+                                width: 52px;
+                                height: 52px;
+                                y: (parent.height - self.height) / 2;
                             }
-                        }
-                        VerticalLayout {
-                            padding-top: 6px;
-                            AppText {
-                                text: @tr("Soufflé");
-                                typography: Typography.onboarding-title;
-                                color: Theme.text-primary;
-                                horizontal-alignment: center;
+                            VerticalLayout {
+                                alignment: center;
+                                spacing: 2px;
+                                AppText {
+                                    text: @tr("Soufflé");
+                                    typography: Typography.onboarding-title;
+                                    color: Theme.text-primary;
+                                }
+                                AppText {
+                                    text: @tr("Transcription vocale locale pour la dictée et les meetings.");
+                                    typography: Typography.reading;
+                                    color: Theme.text-muted;
+                                }
                             }
-                        }
-                        AppText {
-                            text: @tr("Transcription vocale locale pour la dictée et les meetings.");
-                            typography: Typography.reading;
-                            color: Theme.text-muted;
-                            horizontal-alignment: center;
-                            wrap: word-wrap;
                         }
                         HorizontalLayout {
                             padding-top: 4px;

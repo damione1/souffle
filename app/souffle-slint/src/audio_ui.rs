@@ -159,7 +159,6 @@ pub fn populate_microphones(window: &MainWindow, list: &[MicrophoneListEntry]) {
             transport_label: microphone_list::transport_label(entry.transport).into(),
             is_default: entry.is_default,
             connected: entry.connected,
-            hidden: entry.hidden,
             last_seen_age_seconds: entry
                 .last_seen
                 .map(|ts| (chrono::Utc::now().timestamp() - ts).max(0) as i32)

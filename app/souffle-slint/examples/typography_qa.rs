@@ -1,13 +1,16 @@
 //! SOU-276: real UI / native HUD typography fixture. No bootstrap, DB,
 //! recording, network, permissions or user preferences are accessed.
 //! SOU276_SURFACE=home|settings-{transcription,ai,audio,interface,meetings,system}
-//! |onboarding-{permissions,microphone,model,shortcut}|detail|meeting|dictation
+//! |onboarding-{permissions,microphone,model,shortcut}[-<state>] (typography_qa/wizard.rs)|detail|meeting|dictation
 //! |permissions|update|whats-new|specimen|hud-{dictation,meeting,polishing}[-compact]
 //! |empty|error|loading|detail-{empty,error,loading}
 //! |alerts|search-empty|detail-{transcript,no-summary,no-provider,no-audio}|update-{downloading,failed}
 //! |live-editor[-error|-loading]|settings-suggestions[-empty|-error|-loading]
 //! SOU276_LANG=fr|en, SOU276_DARK=0|1, SOU276_WIDTH=680|1040, SOU276_HEIGHT=820.
 //! SOU276_MOCKUP=1 applies the design board data (typography_qa/mockup.rs).
+//! SOU276_INPUT="click:520,40;key:right" replays pointer clicks and keys
+//! (left, right, tab, escape, enter) before the snapshot, one every 400 ms;
+//! "wait:0" skips a slot.
 //! SOU276_SNAPSHOT=<png path> renders the settled window to a file and exits
 //! (see capture_mockup_surfaces.sh; use SLINT_SCALE_FACTOR=1 to match the mockups).
 //!
@@ -65,6 +68,8 @@ mod app_branch_ui {
 mod mockup;
 #[path = "typography_qa/scroll_bench.rs"]
 mod scroll_bench;
+#[path = "typography_qa/wizard.rs"]
+mod wizard;
 use slint::winit_030::WinitWindowAccessor;
 use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
 use std::ffi::CString;
@@ -114,6 +119,46 @@ fn save_png(window: &MainWindow, path: &std::path::Path) {
         image::ExtendedColorType::Rgba8,
     )
     .unwrap();
+}
+/// One step of SOU276_INPUT, dispatched through the window like real input.
+fn replay(window: &MainWindow, step: &str) {
+    use slint::platform::{Key, PointerEventButton, WindowEvent};
+    let (kind, value) = step.split_once(':').expect("kind:value");
+    let events = match kind {
+        "click" => {
+            let (x, y) = value.split_once(',').expect("click:x,y");
+            let position =
+                slint::LogicalPosition::new(x.parse().expect("x"), y.parse().expect("y"));
+            let button = PointerEventButton::Left;
+            vec![
+                WindowEvent::PointerMoved { position },
+                WindowEvent::PointerPressed { position, button },
+                WindowEvent::PointerReleased { position, button },
+                // Leave the target so the capture shows no hover.
+                WindowEvent::PointerExited,
+            ]
+        }
+        // Skips a slot, to let a simulated download finish.
+        "wait" => Vec::new(),
+        "key" => {
+            let key = match value {
+                "left" => Key::LeftArrow,
+                "right" => Key::RightArrow,
+                "tab" => Key::Tab,
+                "escape" => Key::Escape,
+                "enter" => Key::Return,
+                other => panic!("unknown key {other}"),
+            };
+            vec![
+                WindowEvent::KeyPressed { text: key.into() },
+                WindowEvent::KeyReleased { text: key.into() },
+            ]
+        }
+        other => panic!("unknown input {other}"),
+    };
+    for event in events {
+        window.window().dispatch_event(event);
+    }
 }
 fn main() {
     let lang = std::env::var("SOU276_LANG").unwrap_or_else(|_| "fr".into());
@@ -305,12 +350,7 @@ fn main() {
         window.set_transcription_status_message("MODEL_PREPARING".into());
     }
     window.set_onboarding_open(surface.starts_with("onboarding-"));
-    window.set_onboarding_step(match surface.as_str() {
-        "onboarding-microphone" => OnboardingStep::Microphone,
-        "onboarding-model" => OnboardingStep::Model,
-        "onboarding-shortcut" => OnboardingStep::Shortcut,
-        _ => OnboardingStep::Permissions,
-    });
+    window.set_onboarding_step(wizard::step_for(&surface));
     window.set_onboarding_step_count(4);
     window.set_onboarding_permission_rows(model(vec![
         PermissionRow {
@@ -326,11 +366,6 @@ fn main() {
         PermissionRow {
             kind: PermissionKind::Accessibility,
             state: AccessState::Denied,
-            busy: false,
-        },
-        PermissionRow {
-            kind: PermissionKind::Calendar,
-            state: AccessState::Unknown,
             busy: false,
         },
     ]));
@@ -539,6 +574,22 @@ fn main() {
                 pill_panel_set_live_text(live.as_ptr(), 0);
                 pill_panel_set_visible(1);
             }
+        }
+        let clickable = snapshot.is_none() || std::env::var_os("SOU276_INPUT").is_some();
+        let _wizard =
+            (clickable && surface.starts_with("onboarding-")).then(|| wizard::interactive(&window));
+        // The real app loads the settings before it opens them.
+        let weak = window.as_weak();
+        window.on_settings_requested(move || weak.unwrap().set_settings_open(true));
+        let steps: Vec<String> = std::env::var("SOU276_INPUT")
+            .map(|input| input.split_terminator(';').map(str::to_owned).collect())
+            .unwrap_or_default();
+        for (index, step) in steps.into_iter().enumerate() {
+            let weak = window.as_weak();
+            slint::Timer::single_shot(
+                std::time::Duration::from_millis(800 + 400 * index as u64),
+                move || replay(&weak.unwrap(), &step),
+            );
         }
         let unclamp = slint::Timer::default();
         let capture = slint::Timer::default();

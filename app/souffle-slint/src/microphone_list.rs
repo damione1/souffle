@@ -13,7 +13,6 @@ pub struct MicrophoneListEntry {
     pub transport: TransportType,
     pub is_default: bool,
     pub connected: bool,
-    pub hidden: bool,
     pub last_seen: Option<i64>,
 }
 
@@ -40,7 +39,6 @@ pub fn build_microphone_list(
             transport: live.map(|d| d.transport).unwrap_or(TransportType::Unknown),
             is_default: live.map(|d| d.is_default).unwrap_or(false),
             connected: live.is_some(),
-            hidden: priority.hidden.iter().any(|h| h == uid),
             last_seen: if live.is_some() {
                 None
             } else {
@@ -62,17 +60,11 @@ pub fn build_microphone_list(
     ordered
 }
 
-/// Drop one device from priorities, known, and hidden. No-op if absent from all three.
+/// Drop one device from priorities and known. No-op if absent from both.
 pub fn remove_known_device(priority: &InputPriority, uid: &str) -> InputPriority {
     InputPriority {
         priorities: priority
             .priorities
-            .iter()
-            .filter(|e| e.as_str() != uid)
-            .cloned()
-            .collect(),
-        hidden: priority
-            .hidden
             .iter()
             .filter(|e| e.as_str() != uid)
             .cloned()
@@ -117,7 +109,7 @@ pub fn transport_label(transport: TransportType) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use souffle_lib::audio::KnownDevice;
+    use souffle_lib::audio::{KnownDevice, ResolveInputParams, resolve_input};
 
     fn device(uid: &str, name: &str) -> AudioInputDevice {
         AudioInputDevice {
@@ -132,7 +124,6 @@ mod tests {
     fn orders_by_priority_then_known_then_connected() {
         let priority = InputPriority {
             priorities: vec!["b".to_string()],
-            hidden: vec![],
             known: vec![KnownDevice {
                 uid: "c".to_string(),
                 name: "C".to_string(),
@@ -156,7 +147,6 @@ mod tests {
                 transport: TransportType::Usb,
                 is_default: false,
                 connected: true,
-                hidden: false,
                 last_seen: None,
             },
             MicrophoneListEntry {
@@ -165,7 +155,6 @@ mod tests {
                 transport: TransportType::Usb,
                 is_default: false,
                 connected: true,
-                hidden: false,
                 last_seen: None,
             },
         ];
@@ -177,10 +166,9 @@ mod tests {
     }
 
     #[test]
-    fn remove_known_device_drops_from_all_three_lists() {
+    fn remove_known_device_drops_from_both_lists() {
         let priority = InputPriority {
             priorities: vec!["a".to_string(), "b".to_string()],
-            hidden: vec!["a".to_string()],
             known: vec![KnownDevice {
                 uid: "a".to_string(),
                 name: "A".to_string(),
@@ -189,7 +177,43 @@ mod tests {
         };
         let next = remove_known_device(&priority, "a");
         assert_eq!(next.priorities, vec!["b".to_string()]);
-        assert!(next.hidden.is_empty());
         assert!(next.known.is_empty());
+    }
+
+    #[test]
+    fn a_device_moved_to_the_bottom_is_picked_only_when_nothing_above_it_can_be() {
+        let connected = vec![device("a", "A"), device("b", "B"), device("c", "C")];
+        // Nothing saved yet: the first reorder must record the whole list.
+        let mut priority = InputPriority::default();
+        for _ in 0..2 {
+            let list = build_microphone_list(&connected, &priority);
+            priority.priorities = reorder_microphone_list(&list, "a", 1).unwrap();
+        }
+        assert_eq!(priority.priorities, ["b", "c", "a"]);
+        let resolve = |present: &[&str]| {
+            let present: Vec<_> = connected
+                .iter()
+                .filter(|device| present.contains(&device.uid.as_str()))
+                .cloned()
+                .map(|mut device| {
+                    // The system default must not outrank the saved order.
+                    device.is_default = device.uid == "a";
+                    device
+                })
+                .collect();
+            resolve_input(
+                &present,
+                ResolveInputParams {
+                    pin: None,
+                    clamshell_pref: None,
+                    clamshell_active: false,
+                    priority: &priority,
+                    allow_bluetooth_mic: false,
+                },
+            )
+        };
+        assert_eq!(resolve(&["a", "b", "c"]).as_deref(), Some("b"));
+        assert_eq!(resolve(&["a", "c"]).as_deref(), Some("c"));
+        assert_eq!(resolve(&["a"]).as_deref(), Some("a"));
     }
 }

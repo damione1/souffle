@@ -2559,26 +2559,6 @@ msgctxt "MicrophoneSection"
 msgid "Descendre {}"
 msgstr "Descendre {}"
 
-#: ui/components/settings/microphone_section.slint:113
-msgctxt "MicrophoneSection"
-msgid "Afficher"
-msgstr "Afficher"
-
-#: ui/components/settings/microphone_section.slint:113
-msgctxt "MicrophoneSection"
-msgid "Masquer"
-msgstr "Masquer"
-
-#: ui/components/settings/microphone_section.slint:115
-msgctxt "MicrophoneSection"
-msgid "Afficher {}"
-msgstr "Afficher {}"
-
-#: ui/components/settings/microphone_section.slint:116
-msgctxt "MicrophoneSection"
-msgid "Masquer {}"
-msgstr "Masquer {}"
-
 #: ui/components/settings/microphone_section.slint:125
 msgctxt "MicrophoneSection"
 msgid "Supprimer {}"

@@ -260,7 +260,6 @@ export component SettingsView inherits KitAppShell {
     callback reset-sample-rate-requested();
     callback allow-bluetooth-mic-changed(bool);
     callback move-device-requested(string, int);
-    callback toggle-hidden-requested(string, bool);
     callback remove-device-requested(string);
     callback clamshell-device-changed(string);
     callback capture-system-audio-changed(bool);
@@ -601,7 +600,6 @@ export component SettingsView inherits KitAppShell {
                                     reset-sample-rate-requested => { root.reset-sample-rate-requested(); }
                                     allow-bluetooth-mic-changed(value) => { root.allow-bluetooth-mic-changed(value); }
                                     move-device-requested(uid, direction) => { root.move-device-requested(uid, direction); }
-                                    toggle-hidden-requested(uid, hidden) => { root.toggle-hidden-requested(uid, hidden); }
                                     remove-device-requested(uid) => { root.remove-device-requested(uid); }
                                 }
 

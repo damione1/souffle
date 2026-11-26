@@ -18,8 +18,6 @@ pub struct KnownDevice {
 pub struct InputPriority {
     /// Preferred device UIDs, highest priority first.
     pub priorities: Vec<String>,
-    /// Connected devices in this list are never auto-selected.
-    pub hidden: Vec<String>,
     /// Devices seen before, including ones currently disconnected.
     pub known: Vec<KnownDevice>,
 }
@@ -51,13 +49,8 @@ fn is_connected<'a>(devices: &'a [AudioInputDevice], uid: &str) -> Option<&'a Au
     devices.iter().find(|device| device.uid == uid)
 }
 
-fn is_auto_eligible(
-    device: &AudioInputDevice,
-    hidden: &[String],
-    allow_bluetooth_mic: bool,
-) -> bool {
-    !hidden.iter().any(|uid| uid == &device.uid)
-        && (allow_bluetooth_mic || !is_bluetooth_transport(device.transport))
+fn is_auto_eligible(device: &AudioInputDevice, allow_bluetooth_mic: bool) -> bool {
+    allow_bluetooth_mic || !is_bluetooth_transport(device.transport)
 }
 
 /// Update `known` from the current connected-device snapshot.
@@ -88,11 +81,11 @@ pub fn touch_known(priority: &mut InputPriority, connected: &[AudioInputDevice])
 /// Pick the input UID to capture on, or `None` when no device is connected.
 ///
 /// Order: explicit pin (if connected) -> clamshell preference (when active and
-/// connected) -> first connected non-hidden priority entry -> system default
+/// connected) -> first connected eligible priority entry -> system default
 /// (with anti-Bluetooth preference when `allow_bluetooth_mic` is false).
 ///
 /// `None` is also returned when devices are connected but none is
-/// auto-eligible (all hidden, or Bluetooth-only with Bluetooth disallowed).
+/// auto-eligible (Bluetooth-only with Bluetooth disallowed).
 /// The caller decides that fallback: capture opens the OS default anyway so
 /// recording still works, and never rebuilds toward a `None` resolution.
 pub fn resolve_input(
@@ -120,27 +113,19 @@ pub fn resolve_input(
 
     for uid in &params.priority.priorities {
         if let Some(device) = is_connected(connected, uid)
-            && is_auto_eligible(device, &params.priority.hidden, params.allow_bluetooth_mic)
+            && is_auto_eligible(device, params.allow_bluetooth_mic)
         {
             return Some(device.uid.clone());
         }
     }
 
-    resolve_default(
-        connected,
-        &params.priority.hidden,
-        params.allow_bluetooth_mic,
-    )
+    resolve_default(connected, params.allow_bluetooth_mic)
 }
 
-fn resolve_default(
-    connected: &[AudioInputDevice],
-    hidden: &[String],
-    allow_bluetooth_mic: bool,
-) -> Option<String> {
+fn resolve_default(connected: &[AudioInputDevice], allow_bluetooth_mic: bool) -> Option<String> {
     let eligible: Vec<&AudioInputDevice> = connected
         .iter()
-        .filter(|device| is_auto_eligible(device, hidden, allow_bluetooth_mic))
+        .filter(|device| is_auto_eligible(device, allow_bluetooth_mic))
         .collect();
 
     if eligible.is_empty() {
@@ -285,7 +270,6 @@ mod tests {
         ];
         let priority = InputPriority {
             priorities: vec!["missing".into(), "hdmi".into(), "usb".into()],
-            hidden: Vec::new(),
             known: Vec::new(),
         };
         assert_eq!(
@@ -295,19 +279,17 @@ mod tests {
     }
 
     #[test]
-    fn hidden_devices_are_skipped_in_priorities() {
+    fn saved_settings_with_a_hidden_list_still_load_and_follow_the_order() {
+        let priority: InputPriority =
+            serde_json::from_str(r#"{"priorities":["usb","builtin"],"hidden":["usb"],"known":[]}"#)
+                .expect("settings saved by earlier versions");
         let connected = vec![
-            device("usb", "USB", TransportType::Usb, false),
             device("builtin", "Built-in", TransportType::BuiltIn, true),
+            device("usb", "USB", TransportType::Usb, false),
         ];
-        let priority = InputPriority {
-            priorities: vec!["usb".into(), "builtin".into()],
-            hidden: vec!["usb".into()],
-            known: Vec::new(),
-        };
         assert_eq!(
             resolve_input(&connected, params(None, None, false, &priority, true)),
-            Some("builtin".into()),
+            Some("usb".into()),
         );
     }
 
@@ -364,7 +346,6 @@ mod tests {
         ];
         let priority = InputPriority {
             priorities: vec!["bt".into(), "usb".into()],
-            hidden: Vec::new(),
             known: Vec::new(),
         };
         assert_eq!(

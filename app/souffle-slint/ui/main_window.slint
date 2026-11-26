@@ -476,7 +476,6 @@ export component MainWindow inherits Window {
     callback settings-reset-sample-rate-requested();
     callback settings-allow-bluetooth-mic-changed(bool);
     callback settings-move-device-requested(string, int);
-    callback settings-toggle-hidden-requested(string, bool);
     callback settings-remove-device-requested(string);
     callback settings-clamshell-device-changed(string);
     callback settings-capture-system-audio-changed(bool);
@@ -1127,7 +1126,6 @@ export component MainWindow inherits Window {
                 reset-sample-rate-requested => { root.settings-reset-sample-rate-requested(); }
                 allow-bluetooth-mic-changed(value) => { root.settings-allow-bluetooth-mic-changed(value); }
                 move-device-requested(uid, direction) => { root.settings-move-device-requested(uid, direction); }
-                toggle-hidden-requested(uid, hidden) => { root.settings-toggle-hidden-requested(uid, hidden); }
                 remove-device-requested(uid) => { root.settings-remove-device-requested(uid); }
                 clamshell-device-changed(value) => { root.settings-clamshell-device-changed(value); }
                 capture-system-audio-changed(value) => { root.settings-capture-system-audio-changed(value); }

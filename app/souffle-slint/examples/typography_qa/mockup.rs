@@ -1,5 +1,5 @@
 //! Data reproducing the states drawn on the design boards, applied on top of the
-//! typography fixture when SOU276_MOCKUP=1. French only, no live services.
+//! typography fixture when SOU276_MOCKUP=1. French boards, no live services.
 use super::{
     audio_ui, ia_ui, lists_ui, live_view, microphone_list, model, scroll_bench, strings, timeline,
     transcript, transcript_window,
@@ -34,7 +34,7 @@ pub(super) fn apply(window: &MainWindow, surface: &str) {
         settings(window);
         settings_state(window, surface);
     } else if surface.starts_with("onboarding-") {
-        onboarding(window);
+        super::wizard::apply(window, surface);
     } else if surface.starts_with("detail") {
         detail(window, surface);
     } else if surface == "meeting" || surface == "dictation" {
@@ -376,36 +376,6 @@ fn dialogs(window: &MainWindow, surface: &str) {
             }
         }
     }
-}
-
-fn onboarding(window: &MainWindow) {
-    use AccessState::{Denied, Granted, Unknown};
-    window.set_onboarding_toggle_shortcut_label("⌥ Espace".into());
-    window.set_onboarding_permission_rows(model(permission_rows([
-        Granted, Unknown, Denied, Unknown,
-    ])));
-    window.set_onboarding_device_labels(strings(&["MacBook Pro Microphone"]));
-    window.set_onboarding_device_ids(strings(&["builtin"]));
-    window.set_onboarding_default_device_index(0);
-    window.set_onboarding_audio_level(0.6);
-    window.set_onboarding_audio_levels(model(
-        (0..28)
-            .map(|i| 0.25 + 0.6 * ((i as f32) * 0.7).sin().abs())
-            .collect::<Vec<f32>>(),
-    ));
-    window.set_onboarding_model_labels(strings(&["Kyutai STT 1B · FR + EN · streaming"]));
-    window.set_onboarding_model_ids(strings(&["kyutai"]));
-    if window.get_onboarding_step() == OnboardingStep::Model {
-        window.set_onboarding_model_phase(ModelPhase::Downloading);
-        window.set_onboarding_download_progress_label("62 %".into());
-        window.set_onboarding_download_progress_fraction(0.62);
-    }
-    window.set_onboarding_step_index(match window.get_onboarding_step() {
-        OnboardingStep::Permissions => 0,
-        OnboardingStep::Microphone => 1,
-        OnboardingStep::Model => 2,
-        OnboardingStep::Shortcut => 3,
-    });
 }
 
 fn paragraph(speaker: SpeakerRole, timestamp: &str, text: &str, tail: &str) -> TranscriptBlock {
@@ -987,15 +957,26 @@ fn settings(window: &MainWindow) {
     audio_ui::populate_device_pickers(window, &devices, "builtin", None);
     window.set_settings_sample_rate_label("96 kHz".into());
     window.set_settings_sample_rate_high(true);
-    let priority = InputPriority {
-        priorities: vec!["builtin".into(), "airpods".into(), "usb".into()],
+    // SOU276_MICROPHONES=mixed puts the unplugged row between two connected
+    // ones, =connected leaves no unplugged row.
+    let rows = std::env::var("SOU276_MICROPHONES").unwrap_or_default();
+    let order = if rows == "mixed" {
+        ["builtin", "usb", "airpods"]
+    } else {
+        ["builtin", "airpods", "usb"]
+    };
+    let mut priority = InputPriority {
+        priorities: order.into_iter().map(str::to_owned).collect(),
         known: vec![KnownDevice {
             uid: "usb".into(),
             name: "Shure MV7".into(),
-            last_seen: chrono::Utc::now().timestamp() - 3 * 86_400,
+            // Not a whole number of days, as a real last-seen time never is.
+            last_seen: chrono::Utc::now().timestamp() - 3 * 86_400 - 74_400,
         }],
-        ..Default::default()
     };
+    if rows == "connected" {
+        priority = microphone_list::remove_known_device(&priority, "usb");
+    }
     let list = microphone_list::build_microphone_list(&devices, &priority);
     audio_ui::populate_microphones(window, &list);
     window.set_settings_is_laptop(true);

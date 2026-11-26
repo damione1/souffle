@@ -829,7 +829,6 @@ impl AppSettings {
 
         normalized.input_priority.priorities =
             sanitize_uid_list(&normalized.input_priority.priorities);
-        normalized.input_priority.hidden = sanitize_uid_list(&normalized.input_priority.hidden);
         normalized.input_priority.known = normalized
             .input_priority
             .known
