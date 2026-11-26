@@ -1,8 +1,8 @@
 //! Data reproducing the states drawn on the design boards, applied on top of the
 //! typography fixture when SOU276_MOCKUP=1. French only, no live services.
 use super::{
-    audio_ui, ia_ui, lists_ui, microphone_list, model, scroll_bench, strings, transcript,
-    transcript_window,
+    audio_ui, ia_ui, lists_ui, live_view, microphone_list, model, scroll_bench, strings,
+    transcript, transcript_window,
 };
 use slint::{ComponentHandle, Model, SharedString};
 use souffle_lib::audio::{AudioInputDevice, InputPriority, KnownDevice, TransportType};
@@ -182,12 +182,69 @@ fn home(window: &MainWindow, surface: &str) {
             ..Default::default()
         },
     ]));
+    if let Some(days) = std::env::var("SOU276_HISTORY_DAYS")
+        .ok()
+        .and_then(|value| value.parse::<i32>().ok())
+    {
+        long_history(window, days);
+    }
     if surface == "alerts" {
         window.set_mic_stall_visible(true);
         window.set_mic_stall_kind(MicStall::TimedOut);
         window.set_mic_stall_device("MacBook Pro Microphone".into());
         window.set_dictation_recovery_text("Pensez à relancer le fournisseur pour la facture de mars et à confirmer la date du comité avec Camille avant vendredi.".into());
         window.set_meeting_status_message("MEETING_FINALIZATION_TIMEOUT".into());
+    }
+}
+
+/// `days` earlier days of six entries each, to load the history list.
+fn long_history(window: &MainWindow, days: i32) {
+    use TimelineKind::{Dictation, Meeting};
+    const ENTRIES_PER_DAY: i32 = 6;
+    let groups = (0..days)
+        .map(|day| TimelineDayGroup {
+            day: TimelineDay::Earlier,
+            weekday: day % 7,
+            day_of_month: 1 + day % 28,
+            month: (day / 28) % 12,
+            entries: model(
+                (0..ENTRIES_PER_DAY)
+                    .map(|index| {
+                        let id = format!("history-{day}-{index}");
+                        if index % 2 == 0 {
+                            entry(
+                                Meeting,
+                                &id,
+                                &format!("Point d'équipe {day}.{index}"),
+                                "28:05",
+                                "09:00",
+                                index % 4 == 0,
+                            )
+                        } else {
+                            entry(
+                                Dictation,
+                                &id,
+                                "Penser à relancer le fournisseur pour la facture de mars",
+                                "0:32",
+                                "09:48",
+                                false,
+                            )
+                        }
+                    })
+                    .collect(),
+            ),
+        })
+        .collect::<Vec<_>>();
+    window.set_timeline_groups(model(groups));
+    if scroll_bench::enabled() {
+        // A day is a heading, a card of rows and the gap to the next one.
+        let travel = days as f32 * (ENTRIES_PER_DAY as f32 * 57.0 + 60.0);
+        scroll_bench::start(
+            window,
+            format!("history {} entries", days * ENTRIES_PER_DAY),
+            scroll_bench::View::wheel(520.0, 600.0, travel),
+            |_| {},
+        );
     }
 }
 
@@ -335,6 +392,12 @@ fn recording(window: &MainWindow, surface: &str) {
         window.set_mic_stall_kind(MicStall::Parked);
         window.set_mic_stall_device("MacBook Pro Microphone".into());
         window.set_live_elapsed_offset_seconds(14);
+        if let Some(words) = std::env::var("SOU276_DICTATION_WORDS")
+            .ok()
+            .and_then(|value| value.parse::<usize>().ok())
+        {
+            long_dictation(window, words);
+        }
     } else {
         window.set_live_transcript_blocks(model(vec![
             paragraph(SpeakerRole::Them, "23:12", "Du coup côté planning, on peut viser la bêta pour mi-décembre si l'équipe valide le périmètre cette semaine.", ""),
@@ -346,6 +409,45 @@ fn recording(window: &MainWindow, surface: &str) {
         window.set_live_elapsed_offset_seconds(24 * 60 + 8);
     }
     window.set_audio_level(0.5);
+}
+
+/// A dictation streamed one word at a time through the app's own word
+/// publisher: each word is first shown as the engine's pending word, then
+/// joins the text.
+fn long_dictation(window: &MainWindow, words: usize) {
+    const WORDS: [&str; 8] = [
+        "Bonjour",
+        "Camille,",
+        "je",
+        "confirme",
+        "que",
+        "le",
+        "comité",
+        "commence.",
+    ];
+    window.set_live_text("".into());
+    window.set_live_tentative("".into());
+    live_view::push_dictation_words(window);
+    scroll_bench::start_growth(
+        window,
+        format!("dictation {words} words"),
+        2 * words,
+        |window, step| {
+            let word = WORDS[(step / 2) % WORDS.len()];
+            if step % 2 == 0 {
+                window.set_live_tentative(word.into());
+            } else {
+                let mut text = window.get_live_text().to_string();
+                if !text.is_empty() {
+                    text.push(' ');
+                }
+                text.push_str(word);
+                window.set_live_text(text.into());
+                window.set_live_tentative("".into());
+            }
+            live_view::push_dictation_words(window);
+        },
+    );
 }
 
 fn detail(window: &MainWindow, surface: &str) {
@@ -496,6 +598,27 @@ fn detail(window: &MainWindow, surface: &str) {
                 "Export audio dans la bêta ?",
             ]));
         }
+    }
+    if let Some(lines) = std::env::var("SOU276_COMPACT_LINES")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+    {
+        let compression = window.global::<CompressionUi>();
+        compression.set_has_compact(true);
+        compression.set_expanded(true);
+        compression.set_lines(model(
+            (0..lines)
+                .map(|line| CompactLine {
+                    text: format!(
+                        "Eux [{line}] : bêta visée mi-décembre, périmètre des réglages à figer avant lundi, documentation et captures à suivre."
+                    )
+                    .into(),
+                    seconds: line as f32 * 20.0,
+                    timed: line % 3 != 0,
+                    session_index: 0,
+                })
+                .collect(),
+        ));
     }
     if surface.starts_with("detail-transcript-long") {
         long_transcript(window, surface);
@@ -873,8 +996,20 @@ fn settings(window: &MainWindow) {
     window.set_settings_mcp_claude_code_command("claude mcp add souffle -- souffle-mcp".into());
 }
 
-const LONG_LIST_ROWS: i64 = 30;
 const LONG_SUGGESTION_ROWS: i64 = 12;
+// The greatest heights of the three lists in `dictionary_section.slint` and
+// `snippets_section.slint`.
+const DICTIONARY_VIEWPORT_HEIGHT_PX: f32 = 357.0;
+const SUGGESTION_VIEWPORT_HEIGHT_PX: f32 = 240.0;
+const SNIPPETS_VIEWPORT_HEIGHT_PX: f32 = 406.0;
+
+/// Entries in the long dictionary and snippet lists.
+fn long_list_rows() -> i64 {
+    std::env::var("SOU276_LIST_ROWS")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(30)
+}
 
 /// States without an artboard, selected by surface suffix.
 fn settings_state(window: &MainWindow, surface: &str) {
@@ -933,7 +1068,7 @@ fn long_lists(window: &MainWindow, position: ListPosition) {
             .collect::<Vec<_>>(),
     );
     lists.populate_dictionary(
-        &(1..=LONG_LIST_ROWS)
+        &(1..=long_list_rows())
             .map(|i| {
                 dictionary_entry(
                     i,
@@ -945,7 +1080,7 @@ fn long_lists(window: &MainWindow, position: ListPosition) {
             .collect::<Vec<_>>(),
     );
     lists.populate_snippets(
-        &(1..=LONG_LIST_ROWS)
+        &(1..=long_list_rows())
             .map(|i| {
                 snippet(
                     i,
@@ -956,6 +1091,37 @@ fn long_lists(window: &MainWindow, position: ListPosition) {
             .collect::<Vec<_>>(),
         (position == ListPosition::Errors).then_some(2),
     );
+    if scroll_bench::enabled() {
+        let snippets = std::env::var("SOU276_BENCH_LIST").as_deref() == Ok("snippets");
+        let view: scroll_bench::View<MainWindow> = if snippets {
+            scroll_bench::View {
+                travel: Box::new(|window| {
+                    window.get_settings_snippets_content_height() - SNIPPETS_VIEWPORT_HEIGHT_PX
+                }),
+                position: Box::new(|window| -window.get_settings_snippets_scroll_top()),
+                scroll_to: Box::new(|window, position| {
+                    window.set_settings_snippets_scroll_top(-position)
+                }),
+            }
+        } else {
+            scroll_bench::View {
+                travel: Box::new(|window| {
+                    window.get_settings_dictionary_content_height() - DICTIONARY_VIEWPORT_HEIGHT_PX
+                }),
+                position: Box::new(|window| -window.get_settings_dictionary_scroll_top()),
+                scroll_to: Box::new(|window, position| {
+                    window.set_settings_dictionary_scroll_top(-position)
+                }),
+            }
+        };
+        let label = format!(
+            "{} {} rows",
+            if snippets { "snippets" } else { "dictionary" },
+            long_list_rows()
+        );
+        scroll_bench::start(window, label, view, |_| {});
+        return;
+    }
     let share = match position {
         ListPosition::Middle => 0.5,
         ListPosition::End => 1.0,
@@ -965,14 +1131,14 @@ fn long_lists(window: &MainWindow, position: ListPosition) {
     let offset = |content: f32, viewport: f32| -(content - viewport).max(0.0) * share;
     window.set_settings_dictionary_suggestion_scroll_top(offset(
         window.get_settings_dictionary_suggestion_content_height(),
-        lists_ui::SUGGESTION_VIEWPORT_HEIGHT_PX,
+        SUGGESTION_VIEWPORT_HEIGHT_PX,
     ));
     window.set_settings_dictionary_scroll_top(offset(
         window.get_settings_dictionary_content_height(),
-        lists_ui::DICTIONARY_VIEWPORT_HEIGHT_PX,
+        DICTIONARY_VIEWPORT_HEIGHT_PX,
     ));
     window.set_settings_snippets_scroll_top(offset(
         window.get_settings_snippets_content_height(),
-        lists_ui::SNIPPETS_VIEWPORT_HEIGHT_PX,
+        SNIPPETS_VIEWPORT_HEIGHT_PX,
     ));
 }

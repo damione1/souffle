@@ -39,6 +39,30 @@ pub(super) struct View<W> {
     pub(super) scroll_to: Box<dyn Fn(&W, f32)>,
 }
 
+impl<W: ComponentHandle + 'static> View<W> {
+    /// A list scrolled like a user does, by wheel events at (`x`, `y`). The
+    /// window does not report that list's position, so it is tracked here
+    /// against the `travel` the caller computed.
+    pub(super) fn wheel(x: f32, y: f32, travel: f32) -> Self {
+        let scrolled = Rc::new(std::cell::Cell::new(0.0f32));
+        let position = scrolled.clone();
+        Self {
+            travel: Box::new(move |_| travel),
+            position: Box::new(move |_| position.get()),
+            scroll_to: Box::new(move |window, target| {
+                let delta = target - scrolled.replace(target);
+                window
+                    .window()
+                    .dispatch_event(slint::platform::WindowEvent::PointerScrolled {
+                        position: slint::LogicalPosition::new(x, y),
+                        delta_x: 0.0,
+                        delta_y: -delta,
+                    });
+            }),
+        }
+    }
+}
+
 pub(super) fn enabled() -> bool {
     std::env::var("SOU276_SCROLL_BENCH").as_deref() == Ok("1")
 }
@@ -199,6 +223,54 @@ pub(super) fn start<W: ComponentHandle + 'static>(
         run.frame += 1;
         drop(slot);
         (view.scroll_to)(&window, position.clamp(0.0, travel));
+    };
+    let weak = window.as_weak();
+    slint::Timer::single_shot(std::time::Duration::from_millis(1500), move || {
+        if weak.upgrade().is_some() {
+            timer.start(slint::TimerMode::Repeated, STEP_INTERVAL, tick);
+        }
+    });
+}
+
+/// Times `steps` calls of `step`, one every `STEP_INTERVAL`, for a view that
+/// grows instead of scrolling. Reports the first and the last quarter apart:
+/// the cost of a step should not follow the amount of content.
+pub(super) fn start_growth<W: ComponentHandle + 'static>(
+    window: &W,
+    label: String,
+    steps: usize,
+    step: impl Fn(&W, usize) + 'static,
+) {
+    let weak = window.as_weak();
+    let timer = Rc::new(slint::Timer::default());
+    let ticking = timer.clone();
+    let state = RefCell::new((0usize, Samples::default(), None::<(Instant, f64)>));
+    let tick = move || {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        let mut state = state.borrow_mut();
+        let now = (Instant::now(), thread_cpu_ms());
+        if let Some((wall, cpu)) = state.2.replace(now) {
+            state.1.cpu.push(now.1 - cpu);
+            state.1.wall.push((now.0 - wall).as_secs_f64() * 1e3);
+        }
+        if state.0 >= steps {
+            let quarter = (steps / 4).max(1);
+            let part = |range: std::ops::Range<usize>| Samples {
+                cpu: state.1.cpu[range.clone()].to_vec(),
+                wall: state.1.wall[range].to_vec(),
+            };
+            report("first_quarter", &label, &part(0..quarter));
+            report("last_quarter", &label, &part(steps - quarter..steps));
+            ticking.stop();
+            slint::quit_event_loop().unwrap();
+            return;
+        }
+        let index = state.0;
+        state.0 += 1;
+        drop(state);
+        step(&window, index);
     };
     let weak = window.as_weak();
     slint::Timer::single_shot(std::time::Duration::from_millis(1500), move || {

@@ -85,7 +85,28 @@ pub fn push_dictation_words(window: &MainWindow) {
             ..word
         })
         .collect();
-    window.set_live_dictation_words(ModelRc::new(VecModel::from(words)));
+    let current = window.get_live_dictation_words();
+    match current.as_any().downcast_ref::<VecModel<TranscriptWord>>() {
+        Some(model) => sync_words(model, words),
+        None => window.set_live_dictation_words(ModelRc::new(VecModel::from(words))),
+    }
+}
+
+/// Brings `model` to `words` row by row. A live text grows at its end, so
+/// only the last words change: replacing the model instead would rebuild and
+/// measure every word of the text on each engine update.
+fn sync_words(model: &VecModel<TranscriptWord>, words: Vec<TranscriptWord>) {
+    let target = words.len();
+    for (i, word) in words.into_iter().enumerate() {
+        match model.row_data(i) {
+            Some(existing) if existing == word => {}
+            Some(_) => model.set_row_data(i, word),
+            None => model.push(word),
+        }
+    }
+    while model.row_count() > target {
+        model.remove(model.row_count() - 1);
+    }
 }
 
 /// Publishes the current paragraphs to `live-transcript-blocks`. The first
@@ -123,10 +144,22 @@ fn same_rendering(a: &TranscriptBlock, b: &TranscriptBlock) -> bool {
 
 fn sync_blocks(model: &VecModel<TranscriptBlock>, blocks: Vec<TranscriptBlock>) {
     let target = blocks.len();
-    for (i, block) in blocks.into_iter().enumerate() {
+    for (i, mut block) in blocks.into_iter().enumerate() {
         match model.row_data(i) {
             Some(existing) if same_rendering(&existing, &block) => {}
-            Some(_) => model.set_row_data(i, block),
+            Some(existing) => {
+                // The row keeps its word model, so a paragraph that gains a
+                // word does not rebuild the words it already shows.
+                if let Some(words) = existing
+                    .words
+                    .as_any()
+                    .downcast_ref::<VecModel<TranscriptWord>>()
+                {
+                    sync_words(words, block.words.iter().collect());
+                    block.words = existing.words.clone();
+                }
+                model.set_row_data(i, block);
+            }
             None => model.push(block),
         }
     }
@@ -975,6 +1008,59 @@ mod tests {
             text: text.into(),
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn sync_words_follows_a_confirmed_word_a_new_one_and_a_shorter_text() {
+        let word = |text: &str, provisional: bool| TranscriptWord {
+            text: text.into(),
+            trailing_text: " ".into(),
+            clickable: false,
+            provisional,
+        };
+        let model = VecModel::from(vec![
+            word("Bonjour", false),
+            word("Camille", false),
+            word("je", true),
+        ]);
+        let target = vec![
+            word("Bonjour", false),
+            word("Camille", false),
+            word("je", false),
+            word("confirme", true),
+        ];
+        sync_words(&model, target.clone());
+        assert_eq!(model.iter().collect::<Vec<_>>(), target);
+
+        sync_words(&model, vec![word("Bonjour", false)]);
+        assert_eq!(model.iter().collect::<Vec<_>>(), [word("Bonjour", false)]);
+        sync_words(&model, Vec::new());
+        assert_eq!(model.row_count(), 0);
+    }
+
+    #[test]
+    fn a_growing_live_paragraph_keeps_its_word_model() {
+        let paragraph = |text: &str| TranscriptBlock {
+            words: ModelRc::new(VecModel::from(crate::transcript::build_words(text))),
+            ..block(text, SpeakerRole::Me)
+        };
+        let model = VecModel::from(vec![paragraph("Bonjour")]);
+        let words = model.row_data(0).unwrap().words;
+        sync_blocks(&model, vec![paragraph("Bonjour tout le monde")]);
+        let updated = model.row_data(0).unwrap();
+        assert_eq!(updated.text.as_str(), "Bonjour tout le monde");
+        assert!(
+            updated.words == words,
+            "the row still renders the model it had"
+        );
+        assert_eq!(
+            updated
+                .words
+                .iter()
+                .map(|word| word.text.to_string())
+                .collect::<Vec<_>>(),
+            ["Bonjour", "tout", "le", "monde"]
+        );
     }
 
     #[test]

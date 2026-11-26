@@ -1,5 +1,5 @@
 import { AppText, Typography } from "@typography";
-import { FieldSetAppearance, FieldRowAppearance, ButtonIntent, ControlSize, KitButton, KitFieldError, KitFieldRow, KitFieldSeparator, KitFieldSet, KitTextArea, KitTextField, KitThemeContext, ResizePolicy, ScrollFrame, KitOverline } from "@kit";
+import { FieldSetAppearance, FieldRowAppearance, ButtonIntent, ControlSize, KitButton, KitFieldError, KitFieldRow, KitFieldSeparator, KitFieldSet, KitTextArea, KitTextField, KitThemeContext, ListView, ResizePolicy, KitOverline } from "@kit";
 import { Theme } from "../../theme.slint";
 
 // Port of SnippetsSettingsSection.svelte. Which row is being edited is
@@ -14,16 +14,12 @@ export struct SnippetRow {
 }
 
 export component SnippetsSection inherits VerticalLayout {
-    // Only the currently visible slice of the snippet list (SOU-229) -
-    // `lists_ui.rs` owns the full row list and windows it with the same
-    // spacer-before/spacer-after pattern as `transcript_section.slint`; see
-    // `dictionary_section.slint` for the full rationale. Row heights must
-    // match the constants in `lists_ui.rs`.
+    // The whole snippet list (SOU-229), virtualized by the kit list below; see
+    // `dictionary_section.slint`. Row heights must match the constants in
+    // `lists_ui.rs`.
     in property <[SnippetRow]> entries;
     in property <int> entry-count: 0;
     in property <float> list-content-height: 0.0;
-    in property <float> list-spacer-before: 0.0;
-    in property <float> list-spacer-after: 0.0;
     in-out property <length> list-scroll-top: 0px;
     in-out property <string> new-trigger-draft: "";
     in-out property <string> new-expansion-draft: "";
@@ -118,123 +114,113 @@ export component SnippetsSection inherits VerticalLayout {
             }
         }
 
-        snippets-list := ScrollFrame {
+        snippets-list := ListView {
             // Rows pad their own trailing edge, so their dividers reach the card's.
             overlay-scrollbars: true;
             // Seven whole rows, as in the dictionary list.
             height: min(root.list-content-height * 1px, 406px);
             visible: root.entry-count > 0;
             horizontal-scrollbar-policy: always-off;
-            content-width: self.visible-width;
-            content-height: root.list-content-height * 1px;
             content-y <=> root.list-scroll-top;
 
-            VerticalLayout {
+            for row in root.entries: VerticalLayout {
                 width: snippets-list.visible-width;
+                height: row.editing ? 236px : (root.delete-error != "" && root.delete-error-id == row.id ? 80px : 58px);
                 alignment: start;
 
-                Rectangle { height: root.list-spacer-before * 1px; }
+                KitFieldSeparator { theme: KitThemeContext.current; }
 
-                for row in root.entries: VerticalLayout {
-                    height: row.editing ? 236px : (root.delete-error != "" && root.delete-error-id == row.id ? 80px : 58px);
+                VerticalLayout {
+                    padding-left: 20px;
+                    padding-right: 20px;
+                    padding-top: 12px;
+                    padding-bottom: 12px;
+                    spacing: 6px;
                     alignment: start;
 
-                    KitFieldSeparator { theme: KitThemeContext.current; }
+                    if !row.editing: HorizontalLayout {
+                        spacing: 12px;
+                        alignment: stretch;
 
-                    VerticalLayout {
-                        padding-left: 20px;
-                        padding-right: 20px;
-                        padding-top: 12px;
-                        padding-bottom: 12px;
-                        spacing: 6px;
-                        alignment: start;
-
-                        if !row.editing: HorizontalLayout {
-                            spacing: 12px;
-                            alignment: stretch;
-
-                            AppText {
-                                text: row.trigger;
-                                typography: Typography.field-heading;
-                                color: Theme.text-primary;
-                                overflow: elide;
-                                width: 200px;
-                                horizontal-stretch: 0;
-                                vertical-alignment: center;
-                            }
-                            AppText {
-                                text: row.expansion;
-                                typography: Typography.content;
-                                color: Theme.text-muted;
-                                max-height: 32px;
-                                wrap: word-wrap;
-                                overflow: elide;
-                                horizontal-stretch: 1;
-                                vertical-alignment: center;
-                            }
-                            HorizontalLayout {
-                                spacing: 6px;
-                                horizontal-stretch: 0;
-                                alignment: start;
-                                KitButton {
-                                    text: @tr("Modifier");
-                                    control-size: ControlSize.compact;
-                                    intent: ButtonIntent.quiet;
-                                    activated => { root.edit-requested(row.id); }
-                                }
-                                KitButton {
-                                    text: @tr("Supprimer");
-                                    control-size: ControlSize.compact;
-                                    intent: ButtonIntent.quiet;
-                                    activated => { root.delete-requested(row.id); }
-                                }
-                            }
-                        }
-
-                        if row.editing: VerticalLayout {
-                            spacing: 6px;
-
-                            KitOverline { label: @tr("DÉCLENCHEUR"); }
-                            KitTextField {
-                                text <=> root.edit-trigger-draft;
-                                accessible-name: @tr("Phrase déclencheur");
-                            }
-                            KitOverline { label: @tr("EXPANSION"); }
-                            KitTextArea {
-                                text <=> root.edit-expansion-draft;
-                                accessible-name: @tr("Texte de l'extrait vocal");
-                                resize-policy: ResizePolicy.fixed;
-                                min-lines: 4;
-                                height: 72px;
-                            }
-                            if root.update-error != "": KitFieldError { text: root.update-error; overflow: elide; }
-                            HorizontalLayout {
-                                alignment: end;
-                                spacing: 6px;
-                                KitButton {
-                                    text: @tr("Annuler");
-                                    control-size: ControlSize.compact;
-                                    intent: ButtonIntent.quiet;
-                                    activated => { root.cancel-edit-requested(); }
-                                }
-                                KitButton {
-                                    text: @tr("Enregistrer");
-                                    control-size: ControlSize.compact;
-                                    intent: ButtonIntent.primary;
-                                    disabled: root.edit-trigger-draft == "" || root.edit-expansion-draft == "";
-                                    activated => { root.save-edit-requested(row.id, root.edit-trigger-draft, root.edit-expansion-draft); }
-                                }
-                            }
-                        }
-
-                        if root.delete-error != "" && root.delete-error-id == row.id: KitFieldError {
-                            text: root.delete-error;
+                        AppText {
+                            text: row.trigger;
+                            typography: Typography.field-heading;
+                            color: Theme.text-primary;
                             overflow: elide;
+                            width: 200px;
+                            horizontal-stretch: 0;
+                            vertical-alignment: center;
+                        }
+                        AppText {
+                            text: row.expansion;
+                            typography: Typography.content;
+                            color: Theme.text-muted;
+                            max-height: 32px;
+                            wrap: word-wrap;
+                            overflow: elide;
+                            horizontal-stretch: 1;
+                            vertical-alignment: center;
+                        }
+                        HorizontalLayout {
+                            spacing: 6px;
+                            horizontal-stretch: 0;
+                            alignment: start;
+                            KitButton {
+                                text: @tr("Modifier");
+                                control-size: ControlSize.compact;
+                                intent: ButtonIntent.quiet;
+                                activated => { root.edit-requested(row.id); }
+                            }
+                            KitButton {
+                                text: @tr("Supprimer");
+                                control-size: ControlSize.compact;
+                                intent: ButtonIntent.quiet;
+                                activated => { root.delete-requested(row.id); }
+                            }
                         }
                     }
-                }
 
-                Rectangle { height: root.list-spacer-after * 1px; }
+                    if row.editing: VerticalLayout {
+                        spacing: 6px;
+
+                        KitOverline { label: @tr("DÉCLENCHEUR"); }
+                        KitTextField {
+                            text <=> root.edit-trigger-draft;
+                            accessible-name: @tr("Phrase déclencheur");
+                        }
+                        KitOverline { label: @tr("EXPANSION"); }
+                        KitTextArea {
+                            text <=> root.edit-expansion-draft;
+                            accessible-name: @tr("Texte de l'extrait vocal");
+                            resize-policy: ResizePolicy.fixed;
+                            min-lines: 4;
+                            height: 72px;
+                        }
+                        if root.update-error != "": KitFieldError { text: root.update-error; overflow: elide; }
+                        HorizontalLayout {
+                            alignment: end;
+                            spacing: 6px;
+                            KitButton {
+                                text: @tr("Annuler");
+                                control-size: ControlSize.compact;
+                                intent: ButtonIntent.quiet;
+                                activated => { root.cancel-edit-requested(); }
+                            }
+                            KitButton {
+                                text: @tr("Enregistrer");
+                                control-size: ControlSize.compact;
+                                intent: ButtonIntent.primary;
+                                disabled: root.edit-trigger-draft == "" || root.edit-expansion-draft == "";
+                                activated => { root.save-edit-requested(row.id, root.edit-trigger-draft, root.edit-expansion-draft); }
+                            }
+                        }
+                    }
+
+                    if root.delete-error != "" && root.delete-error-id == row.id: KitFieldError {
+                        text: root.delete-error;
+                        overflow: elide;
+                    }
+                }
             }
         }
     }

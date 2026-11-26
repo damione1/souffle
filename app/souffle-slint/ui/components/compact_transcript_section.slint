@@ -1,5 +1,5 @@
 import { AppText, Typography } from "@typography";
-import { AlertSeverity, ButtonIntent, ControlSize, ControlWidth, KitAlert, KitButton, KitCard, KitInline, KitPressable, KitProgress, KitScrollArea, KitText, KitThemeContext, ProgressMode, SurfaceLevel, TypographyRole } from "@kit";
+import { AlertSeverity, ButtonIntent, ControlSize, ControlWidth, KitAlert, KitButton, KitCard, KitInline, KitPressable, KitProgress, KitText, KitThemeContext, ListView, ProgressMode, SurfaceLevel, TypographyRole } from "@kit";
 import { Theme } from "../theme.slint";
 import { CompressionUi } from "../compression.slint";
 import { CompactJobPhase } from "../types.slint";
@@ -118,11 +118,12 @@ export component CompactTranscriptSection inherits KitCard {
         inset: none;
         gap: none;
         height: CompressionUi.expanded ? 320px : 160px;
-        KitScrollArea {
-            label: @tr("Version compacte");
+        // One line per turn of the meeting: the list creates only those on screen.
+        compact-list := ListView {
+            accessible-label: @tr("Version compacte");
             height: CompressionUi.expanded ? 320px : 160px;
-            gap: none;
             for line in CompressionUi.lines: CompactLine {
+                width: compact-list.visible-width;
                 text: line.text;
                 timed: line.timed;
                 expanded: CompressionUi.expanded;

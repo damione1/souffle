@@ -200,23 +200,17 @@ export component SettingsView inherits KitAppShell {
     in property <[DictionarySuggestionRow]> dictionary-suggestions;
     in property <int> dictionary-suggestion-count;
     in property <float> dictionary-suggestion-content-height;
-    in property <float> dictionary-suggestion-spacer-before;
-    in property <float> dictionary-suggestion-spacer-after;
     in-out property <length> dictionary-suggestion-scroll-top;
     in property <string> dictionary-suggestion-error;
     in property <bool> dictionary-suggestion-busy;
-    // `dictionary-entries` / `snippets` are windowed slices, not the full
-    // lists - see the SOU-229 comment in `dictionary_section.slint`.
+    // `dictionary-entries` / `snippets` are the full lists - see the SOU-229
+    // comment in `dictionary_section.slint`.
     in property <[DictionaryRow]> dictionary-entries;
     in property <int> dictionary-entry-count;
     in property <float> dictionary-list-content-height;
-    in property <float> dictionary-list-spacer-before;
-    in property <float> dictionary-list-spacer-after;
     in-out property <length> dictionary-list-scroll-top;
     in property <int> snippets-entry-count;
     in property <float> snippets-list-content-height;
-    in property <float> snippets-list-spacer-before;
-    in property <float> snippets-list-spacer-after;
     in-out property <length> snippets-list-scroll-top;
     in property <string> dictionary-add-error;
     in property <int> dictionary-delete-error-id;
@@ -425,16 +419,12 @@ export component SettingsView inherits KitAppShell {
                                     suggestions: root.dictionary-suggestions;
                                     suggestion-count: root.dictionary-suggestion-count;
                                     suggestion-content-height: root.dictionary-suggestion-content-height;
-                                    suggestion-spacer-before: root.dictionary-suggestion-spacer-before;
-                                    suggestion-spacer-after: root.dictionary-suggestion-spacer-after;
                                     suggestion-scroll-top <=> root.dictionary-suggestion-scroll-top;
                                     suggestion-error: root.dictionary-suggestion-error;
                                     suggestion-busy: root.dictionary-suggestion-busy;
                                     entries: root.dictionary-entries;
                                     entry-count: root.dictionary-entry-count;
                                     list-content-height: root.dictionary-list-content-height;
-                                    list-spacer-before: root.dictionary-list-spacer-before;
-                                    list-spacer-after: root.dictionary-list-spacer-after;
                                     list-scroll-top <=> root.dictionary-list-scroll-top;
                                     new-term-draft <=> root.new-dictionary-term-draft;
                                     new-pronunciation-draft <=> root.new-dictionary-pronunciation-draft;
@@ -453,8 +443,6 @@ export component SettingsView inherits KitAppShell {
                                     entries: root.snippets;
                                     entry-count: root.snippets-entry-count;
                                     list-content-height: root.snippets-list-content-height;
-                                    list-spacer-before: root.snippets-list-spacer-before;
-                                    list-spacer-after: root.snippets-list-spacer-after;
                                     list-scroll-top <=> root.snippets-list-scroll-top;
                                     new-trigger-draft <=> root.new-snippet-trigger-draft;
                                     new-expansion-draft <=> root.new-snippet-expansion-draft;

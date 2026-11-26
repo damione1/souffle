@@ -21,6 +21,12 @@ mod ia_ui;
 #[path = "../src/lists_ui.rs"]
 mod lists_ui;
 #[allow(dead_code)]
+#[path = "../src/live_transcript.rs"]
+mod live_transcript;
+#[allow(dead_code)]
+#[path = "../src/live_view.rs"]
+mod live_view;
+#[allow(dead_code)]
 #[path = "../src/microphone_list.rs"]
 mod microphone_list;
 #[allow(dead_code)]

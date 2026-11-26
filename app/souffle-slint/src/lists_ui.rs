@@ -3,22 +3,12 @@
 //! `add_snippet`, ...), not a full-`AppSettings` round trip - no bounds or
 //! state machine to consume here, just row formatting.
 //!
-//! Two distinct mechanisms live here (SOU-229 splits them apart honestly):
-//!
-//! - **Incremental sync by id** (`sync_rows_by_id`, from SOU-209/PR #268):
-//!   the full row lists live in long-lived `VecModel`s whose `Rc` identity
-//!   never changes; a CRUD operation patches only the rows whose id/content
-//!   actually changed instead of rebuilding the whole model. This is *not*
-//!   virtualization - it bounds notifications, not instantiation.
-//! - **Render windowing** (SOU-229): Slint's `ListView` is a plain
-//!   `ScrollView { @children }` (`i-slint-compiler-1.17.1/widgets/common/
-//!   listview.slint`) that mounts one delegate per model row no matter what
-//!   is on screen. So, same as the transcript list (SOU-187 AC15, see
-//!   `transcript::visible_window`), the window only ever receives a *slice*
-//!   model of the on-screen rows plus a margin, with Rust-computed
-//!   spacer-before/spacer-after paddings standing in for everything else.
+//! The rows live in long-lived `VecModel`s whose `Rc` identity never changes
+//! (`sync_rows_by_id`, from SOU-209/PR #268): a CRUD operation patches only
+//! the rows whose id or content changed instead of replacing the model. The
+//! lists themselves are kit `ListView`s (SOU-229), which create a row only
+//! while it is on screen, so these models hold every entry.
 
-use crate::transcript::visible_window;
 use crate::{DictionaryRow, DictionarySuggestionRow, MainWindow, SnippetRow};
 use slint::{ComponentHandle, Model, VecModel};
 use souffle_lib::db::dictionary::DictionarySuggestion;
@@ -88,21 +78,14 @@ pub(crate) fn mutate_dictionary_suggestion(
 
 // Row heights mirror the explicit delegate heights in
 // `components/settings/dictionary_section.slint` /
-// `snippets_section.slint`. Like the transcript's estimates, a stale error/
-// editing state only skews spacer sizing a little - mounted rows always lay
-// out their real height.
+// `snippets_section.slint`. Their sum sizes a list that is shorter than its
+// maximum height.
 const DICTIONARY_ROW_HEIGHT_PX: f32 = 51.0;
 const DICTIONARY_ERROR_ROW_HEIGHT_PX: f32 = 72.0;
-pub(crate) const DICTIONARY_VIEWPORT_HEIGHT_PX: f32 = 357.0;
 const SUGGESTION_ROW_HEIGHT_PX: f32 = 52.0;
-pub(crate) const SUGGESTION_VIEWPORT_HEIGHT_PX: f32 = 240.0;
 const SNIPPET_ROW_HEIGHT_PX: f32 = 58.0;
 const SNIPPET_ERROR_ROW_HEIGHT_PX: f32 = 80.0;
 const SNIPPET_EDITING_ROW_HEIGHT_PX: f32 = 236.0;
-pub(crate) const SNIPPETS_VIEWPORT_HEIGHT_PX: f32 = 406.0;
-// Two viewport-heights of pre-mounted margin on each side, so ordinary
-// scrolling hits already-mounted rows and the re-window is invisible.
-const SETTINGS_LIST_SCROLL_MARGIN_FACTOR: f32 = 2.0;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct DictionaryAddDraft {
@@ -123,23 +106,14 @@ pub(crate) enum ListMutation<T, D> {
     Rejected { draft: D, error: String },
 }
 
-/// Long-lived models for the two unbounded Settings lists. `dictionary` /
-/// `snippets` hold the *full* row lists (source of truth, updated with
-/// row-level notifications so a CRUD operation never replaces the model),
-/// while `dictionary_view` / `snippets_view` are the bounded slice models
-/// actually installed on the window - only the on-screen rows plus a margin
-/// are ever mounted as Slint delegates (SOU-229).
+/// Long-lived models of the unbounded Settings lists, installed on the
+/// window once and updated with row-level notifications so a CRUD operation
+/// never replaces a model.
 pub(crate) struct SettingsListModels {
     window: slint::Weak<MainWindow>,
     dictionary: Rc<VecModel<DictionaryRow>>,
     snippets: Rc<VecModel<SnippetRow>>,
-    dictionary_view: Rc<VecModel<DictionaryRow>>,
-    snippets_view: Rc<VecModel<SnippetRow>>,
-    dictionary_mounted: Cell<(usize, usize)>,
-    snippets_mounted: Cell<(usize, usize)>,
     suggestions: Rc<VecModel<DictionarySuggestionRow>>,
-    suggestions_view: Rc<VecModel<DictionarySuggestionRow>>,
-    suggestions_mounted: Cell<(usize, usize)>,
     dictionary_revision: Cell<u64>,
 }
 
@@ -149,47 +123,12 @@ impl SettingsListModels {
             window: window.as_weak(),
             dictionary: Rc::new(VecModel::default()),
             snippets: Rc::new(VecModel::default()),
-            dictionary_view: Rc::new(VecModel::default()),
-            snippets_view: Rc::new(VecModel::default()),
-            dictionary_mounted: Cell::new((usize::MAX, usize::MAX)),
-            snippets_mounted: Cell::new((usize::MAX, usize::MAX)),
             suggestions: Rc::new(VecModel::default()),
-            suggestions_view: Rc::new(VecModel::default()),
-            suggestions_mounted: Cell::new((usize::MAX, usize::MAX)),
             dictionary_revision: Cell::new(0),
         });
-        window.set_settings_dictionary_entries(models.dictionary_view.clone().into());
-        window.set_settings_snippets(models.snippets_view.clone().into());
-        window.set_settings_dictionary_suggestions(models.suggestions_view.clone().into());
-
-        // Slint's expression language can't do the windowing math, so Rust
-        // re-windows whenever the Flickable scroll position actually changes
-        // (SOU-283: `changed` handlers on the `*-scroll-top` properties in
-        // `main_window.slint`, coalesced once per event-loop iteration) -
-        // nothing runs while the list sits still or Settings is closed.
-        // A data replacement or first mount doesn't fire `changed`, which is
-        // why the `populate_*` paths below keep their forced re-window.
-        let weak = window.as_weak();
-        let models_weak = Rc::downgrade(&models);
-        window.on_settings_dictionary_scroll_changed(move |_| {
-            if let (Some(window), Some(models)) = (weak.upgrade(), models_weak.upgrade()) {
-                models.update_dictionary_window(&window, false);
-            }
-        });
-        let weak = window.as_weak();
-        let models_weak = Rc::downgrade(&models);
-        window.on_settings_snippets_scroll_changed(move |_| {
-            if let (Some(window), Some(models)) = (weak.upgrade(), models_weak.upgrade()) {
-                models.update_snippets_window(&window, false);
-            }
-        });
-        let weak = window.as_weak();
-        let models_weak = Rc::downgrade(&models);
-        window.on_settings_dictionary_suggestion_scroll_changed(move |_| {
-            if let (Some(window), Some(models)) = (weak.upgrade(), models_weak.upgrade()) {
-                models.update_suggestions_window(&window, false);
-            }
-        });
+        window.set_settings_dictionary_entries(models.dictionary.clone().into());
+        window.set_settings_snippets(models.snippets.clone().into());
+        window.set_settings_dictionary_suggestions(models.suggestions.clone().into());
         models
     }
 
@@ -199,7 +138,7 @@ impl SettingsListModels {
         let rows = entries.iter().map(dictionary_row).collect();
         sync_rows_by_id(&self.dictionary, rows, |row| row.id);
         if let Some(window) = self.window.upgrade() {
-            self.update_dictionary_window(&window, true);
+            self.publish_dictionary_size(&window);
         }
     }
 
@@ -216,7 +155,7 @@ impl SettingsListModels {
             .collect();
         sync_rows_by_id(&self.suggestions, rows, |row| row.id);
         if let Some(window) = self.window.upgrade() {
-            self.update_suggestions_window(&window, true);
+            self.publish_suggestions_size(&window);
         }
     }
 
@@ -241,31 +180,12 @@ impl SettingsListModels {
         }
     }
 
-    fn update_suggestions_window(&self, window: &MainWindow, force: bool) {
-        let offsets = cumulative_offsets(&vec![
-            SUGGESTION_ROW_HEIGHT_PX;
-            self.suggestions.row_count()
-        ]);
-        let win = visible_window(
-            &offsets,
-            -window.get_settings_dictionary_suggestion_scroll_top_px(),
-            SUGGESTION_VIEWPORT_HEIGHT_PX,
-            SUGGESTION_VIEWPORT_HEIGHT_PX * SETTINGS_LIST_SCROLL_MARGIN_FACTOR,
-        );
-        if !force && self.suggestions_mounted.get() == (win.start, win.end) {
-            return;
-        }
-        self.suggestions_mounted.set((win.start, win.end));
-        let rows = (win.start..win.end)
-            .filter_map(|index| self.suggestions.row_data(index))
-            .collect();
-        sync_rows_by_id(&self.suggestions_view, rows, |row| row.id);
-        window.set_settings_dictionary_suggestion_count(self.suggestions.row_count() as i32);
+    fn publish_suggestions_size(&self, window: &MainWindow) {
+        let count = self.suggestions.row_count();
+        window.set_settings_dictionary_suggestion_count(count as i32);
         window.set_settings_dictionary_suggestion_content_height(
-            offsets.last().copied().unwrap_or(0.0),
+            count as f32 * SUGGESTION_ROW_HEIGHT_PX,
         );
-        window.set_settings_dictionary_suggestion_spacer_before(win.spacer_before);
-        window.set_settings_dictionary_suggestion_spacer_after(win.spacer_after);
     }
 
     pub(crate) fn populate_snippets(&self, entries: &[SnippetEntry], editing_id: Option<i64>) {
@@ -275,7 +195,7 @@ impl SettingsListModels {
             .collect();
         sync_rows_by_id(&self.snippets, rows, |row| row.id);
         if let Some(window) = self.window.upgrade() {
-            self.update_snippets_window(&window, true);
+            self.publish_snippets_size(&window);
         }
     }
 
@@ -292,20 +212,16 @@ impl SettingsListModels {
             }
         }
         if let Some(window) = self.window.upgrade() {
-            self.update_snippets_window(&window, true);
+            self.publish_snippets_size(&window);
         }
     }
 
-    /// Recomputes which slice of the full dictionary should be mounted for
-    /// the current scroll position and patches the view model, but only when
-    /// the slice actually changed (or `force`, after a repopulate).
-    fn update_dictionary_window(&self, window: &MainWindow, force: bool) {
-        // Flickable's content-y is negative-going-down, same as the
-        // transcript's scroll mirror.
-        let scroll_top = -window.get_settings_dictionary_scroll_top_px();
+    /// Entry count and total row height of the dictionary, for its empty
+    /// state and for a list shorter than its maximum height.
+    fn publish_dictionary_size(&self, window: &MainWindow) {
         let error_id = window.get_settings_dictionary_delete_error_id();
         let has_error = !window.get_settings_dictionary_delete_error().is_empty();
-        let heights: Vec<f32> = self
+        let height: f32 = self
             .dictionary
             .iter()
             .map(|row| {
@@ -315,40 +231,16 @@ impl SettingsListModels {
                     DICTIONARY_ROW_HEIGHT_PX
                 }
             })
-            .collect();
-        let offsets = cumulative_offsets(&heights);
-        let win = visible_window(
-            &offsets,
-            scroll_top,
-            DICTIONARY_VIEWPORT_HEIGHT_PX,
-            DICTIONARY_VIEWPORT_HEIGHT_PX * SETTINGS_LIST_SCROLL_MARGIN_FACTOR,
-        );
-        if !force && self.dictionary_mounted.get() == (win.start, win.end) {
-            return;
-        }
-        self.dictionary_mounted.set((win.start, win.end));
-        let slice: Vec<DictionaryRow> = (win.start..win.end)
-            .filter_map(|index| self.dictionary.row_data(index))
-            .collect();
-        let mounted = slice.len();
-        let total = self.dictionary.row_count();
-        sync_rows_by_id(&self.dictionary_view, slice, |row| row.id);
-        window.set_settings_dictionary_count(total as i32);
-        window.set_settings_dictionary_content_height(offsets.last().copied().unwrap_or(0.0));
-        window.set_settings_dictionary_spacer_before(win.spacer_before);
-        window.set_settings_dictionary_spacer_after(win.spacer_after);
-        // SOU-229 AC1/AC2's "delegate counter" evidence: stays small and
-        // bounded regardless of how many entries the dictionary has - see
-        // `tests::settings_list_windows_stay_bounded_for_0_100_1000_rows`.
-        eprintln!("settings dictionary window: {mounted}/{total} rows mounted (SOU-229)");
+            .sum();
+        window.set_settings_dictionary_count(self.dictionary.row_count() as i32);
+        window.set_settings_dictionary_content_height(height);
     }
 
-    /// Snippets counterpart of `update_dictionary_window`.
-    fn update_snippets_window(&self, window: &MainWindow, force: bool) {
-        let scroll_top = -window.get_settings_snippets_scroll_top_px();
+    /// Snippets counterpart of `publish_dictionary_size`.
+    fn publish_snippets_size(&self, window: &MainWindow) {
         let error_id = window.get_settings_snippet_delete_error_id();
         let has_error = !window.get_settings_snippet_delete_error().is_empty();
-        let heights: Vec<f32> = self
+        let height: f32 = self
             .snippets
             .iter()
             .map(|row| {
@@ -360,44 +252,10 @@ impl SettingsListModels {
                     SNIPPET_ROW_HEIGHT_PX
                 }
             })
-            .collect();
-        let offsets = cumulative_offsets(&heights);
-        let win = visible_window(
-            &offsets,
-            scroll_top,
-            SNIPPETS_VIEWPORT_HEIGHT_PX,
-            SNIPPETS_VIEWPORT_HEIGHT_PX * SETTINGS_LIST_SCROLL_MARGIN_FACTOR,
-        );
-        if !force && self.snippets_mounted.get() == (win.start, win.end) {
-            return;
-        }
-        self.snippets_mounted.set((win.start, win.end));
-        let slice: Vec<SnippetRow> = (win.start..win.end)
-            .filter_map(|index| self.snippets.row_data(index))
-            .collect();
-        let mounted = slice.len();
-        let total = self.snippets.row_count();
-        sync_rows_by_id(&self.snippets_view, slice, |row| row.id);
-        window.set_settings_snippets_count(total as i32);
-        window.set_settings_snippets_content_height(offsets.last().copied().unwrap_or(0.0));
-        window.set_settings_snippets_spacer_before(win.spacer_before);
-        window.set_settings_snippets_spacer_after(win.spacer_after);
-        eprintln!("settings snippets window: {mounted}/{total} rows mounted (SOU-229)");
+            .sum();
+        window.set_settings_snippets_count(self.snippets.row_count() as i32);
+        window.set_settings_snippets_content_height(height);
     }
-}
-
-/// Cumulative y-offsets from per-row heights: `offsets[i]` is the top of row
-/// `i`, `offsets[heights.len()]` the total content height - same shape as
-/// `transcript::compute_offsets`, which is tied to `TranscriptBlock`.
-fn cumulative_offsets(heights: &[f32]) -> Vec<f32> {
-    let mut offsets = Vec::with_capacity(heights.len() + 1);
-    let mut y = 0.0f32;
-    offsets.push(y);
-    for height in heights {
-        y += height;
-        offsets.push(y);
-    }
-    offsets
 }
 
 fn dictionary_row(entry: &DictionaryEntry) -> DictionaryRow {
@@ -544,13 +402,10 @@ mod tests {
         }
     }
 
-    // SOU-283: the Settings lists re-window from the `changed` handlers on
-    // their `*-scroll-top` properties, not from a poll timer. Moving the
-    // scroll position and letting Slint run its change handlers (what the
-    // event loop does once per iteration) must mount a new slice; a
-    // repopulate still mounts the top slice on its own.
+    // SOU-229: the window holds the full lists (the kit list virtualizes the
+    // rows), and the published height follows the rows' states.
     #[test]
-    fn settings_lists_rewindow_on_scroll_change_without_a_timer() {
+    fn the_window_receives_every_row_and_the_height_of_their_states() {
         let _ = slint::platform::set_platform(Box::new(TestPlatform));
         let window = crate::settings_kit::new_window().unwrap();
         let models = SettingsListModels::install(&window);
@@ -571,8 +426,6 @@ mod tests {
                 created_at: String::new(),
             })
             .collect();
-        models.populate_dictionary(&dictionary);
-        models.populate_snippets(&snippets, None);
         let suggestions = (1..=500)
             .map(|id| DictionarySuggestion {
                 id,
@@ -580,49 +433,40 @@ mod tests {
                 term: format!("term {id}"),
             })
             .collect::<Vec<_>>();
+        models.populate_dictionary(&dictionary);
+        models.populate_snippets(&snippets, None);
         models.populate_suggestions(&suggestions);
-        assert_eq!(models.suggestions_view.row_data(0).unwrap().id, 1);
+
+        assert_eq!(window.get_settings_dictionary_entries().row_count(), 500);
+        assert_eq!(window.get_settings_snippets().row_count(), 500);
+        assert_eq!(
+            window.get_settings_dictionary_suggestions().row_count(),
+            500
+        );
+        assert_eq!(window.get_settings_dictionary_count(), 500);
+        assert_eq!(window.get_settings_snippets_count(), 500);
         assert_eq!(window.get_settings_dictionary_suggestion_count(), 500);
-        assert!(models.suggestions_view.row_count() < 25);
-
-        let first_dictionary_id = || models.dictionary_view.row_data(0).map(|row| row.id);
-        let first_snippet_id = || models.snippets_view.row_data(0).map(|row| row.id);
-        assert_eq!(first_dictionary_id(), Some(1));
-        assert_eq!(first_snippet_id(), Some(1));
-        assert_eq!(window.get_settings_dictionary_spacer_before(), 0.0);
-        assert_eq!(window.get_settings_snippets_spacer_before(), 0.0);
-
-        // Flickable content-y is negative going down: scroll both lists to
-        // the middle of their content.
-        window.set_settings_dictionary_scroll_top(-250.0 * DICTIONARY_ROW_HEIGHT_PX);
-        window.set_settings_snippets_scroll_top(-250.0 * SNIPPET_ROW_HEIGHT_PX);
-        window.set_settings_dictionary_suggestion_scroll_top(-250.0 * SUGGESTION_ROW_HEIGHT_PX);
-        slint::platform::update_timers_and_animations();
-
-        let dictionary_start = first_dictionary_id().expect("dictionary slice mounted");
-        let snippets_start = first_snippet_id().expect("snippets slice mounted");
-        assert!(
-            dictionary_start > 200 && dictionary_start <= 251,
-            "dictionary slice should start near row 250, got {dictionary_start}"
+        assert_eq!(
+            window.get_settings_dictionary_content_height(),
+            500.0 * DICTIONARY_ROW_HEIGHT_PX
         );
-        assert!(
-            snippets_start > 200 && snippets_start <= 251,
-            "snippets slice should start near row 250, got {snippets_start}"
+        assert_eq!(
+            window.get_settings_dictionary_suggestion_content_height(),
+            500.0 * SUGGESTION_ROW_HEIGHT_PX
         );
-        assert!(window.get_settings_dictionary_spacer_before() > 0.0);
-        assert!(window.get_settings_snippets_spacer_before() > 0.0);
-        assert!(models.dictionary_view.row_count() < 50);
-        assert!(models.snippets_view.row_count() < 50);
-        assert!(models.suggestions_view.row_data(0).unwrap().id > 200);
-        assert!(models.suggestions_view.row_count() < 25);
-        assert!(window.get_settings_dictionary_suggestion_spacer_before() > 0.0);
 
-        // Back to the top re-windows again.
-        window.set_settings_dictionary_scroll_top(0.0);
-        window.set_settings_snippets_scroll_top(0.0);
-        slint::platform::update_timers_and_animations();
-        assert_eq!(first_dictionary_id(), Some(1));
-        assert_eq!(first_snippet_id(), Some(1));
+        window.set_settings_dictionary_delete_error_id(7);
+        window.set_settings_dictionary_delete_error("failed".into());
+        models.populate_dictionary(&dictionary);
+        assert_eq!(
+            window.get_settings_dictionary_content_height(),
+            499.0 * DICTIONARY_ROW_HEIGHT_PX + DICTIONARY_ERROR_ROW_HEIGHT_PX
+        );
+        models.populate_snippets(&snippets, Some(3));
+        assert_eq!(
+            window.get_settings_snippets_content_height(),
+            499.0 * SNIPPET_ROW_HEIGHT_PX + SNIPPET_EDITING_ROW_HEIGHT_PX
+        );
     }
 
     #[test]
@@ -716,64 +560,6 @@ mod tests {
         assert_eq!(model.row_data(0), Some((1, "one".to_string())));
         assert_eq!(model.row_data(1), Some((2, "updated".to_string())));
         assert_eq!(model.row_data(2), Some((3, "three".to_string())));
-    }
-
-    // SOU-229 AC1/AC2: with the old ListView-over-the-full-model layout the
-    // delegate count was, by construction, exactly the entry count (0/100/
-    // 1000 delegates for 0/100/1000 rows - `ListView` is a `ScrollView {
-    // @children }`, nothing bounds instantiation). The windowed slice bounds
-    // it to viewport + margin regardless of the total.
-    #[test]
-    fn settings_list_windows_stay_bounded_for_0_100_1000_rows() {
-        // Viewport (357px) + a 714px margin on each side = 1785px of rows at
-        // 51px each, so 35 mounted rows, plus the overlap slack
-        // `visible_window` allows on both edges.
-        let max_mounted = (((1.0 + 2.0 * SETTINGS_LIST_SCROLL_MARGIN_FACTOR)
-            * DICTIONARY_VIEWPORT_HEIGHT_PX)
-            / DICTIONARY_ROW_HEIGHT_PX)
-            .ceil() as usize
-            + 2;
-        for total in [0usize, 100, 1000] {
-            let heights = vec![DICTIONARY_ROW_HEIGHT_PX; total];
-            let offsets = cumulative_offsets(&heights);
-            let content_height = offsets.last().copied().unwrap_or(0.0);
-            // Probe the top, the middle, and the bottom of the scroll range.
-            for scroll_top in [0.0, content_height / 2.0, content_height] {
-                let win = visible_window(
-                    &offsets,
-                    scroll_top,
-                    DICTIONARY_VIEWPORT_HEIGHT_PX,
-                    DICTIONARY_VIEWPORT_HEIGHT_PX * SETTINGS_LIST_SCROLL_MARGIN_FACTOR,
-                );
-                let mounted = win.end - win.start;
-                assert!(
-                    mounted <= max_mounted.min(total.max(1)),
-                    "{mounted} rows mounted for {total} entries at scroll {scroll_top}"
-                );
-                // The spacers stand in for everything not mounted, so the
-                // scrollbar still reflects the full list.
-                let mounted_height: f32 = heights[win.start..win.end].iter().sum();
-                let reconstructed = win.spacer_before + mounted_height + win.spacer_after;
-                assert!(
-                    (reconstructed - content_height).abs() < 0.5,
-                    "spacers + slice should reconstruct the full {content_height}px, got {reconstructed}"
-                );
-            }
-        }
-
-        // A short list still mounts everything - windowing must not clip a
-        // list that fits on screen.
-        let heights = vec![DICTIONARY_ROW_HEIGHT_PX; 5];
-        let offsets = cumulative_offsets(&heights);
-        let win = visible_window(
-            &offsets,
-            0.0,
-            DICTIONARY_VIEWPORT_HEIGHT_PX,
-            DICTIONARY_VIEWPORT_HEIGHT_PX * SETTINGS_LIST_SCROLL_MARGIN_FACTOR,
-        );
-        assert_eq!((win.start, win.end), (0, 5));
-        assert_eq!(win.spacer_before, 0.0);
-        assert_eq!(win.spacer_after, 0.0);
     }
 
     #[test]
