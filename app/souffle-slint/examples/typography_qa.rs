@@ -154,10 +154,10 @@ fn main() {
     window.set_settings_app_version("SOU-276 QA".into());
     window.set_settings_open(surface.starts_with("settings-"));
     window.set_settings_tab(match surface.as_str() {
-        "settings-ai" => SettingsTab::Ai,
+        "settings-ai" | "settings-ai-ollama" => SettingsTab::Ai,
         "settings-audio" => SettingsTab::Audio,
         "settings-interface" => SettingsTab::Interface,
-        "settings-meetings" => SettingsTab::Meetings,
+        "settings-meetings" | "settings-meetings-denied" => SettingsTab::Meetings,
         "settings-system" => SettingsTab::System,
         _ => SettingsTab::Transcription,
     });

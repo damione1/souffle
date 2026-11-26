@@ -1,4 +1,4 @@
-import { AppText, AppNumericText, Typography } from "@typography";
+import { AppText, Typography } from "@typography";
 import { AvatarShape, ButtonIntent, ControlSize, KitAvatar, KitBadge, KitButton, KitCard, KitDivider, KitEmptyState, KitIcon, KitIconButton, KitLayoutMetrics, KitThemeContext, LayoutSpace, SurfaceLevel, Tone } from "@kit";
 import { LucideAccount } from "@kit-icons/account.slint";
 import { LucideCommunication } from "@kit-icons/communication.slint";
@@ -178,12 +178,12 @@ export component TimelineSection inherits VerticalLayout {
                             alignment: end;
                             horizontal-stretch: 0;
 
-                            AppNumericText {
+                            AppText {
                                 text: event.time-range;
-                                width: Theme.row-time-width;
+                                min-width: max(Theme.row-time-width, self.preferred-width);
                                 horizontal-alignment: right;
-                                typography: Typography.small;
-                                text-color: Theme.text-muted;
+                                typography: Typography.mono;
+                                color: Theme.text-muted;
                                 vertical-alignment: center;
                             }
 
@@ -235,7 +235,7 @@ export component TimelineSection inherits VerticalLayout {
                 AppText {
                     text: @tr("Affichez vos réunions du jour ici");
                     wrap: word-wrap;
-                    typography: Typography.body-emphasis;
+                    typography: Typography.body-strong;
                     color: Theme.text-primary;
                 }
                 AppText {

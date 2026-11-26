@@ -1,5 +1,5 @@
 import { AppText, Typography } from "@typography";
-import { ButtonIntent, ChatBubbleTone, ChatSide, ControlSize, ControlWidth, FieldDecoration, KitButton, KitCard, KitChatBubble, KitSearchField, KitSegmentedControl, KitStack, KitText, KitThemeContext, OptionRow, Ownership, SegmentedAppearance, SurfaceLevel, TypographyRole } from "@kit";
+import { ButtonIntent, ChatBubbleTone, ChatSide, ControlSize, ControlWidth, FieldDecoration, KitButton, KitCard, KitChatBubble, KitPressable, KitSearchField, KitSegmentedControl, KitStack, KitText, KitThemeContext, OptionRow, Ownership, SegmentedAppearance, SurfaceLevel, TypographyRole } from "@kit";
 import { LucideText } from "@kit-icons/text.slint";
 import { LucideNotifications } from "@kit-icons/notifications.slint";
 import { Theme } from "../theme.slint";
@@ -138,6 +138,28 @@ export component TranscriptToolbar inherits KitCard {
     }
 }
 
+// The kit button takes no typography role, so the mono time is its own label.
+component TimestampButton inherits KitPressable {
+    in property <string> text;
+
+    control-size: ControlSize.compact;
+    intent: ButtonIntent.quiet;
+    min-height: 24px;
+    padding-inline: 8px;
+    padding-block: 0px;
+    preferred-width: label.preferred-width + 2 * self.padding-inline;
+    min-width: self.preferred-width;
+
+    label := AppText {
+        text: root.text;
+        typography: Typography.mono-small;
+        color: root.disabled ? Theme.text-faint : Theme.text-secondary;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        accessible-role: none;
+    }
+}
+
 component TranscriptRowHeader inherits HorizontalLayout {
     in property <TranscriptBlock> block;
     in property <bool> has-audio;
@@ -147,15 +169,9 @@ component TranscriptRowHeader inherits HorizontalLayout {
     spacing: 2 * KitThemeContext.current.spacing.unit;
     alignment: root.mirrored ? end : start;
 
-    if root.mirrored: KitButton {
+    if root.mirrored: TimestampButton {
         accessible-name: @tr("Aller à {}", root.block.timestamp);
         text: root.block.timestamp;
-        control-size: ControlSize.compact;
-        intent: ButtonIntent.quiet;
-        min-height: 24px;
-        padding-inline: 8px;
-        padding-block: 0px;
-        text-size: Typography.small.size;
         disabled: !root.has-audio;
         activated => { root.seek-requested(); }
     }
@@ -168,15 +184,9 @@ component TranscriptRowHeader inherits HorizontalLayout {
         wrap: no-wrap;
     }
 
-    if !root.mirrored: KitButton {
+    if !root.mirrored: TimestampButton {
         accessible-name: @tr("Aller à {}", root.block.timestamp);
         text: root.block.timestamp;
-        control-size: ControlSize.compact;
-        intent: ButtonIntent.quiet;
-        min-height: 24px;
-        padding-inline: 8px;
-        padding-block: 0px;
-        text-size: Typography.small.size;
         disabled: !root.has-audio;
         activated => { root.seek-requested(); }
     }
@@ -207,6 +217,9 @@ export component TranscriptSection inherits KitStack {
     // The paragraph holding the audio position gets the brand ring.
     in property <float> audio-position-seconds: 0.0;
     in property <int> audio-session-index: -1;
+    // The width of the column the list sits in. The host passes it because
+    // reading the list's own width from a bubble's preferred width would loop.
+    in property <length> row-width: 820px;
 
     // (recording-session-index, start-time) of the clicked paragraph.
     callback paragraph-clicked(int, float);
@@ -221,6 +234,10 @@ export component TranscriptSection inherits KitStack {
     property <length> ring-width: 2px;
     // KitChatBubble pads its content slot by 3.5 units on every side.
     property <length> bubble-padding: 3.5 * root.unit;
+    // `content-share` only splits spare space, so a long paragraph also needs a
+    // cap on its natural width to wrap.
+    property <float> bubble-share: 0.78;
+    property <length> bubble-text-limit: root.bubble-share * root.row-width - 2 * root.bubble-padding;
 
     pure function playing(block: TranscriptBlock) -> bool {
         return root.has-audio
@@ -278,16 +295,20 @@ export component TranscriptSection inherits KitStack {
                     if root.layout == TranscriptLayout.conversation: KitChatBubble {
                         side: block.speaker == SpeakerRole.me && block.has-speaker ? ChatSide.end : ChatSide.start;
                         tone: block.speaker == SpeakerRole.me && block.has-speaker ? ChatBubbleTone.accent-subtle : ChatBubbleTone.muted;
-                        content-share: 0.78;
+                        content-share: root.bubble-share;
                         hug: true;
 
                         Rectangle {
-                            preferred-width: one-line.preferred-width;
+                            preferred-width: min(one-line.preferred-width, root.bubble-text-limit);
                             preferred-height: bubble-flow.preferred-height;
 
                             one-line := TranscriptNaturalWidth {
+                                // Positioned, so its unwrapped min-width does not
+                                // propagate to the bubble and defeat the cap.
+                                x: 0px;
+                                y: 0px;
                                 words: block.words;
-                                typography: Typography.body;
+                                typography: Typography.reading;
                             }
 
                             if root.playing(block): Rectangle {
@@ -303,7 +324,8 @@ export component TranscriptSection inherits KitStack {
                             bubble-flow := TranscriptWordFlow {
                                 width: parent.width;
                                 words: block.words;
-                                typography: Typography.body;
+                                typography: Typography.reading;
+                                line-ratio: 1.55;
                                 word-clicked(word, at-x, at-y) => { alias-popup.open(word, at-x, at-y); }
                             }
                         }

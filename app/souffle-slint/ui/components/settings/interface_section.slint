@@ -79,7 +79,7 @@ export component ShortcutRecorderButton inherits FocusScope {
         height: parent.height;
         size: root.large ? KeycapSize.large : KeycapSize.regular;
         text: root.display-label;
-        opacity: !root.enabled ? 0.45 : root.shortcut-label == "" ? 0.75 : 1;
+        opacity: !root.enabled ? 0.45 : root.large && root.shortcut-label == "" ? 0.75 : 1;
     }
 
     key-pressed(event) => {
@@ -274,6 +274,8 @@ export component InterfaceSection inherits VerticalLayout {
                 theme: KitThemeContext.current;
                 modal-layer: 0;
                 appearance: StepperAppearance.compact;
+                // Keeps the editor slack before the value, next to the unit and buttons.
+                text-alignment: TextHorizontalAlignment.right;
                 control-size: ControlSize.compact;
                 decrement-glyph: LucideArrows.chevron-down();
                 increment-glyph: LucideArrows.chevron-up();

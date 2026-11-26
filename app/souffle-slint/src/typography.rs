@@ -127,6 +127,7 @@ fn project_kit_typography(window: &MainWindow) {
     let semibold = i32::from(souffle_typography::Weight::SemiBold.number());
     let typography = &mut theme.typography;
     typography.family = SharedString::from(souffle_typography::FAMILY);
+    typography.family_monospace = SharedString::from(souffle_typography::MONO_FAMILY);
     typography.weight_regular = i32::from(souffle_typography::Weight::Regular.number());
     typography.weight_medium = semibold;
     typography.weight_semibold = semibold;

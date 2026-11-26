@@ -1,6 +1,6 @@
 //! Install kit services and project Soufflé's catalogues and enums into kit options.
 use crate::{
-    CatalogChoices, MainWindow, MeetingExportFormat, MeetingExportMenu, PickerLabels,
+    AppLocale, CatalogChoices, MainWindow, MeetingExportFormat, MeetingExportMenu, PickerLabels,
     SettingsOptionList, SettingsOptions,
 };
 use slint::{ComponentHandle, Model, ModelExt, SharedString, VecModel};
@@ -47,11 +47,16 @@ pub(crate) fn new_window() -> Result<MainWindow, slint::PlatformError> {
             return Default::default();
         }
         let translations = window.global::<PickerLabels>();
+        let options = window.global::<SettingsOptions>();
         let rows = (0..ids.row_count()).map(|index| {
             let id = ids.row_data_tracked(index).expect("catalogue id");
             let label = labels.row_data_tracked(index).expect("catalogue label");
+            // Duration catalogues use the label itself as the value.
+            let duration = (id == label).then(|| duration_parts(&label)).flatten();
             let text = if usize::try_from(default_device) == Ok(index) {
                 translations.invoke_device_label(label, true)
+            } else if let Some((count, hours)) = duration {
+                options.invoke_duration_label(count, hours)
             } else {
                 translations.invoke_display(label)
             };
@@ -102,7 +107,29 @@ pub(crate) fn new_window() -> Result<MainWindow, slint::PlatformError> {
             options.$decode(enum_value);
         }};
     }
-    bind_options!(on_locale_options, invoke_locale_label, on_locale_value);
+    let weak = window.as_weak();
+    options.on_locale_options(move |current| {
+        let Some(window) = weak.upgrade() else {
+            return Default::default();
+        };
+        let labels = window.global::<SettingsOptions>();
+        locale_options(current, |value| labels.invoke_locale_label(value))
+    });
+    options.on_locale_value(enum_value);
+    let weak = window.as_weak();
+    options.on_joined_labels(move |labels| {
+        let Some(window) = weak.upgrade() else {
+            return Default::default();
+        };
+        labels.model_tracker().track_row_count_changes();
+        let translations = window.global::<PickerLabels>();
+        (0..labels.row_count())
+            .filter_map(|index| labels.row_data_tracked(index))
+            .map(|label| translations.invoke_display(label).to_string())
+            .collect::<Vec<_>>()
+            .join(" · ")
+            .into()
+    });
     bind_options!(on_theme_options, invoke_theme_label, on_theme_value);
     bind_options!(
         on_paste_method_options,
@@ -131,6 +158,30 @@ pub(crate) fn new_window() -> Result<MainWindow, slint::PlatformError> {
     );
     bind_options!(on_tab_options, invoke_tab_label, on_tab_value);
     Ok(window)
+}
+
+/// The count and "is in hours" of an `audio_ui::minute_label` value. Parsed
+/// here because some examples include this file without `audio_ui`.
+fn duration_parts(label: &str) -> Option<(i32, bool)> {
+    let (count, hours) = match label.strip_suffix(" h") {
+        Some(count) => (count, true),
+        None => (label.strip_suffix(" min")?, false),
+    };
+    Some((count.parse().ok()?, hours))
+}
+
+/// French comes first on screen. Tokens stay enum indices.
+fn locale_options(
+    current: AppLocale,
+    label: impl Fn(AppLocale) -> SharedString,
+) -> SettingsOptionList {
+    let list = enum_options(current, label);
+    let mut rows = list.rows.iter().collect::<Vec<_>>();
+    rows.sort_by_key(|row| enum_value(row.clone(), AppLocale::En) != AppLocale::Fr);
+    SettingsOptionList {
+        rows: VecModel::from_slice(&rows),
+        selected: list.selected,
+    }
 }
 
 fn enum_options<T: Copy + PartialEq + VariantArray>(
@@ -199,6 +250,31 @@ mod tests {
         drop(first);
         assert!(weak.upgrade().is_none());
         assert_eq!(other.get_shortcut_session(), 0);
+    }
+
+    #[test]
+    fn duration_labels_split_into_count_and_unit() {
+        assert_eq!(duration_parts("15 min"), Some((15, false)));
+        assert_eq!(duration_parts("3 h"), Some((3, true)));
+        assert_eq!(duration_parts("__NEVER__"), None);
+        assert_eq!(duration_parts("Studio Mic"), None);
+    }
+
+    #[test]
+    fn the_language_picker_lists_french_first_and_keeps_its_tokens() {
+        let options = locale_options(AppLocale::En, |_| "Same label".into());
+        let values = options
+            .rows
+            .iter()
+            .map(|row| enum_value(row, AppLocale::En))
+            .collect::<Vec<_>>();
+        assert_eq!(values, [AppLocale::Fr, AppLocale::En]);
+        let selected = options
+            .rows
+            .iter()
+            .find(|row| row.token == options.selected.token)
+            .unwrap();
+        assert_eq!(enum_value(selected, AppLocale::Fr), AppLocale::En);
     }
 
     #[test]

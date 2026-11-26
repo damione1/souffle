@@ -1,4 +1,4 @@
-import { AppText, AppNumericText, Typography } from "@typography";
+import { AppText, Typography } from "@typography";
 import { ButtonIntent, ControlSize, IconGlyph, KitCard, KitIcon, KitIconButton, KitStack, SurfaceLevel } from "@kit";
 import { Theme } from "../theme.slint";
 import { ProWaveformSeek } from "@kit-pro";
@@ -107,10 +107,10 @@ export component AudioPlayerSection inherits KitStack {
                     typography: Typography.hint;
                     color: Theme.text-muted;
                 }
-                if root.duration-label != "": AppNumericText {
+                if root.duration-label != "": AppText {
                     text: root.position-label + " / " + root.duration-label;
-                    typography: Typography.hint-emphasis;
-                    text-color: Theme.text-primary;
+                    typography: Typography.mono-label;
+                    color: Theme.text-primary;
                     horizontal-alignment: right;
                 }
             }

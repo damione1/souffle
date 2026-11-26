@@ -41,13 +41,17 @@ Reunion-Etats detail-error 0 1040 1180
 Reunion-Etats detail-empty 0 1040 1180
 Reunion-Etats detail-no-audio 0 1040 1180
 Reglages-Transcription settings-transcription 0 1040 1700
+Reglages-Transcription settings-transcription-long 0 1040 1900 long
+Reglages-Transcription settings-transcription-long-scrolled 0 1040 1900 long-scrolled
 Reglages-IA settings-ai 0 1040 1720
 Reglages-IA settings-ai 0 1040 2900 full
+Reglages-IA settings-ai-ollama 0 1040 1720 ollama
 Reglages-Audio settings-audio 0 1040 1900
 Reglages-Audio settings-audio 0 1040 2400 full
 Reglages-Interface settings-interface 0 1040 1360
 Reglages-Interface settings-interface 0 1040 1800 full
 Reglages-Reunions settings-meetings 0 1040 760
+Reglages-Reunions settings-meetings-denied 0 1040 860 denied
 Reglages-Systeme settings-system 0 1040 2500
 Reglages-Systeme settings-system 0 1040 3000 full
 Dialogues permissions 0 1040 860

@@ -371,431 +371,436 @@ export component SettingsView inherits KitAppShell {
             vertical-stretch: 0;
         }
 
-        SettingsTabBar {
-            current <=> root.tab;
-            changed(value) => { root.tab-changed(); }
-        }
-
-        // The pages reach past the column so card shadows are not clipped.
-        Rectangle {
+        VerticalLayout {
+            spacing: 20px;
             vertical-stretch: 1;
 
-            KitRouter {
-                x: -Theme.shadow-bleed;
-                width: parent.width + 2 * Theme.shadow-bleed;
-                height: parent.height;
+            SettingsTabBar {
+                current <=> root.tab;
+                changed(value) => { root.tab-changed(); }
+            }
 
-                        trans-page := SettingsTabPage {
-                        width: parent.width;
-                        height: parent.height;
-                        active: root.tab == SettingsTab.transcription;
-                        label: SettingsOptions.tab-label(SettingsTab.transcription);
+            // The pages reach past the column so card shadows are not clipped.
+            Rectangle {
+                vertical-stretch: 1;
 
-                            if trans-page.mounted: ModelSection {
-                                capture-busy: root.capture-busy;
-                                model-phase: root.model-phase;
-                                ready: root.model-ready;
-                                model-labels: root.model-labels;
-                                model-ids: root.model-ids;
-                                selected-model-label: root.selected-model-label;
-                                selected-model-id: root.selected-model-id;
-                                apple-speech-selected: root.apple-speech-selected;
-                                apple-speech-unavailable: root.apple-speech-unavailable;
-                                apple-speech-unavailable-reason: root.apple-speech-unavailable-reason;
-                                open-system-settings-requested(pane) => { root.open-system-settings-requested(pane); }
-                                busy: root.model-busy;
-                                downloading: root.model-downloading;
-                                download-progress-label: root.model-download-progress-label;
-                                download-progress-fraction: root.model-download-progress-fraction;
-                                unload-timeout-labels: root.unload-timeout-labels;
-                                unload-timeout-label: root.unload-timeout-label;
-                                error-message: root.model-error-message;
-                                model-changed(value) => { root.model-changed(value); }
-                                unload-timeout-changed(value) => { root.unload-timeout-changed(value); }
-                            }
+                KitRouter {
+                    x: -Theme.shadow-bleed;
+                    width: parent.width + 2 * Theme.shadow-bleed;
+                    height: parent.height;
 
-                            if trans-page.mounted: DictionarySection {
-                                learning-mode: root.dictionary-learning-mode;
-                                learning-options: root.dictionary-learning-options;
-                                suggestions: root.dictionary-suggestions;
-                                suggestion-count: root.dictionary-suggestion-count;
-                                suggestion-content-height: root.dictionary-suggestion-content-height;
-                                suggestion-spacer-before: root.dictionary-suggestion-spacer-before;
-                                suggestion-spacer-after: root.dictionary-suggestion-spacer-after;
-                                suggestion-scroll-top <=> root.dictionary-suggestion-scroll-top;
-                                suggestion-error: root.dictionary-suggestion-error;
-                                suggestion-busy: root.dictionary-suggestion-busy;
-                                entries: root.dictionary-entries;
-                                entry-count: root.dictionary-entry-count;
-                                list-content-height: root.dictionary-list-content-height;
-                                list-spacer-before: root.dictionary-list-spacer-before;
-                                list-spacer-after: root.dictionary-list-spacer-after;
-                                list-scroll-top <=> root.dictionary-list-scroll-top;
-                                new-term-draft <=> root.new-dictionary-term-draft;
-                                new-pronunciation-draft <=> root.new-dictionary-pronunciation-draft;
-                                new-category-draft <=> root.new-dictionary-category-draft;
-                                add-error: root.dictionary-add-error;
-                                delete-error-id: root.dictionary-delete-error-id;
-                                delete-error: root.dictionary-delete-error;
-                                learning-mode-changed(value) => { root.dictionary-learning-mode-changed(value); }
-                                suggestion-accept-requested(id) => { root.dictionary-suggestion-accept-requested(id); }
-                                suggestion-dismiss-requested(id) => { root.dictionary-suggestion-dismiss-requested(id); }
-                                add-requested(term, pronunciation, category) => { root.dictionary-add-requested(term, pronunciation, category); }
-                                delete-requested(id) => { root.dictionary-delete-requested(id); }
-                            }
+                            trans-page := SettingsTabPage {
+                            width: parent.width;
+                            height: parent.height;
+                            active: root.tab == SettingsTab.transcription;
+                            label: SettingsOptions.tab-label(SettingsTab.transcription);
 
-                            if trans-page.mounted: SnippetsSection {
-                                entries: root.snippets;
-                                entry-count: root.snippets-entry-count;
-                                list-content-height: root.snippets-list-content-height;
-                                list-spacer-before: root.snippets-list-spacer-before;
-                                list-spacer-after: root.snippets-list-spacer-after;
-                                list-scroll-top <=> root.snippets-list-scroll-top;
-                                new-trigger-draft <=> root.new-snippet-trigger-draft;
-                                new-expansion-draft <=> root.new-snippet-expansion-draft;
-                                add-error: root.snippet-add-error;
-                                delete-error-id: root.snippet-delete-error-id;
-                                delete-error: root.snippet-delete-error;
-                                edit-trigger-draft <=> root.edit-snippet-trigger-draft;
-                                edit-expansion-draft <=> root.edit-snippet-expansion-draft;
-                                update-error: root.snippet-update-error;
-                                add-requested(trigger, expansion) => { root.snippet-add-requested(trigger, expansion); }
-                                delete-requested(id) => { root.snippet-delete-requested(id); }
-                                edit-requested(id) => { root.snippet-edit-requested(id); }
-                                cancel-edit-requested => { root.snippet-cancel-edit-requested(); }
-                                save-edit-requested(id, trigger, expansion) => { root.snippet-save-edit-requested(id, trigger, expansion); }
-                            }
-                    }
+                                if trans-page.mounted: ModelSection {
+                                    capture-busy: root.capture-busy;
+                                    model-phase: root.model-phase;
+                                    ready: root.model-ready;
+                                    model-labels: root.model-labels;
+                                    model-ids: root.model-ids;
+                                    selected-model-label: root.selected-model-label;
+                                    selected-model-id: root.selected-model-id;
+                                    apple-speech-selected: root.apple-speech-selected;
+                                    apple-speech-unavailable: root.apple-speech-unavailable;
+                                    apple-speech-unavailable-reason: root.apple-speech-unavailable-reason;
+                                    open-system-settings-requested(pane) => { root.open-system-settings-requested(pane); }
+                                    busy: root.model-busy;
+                                    downloading: root.model-downloading;
+                                    download-progress-label: root.model-download-progress-label;
+                                    download-progress-fraction: root.model-download-progress-fraction;
+                                    unload-timeout-labels: root.unload-timeout-labels;
+                                    unload-timeout-label: root.unload-timeout-label;
+                                    error-message: root.model-error-message;
+                                    model-changed(value) => { root.model-changed(value); }
+                                    unload-timeout-changed(value) => { root.unload-timeout-changed(value); }
+                                }
 
-                        ai-page := SettingsTabPage {
-                        width: parent.width;
-                        height: parent.height;
-                        active: root.tab == SettingsTab.ai;
-                        label: SettingsOptions.tab-label(SettingsTab.ai);
+                                if trans-page.mounted: DictionarySection {
+                                    learning-mode: root.dictionary-learning-mode;
+                                    learning-options: root.dictionary-learning-options;
+                                    suggestions: root.dictionary-suggestions;
+                                    suggestion-count: root.dictionary-suggestion-count;
+                                    suggestion-content-height: root.dictionary-suggestion-content-height;
+                                    suggestion-spacer-before: root.dictionary-suggestion-spacer-before;
+                                    suggestion-spacer-after: root.dictionary-suggestion-spacer-after;
+                                    suggestion-scroll-top <=> root.dictionary-suggestion-scroll-top;
+                                    suggestion-error: root.dictionary-suggestion-error;
+                                    suggestion-busy: root.dictionary-suggestion-busy;
+                                    entries: root.dictionary-entries;
+                                    entry-count: root.dictionary-entry-count;
+                                    list-content-height: root.dictionary-list-content-height;
+                                    list-spacer-before: root.dictionary-list-spacer-before;
+                                    list-spacer-after: root.dictionary-list-spacer-after;
+                                    list-scroll-top <=> root.dictionary-list-scroll-top;
+                                    new-term-draft <=> root.new-dictionary-term-draft;
+                                    new-pronunciation-draft <=> root.new-dictionary-pronunciation-draft;
+                                    new-category-draft <=> root.new-dictionary-category-draft;
+                                    add-error: root.dictionary-add-error;
+                                    delete-error-id: root.dictionary-delete-error-id;
+                                    delete-error: root.dictionary-delete-error;
+                                    learning-mode-changed(value) => { root.dictionary-learning-mode-changed(value); }
+                                    suggestion-accept-requested(id) => { root.dictionary-suggestion-accept-requested(id); }
+                                    suggestion-dismiss-requested(id) => { root.dictionary-suggestion-dismiss-requested(id); }
+                                    add-requested(term, pronunciation, category) => { root.dictionary-add-requested(term, pronunciation, category); }
+                                    delete-requested(id) => { root.dictionary-delete-requested(id); }
+                                }
 
-                            if ai-page.mounted: SummarizationSection { }
+                                if trans-page.mounted: SnippetsSection {
+                                    entries: root.snippets;
+                                    entry-count: root.snippets-entry-count;
+                                    list-content-height: root.snippets-list-content-height;
+                                    list-spacer-before: root.snippets-list-spacer-before;
+                                    list-spacer-after: root.snippets-list-spacer-after;
+                                    list-scroll-top <=> root.snippets-list-scroll-top;
+                                    new-trigger-draft <=> root.new-snippet-trigger-draft;
+                                    new-expansion-draft <=> root.new-snippet-expansion-draft;
+                                    add-error: root.snippet-add-error;
+                                    delete-error-id: root.snippet-delete-error-id;
+                                    delete-error: root.snippet-delete-error;
+                                    edit-trigger-draft <=> root.edit-snippet-trigger-draft;
+                                    edit-expansion-draft <=> root.edit-snippet-expansion-draft;
+                                    update-error: root.snippet-update-error;
+                                    add-requested(trigger, expansion) => { root.snippet-add-requested(trigger, expansion); }
+                                    delete-requested(id) => { root.snippet-delete-requested(id); }
+                                    edit-requested(id) => { root.snippet-edit-requested(id); }
+                                    cancel-edit-requested => { root.snippet-cancel-edit-requested(); }
+                                    save-edit-requested(id, trigger, expansion) => { root.snippet-save-edit-requested(id, trigger, expansion); }
+                                }
+                        }
 
-                            if ai-page.mounted && SummarizationUi.enabled: IntelligenceSection {
-                                summary-provider: root.summary-provider;
-                                apple-intelligence-available: root.apple-intelligence-available;
-                                apple-intelligence-reason: root.apple-intelligence-reason;
-                                ollama-url: root.ollama-url;
-                                ollama-available: root.ollama-available;
-                                ollama-checking: root.ollama-checking;
-                                summary-model-count: root.summary-model-count;
-                                model-picker-visible: root.summary-model-picker-visible;
-                                model-ids: root.summary-model-ids;
-                                model-labels: root.summary-model-labels;
-                                selected-model-id: root.selected-summary-model-id;
-                                show-ollama-setup: root.show-ollama-setup;
-                                ollama-pulling: root.ollama-pulling;
-                                ollama-pull-status: root.ollama-pull-status;
-                                ollama-pull-error: root.ollama-pull-error;
-                                recommended-model: root.recommended-ollama-model;
-                                refresh-error: root.summary-refresh-error;
-                                provider-unavailable: root.summary-provider-unavailable;
-                                summary-provider-changed(value) => { root.summary-provider-changed(value); }
-                                ollama-url-changed(value) => { root.ollama-url-changed(value); }
-                                ollama-model-changed(value) => { root.ollama-model-changed(value); }
-                                retry-requested => { root.summary-providers-retry-requested(); }
-                                download-recommended-requested => { root.download-recommended-ollama-model-requested(); }
-                                open-apple-intelligence-settings-requested => { root.open-apple-intelligence-settings-requested(); }
-                            }
+                            ai-page := SettingsTabPage {
+                            width: parent.width;
+                            height: parent.height;
+                            active: root.tab == SettingsTab.ai;
+                            label: SettingsOptions.tab-label(SettingsTab.ai);
 
-                            if ai-page.mounted && SummarizationUi.enabled: CompressionSection { }
-                            if ai-page.mounted && (SummarizationUi.enabled || CompressionUi.cache-present || CompressionUi.model-error != ""): CompressionStorageSection { }
+                                if ai-page.mounted: SummarizationSection { }
 
-                            if ai-page.mounted: DictationPolishSection {
-                                enabled: root.dictation-polish-enabled;
-                                provider-available: root.dictation-polish-provider-available;
-                                template-ids: root.dictation-polish-template-ids;
-                                template-labels: root.dictation-polish-template-labels;
-                                active-template-id: root.active-dictation-polish-id;
-                                active-prompt <=> root.active-dictation-polish-prompt;
-                                enabled-changed(value) => { root.dictation-polish-enabled-changed(value); }
-                                template-changed(value) => { root.dictation-polish-template-changed(value); }
-                                prompt-changed(value) => { root.dictation-polish-prompt-changed(value); }
-                                open-provider-settings-requested => { root.open-apple-intelligence-settings-requested(); }
-                            }
+                                if ai-page.mounted && SummarizationUi.enabled: IntelligenceSection {
+                                    summary-provider: root.summary-provider;
+                                    apple-intelligence-available: root.apple-intelligence-available;
+                                    apple-intelligence-reason: root.apple-intelligence-reason;
+                                    ollama-url: root.ollama-url;
+                                    ollama-available: root.ollama-available;
+                                    ollama-checking: root.ollama-checking;
+                                    summary-model-count: root.summary-model-count;
+                                    model-picker-visible: root.summary-model-picker-visible;
+                                    model-ids: root.summary-model-ids;
+                                    model-labels: root.summary-model-labels;
+                                    selected-model-id: root.selected-summary-model-id;
+                                    show-ollama-setup: root.show-ollama-setup;
+                                    ollama-pulling: root.ollama-pulling;
+                                    ollama-pull-status: root.ollama-pull-status;
+                                    ollama-pull-error: root.ollama-pull-error;
+                                    recommended-model: root.recommended-ollama-model;
+                                    refresh-error: root.summary-refresh-error;
+                                    provider-unavailable: root.summary-provider-unavailable;
+                                    summary-provider-changed(value) => { root.summary-provider-changed(value); }
+                                    ollama-url-changed(value) => { root.ollama-url-changed(value); }
+                                    ollama-model-changed(value) => { root.ollama-model-changed(value); }
+                                    retry-requested => { root.summary-providers-retry-requested(); }
+                                    download-recommended-requested => { root.download-recommended-ollama-model-requested(); }
+                                    open-apple-intelligence-settings-requested => { root.open-apple-intelligence-settings-requested(); }
+                                }
 
-                            if ai-page.mounted && SummarizationUi.enabled: SummaryTemplatesSection {
-                                template-ids: root.summary-template-ids;
-                                template-labels: root.summary-template-labels;
-                                default-template-id: root.default-summary-template-id;
-                                editing-template-id: root.editing-summary-template-id;
-                                editing-is-builtin: root.editing-summary-template-is-builtin;
-                                editing-name <=> root.editing-summary-template-name;
-                                editing-prompt <=> root.editing-summary-template-prompt;
-                                new-template-draft <=> root.new-summary-template-draft;
-                                default-changed(value) => { root.summary-template-default-changed(value); }
-                                edit-target-changed(value) => { root.summary-template-edit-target-changed(value); }
-                                delete-requested => { root.summary-template-delete-requested(); }
-                                name-changed(value) => { root.summary-template-name-changed(value); }
-                                prompt-changed(value) => { root.summary-template-prompt-changed(value); }
-                                add-requested(name) => { root.summary-template-add-requested(name); }
-                            }
+                                if ai-page.mounted && SummarizationUi.enabled: CompressionSection { }
+                                if ai-page.mounted && (SummarizationUi.enabled || CompressionUi.cache-present || CompressionUi.model-error != ""): CompressionStorageSection { }
 
-                            if ai-page.mounted: AppBranchesSection {
-                                rules: root.app-branch-rules;
-                                target-labels: root.app-branch-target-labels;
-                                test-phase: root.app-branch-test-phase;
-                                test-delay-seconds: root.app-branch-test-delay-seconds;
-                                preview-matched: root.app-branch-preview-matched;
-                                preview-fallback: root.app-branch-preview-fallback;
-                                preview-app: root.app-branch-preview-app;
-                                preview-pattern: root.app-branch-preview-pattern;
-                                preview-template: root.app-branch-preview-template;
-                                rule-added(pattern, target) => { root.app-branch-added(pattern, target); }
-                                rule-deleted(id) => { root.app-branch-deleted(id); }
-                                rule-enabled(id, value) => { root.app-branch-enabled(id, value); }
-                                rule-pattern-changed(id, value) => { root.app-branch-pattern-changed(id, value); }
-                                rule-target-changed(id, target) => { root.app-branch-target-changed(id, target); }
-                                rule-moved(id, index) => { root.app-branch-moved(id, index); }
-                                test-requested => { root.app-branch-test-requested(); }
-                            }
+                                if ai-page.mounted: DictationPolishSection {
+                                    enabled: root.dictation-polish-enabled;
+                                    provider-available: root.dictation-polish-provider-available;
+                                    template-ids: root.dictation-polish-template-ids;
+                                    template-labels: root.dictation-polish-template-labels;
+                                    active-template-id: root.active-dictation-polish-id;
+                                    active-prompt <=> root.active-dictation-polish-prompt;
+                                    enabled-changed(value) => { root.dictation-polish-enabled-changed(value); }
+                                    template-changed(value) => { root.dictation-polish-template-changed(value); }
+                                    prompt-changed(value) => { root.dictation-polish-prompt-changed(value); }
+                                    open-provider-settings-requested => { root.open-apple-intelligence-settings-requested(); }
+                                }
 
-                            if ai-page.mounted && !SummarizationUi.enabled && root.dictation-polish-enabled: IntelligenceSection {
-                                for-dictation: true;
-                                summary-provider: root.summary-provider;
-                                apple-intelligence-available: root.apple-intelligence-available;
-                                apple-intelligence-reason: root.apple-intelligence-reason;
-                                ollama-url: root.ollama-url;
-                                ollama-available: root.ollama-available;
-                                ollama-checking: root.ollama-checking;
-                                summary-model-count: root.summary-model-count;
-                                model-picker-visible: root.summary-model-picker-visible;
-                                model-ids: root.summary-model-ids;
-                                model-labels: root.summary-model-labels;
-                                selected-model-id: root.selected-summary-model-id;
-                                show-ollama-setup: root.show-ollama-setup;
-                                ollama-pulling: root.ollama-pulling;
-                                ollama-pull-status: root.ollama-pull-status;
-                                ollama-pull-error: root.ollama-pull-error;
-                                recommended-model: root.recommended-ollama-model;
-                                refresh-error: root.summary-refresh-error;
-                                provider-unavailable: root.summary-provider-unavailable;
-                                summary-provider-changed(value) => { root.summary-provider-changed(value); }
-                                ollama-url-changed(value) => { root.ollama-url-changed(value); }
-                                ollama-model-changed(value) => { root.ollama-model-changed(value); }
-                                retry-requested => { root.summary-providers-retry-requested(); }
-                                download-recommended-requested => { root.download-recommended-ollama-model-requested(); }
-                                open-apple-intelligence-settings-requested => { root.open-apple-intelligence-settings-requested(); }
-                            }
-                    }
+                                if ai-page.mounted && SummarizationUi.enabled: SummaryTemplatesSection {
+                                    template-ids: root.summary-template-ids;
+                                    template-labels: root.summary-template-labels;
+                                    default-template-id: root.default-summary-template-id;
+                                    editing-template-id: root.editing-summary-template-id;
+                                    editing-is-builtin: root.editing-summary-template-is-builtin;
+                                    editing-name <=> root.editing-summary-template-name;
+                                    editing-prompt <=> root.editing-summary-template-prompt;
+                                    new-template-draft <=> root.new-summary-template-draft;
+                                    default-changed(value) => { root.summary-template-default-changed(value); }
+                                    edit-target-changed(value) => { root.summary-template-edit-target-changed(value); }
+                                    delete-requested => { root.summary-template-delete-requested(); }
+                                    name-changed(value) => { root.summary-template-name-changed(value); }
+                                    prompt-changed(value) => { root.summary-template-prompt-changed(value); }
+                                    add-requested(name) => { root.summary-template-add-requested(name); }
+                                }
 
-                        audio-page := SettingsTabPage {
-                        width: parent.width;
-                        height: parent.height;
-                        active: root.tab == SettingsTab.audio;
-                        label: SettingsOptions.tab-label(SettingsTab.audio);
+                                if ai-page.mounted: AppBranchesSection {
+                                    rules: root.app-branch-rules;
+                                    target-labels: root.app-branch-target-labels;
+                                    test-phase: root.app-branch-test-phase;
+                                    test-delay-seconds: root.app-branch-test-delay-seconds;
+                                    preview-matched: root.app-branch-preview-matched;
+                                    preview-fallback: root.app-branch-preview-fallback;
+                                    preview-app: root.app-branch-preview-app;
+                                    preview-pattern: root.app-branch-preview-pattern;
+                                    preview-template: root.app-branch-preview-template;
+                                    rule-added(pattern, target) => { root.app-branch-added(pattern, target); }
+                                    rule-deleted(id) => { root.app-branch-deleted(id); }
+                                    rule-enabled(id, value) => { root.app-branch-enabled(id, value); }
+                                    rule-pattern-changed(id, value) => { root.app-branch-pattern-changed(id, value); }
+                                    rule-target-changed(id, target) => { root.app-branch-target-changed(id, target); }
+                                    rule-moved(id, index) => { root.app-branch-moved(id, index); }
+                                    test-requested => { root.app-branch-test-requested(); }
+                                }
 
-                            if audio-page.mounted: MicrophoneSection {
-                                device-labels: root.audio-device-labels;
-                                device-ids: root.audio-device-ids;
-                                default-device-index: root.default-device-index;
-                                selected-device-id: root.selected-device-id;
-                                pin-unavailable: root.pin-unavailable;
-                                sample-rate-label: root.sample-rate-label;
-                                sample-rate-high: root.sample-rate-high;
-                                resetting-sample-rate: root.resetting-sample-rate;
-                                capture-busy: root.capture-busy;
-                                allow-bluetooth-mic: root.allow-bluetooth-mic;
-                                microphones: root.microphones;
-                                has-disconnected: root.has-disconnected-devices;
-                                device-changed(value) => { root.device-changed(value); }
-                                refresh-requested => { root.refresh-devices-requested(); }
-                                reset-devices-requested => { root.reset-devices-requested(); }
-                                reset-sample-rate-requested => { root.reset-sample-rate-requested(); }
-                                allow-bluetooth-mic-changed(value) => { root.allow-bluetooth-mic-changed(value); }
-                                move-device-requested(uid, direction) => { root.move-device-requested(uid, direction); }
-                                toggle-hidden-requested(uid, hidden) => { root.toggle-hidden-requested(uid, hidden); }
-                                remove-device-requested(uid) => { root.remove-device-requested(uid); }
-                            }
+                                if ai-page.mounted && !SummarizationUi.enabled && root.dictation-polish-enabled: IntelligenceSection {
+                                    for-dictation: true;
+                                    summary-provider: root.summary-provider;
+                                    apple-intelligence-available: root.apple-intelligence-available;
+                                    apple-intelligence-reason: root.apple-intelligence-reason;
+                                    ollama-url: root.ollama-url;
+                                    ollama-available: root.ollama-available;
+                                    ollama-checking: root.ollama-checking;
+                                    summary-model-count: root.summary-model-count;
+                                    model-picker-visible: root.summary-model-picker-visible;
+                                    model-ids: root.summary-model-ids;
+                                    model-labels: root.summary-model-labels;
+                                    selected-model-id: root.selected-summary-model-id;
+                                    show-ollama-setup: root.show-ollama-setup;
+                                    ollama-pulling: root.ollama-pulling;
+                                    ollama-pull-status: root.ollama-pull-status;
+                                    ollama-pull-error: root.ollama-pull-error;
+                                    recommended-model: root.recommended-ollama-model;
+                                    refresh-error: root.summary-refresh-error;
+                                    provider-unavailable: root.summary-provider-unavailable;
+                                    summary-provider-changed(value) => { root.summary-provider-changed(value); }
+                                    ollama-url-changed(value) => { root.ollama-url-changed(value); }
+                                    ollama-model-changed(value) => { root.ollama-model-changed(value); }
+                                    retry-requested => { root.summary-providers-retry-requested(); }
+                                    download-recommended-requested => { root.download-recommended-ollama-model-requested(); }
+                                    open-apple-intelligence-settings-requested => { root.open-apple-intelligence-settings-requested(); }
+                                }
+                        }
 
-                            if audio-page.mounted: AudioSection {
-                                is-laptop: root.is-laptop;
-                                clamshell-device-labels: root.clamshell-device-labels;
-                                clamshell-device-ids: root.audio-device-ids;
-                                default-device-index: root.default-device-index;
-                                clamshell-device-id: root.clamshell-device-id;
-                                clamshell-device-label: root.clamshell-device-label;
-                                system-audio-supported: root.system-audio-supported;
-                                capture-system-audio: root.capture-system-audio;
-                                meeting-audio-diagnostic: root.meeting-audio-diagnostic;
-                                meeting-audio-retention: root.meeting-audio-retention;
-                                diagnostic-max-minutes: root.diagnostic-max-minutes;
-                                diagnostic-megabytes-per-hour: root.diagnostic-megabytes-per-hour;
-                                meeting-transcription-language: root.meeting-transcription-language;
-                                meeting-autostop-enabled: root.meeting-autostop-enabled;
-                                meeting-autostop-labels: root.meeting-autostop-labels;
-                                meeting-autostop-label: root.meeting-autostop-label;
-                                meeting-max-duration-labels: root.meeting-max-duration-labels;
-                                meeting-max-duration-label: root.meeting-max-duration-label;
-                                vad-enabled: root.vad-enabled;
-                                filler-removal: root.filler-removal;
-                                stutter-collapse: root.stutter-collapse;
-                                dictionary-correction: root.dictionary-correction;
-                                clamshell-device-changed(value) => { root.clamshell-device-changed(value); }
-                                capture-system-audio-changed(value) => { root.capture-system-audio-changed(value); }
-                                meeting-audio-diagnostic-changed(value) => { root.meeting-audio-diagnostic-changed(value); }
-                                meeting-transcription-language-changed(value) => { root.meeting-transcription-language-changed(value); }
-                                meeting-autostop-enabled-changed(value) => { root.meeting-autostop-enabled-changed(value); }
-                                meeting-autostop-changed(value) => { root.meeting-autostop-changed(value); }
-                                meeting-max-duration-changed(value) => { root.meeting-max-duration-changed(value); }
-                                vad-enabled-changed(value) => { root.vad-enabled-changed(value); }
-                                filler-removal-changed(value) => { root.filler-removal-changed(value); }
-                                stutter-collapse-changed(value) => { root.stutter-collapse-changed(value); }
-                                dictionary-correction-changed(value) => { root.dictionary-correction-changed(value); }
-                            }
-                    }
+                            audio-page := SettingsTabPage {
+                            width: parent.width;
+                            height: parent.height;
+                            active: root.tab == SettingsTab.audio;
+                            label: SettingsOptions.tab-label(SettingsTab.audio);
 
-                        interface-page := SettingsTabPage {
-                        width: parent.width;
-                        height: parent.height;
-                        active: root.tab == SettingsTab.interface;
-                        label: SettingsOptions.tab-label(SettingsTab.interface);
+                                if audio-page.mounted: MicrophoneSection {
+                                    device-labels: root.audio-device-labels;
+                                    device-ids: root.audio-device-ids;
+                                    default-device-index: root.default-device-index;
+                                    selected-device-id: root.selected-device-id;
+                                    pin-unavailable: root.pin-unavailable;
+                                    sample-rate-label: root.sample-rate-label;
+                                    sample-rate-high: root.sample-rate-high;
+                                    resetting-sample-rate: root.resetting-sample-rate;
+                                    capture-busy: root.capture-busy;
+                                    allow-bluetooth-mic: root.allow-bluetooth-mic;
+                                    microphones: root.microphones;
+                                    has-disconnected: root.has-disconnected-devices;
+                                    device-changed(value) => { root.device-changed(value); }
+                                    refresh-requested => { root.refresh-devices-requested(); }
+                                    reset-devices-requested => { root.reset-devices-requested(); }
+                                    reset-sample-rate-requested => { root.reset-sample-rate-requested(); }
+                                    allow-bluetooth-mic-changed(value) => { root.allow-bluetooth-mic-changed(value); }
+                                    move-device-requested(uid, direction) => { root.move-device-requested(uid, direction); }
+                                    toggle-hidden-requested(uid, hidden) => { root.toggle-hidden-requested(uid, hidden); }
+                                    remove-device-requested(uid) => { root.remove-device-requested(uid); }
+                                }
 
-                            if interface-page.mounted: InterfaceSection {
-                                theme: root.app-theme;
-                                locale: root.locale;
-                                auto-paste: root.auto-paste;
-                                paste-method: root.paste-method;
-                                paste-delay-ms: root.paste-delay-ms;
-                                paste-delay-min: root.paste-delay-min;
-                                paste-delay-max: root.paste-delay-max;
-                                toggle-shortcut-label: root.toggle-shortcut-label;
-                                capture-busy: root.capture-busy;
-                                ptt-shortcut-label: root.ptt-shortcut-label;
-                                recording-field: root.recording-field;
-                                shortcut-error: root.shortcut-error;
-                                shortcut-error-kind: root.shortcut-error-kind;
-                                shortcut-notice: root.shortcut-notice;
-                                native-tap-warning-visible: root.native-tap-warning-visible;
-                                pill-hidden: root.pill-hidden;
-                                pill-hidden-in-captures: root.pill-hidden-in-captures;
-                                theme-changed(value) => { root.theme-changed(value); }
-                                locale-changed(value) => { root.locale-changed(value); }
-                                auto-paste-changed(value) => { root.auto-paste-changed(value); }
-                                paste-method-changed(value) => { root.paste-method-changed(value); }
-                                paste-delay-changed(value) => { root.paste-delay-changed(value); }
-                                pill-hidden-changed(value) => { root.pill-hidden-changed(value); }
-                                pill-hidden-in-captures-changed(value) => { root.pill-hidden-in-captures-changed(value); }
-                                shortcut-record-requested(field) => { root.shortcut-record-requested(field); }
-                                shortcut-captured(field, text, ctrl, shift, alt, meta) => { root.shortcut-captured(field, text, ctrl, shift, alt, meta); }
-                                shortcut-released(field, text, ctrl, shift, alt, meta) => { root.shortcut-released(field, text, ctrl, shift, alt, meta); }
-                                shortcut-cleared(field) => { root.shortcut-cleared(field); }
-                                shortcut-cancelled => { root.shortcut-cancelled(); }
-                                permissions-review-requested => { root.permissions-review-requested(); }
-                            }
+                                if audio-page.mounted: AudioSection {
+                                    is-laptop: root.is-laptop;
+                                    clamshell-device-labels: root.clamshell-device-labels;
+                                    clamshell-device-ids: root.audio-device-ids;
+                                    default-device-index: root.default-device-index;
+                                    clamshell-device-id: root.clamshell-device-id;
+                                    clamshell-device-label: root.clamshell-device-label;
+                                    system-audio-supported: root.system-audio-supported;
+                                    capture-system-audio: root.capture-system-audio;
+                                    meeting-audio-diagnostic: root.meeting-audio-diagnostic;
+                                    meeting-audio-retention: root.meeting-audio-retention;
+                                    diagnostic-max-minutes: root.diagnostic-max-minutes;
+                                    diagnostic-megabytes-per-hour: root.diagnostic-megabytes-per-hour;
+                                    meeting-transcription-language: root.meeting-transcription-language;
+                                    meeting-autostop-enabled: root.meeting-autostop-enabled;
+                                    meeting-autostop-labels: root.meeting-autostop-labels;
+                                    meeting-autostop-label: root.meeting-autostop-label;
+                                    meeting-max-duration-labels: root.meeting-max-duration-labels;
+                                    meeting-max-duration-label: root.meeting-max-duration-label;
+                                    vad-enabled: root.vad-enabled;
+                                    filler-removal: root.filler-removal;
+                                    stutter-collapse: root.stutter-collapse;
+                                    dictionary-correction: root.dictionary-correction;
+                                    clamshell-device-changed(value) => { root.clamshell-device-changed(value); }
+                                    capture-system-audio-changed(value) => { root.capture-system-audio-changed(value); }
+                                    meeting-audio-diagnostic-changed(value) => { root.meeting-audio-diagnostic-changed(value); }
+                                    meeting-transcription-language-changed(value) => { root.meeting-transcription-language-changed(value); }
+                                    meeting-autostop-enabled-changed(value) => { root.meeting-autostop-enabled-changed(value); }
+                                    meeting-autostop-changed(value) => { root.meeting-autostop-changed(value); }
+                                    meeting-max-duration-changed(value) => { root.meeting-max-duration-changed(value); }
+                                    vad-enabled-changed(value) => { root.vad-enabled-changed(value); }
+                                    filler-removal-changed(value) => { root.filler-removal-changed(value); }
+                                    stutter-collapse-changed(value) => { root.stutter-collapse-changed(value); }
+                                    dictionary-correction-changed(value) => { root.dictionary-correction-changed(value); }
+                                }
+                        }
 
-                            if interface-page.mounted: FeedbackSoundsSection {
-                                enabled: root.feedback-sounds-enabled;
-                                volume: root.feedback-sounds-volume;
-                                volume-min: root.feedback-sounds-volume-min;
-                                volume-max: root.feedback-sounds-volume-max;
-                                enabled-changed(value) => { root.feedback-sounds-enabled-changed(value); }
-                                volume-changed(value) => { root.feedback-sounds-volume-changed(value); }
-                            }
-                    }
+                            interface-page := SettingsTabPage {
+                            width: parent.width;
+                            height: parent.height;
+                            active: root.tab == SettingsTab.interface;
+                            label: SettingsOptions.tab-label(SettingsTab.interface);
 
-                        meetings-page := SettingsTabPage {
-                        width: parent.width;
-                        height: parent.height;
-                        active: root.tab == SettingsTab.meetings;
-                        label: SettingsOptions.tab-label(SettingsTab.meetings);
+                                if interface-page.mounted: InterfaceSection {
+                                    theme: root.app-theme;
+                                    locale: root.locale;
+                                    auto-paste: root.auto-paste;
+                                    paste-method: root.paste-method;
+                                    paste-delay-ms: root.paste-delay-ms;
+                                    paste-delay-min: root.paste-delay-min;
+                                    paste-delay-max: root.paste-delay-max;
+                                    toggle-shortcut-label: root.toggle-shortcut-label;
+                                    capture-busy: root.capture-busy;
+                                    ptt-shortcut-label: root.ptt-shortcut-label;
+                                    recording-field: root.recording-field;
+                                    shortcut-error: root.shortcut-error;
+                                    shortcut-error-kind: root.shortcut-error-kind;
+                                    shortcut-notice: root.shortcut-notice;
+                                    native-tap-warning-visible: root.native-tap-warning-visible;
+                                    pill-hidden: root.pill-hidden;
+                                    pill-hidden-in-captures: root.pill-hidden-in-captures;
+                                    theme-changed(value) => { root.theme-changed(value); }
+                                    locale-changed(value) => { root.locale-changed(value); }
+                                    auto-paste-changed(value) => { root.auto-paste-changed(value); }
+                                    paste-method-changed(value) => { root.paste-method-changed(value); }
+                                    paste-delay-changed(value) => { root.paste-delay-changed(value); }
+                                    pill-hidden-changed(value) => { root.pill-hidden-changed(value); }
+                                    pill-hidden-in-captures-changed(value) => { root.pill-hidden-in-captures-changed(value); }
+                                    shortcut-record-requested(field) => { root.shortcut-record-requested(field); }
+                                    shortcut-captured(field, text, ctrl, shift, alt, meta) => { root.shortcut-captured(field, text, ctrl, shift, alt, meta); }
+                                    shortcut-released(field, text, ctrl, shift, alt, meta) => { root.shortcut-released(field, text, ctrl, shift, alt, meta); }
+                                    shortcut-cleared(field) => { root.shortcut-cleared(field); }
+                                    shortcut-cancelled => { root.shortcut-cancelled(); }
+                                    permissions-review-requested => { root.permissions-review-requested(); }
+                                }
 
-                            if meetings-page.mounted: CalendarSection {
-                                enabled: root.calendar-enabled;
-                                permission: root.calendar-permission;
-                                autostart-enabled: root.calendar-autostart-enabled;
-                                reminder-minutes: root.calendar-reminder-minutes;
-                                reminder-minutes-min: root.calendar-reminder-minutes-min;
-                                reminder-minutes-max: root.calendar-reminder-minutes-max;
-                                calendars: root.calendars;
-                                enabled-changed(value) => { root.calendar-enabled-changed(value); }
-                                autostart-enabled-changed(value) => { root.calendar-autostart-enabled-changed(value); }
-                                reminder-minutes-changed(value) => { root.calendar-reminder-minutes-changed(value); }
-                                calendar-toggled(id) => { root.calendar-toggled(id); }
-                                open-system-settings-requested => { root.calendar-open-system-settings-requested(); }
-                            }
-                    }
+                                if interface-page.mounted: FeedbackSoundsSection {
+                                    enabled: root.feedback-sounds-enabled;
+                                    volume: root.feedback-sounds-volume;
+                                    volume-min: root.feedback-sounds-volume-min;
+                                    volume-max: root.feedback-sounds-volume-max;
+                                    enabled-changed(value) => { root.feedback-sounds-enabled-changed(value); }
+                                    volume-changed(value) => { root.feedback-sounds-volume-changed(value); }
+                                }
+                        }
 
-                        system-page := SettingsTabPage {
-                        width: parent.width;
-                        height: parent.height;
-                        active: root.tab == SettingsTab.system;
-                        label: SettingsOptions.tab-label(SettingsTab.system);
+                            meetings-page := SettingsTabPage {
+                            width: parent.width;
+                            height: parent.height;
+                            active: root.tab == SettingsTab.meetings;
+                            label: SettingsOptions.tab-label(SettingsTab.meetings);
 
-                            if system-page.mounted: AutostartSection {
-                                autostart-enabled: root.autostart-enabled;
-                                autostart-changed(value) => { root.autostart-changed(value); }
-                            }
+                                if meetings-page.mounted: CalendarSection {
+                                    enabled: root.calendar-enabled;
+                                    permission: root.calendar-permission;
+                                    autostart-enabled: root.calendar-autostart-enabled;
+                                    reminder-minutes: root.calendar-reminder-minutes;
+                                    reminder-minutes-min: root.calendar-reminder-minutes-min;
+                                    reminder-minutes-max: root.calendar-reminder-minutes-max;
+                                    calendars: root.calendars;
+                                    enabled-changed(value) => { root.calendar-enabled-changed(value); }
+                                    autostart-enabled-changed(value) => { root.calendar-autostart-enabled-changed(value); }
+                                    reminder-minutes-changed(value) => { root.calendar-reminder-minutes-changed(value); }
+                                    calendar-toggled(id) => { root.calendar-toggled(id); }
+                                    open-system-settings-requested => { root.calendar-open-system-settings-requested(); }
+                                }
+                        }
 
-                            if system-page.mounted: PermissionsSection {
-                                review-requested => { root.permissions-review-requested(); }
-                            }
+                            system-page := SettingsTabPage {
+                            width: parent.width;
+                            height: parent.height;
+                            active: root.tab == SettingsTab.system;
+                            label: SettingsOptions.tab-label(SettingsTab.system);
 
-                            if system-page.mounted: DiagnosticsSection {
-                                debug-transcription: root.debug-transcription;
-                                log-level: root.log-level;
-                                log-lines: root.log-lines;
-                                log-line-count: root.log-line-count;
-                                log-spacer-before: root.log-spacer-before;
-                                log-spacer-after: root.log-spacer-after;
-                                log-scroll-top <=> root.log-scroll-top;
-                                copying-diagnostics: root.copying-diagnostics;
-                                debug-transcription-changed(value) => { root.debug-transcription-changed(value); }
-                                log-level-changed(value) => { root.log-level-changed(value); }
-                                copy-diagnostics-requested => { root.copy-diagnostics-requested(); }
-                            }
+                                if system-page.mounted: AutostartSection {
+                                    autostart-enabled: root.autostart-enabled;
+                                    autostart-changed(value) => { root.autostart-changed(value); }
+                                }
 
-                            if system-page.mounted: DataSection {
-                                stats-line: root.data-stats-line;
-                                recordings-line: root.data-recordings-line;
-                                retention: root.meeting-audio-retention;
-                                exporting: root.data-exporting;
-                                export-status: root.data-export-status;
-                                export-status-is-error: root.data-export-status-is-error;
-                                mcp-binary-path: root.mcp-binary-path;
-                                mcp-exists: root.mcp-exists;
-                                mcp-claude-desktop-snippet: root.mcp-claude-desktop-snippet;
-                                mcp-claude-code-command: root.mcp-claude-code-command;
-                                testing-mcp: root.testing-mcp;
-                                mcp-test-status: root.mcp-test-status;
-                                retention-changed(value) => { root.meeting-audio-retention-changed(value); }
-                                export-requested => { root.data-export-requested(); }
-                                reveal-requested => { root.data-reveal-requested(); }
-                                copy-desktop-snippet-requested => { root.mcp-copy-desktop-snippet-requested(); }
-                                copy-code-command-requested => { root.mcp-copy-code-command-requested(); }
-                                test-mcp-requested => { root.mcp-test-requested(); }
-                            }
+                                if system-page.mounted: PermissionsSection {
+                                    review-requested => { root.permissions-review-requested(); }
+                                }
 
-                            if system-page.mounted: ModelDeleteSection {
-                                files-deletable: root.model-files-deletable;
-                                model-phase: root.model-phase;
-                                model-label: root.selected-model-label;
-                                delete-error: root.model-delete-error;
-                                delete-error-kind: root.model-delete-error-kind;
-                                delete-requested => { root.delete-model-requested(); }
-                            }
+                                if system-page.mounted: DiagnosticsSection {
+                                    debug-transcription: root.debug-transcription;
+                                    log-level: root.log-level;
+                                    log-lines: root.log-lines;
+                                    log-line-count: root.log-line-count;
+                                    log-spacer-before: root.log-spacer-before;
+                                    log-spacer-after: root.log-spacer-after;
+                                    log-scroll-top <=> root.log-scroll-top;
+                                    copying-diagnostics: root.copying-diagnostics;
+                                    debug-transcription-changed(value) => { root.debug-transcription-changed(value); }
+                                    log-level-changed(value) => { root.log-level-changed(value); }
+                                    copy-diagnostics-requested => { root.copy-diagnostics-requested(); }
+                                }
 
-                            if system-page.mounted: AboutSection {
-                                app-version: root.app-version;
-                                transcription-label: root.about-transcription-label;
-                                summary-label: root.about-summary-label;
-                                auto-update-check: root.auto-update-check;
-                                update-row: root.update-row;
-                                update-version: root.update-version;
-                                update-error: root.update-error;
-                                update-has-progress: root.update-has-progress;
-                                update-progress: root.update-progress;
-                                update-blocked: root.update-blocked;
-                                update-block-reason: root.update-block-reason;
-                                update-action-requested => { root.update-action-requested(); }
-                                auto-update-check-changed(value) => { root.auto-update-check-changed(value); }
+                                if system-page.mounted: DataSection {
+                                    stats-line: root.data-stats-line;
+                                    recordings-line: root.data-recordings-line;
+                                    retention: root.meeting-audio-retention;
+                                    exporting: root.data-exporting;
+                                    export-status: root.data-export-status;
+                                    export-status-is-error: root.data-export-status-is-error;
+                                    mcp-binary-path: root.mcp-binary-path;
+                                    mcp-exists: root.mcp-exists;
+                                    mcp-claude-desktop-snippet: root.mcp-claude-desktop-snippet;
+                                    mcp-claude-code-command: root.mcp-claude-code-command;
+                                    testing-mcp: root.testing-mcp;
+                                    mcp-test-status: root.mcp-test-status;
+                                    retention-changed(value) => { root.meeting-audio-retention-changed(value); }
+                                    export-requested => { root.data-export-requested(); }
+                                    reveal-requested => { root.data-reveal-requested(); }
+                                    copy-desktop-snippet-requested => { root.mcp-copy-desktop-snippet-requested(); }
+                                    copy-code-command-requested => { root.mcp-copy-code-command-requested(); }
+                                    test-mcp-requested => { root.mcp-test-requested(); }
+                                }
+
+                                if system-page.mounted: ModelDeleteSection {
+                                    files-deletable: root.model-files-deletable;
+                                    model-phase: root.model-phase;
+                                    model-label: root.selected-model-label;
+                                    delete-error: root.model-delete-error;
+                                    delete-error-kind: root.model-delete-error-kind;
+                                    delete-requested => { root.delete-model-requested(); }
+                                }
+
+                                if system-page.mounted: AboutSection {
+                                    app-version: root.app-version;
+                                    transcription-label: root.about-transcription-label;
+                                    summary-label: root.about-summary-label;
+                                    auto-update-check: root.auto-update-check;
+                                    update-row: root.update-row;
+                                    update-version: root.update-version;
+                                    update-error: root.update-error;
+                                    update-has-progress: root.update-has-progress;
+                                    update-progress: root.update-progress;
+                                    update-blocked: root.update-blocked;
+                                    update-block-reason: root.update-block-reason;
+                                    update-action-requested => { root.update-action-requested(); }
+                                    auto-update-check-changed(value) => { root.auto-update-check-changed(value); }
+                                }
                             }
                         }
-                    }
+            }
         }
             }
         }

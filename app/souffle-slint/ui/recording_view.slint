@@ -175,7 +175,9 @@ export component RecordingView inherits Rectangle {
                     waveform := ProLevelWaveform {
                         running: root.mode != RecordingMode.idle && root.window-visible;
                         level: root.audio-level;
-                        ink: KitThemeContext.current.border-strong;
+                        // The kit fades quiet bars, so the ink is darker than
+                        // the bar colour it should read as.
+                        ink: Theme.surface-4.mix(Theme.text-faint, 0.6);
                         bar-count: 56;
                     }
                 }
@@ -298,6 +300,7 @@ export component RecordingView inherits Rectangle {
                                 if !root.starting && root.combined-text != "": TranscriptWordFlow {
                                     words: root.live-dictation-words;
                                     typography: Typography.title-input;
+                                    line-ratio: 1.5;
                                     color: Theme.text-primary;
                                     caret: true;
                                 }
@@ -448,30 +451,38 @@ export component RecordingView inherits Rectangle {
 
                     if root.mode == RecordingMode.meeting: KitCard {
                         level: SurfaceLevel.raised;
-                        inset: regular;
-                        gap: compact;
+                        inset: none;
+                        gap: none;
 
-                        KitInline {
-                            gap: compact;
-                            KitIcon {
-                                glyph: LucideDesign.pen-line();
-                                ink: Theme.text-muted;
-                            }
-                            AppText {
-                                text: @tr("NOTES");
-                                typography: Typography.timeline-heading;
-                                color: Theme.text-muted;
-                                vertical-alignment: center;
-                            }
-                        }
+                        VerticalLayout {
+                            padding-top: 18px;
+                            padding-bottom: 18px;
+                            padding-left: 22px;
+                            padding-right: 22px;
+                            spacing: 10px;
 
-                        notes-input := KitTextArea {
-                            min-lines: 3;
-                            max-lines: 3;
-                            text <=> root.notes;
-                            placeholder: @tr("Notez décisions, actions, noms…");
-                            accessible-name: @tr("Notes de la réunion");
-                            edited(value) => { root.notes-changed(value); }
+                            KitInline {
+                                gap: compact;
+                                KitIcon {
+                                    glyph: LucideDesign.pen-line();
+                                    ink: Theme.text-muted;
+                                }
+                                AppText {
+                                    text: @tr("NOTES");
+                                    typography: Typography.timeline-heading;
+                                    color: Theme.text-muted;
+                                    vertical-alignment: center;
+                                }
+                            }
+
+                            notes-input := KitTextArea {
+                                min-lines: 3;
+                                max-lines: 3;
+                                text <=> root.notes;
+                                placeholder: @tr("Notez décisions, actions, noms…");
+                                accessible-name: @tr("Notes de la réunion");
+                                edited(value) => { root.notes-changed(value); }
+                            }
                         }
                     }
                 }

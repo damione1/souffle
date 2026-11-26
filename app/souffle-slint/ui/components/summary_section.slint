@@ -1,5 +1,5 @@
 import { AppText, Typography } from "@typography";
-import { AlertActions, AlertSeverity, ButtonIntent, ControlSize, ElevationLevel, KitAlert, KitButton, KitCard, KitDivider, KitIcon, KitInline, KitProgress, KitStack, KitThemeContext, ProgressMode, SurfaceLevel } from "@kit";
+import { AlertActions, AlertSeverity, ButtonIntent, ControlSize, CardBorderStyle, ElevationLevel, IconGlyph, KitAlert, KitButton, KitCard, KitDivider, KitIcon, KitInline, KitProgress, KitStack, KitThemeContext, ProgressMode, SurfaceLevel } from "@kit";
 import { LucideArrows } from "@kit-icons/arrows.slint";
 import { Theme } from "../theme.slint";
 import { LucideCursors } from "@kit-icons/cursors.slint";
@@ -14,11 +14,13 @@ export struct StructuredActionItem {
 
 component SummaryTitle inherits KitInline {
     in property <string> model-label;
+    // The mockup's single four-point star, which the kit icon set lacks.
+    private property <IconGlyph> sparkle-glyph: { stroke: "M 12 3 l -1.9 5.8 a 2 2 0 0 1 -1.3 1.3 L 3 12 l 5.8 1.9 a 2 2 0 0 1 1.3 1.3 L 12 21 l 1.9 -5.8 a 2 2 0 0 1 1.3 -1.3 L 21 12 l -5.8 -1.9 a 2 2 0 0 1 -1.3 -1.3 Z", fill: "", viewbox: 24 };
     gap: compact;
     alignment: stretch;
 
     KitIcon {
-        glyph: LucideCursors.sparkles();
+        glyph: root.sparkle-glyph;
         ink: KitThemeContext.current.accent-ink;
         y: (parent.height - self.height) / 2;
     }
@@ -30,7 +32,7 @@ component SummaryTitle inherits KitInline {
     }
     if root.model-label != "": AppText {
         text: root.model-label;
-        typography: Typography.secondary;
+        typography: Typography.mono;
         color: Theme.text-muted;
         vertical-alignment: center;
     }
@@ -99,6 +101,7 @@ component SummaryBullet inherits KitInline {
     AppText {
         text: root.text;
         typography: Typography.field-label;
+        line-height-factor: 1.24;
         color: Theme.text-primary;
         horizontal-stretch: 1;
         wrap: word-wrap;
@@ -140,9 +143,31 @@ export component SummarySection inherits KitStack {
 
     gap: compact;
 
-    if root.summary == "" && !root.is-generating && root.available-models.length > 0 && root.generation-error == "": KitCard {
+    if root.summary == "" && !root.is-generating && root.available-models.length == 0: KitAlert { bordered: false;
+        corner-radius: 12px;
+        inset: 12px;
+        severity: AlertSeverity.warning;
+        message: @tr("Aucun fournisseur de résumé disponible. Activez Apple Intelligence ou connectez Ollama dans Réglages › IA.");
+    }
+
+    if root.summary == "" && !root.is-generating && root.generation-error != "": KitAlert { bordered: false;
+        corner-radius: 12px;
+        inset: 12px;
+        actions-placement: AlertActions.inline;
+        severity: AlertSeverity.error;
+        message: @tr("La génération du résumé a échoué : {}", root.generation-error);
+        if root.available-models.length > 0: KitButton {
+            text: @tr("Réessayer");
+            intent: ButtonIntent.secondary;
+            control-size: ControlSize.compact;
+            activated => { root.generate-requested(); }
+        }
+    }
+
+    if root.summary == "" && !root.is-generating && root.available-models.length > 0: KitCard {
         level: SurfaceLevel.flat;
         elevation: ElevationLevel.none;
+        border-style: CardBorderStyle.dashed;
         border-color: Theme.line-strong;
         inset: none;
         gap: none;
@@ -179,7 +204,7 @@ export component SummarySection inherits KitStack {
 
                 AppText {
                     text: @tr("Générer le résumé (expérimental)");
-                    typography: Typography.body-emphasis;
+                    typography: Typography.body-strong;
                     color: Theme.text-primary;
                     wrap: word-wrap;
                 }
@@ -213,27 +238,6 @@ export component SummarySection inherits KitStack {
                     activated => { root.generate-requested(); }
                 }
             }
-        }
-    }
-
-    if root.summary == "" && !root.is-generating && root.available-models.length == 0: KitAlert { bordered: false;
-        corner-radius: 12px;
-        inset: 12px;
-        severity: AlertSeverity.warning;
-        message: @tr("Aucun fournisseur de résumé disponible. Activez Apple Intelligence ou connectez Ollama dans Réglages › IA.");
-    }
-
-    if root.summary == "" && !root.is-generating && root.generation-error != "": KitAlert { bordered: false;
-        corner-radius: 12px;
-        inset: 12px;
-        actions-placement: AlertActions.trailing;
-        severity: AlertSeverity.error;
-        message: @tr("La génération du résumé a échoué : {}", root.generation-error);
-        if root.available-models.length > 0: KitButton {
-            text: @tr("Réessayer");
-            intent: ButtonIntent.secondary;
-            control-size: ControlSize.compact;
-            activated => { root.generate-requested(); }
         }
     }
 
@@ -294,6 +298,7 @@ export component SummarySection inherits KitStack {
             if root.summary-is-stale: KitAlert { bordered: false;
                 corner-radius: 12px;
                 inset: 9px;
+                message-size: Typography.hint.size;
                 severity: AlertSeverity.warning;
                 message: @tr("Résumé obsolète (audio ajouté depuis)");
             }
@@ -320,7 +325,8 @@ export component SummarySection inherits KitStack {
                     }
                     AppText {
                         text: point;
-                        typography: Typography.body;
+                        typography: Typography.reading;
+                        line-height-factor: 1.28;
                         color: Theme.text-primary;
                         horizontal-stretch: 1;
                         wrap: word-wrap;
@@ -330,7 +336,8 @@ export component SummarySection inherits KitStack {
 
             if root.summary-body != "": AppText {
                 text: root.summary-body;
-                typography: Typography.body;
+                typography: Typography.reading;
+                line-height-factor: 1.28;
                 color: Theme.text-primary;
                 wrap: word-wrap;
             }
@@ -358,7 +365,7 @@ export component SummarySection inherits KitStack {
                         }
                         if item.owner != "": AppText {
                             text: @tr("→ {}", item.owner);
-                            typography: Typography.small;
+                            typography: Typography.mono-small;
                             color: Theme.text-muted;
                             wrap: word-wrap;
                         }

@@ -169,6 +169,7 @@ export component IdleView inherits Rectangle {
                 corner-radius: 12px;
                 field-fill: Theme.surface-1;
                 leading-icon-ink: Theme.text-muted;
+                leading-icon-size: 16px;
                 text <=> root.search-query;
                 placeholder: @tr("Rechercher transcriptions et réunions");
                 edited(text) => { root.search-changed(text); }

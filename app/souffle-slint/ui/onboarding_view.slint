@@ -149,14 +149,14 @@ export component OnboardingView inherits Rectangle {
                             padding-top: 6px;
                             AppText {
                                 text: @tr("Soufflé");
-                                typography: Typography.title;
+                                typography: Typography.onboarding-title;
                                 color: Theme.text-primary;
                                 horizontal-alignment: center;
                             }
                         }
                         AppText {
                             text: @tr("Transcription vocale locale pour la dictée et les meetings.");
-                            typography: Typography.body;
+                            typography: Typography.reading;
                             color: Theme.text-muted;
                             horizontal-alignment: center;
                             wrap: word-wrap;
@@ -210,7 +210,8 @@ export component OnboardingView inherits Rectangle {
 
                         VerticalLayout {
                             padding: 28px;
-                            spacing: 18px;
+                            // The permission rows sit closer to the subtitle.
+                            spacing: root.step == OnboardingStep.permissions && root.status-message == "" ? 12px : 18px;
 
                             KitStack {
                                 gap: tight;

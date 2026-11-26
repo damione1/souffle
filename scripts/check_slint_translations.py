@@ -19,7 +19,7 @@ UNCHANGED_ENGLISH = {
     # Export file formats (MeetingDetail's Export menu): format names, not
     # prose - the same words in both languages.
     "Markdown (.md)", "JSON (.json)", "Audio (.ogg)",
-    " {}", " / {}", "• {}", "→ {}", "Version {}",
+    " {}", " / {}", "• {}", "→ {}", "Version {}", "{} segments", "{} sessions", "{} minute", "{} minutes",
     # Brand plus Foundation-localized open-set locale data.
     "Apple Speech", "Apple Speech ({})", "Apple Speech — {} [{}]",
 }

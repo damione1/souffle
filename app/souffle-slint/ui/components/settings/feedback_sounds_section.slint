@@ -60,6 +60,9 @@ export component FeedbackSoundsSection inherits KitFieldSet {
                 modal-layer: 0;
                 width: 174px;
                 presentation: SliderPresentation.line;
+                // A plain value bar; the kit still outlines the thumb on keyboard focus.
+                handle-brush: transparent;
+                track-brush: Theme.surface-3;
                 ownership: Ownership.controlled;
                 spec: { minimum: root.volume-min, maximum: root.volume-max, step: 1 };
                 label: @tr("Volume des sons de dictée");

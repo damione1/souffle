@@ -162,7 +162,8 @@ export component SummaryTemplatesSection inherits KitFieldSet {
             focus-requested => { new-name-editor.take-focus(); }
 
             HorizontalLayout {
-                width: Theme.settings-control-width;
+                // Wider than a settings control so the placeholder fits beside the button.
+                width: 280px;
                 spacing: 8px;
                 new-name-editor := KitTextField {
                     theme: root.theme;

@@ -1,4 +1,4 @@
-import { AppText, AppNumericText, Typography } from "@typography";
+import { AppText, Typography } from "@typography";
 import { Theme } from "../theme.slint";
 import { SpeakerRole } from "../types.slint";
 import { TranscriptBlock, SpeakerLabels } from "transcript_section.slint";
@@ -32,12 +32,14 @@ export component LiveTranscriptParagraph inherits VerticalLayout {
         AppText {
             text: root.block.has-speaker ? SpeakerLabels.of(root.block.speaker) : "";
             typography: Typography.small-emphasis;
+            vertical-alignment: center;
             color: root.block.speaker == SpeakerRole.me ? Theme.accent : Theme.secondary;
         }
-        AppNumericText {
+        AppText {
             text: root.block.timestamp;
-            typography: Typography.micro-detail;
-            text-color: Theme.text-faint;
+            typography: Typography.mono-caption;
+            color: Theme.text-faint;
+            vertical-alignment: center;
         }
         if root.block.can-edit: KitButton {
             // Keep the existing catalogue context when extracting this row.
@@ -54,6 +56,7 @@ export component LiveTranscriptParagraph inherits VerticalLayout {
         width: parent.width;
         words: root.block.words;
         typography: Typography.action-body;
+        line-ratio: 1.6;
         color: Theme.text-primary;
         word-clicked(word, at-x, at-y) => { root.word-clicked(word, at-x, at-y); }
     }

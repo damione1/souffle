@@ -37,6 +37,8 @@ export component TranscriptWordFlow inherits KitWrap {
     in property <brush> color: Theme.text-primary;
     // An insertion mark after the last word, for the dictation surface.
     in property <bool> caret: false;
+    // Line box as a multiple of the font size; 0 keeps the font's own height.
+    in property <float> line-ratio: 0;
     // The exact token text of the clicked word, and the window position
     // of its bottom-left corner (where the alias popover opens).
     callback word-clicked(string, length, length);
@@ -45,7 +47,7 @@ export component TranscriptWordFlow inherits KitWrap {
 
     for word in root.words: Rectangle {
         width: word-label.preferred-width + trailing-label.preferred-width;
-        height: max(word-label.preferred-height, trailing-label.preferred-height);
+        height: max(word-label.preferred-height, trailing-label.preferred-height, root.typography.size * root.line-ratio);
 
         word-area := TouchArea {
             // The item also reserves the trailing text's width. Slint
@@ -63,6 +65,7 @@ export component TranscriptWordFlow inherits KitWrap {
 
             word-label := AppText {
                 text: word.text;
+                y: (parent.height - self.height) / 2;
                 width: self.preferred-width;
                 color: root.color;
                 typography: root.typography;
@@ -72,6 +75,7 @@ export component TranscriptWordFlow inherits KitWrap {
 
         trailing-label := AppText {
             x: word-area.width;
+            y: (parent.height - self.height) / 2;
             text: word.trailing-text;
             width: self.preferred-width;
             color: root.color;
@@ -82,11 +86,13 @@ export component TranscriptWordFlow inherits KitWrap {
 
     if root.caret: Rectangle {
         width: 7px;
-        height: root.typography.size * 1.2;
+        height: root.typography.size * max(1.2, root.line-ratio);
 
         Rectangle {
             x: 2px;
+            y: (parent.height - self.height) / 2;
             width: 5px;
+            height: root.typography.size * 1.2;
             background: Theme.accent;
         }
     }
@@ -189,7 +195,7 @@ export component DictionaryAliasPopover inherits Rectangle {
 
                     AppText {
                         text: @tr("Alias de dictionnaire");
-                        typography: Typography.section;
+                        typography: Typography.body-strong;
                         color: Theme.text-primary;
                         vertical-alignment: center;
                     }

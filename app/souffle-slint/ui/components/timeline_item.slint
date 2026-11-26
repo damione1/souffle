@@ -4,7 +4,7 @@ import { LucideAccount } from "@kit-icons/account.slint";
 import { LucideText } from "@kit-icons/text.slint";
 import { LucideFiles } from "@kit-icons/files.slint";
 import { LucideArrows } from "@kit-icons/arrows.slint";
-import { AppText, AppNumericText, Typography } from "@typography";
+import { AppText, Typography } from "@typography";
 import { TimelineKind } from "../types.slint";
 import { ActionGuards, MeetingDeletePermission } from "../action_guards.slint";
 import { Theme } from "../theme.slint";
@@ -174,16 +174,18 @@ export component TimelineItemRow inherits Rectangle {
                         }
                     }
 
-                    Rectangle {
-                        width: Theme.row-duration-width + root.column-gap;
+                    duration-slot := Rectangle {
+                        // Hour-long durations outgrow the column in the mono face.
+                        private property <length> text-width: max(Theme.row-duration-width, duration.preferred-width);
+                        width: self.text-width + root.column-gap;
 
-                        AppNumericText {
+                        duration := AppText {
                             x: root.column-gap;
                             text: root.entry.duration-label;
-                            width: Theme.row-duration-width;
+                            width: duration-slot.text-width;
                             horizontal-alignment: right;
-                            text-color: Theme.text-muted;
-                            typography: Typography.secondary;
+                            color: Theme.text-muted;
+                            typography: Typography.mono;
                             vertical-alignment: center;
                         }
                     }
@@ -191,13 +193,13 @@ export component TimelineItemRow inherits Rectangle {
                     Rectangle {
                         width: Theme.row-timeline-time-width + root.column-gap;
 
-                        AppNumericText {
+                        AppText {
                             x: root.column-gap;
                             text: root.entry.time-label;
                             width: Theme.row-timeline-time-width;
                             horizontal-alignment: right;
-                            text-color: Theme.text-muted;
-                            typography: Typography.secondary;
+                            color: Theme.text-muted;
+                            typography: Typography.mono;
                             vertical-alignment: center;
                         }
                     }

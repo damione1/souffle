@@ -51,6 +51,18 @@ export global MeetingExportMenu {
     }
 }
 
+component MetaText inherits AppText {
+    typography: Typography.content;
+    color: Theme.text-muted;
+    vertical-alignment: center;
+}
+
+component MetaMono inherits AppText {
+    typography: Typography.mono-label;
+    color: Theme.text-muted;
+    vertical-alignment: center;
+}
+
 export component MeetingDetail inherits Rectangle {
     in property <string> title;
     in property <MeetingMeta> meta;
@@ -239,14 +251,13 @@ export component MeetingDetail inherits Rectangle {
                                 gap: compact;
                                 alignment: start;
 
-                                AppText {
-                                    text: root.meta.sessions > 1
-                                        ? @tr("{0}/{1}/{2} {3}:{4} · {5} · {6} segments · {7} sessions", root.meta.day, root.meta.month, root.meta.year, root.meta.hour, root.meta.minute, root.meta.duration, root.meta.segments, root.meta.sessions)
-                                        : @tr("{0}/{1}/{2} {3}:{4} · {5} · {6} segments", root.meta.day, root.meta.month, root.meta.year, root.meta.hour, root.meta.minute, root.meta.duration, root.meta.segments);
-                                    color: Theme.text-muted;
-                                    typography: Typography.content;
-                                    vertical-alignment: center;
-                                }
+                                MetaMono { text: @tr("{0}/{1}/{2} {3}:{4}", root.meta.day, root.meta.month, root.meta.year, root.meta.hour, root.meta.minute); }
+                                MetaText { text: "·"; accessible-role: none; }
+                                MetaMono { text: root.meta.duration; }
+                                MetaText { text: "·"; accessible-role: none; }
+                                MetaText { text: @tr("{} segments", root.meta.segments); }
+                                if root.meta.sessions > 1: MetaText { text: "·"; accessible-role: none; }
+                                if root.meta.sessions > 1: MetaText { text: @tr("{} sessions", root.meta.sessions); }
 
                                 if root.model-label != "": KitBadge {
                                     text: root.model-label;
@@ -397,7 +408,7 @@ export component MeetingDetail inherits Rectangle {
                                 spacing: 6px;
                                 AppText {
                                     text: @tr("Cette réunion ne contient aucun enregistrement.");
-                                    typography: Typography.body-emphasis;
+                                    typography: Typography.body-strong;
                                     color: Theme.text-primary;
                                     horizontal-alignment: center;
                                     wrap: word-wrap;
@@ -446,90 +457,107 @@ export component MeetingDetail inherits Rectangle {
 
                         if root.show-reading: KitCard {
                             level: SurfaceLevel.raised;
-                            inset: regular;
-                            gap: compact;
+                            inset: none;
+                            gap: none;
 
-                            KitInline {
-                                alignment: stretch;
+                            VerticalLayout {
+                                padding-top: 18px;
+                                padding-bottom: 18px;
+                                padding-left: 22px;
+                                padding-right: 22px;
+                                spacing: 10px;
 
-                                KitIcon {
-                                    glyph: LucideDesign.pen-line();
-                                    ink: Theme.accent;
-                                    vertical-stretch: 0;
+                                KitInline {
+                                    alignment: stretch;
+
+                                    KitIcon {
+                                        glyph: LucideDesign.pen-line();
+                                        ink: Theme.accent;
+                                        vertical-stretch: 0;
+                                    }
+
+                                    AppText {
+                                        text: @tr("Notes");
+                                        typography: Typography.body-strong;
+                                        color: Theme.text-primary;
+                                        vertical-alignment: center;
+                                        horizontal-stretch: 1;
+                                    }
+
+                                    if root.notes-save-state == NotesSaveState.saved: KitText {
+                                        text: @tr("Enregistr\u{e9}");
+                                        role: TypographyRole.caption;
+                                        vertical-alignment: center;
+                                    }
+                                    if root.notes-save-state == NotesSaveState.pending: KitText {
+                                        text: @tr("Enregistrement\u{2026}");
+                                        role: TypographyRole.caption;
+                                        vertical-alignment: center;
+                                    }
                                 }
 
-                                AppText {
-                                    text: @tr("Notes");
-                                    typography: Typography.body-emphasis;
-                                    color: Theme.text-primary;
-                                    vertical-alignment: center;
-                                    horizontal-stretch: 1;
+                                notes-edit := KitTextArea {
+                                    text <=> root.notes;
+                                    min-lines: 3;
+                                    max-lines: 3;
+                                    placeholder: @tr("Ajoutez les décisions, actions et noms importants…");
+                                    accessible-name: @tr("Notes de la réunion");
+                                    edited(value) => { root.notes-changed(value); }
                                 }
 
-                                if root.notes-save-state == NotesSaveState.saved: KitText {
-                                    text: @tr("Enregistr\u{e9}");
+                                KitText {
+                                    text: @tr("Les notes sont enregistr\u{e9}es avec la r\u{e9}union et am\u{e9}liorent le r\u{e9}sum\u{e9}.");
                                     role: TypographyRole.caption;
-                                    vertical-alignment: center;
                                 }
-                                if root.notes-save-state == NotesSaveState.pending: KitText {
-                                    text: @tr("Enregistrement\u{2026}");
-                                    role: TypographyRole.caption;
-                                    vertical-alignment: center;
-                                }
-                            }
-
-                            notes-edit := KitTextArea {
-                                text <=> root.notes;
-                                min-lines: 3;
-                                max-lines: 3;
-                                placeholder: @tr("Ajoutez les décisions, actions et noms importants…");
-                                accessible-name: @tr("Notes de la réunion");
-                                edited(value) => { root.notes-changed(value); }
-                            }
-
-                            KitText {
-                                text: @tr("Les notes sont enregistr\u{e9}es avec la r\u{e9}union et am\u{e9}liorent le r\u{e9}sum\u{e9}.");
-                                role: TypographyRole.caption;
                             }
                         }
 
                         if !root.is-empty-meeting && root.show-reading: KitCard {
                             level: SurfaceLevel.raised;
-                            inset: regular;
-                            gap: compact;
+                            inset: none;
+                            gap: none;
 
-                            KitInline {
-                                alignment: stretch;
+                            VerticalLayout {
+                                padding-top: 20px;
+                                padding-bottom: 20px;
+                                padding-left: 24px;
+                                padding-right: 24px;
+                                spacing: 14px;
 
-                                AppText {
-                                    text: @tr("Transcription");
-                                    typography: Typography.action-title;
-                                    color: Theme.text-primary;
-                                    vertical-alignment: center;
-                                    horizontal-stretch: 1;
+                                KitInline {
+                                    alignment: stretch;
+
+                                    AppText {
+                                        text: @tr("Transcription");
+                                        typography: Typography.action-strong;
+                                        color: Theme.text-primary;
+                                        vertical-alignment: center;
+                                        horizontal-stretch: 1;
+                                    }
+
+                                    if root.transcript-segment-count > 0: KitButton {
+                                        text: @tr("Voir la transcription complète");
+                                        control-size: ControlSize.compact;
+                                        intent: ButtonIntent.secondary;
+                                        activated => { root.show-view(MeetingDetailView.transcript); }
+                                    }
                                 }
 
-                                if root.transcript-segment-count > 0: KitButton {
-                                    text: @tr("Voir la transcription complète");
-                                    control-size: ControlSize.compact;
-                                    intent: ButtonIntent.secondary;
-                                    activated => { root.show-view(MeetingDetailView.transcript); }
+                                if root.transcript-segment-count == 0: AppText {
+                                    text: @tr("Aucun texte transcrit pour cette r\u{e9}union.");
+                                    color: Theme.text-muted;
+                                    typography: Typography.secondary;
                                 }
-                            }
 
-                            if root.transcript-segment-count == 0: AppText {
-                                text: @tr("Aucun texte transcrit pour cette r\u{e9}union.");
-                                color: Theme.text-muted;
-                                typography: Typography.secondary;
-                            }
-
-                            if root.transcript-preview != "": AppText {
-                                text: root.transcript-preview;
-                                color: Theme.text-muted;
-                                typography: Typography.content;
-                                wrap: word-wrap;
-                                overflow: elide;
-                                height: min(self.preferred-height, 3 * 1.4 * Typography.content.size);
+                                if root.transcript-preview != "": AppText {
+                                    text: root.transcript-preview;
+                                    color: Theme.text-muted;
+                                    typography: Typography.field-label;
+                                    line-height-factor: 1.32;
+                                    wrap: word-wrap;
+                                    overflow: elide;
+                                    height: min(self.preferred-height, 3.4 * 1.6 * Typography.field-label.size);
+                                }
                             }
                         }
 
@@ -545,6 +573,7 @@ export component MeetingDetail inherits Rectangle {
                             filtered: root.transcript-search != "";
                             audio-position-seconds: root.audio-position-seconds;
                             audio-session-index: root.audio-session-index;
+                            row-width: root.column-width;
                             paragraph-clicked(session, time) => { root.transcript-paragraph-clicked(session, time); }
                             background-clicked => { focus-bg.focus(); }
                             alias-save-requested(term, pronunciation) => { root.transcript-alias-save-requested(term, pronunciation); }

@@ -123,6 +123,8 @@ export component CalendarSection inherits VerticalLayout {
                 theme: KitThemeContext.current;
                 modal-layer: 0;
                 appearance: StepperAppearance.compact;
+                // Keeps the editor slack before the value, next to the unit and buttons.
+                text-alignment: TextHorizontalAlignment.right;
                 control-size: ControlSize.compact;
                 decrement-glyph: LucideArrows.chevron-down();
                 increment-glyph: LucideArrows.chevron-up();

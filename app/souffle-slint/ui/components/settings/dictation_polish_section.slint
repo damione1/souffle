@@ -1,6 +1,7 @@
 import { FieldSetAppearance, FieldRowAppearance, AlertActions, ChoiceLabelPosition, ControlWidth, KitAlert, KitButton, KitFieldRow, KitFieldSet, KitSwitch, KitTextArea, KitThemeContext, KitThemes, Ownership, ControlSize, ResizePolicy } from "@kit";
 import { CatalogPicker } from "../catalog_picker.slint";
 import { SettingsNoticeRow } from "settings_notice_row.slint";
+import { SettingsOptions } from "settings_options.slint";
 import { Theme } from "../../theme.slint";
 
 export component DictationPolishSection inherits KitFieldSet {
@@ -78,6 +79,7 @@ export component DictationPolishSection inherits KitFieldSet {
             if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
         }
         label: @tr("Modèle de retouche");
+        description: SettingsOptions.joined-labels(root.template-labels);
 
         model-picker := CatalogPicker {
             theme: KitThemeContext.current;

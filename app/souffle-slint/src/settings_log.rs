@@ -1,6 +1,6 @@
 //! Virtualization math for the Settings "Journal en direct" module
 //! (SOU-224). Same spacer-window pattern as `transcript.rs`: Rust owns the
-//! full log tail as a line list, and only the lines overlapping the 140px
+//! full log tail as a line list, and only the lines overlapping the 96px
 //! viewport (plus a margin) are ever mounted in Slint; everything scrolled
 //! past is replaced by two estimated-height spacers. The window math itself
 //! is shared with the transcript (`transcript::visible_window`).
@@ -9,18 +9,19 @@ use slint::SharedString;
 
 use crate::transcript;
 
-/// Matches `DiagnosticsSection`'s fixed `height: 140px` log Rectangle -
+/// Matches `DiagnosticsSection`'s fixed `height: 96px` log Rectangle -
 /// like the transcript's, the estimate only needs to be approximately
 /// right, the margin absorbs the error.
-pub const VIEWPORT_HEIGHT: f32 = 140.0;
+pub const VIEWPORT_HEIGHT: f32 = 96.0;
 pub const SCROLL_MARGIN: f32 = 3.0 * VIEWPORT_HEIGHT;
 
-/// Rough wrap estimate for the Inter micro-detail role in the log box
+/// Rough wrap estimate for the monospace role in the log box
 /// (see `transcript::CHARS_PER_LINE` for why a fixed count is fine here:
 /// estimation error only skews the spacer/scrollbar proportion, mounted
 /// lines are still laid out for real).
 const CHARS_PER_LINE: usize = 90;
-const LINE_HEIGHT_PX: f32 = 14.0;
+/// One text row plus the 4px spacing between lines.
+const LINE_HEIGHT_PX: f32 = 18.0;
 
 /// Backing data for the virtualized log list - mirrors `TranscriptState`
 /// in main.rs. `mounted_start == usize::MAX` means "nothing mounted yet",

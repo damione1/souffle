@@ -50,7 +50,7 @@ export component PermissionsStep inherits VerticalLayout {
         return @tr("Autoriser");
     }
     pure function row-hint(kind: PermissionKind, state: AccessState) -> string {
-        if kind == PermissionKind.accessibility && state == AccessState.denied { return @tr("Refusé. Ouvrez Réglages Système > Confidentialité et sécurité > Accessibilité."); }
+        if kind == PermissionKind.accessibility && state == AccessState.denied { return @tr("Accessibilité refusée ? Ouvrez Réglages Système > Confidentialité et sécurité > Accessibilité."); }
         if kind == PermissionKind.microphone && state == AccessState.denied { return @tr("Refusé. Ouvrez Réglages Système pour l'autoriser."); }
         if kind == PermissionKind.microphone && state == AccessState.no-device { return @tr("Aucun microphone détecté."); }
         return "";
@@ -81,7 +81,7 @@ export component PermissionsStep inherits VerticalLayout {
             HorizontalLayout {
                 padding-top: root.compact ? root.unit * 2.75 : root.unit * 4;
                 padding-bottom: root.compact ? root.unit * 2.75 : root.unit * 4;
-                spacing: root.unit * 3.5;
+                spacing: root.compact ? root.unit * 3 : root.unit * 3.5;
                 cross-axis-alignment: CrossAxisAlignment.center;
 
                 KitAvatar {
@@ -136,7 +136,7 @@ export component PermissionsStep inherits VerticalLayout {
         }
 
         // Hints follow the whole list so they never split it. The compact
-        // list skips the Accessibility one: its row already opens Settings.
+        // list skips the Accessibility one: its row button still opens Settings.
         for row in root.rows: VerticalLayout {
             if row-hint(row.kind, row.state) != "" && !(root.compact && row.kind == PermissionKind.accessibility): VerticalLayout {
                 padding-top: root.unit * 3;
@@ -145,6 +145,7 @@ export component PermissionsStep inherits VerticalLayout {
                     bordered: false;
                     inset: 12px;
                     corner-radius: 12px;
+                    message-size: Typography.hint.size;
                     severity: AlertSeverity.information;
                     // Away from its row, the microphone hint has to name it.
                     title: row.kind == PermissionKind.microphone ? row-label(row.kind) : "";

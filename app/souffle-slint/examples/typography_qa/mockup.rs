@@ -16,6 +16,7 @@ pub(super) fn apply(window: &MainWindow, surface: &str) {
     window.set_header_model_label("Kyutai STT 1B".into());
     if surface.starts_with("settings-") {
         settings(window);
+        settings_state(window, surface);
     } else if surface.starts_with("onboarding-") {
         onboarding(window);
     } else if surface.starts_with("detail") {
@@ -664,4 +665,74 @@ fn settings(window: &MainWindow) {
         "{\n  \"souffle\": { \"command\": \"souffle-mcp\" }\n}".into(),
     );
     window.set_settings_mcp_claude_code_command("claude mcp add souffle -- souffle-mcp".into());
+}
+
+const LONG_LIST_ROWS: i32 = 30;
+/// First row of the mounted slice in the scrolled long-list state.
+const SCROLLED_FIRST_ROW: i32 = 10;
+
+/// States without an artboard, selected by surface suffix.
+fn settings_state(window: &MainWindow, surface: &str) {
+    match surface {
+        "settings-transcription-long" => long_lists(window, 0),
+        "settings-transcription-long-scrolled" => long_lists(window, SCROLLED_FIRST_ROW),
+        "settings-meetings-denied" => {
+            window.set_settings_calendar_permission(AccessState::Denied);
+        }
+        "settings-ai-ollama" => {
+            let settings = AppSettings {
+                summary_provider: SummaryProviderChoice::Ollama,
+                ..Default::default()
+            };
+            let status = SummaryProvidersStatus {
+                ollama_url: "http://localhost:11434".into(),
+                ollama_available: true,
+                apple_intelligence_available: false,
+                apple_intelligence_is_stub: false,
+                apple_intelligence_unavailable_reason: None,
+                recommended_ollama_model: "qwen3:14b".into(),
+                models: Vec::new(),
+            };
+            ia_ui::populate_intelligence(window, &settings, &status);
+        }
+        _ => {}
+    }
+}
+
+/// Mirrors the windowing of `lists_ui.rs`: a slice of the rows between two
+/// spacers sized with its row height constants (51px and 58px).
+fn long_lists(window: &MainWindow, first: i32) {
+    window.set_settings_dictionary_entries(model(
+        (first..LONG_LIST_ROWS)
+            .map(|i| DictionaryRow {
+                id: i + 1,
+                term: format!("Terme {:02}", i + 1).into(),
+                aliases_display: format!("prononciation {:02}", i + 1).into(),
+                category: if i % 2 == 0 { "tech" } else { "" }.into(),
+            })
+            .collect::<Vec<_>>(),
+    ));
+    window.set_settings_dictionary_count(LONG_LIST_ROWS);
+    window.set_settings_dictionary_content_height(LONG_LIST_ROWS as f32 * 51.0);
+    window.set_settings_dictionary_spacer_before(first as f32 * 51.0);
+    window.set_settings_dictionary_spacer_after(0.0);
+    window.set_settings_snippets(model(
+        (first..LONG_LIST_ROWS)
+            .map(|i| SnippetRow {
+                id: i + 1,
+                trigger: format!("extrait {:02}", i + 1).into(),
+                expansion: format!("Texte inséré par l'extrait numéro {:02}", i + 1).into(),
+                editing: false,
+            })
+            .collect::<Vec<_>>(),
+    ));
+    window.set_settings_snippets_count(LONG_LIST_ROWS);
+    window.set_settings_snippets_content_height(LONG_LIST_ROWS as f32 * 58.0);
+    window.set_settings_snippets_spacer_before(first as f32 * 58.0);
+    window.set_settings_snippets_spacer_after(0.0);
+    if first > 0 {
+        // A few pixels into the second mounted row.
+        window.set_settings_dictionary_scroll_top(-((first + 1) as f32 * 51.0 + 20.0));
+        window.set_settings_snippets_scroll_top(-((first + 1) as f32 * 58.0 + 20.0));
+    }
 }
