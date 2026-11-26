@@ -398,7 +398,7 @@ fn refresh_timeline(window: &MainWindow, tauri_handle: &AppHandle) {
     let is_empty = dictations.is_empty() && meetings.is_empty();
     let groups = timeline::build_groups(&dictations, &meetings, kind_filter, &search_query);
     window.set_timeline_has_matches(!groups.is_empty());
-    timeline::show_groups(window, groups);
+    timeline::show_history(window, groups);
     window.set_timeline_is_empty(is_empty);
 }
 
@@ -4524,6 +4524,15 @@ fn wire_callbacks(
     let weak = window.as_weak();
     let handle = tauri_handle.clone();
     window.on_search_changed(move |_query| {
+        if let Some(window) = weak.upgrade() {
+            refresh_timeline(&window, &handle);
+        }
+    });
+
+    // The window already moved to the page: only its rows are missing.
+    let weak = window.as_weak();
+    let handle = tauri_handle.clone();
+    window.on_timeline_page_changed(move |_page| {
         if let Some(window) = weak.upgrade() {
             refresh_timeline(&window, &handle);
         }

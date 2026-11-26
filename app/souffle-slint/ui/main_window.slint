@@ -87,7 +87,14 @@ export component MainWindow inherits Window {
     in-out property <TimelineFilter> kind-filter: TimelineFilter.all;
     in property <string> transcription-status-message;
     in property <string> meeting-status-message;
+    // One page of the history. The search and the filter apply to the whole
+    // history in Rust, which then hands over the page the window is on.
     in property <[TimelineDayGroup]> timeline-groups;
+    in-out property <int> timeline-page;
+    in property <int> timeline-page-count;
+    // Entries on every page, for the page caption.
+    in property <int> timeline-total;
+    callback timeline-page-changed(int);
     in property <bool> timeline-is-empty: true;
     in property <bool> timeline-has-matches: true;
     in property <string> live-meeting-id;
@@ -742,6 +749,13 @@ export component MainWindow inherits Window {
                 mic-stall-restart-requested => { root.mic-stall-restart-requested(); }
                 mic-stall-dismissed => { root.mic-stall-dismissed(); }
                 timeline-groups: root.timeline-groups;
+                timeline-page: root.timeline-page;
+                timeline-page-count: root.timeline-page-count;
+                timeline-total: root.timeline-total;
+                timeline-page-requested(page) => {
+                    root.timeline-page = page;
+                    root.timeline-page-changed(page);
+                }
                 timeline-is-empty: root.timeline-is-empty;
                 timeline-has-matches: root.timeline-has-matches;
                 live-meeting-id: root.live-meeting-id;
@@ -751,8 +765,15 @@ export component MainWindow inherits Window {
                 upcoming: root.upcoming-events;
                 dictate-requested => { root.dictate-requested(); }
                 meeting-requested => { root.meeting-requested(); }
-                filter-changed(kind) => { root.filter-changed(kind); }
-                search-changed(query) => { root.search-changed(query); }
+                // Another filter or search is another list: back to its first page.
+                filter-changed(kind) => {
+                    root.timeline-page = 0;
+                    root.filter-changed(kind);
+                }
+                search-changed(query) => {
+                    root.timeline-page = 0;
+                    root.search-changed(query);
+                }
                 dismiss-transcription-status => { root.dismiss-transcription-status(); }
                 copy-dictation-recovery => { root.copy-dictation-recovery(); }
                 discard-dictation-recovery => { root.discard-dictation-recovery(); }

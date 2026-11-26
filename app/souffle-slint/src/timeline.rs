@@ -142,6 +142,74 @@ pub fn build_groups(
         .collect()
 }
 
+/// Entries on one page of the history. The list is not virtualized, so this
+/// bounds what a mount, a scroll or a page change costs whatever the size of
+/// the history: 50 rows mount in about 25 ms in a debug build.
+pub const HISTORY_PAGE_SIZE: usize = 50;
+
+/// One page of a history and where it sits in the whole of it.
+pub struct HistoryPage {
+    pub groups: Vec<TimelineDayGroup>,
+    pub page: usize,
+    pub page_count: usize,
+    /// Entries on every page.
+    pub total: usize,
+}
+
+/// Cuts `groups` (the whole filtered history, newest first) into pages of
+/// `size` entries and returns the one at `requested`, or the last one when
+/// the history no longer reaches that far. A day cut by a page boundary
+/// keeps its heading on both pages.
+pub fn page_of(groups: Vec<TimelineDayGroup>, requested: usize, size: usize) -> HistoryPage {
+    use slint::Model;
+    let size = size.max(1);
+    let total: usize = groups.iter().map(|group| group.entries.row_count()).sum();
+    let page_count = total.div_ceil(size);
+    let page = requested.min(page_count.saturating_sub(1));
+    let (first, end) = (page * size, (page + 1) * size);
+    let mut seen = 0;
+    let mut shown = Vec::new();
+    for group in groups {
+        let count = group.entries.row_count();
+        let (from, to) = (first.max(seen), end.min(seen + count));
+        if from < to {
+            let entries: Vec<HistoryEntry> = group
+                .entries
+                .iter()
+                .skip(from - seen)
+                .take(to - from)
+                .collect();
+            shown.push(TimelineDayGroup {
+                entries: std::rc::Rc::new(slint::VecModel::from(entries)).into(),
+                ..group
+            });
+        }
+        seen += count;
+    }
+    HistoryPage {
+        groups: shown,
+        page,
+        page_count,
+        total,
+    }
+}
+
+/// Shows the page of `groups` the window is on. `groups` is the whole
+/// filtered history: the page stays where it is across a refresh, and moves
+/// back only when the history got too short for it.
+pub fn show_history(window: &crate::MainWindow, groups: Vec<TimelineDayGroup>) {
+    show_history_paged(window, groups, HISTORY_PAGE_SIZE);
+}
+
+pub fn show_history_paged(window: &crate::MainWindow, groups: Vec<TimelineDayGroup>, size: usize) {
+    let requested = window.get_timeline_page().max(0) as usize;
+    let page = page_of(groups, requested, size);
+    window.set_timeline_page(page.page as i32);
+    window.set_timeline_page_count(page.page_count as i32);
+    window.set_timeline_total(page.total as i32);
+    show_groups(window, page.groups);
+}
+
 /// Shows `groups` in the history, changing only what differs from what is
 /// already there. A search key, a filter or a finished recording refreshes
 /// the whole history: installing a new model each time would rebuild every
@@ -289,15 +357,16 @@ mod tests {
         let window = TEST_WINDOW
             .with(|slot| slot.borrow().clone())
             .expect("no test window");
+        let size = window.size();
         let mut frame = vec![
             slint::platform::software_renderer::Rgb565Pixel::default();
-            (WIDTH * HEIGHT) as usize
+            (size.width * size.height) as usize
         ];
         for _ in 0..3 {
             slint::platform::update_timers_and_animations();
             window.request_redraw();
             window.draw_if_needed(|renderer| {
-                renderer.render(&mut frame, WIDTH as usize);
+                renderer.render(&mut frame, size.width as usize);
             });
         }
     }
@@ -553,6 +622,246 @@ mod tests {
 
         sync_groups(&model, Vec::new());
         assert_eq!(model.row_count(), 0);
+    }
+
+    fn numbered_day(day_of_month: i32, entries: std::ops::Range<usize>) -> TimelineDayGroup {
+        let entries: Vec<(String, String)> = entries
+            .map(|index| (format!("m{index}"), format!("Réunion {index}")))
+            .collect();
+        history_day(
+            day_of_month,
+            &entries
+                .iter()
+                .map(|(id, title)| (id.as_str(), title.as_str()))
+                .collect::<Vec<_>>(),
+        )
+    }
+
+    fn ids(groups: &[TimelineDayGroup]) -> Vec<(i32, Vec<String>)> {
+        use slint::Model;
+        groups
+            .iter()
+            .map(|group| {
+                (
+                    group.day_of_month,
+                    group
+                        .entries
+                        .iter()
+                        .map(|entry| entry.id.to_string())
+                        .collect(),
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_day_cut_by_a_page_keeps_its_heading_on_both_pages() {
+        let history = || {
+            vec![
+                numbered_day(9, 0..4),
+                numbered_day(8, 4..7),
+                numbered_day(7, 7..12),
+            ]
+        };
+        let label = |ids: &[&str]| ids.iter().map(|id| id.to_string()).collect::<Vec<_>>();
+
+        let first = page_of(history(), 0, 5);
+        assert_eq!((first.page, first.page_count, first.total), (0, 3, 12));
+        assert_eq!(
+            ids(&first.groups),
+            [(9, label(&["m0", "m1", "m2", "m3"])), (8, label(&["m4"]))]
+        );
+        let second = page_of(history(), 1, 5);
+        assert_eq!(
+            ids(&second.groups),
+            [(8, label(&["m5", "m6"])), (7, label(&["m7", "m8", "m9"]))]
+        );
+        let last = page_of(history(), 2, 5);
+        assert_eq!(ids(&last.groups), [(7, label(&["m10", "m11"]))]);
+    }
+
+    #[test]
+    fn a_page_past_the_end_falls_back_to_the_last_one_and_never_shows_nothing() {
+        // The only entry of page 3 was deleted: ten entries are left.
+        let after_delete = page_of(vec![numbered_day(9, 0..10)], 2, 5);
+        assert_eq!((after_delete.page, after_delete.page_count), (1, 2));
+        assert_eq!(ids(&after_delete.groups)[0].1.len(), 5);
+
+        let one_page = page_of(vec![numbered_day(9, 0..5)], 4, 5);
+        assert_eq!(
+            (one_page.page, one_page.page_count, one_page.total),
+            (0, 1, 5)
+        );
+
+        let empty = page_of(Vec::new(), 3, 5);
+        assert_eq!((empty.page, empty.page_count, empty.total), (0, 0, 0));
+        assert!(empty.groups.is_empty());
+    }
+
+    fn rows(window: &MainWindow) -> usize {
+        ElementHandle::find_by_element_type_name(window, "TimelineItemRow").count()
+    }
+
+    fn pager(window: &MainWindow) -> Option<ElementHandle> {
+        ElementHandle::find_by_element_id(window, "IdleView::history-pages").next()
+    }
+
+    /// Previous and Next, in that order.
+    fn pager_buttons(window: &MainWindow) -> Vec<ElementHandle> {
+        pager(window)
+            .expect("the pager is shown")
+            .query_descendants()
+            .match_inherits("KitButton")
+            .find_all()
+    }
+
+    #[test]
+    fn a_refresh_stays_on_its_page_and_a_shorter_history_moves_it_back() {
+        let window = timeline_window();
+        window
+            .window()
+            .set_size(slint::PhysicalSize::new(WIDTH, 4000));
+        show_history_paged(&window, vec![numbered_day(9, 0..23)], 10);
+        settle();
+        assert_eq!(
+            (
+                window.get_timeline_page(),
+                window.get_timeline_page_count(),
+                window.get_timeline_total()
+            ),
+            (0, 3, 23)
+        );
+        assert_eq!(rows(&window), 10, "only the page is instantiated");
+
+        window.set_timeline_page(2);
+        show_history_paged(&window, vec![numbered_day(9, 0..23)], 10);
+        settle();
+        assert_eq!(rows(&window), 3);
+
+        // The same history again, as after a finished recording.
+        show_history_paged(&window, vec![numbered_day(9, 0..23)], 10);
+        assert_eq!(window.get_timeline_page(), 2);
+
+        // The three entries of the last page are deleted one after the other.
+        show_history_paged(&window, vec![numbered_day(9, 0..21)], 10);
+        assert_eq!(window.get_timeline_page(), 2);
+        show_history_paged(&window, vec![numbered_day(9, 0..20)], 10);
+        settle();
+        assert_eq!(
+            (window.get_timeline_page(), window.get_timeline_page_count()),
+            (1, 2)
+        );
+        assert_eq!(rows(&window), 10, "the page before it, not an empty one");
+    }
+
+    #[test]
+    fn the_pager_shows_only_for_several_pages_and_asks_for_the_next_one() {
+        let window = timeline_window();
+        window
+            .window()
+            .set_size(slint::PhysicalSize::new(WIDTH, 4000));
+        let asked = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let sink = asked.clone();
+        let weak = window.as_weak();
+        window.on_timeline_page_changed(move |page| {
+            sink.borrow_mut().push(page);
+            // The window already moved: the app only loads that page.
+            let window = weak.unwrap();
+            assert_eq!(window.get_timeline_page(), page);
+            show_history_paged(&window, vec![numbered_day(9, 0..23)], 10);
+        });
+
+        show_history_paged(&window, vec![numbered_day(9, 0..10)], 10);
+        settle();
+        assert!(pager(&window).is_none(), "one page needs no pager");
+
+        show_history_paged(&window, vec![numbered_day(9, 0..23)], 10);
+        settle();
+        let buttons = pager_buttons(&window);
+        assert_eq!(buttons.len(), 2);
+        assert_eq!(buttons[0].accessible_enabled(), Some(false));
+        buttons[1].invoke_accessible_default_action();
+        settle();
+        assert_eq!(*asked.borrow(), [1]);
+        assert_eq!(window.get_timeline_page(), 1);
+        assert_eq!(rows(&window), 10);
+
+        let buttons = pager_buttons(&window);
+        buttons[1].invoke_accessible_default_action();
+        settle();
+        assert_eq!(*asked.borrow(), [1, 2]);
+        assert_eq!(rows(&window), 3);
+        assert_eq!(
+            pager_buttons(&window)[1].accessible_enabled(),
+            Some(false),
+            "no page after the last"
+        );
+        pager_buttons(&window)[0].invoke_accessible_default_action();
+        settle();
+        assert_eq!(window.get_timeline_page(), 1);
+    }
+
+    #[test]
+    fn a_filter_or_a_search_starts_again_on_the_first_page() {
+        let window = timeline_window();
+        let seen = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let sink = seen.clone();
+        let weak = window.as_weak();
+        window
+            .on_filter_changed(move |_| sink.borrow_mut().push(weak.unwrap().get_timeline_page()));
+        let sink = seen.clone();
+        let weak = window.as_weak();
+        window
+            .on_search_changed(move |_| sink.borrow_mut().push(weak.unwrap().get_timeline_page()));
+
+        window.set_timeline_page(2);
+        show_history_paged(&window, vec![numbered_day(9, 0..23)], 10);
+        settle();
+        let chips: Vec<_> =
+            ElementHandle::find_by_element_type_name(&window, "KitChipButton").collect();
+        assert_eq!(chips.len(), 3);
+        chips[1].invoke_accessible_default_action();
+        assert_eq!(
+            *seen.borrow(),
+            [0],
+            "the handler already sees the first page"
+        );
+
+        window.set_timeline_page(2);
+        window.invoke_search_changed("budget".into());
+        assert_eq!(
+            *seen.borrow(),
+            [0, 2],
+            "a search typed in the field goes through the view"
+        );
+    }
+
+    #[test]
+    fn a_page_change_returns_to_the_top_of_the_history() {
+        let window = timeline_window();
+        show_history_paged(&window, vec![numbered_day(9, 0..60)], 20);
+        settle();
+        let top = || {
+            ElementHandle::find_by_element_id(&window, "IdleView::history-content")
+                .next()
+                .unwrap()
+                .absolute_position()
+                .y
+        };
+        let rest = top();
+        window
+            .window()
+            .dispatch_event(slint::platform::WindowEvent::PointerScrolled {
+                position: slint::LogicalPosition::new(520.0, 600.0),
+                delta_x: 0.0,
+                delta_y: -400.0,
+            });
+        settle();
+        assert!(top() < rest - 300.0, "the history scrolled");
+        window.set_timeline_page(1);
+        show_history_paged(&window, vec![numbered_day(9, 0..60)], 20);
+        settle();
+        assert_eq!(top(), rest);
     }
 
     #[test]

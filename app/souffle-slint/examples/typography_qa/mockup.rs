@@ -240,17 +240,45 @@ fn long_history(window: &MainWindow, days: i32) {
             })
             .collect()
     };
-    window.set_timeline_groups(model(groups(|_| true)));
+    // The app's page size unless SOU276_HISTORY_PAGE_SIZE gives another.
+    let page_size = std::env::var("SOU276_HISTORY_PAGE_SIZE")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(timeline::HISTORY_PAGE_SIZE);
+    if let Some(page) = std::env::var("SOU276_HISTORY_PAGE")
+        .ok()
+        .and_then(|value| value.parse::<i32>().ok())
+    {
+        window.set_timeline_page(page);
+    }
+    timeline::show_history_paged(window, groups(|_| true), page_size);
+    // The pager of the fixture: the app's does the same after its query.
+    let weak = window.as_weak();
+    window.on_timeline_page_changed(move |_| {
+        if let Some(window) = weak.upgrade() {
+            timeline::show_history_paged(&window, groups(|_| true), page_size);
+        }
+    });
     if !scroll_bench::enabled() {
         return;
     }
-    let label = format!("history {} entries", days * ENTRIES_PER_DAY);
+    let label = format!(
+        "history {} entries page size {page_size}",
+        days * ENTRIES_PER_DAY
+    );
     if std::env::var("SOU276_HISTORY_REFRESH").as_deref() == Ok("1") {
         // What `refresh_timeline` does after a finished recording (the same
-        // entries again) and, with `search`, after each key of a search that
-        // keeps one entry in three and is then cleared.
+        // entries again), after each key of a search that keeps one entry in
+        // three and is then cleared, and when the page changes.
         let search = std::env::var("SOU276_HISTORY_REFRESH_SEARCH").as_deref() == Ok("1");
-        let name = if search { "searched" } else { "refreshed" };
+        let paging = std::env::var("SOU276_HISTORY_REFRESH_PAGES").as_deref() == Ok("1");
+        let name = if search {
+            "searched"
+        } else if paging {
+            "paged"
+        } else {
+            "refreshed"
+        };
         scroll_bench::start_growth(
             window,
             format!("{label} {name}"),
@@ -261,13 +289,17 @@ fn long_history(window: &MainWindow, days: i32) {
                 } else {
                     groups(|_| true)
                 };
-                timeline::show_groups(window, shown);
+                if paging {
+                    window.set_timeline_page((step % 2) as i32);
+                }
+                timeline::show_history_paged(window, shown, page_size);
             },
         );
         return;
     }
     // A day is a heading, a card of rows and the gap to the next one.
-    let travel = days as f32 * (ENTRIES_PER_DAY as f32 * 57.0 + 60.0);
+    let shown_days = days.min(page_size.div_ceil(ENTRIES_PER_DAY as usize) as i32);
+    let travel = shown_days as f32 * (ENTRIES_PER_DAY as f32 * 57.0 + 60.0);
     scroll_bench::start(
         window,
         label,

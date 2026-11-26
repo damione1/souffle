@@ -1,5 +1,5 @@
 import { AppText, AppTextInput, Typography, TypographyStyle } from "@typography";
-import { AlertSeverity, ChipAppearance, ControlSize, KitChipButton, KitScrollArea, KitSearchField, KitThemeContext } from "@kit";
+import { AlertSeverity, ChipAppearance, ControlSize, KitChipButton, KitPagination, KitScrollArea, KitSearchField, KitThemeContext, Ownership } from "@kit";
 import { Theme } from "theme.slint";
 import { ActionHero } from "components/action_hero.slint";
 import { StatusBanner } from "components/status_banner.slint";
@@ -28,6 +28,12 @@ export component IdleView inherits Rectangle {
     in property <MicStall> mic-stall-kind;
     in property <string> mic-stall-device;
     in property <[TimelineDayGroup]> timeline-groups;
+    // Zero-based page shown, pages in the filtered history and its entries.
+    in property <int> timeline-page;
+    in property <int> timeline-page-count;
+    in property <int> timeline-total;
+    callback timeline-page-requested(int);
+    changed timeline-page => { history-scroll.content-y = 0px; }
     in property <bool> timeline-is-empty: true;
     in property <bool> timeline-has-matches: true;
     in property <string> live-meeting-id;
@@ -269,6 +275,23 @@ export component IdleView inherits Rectangle {
                             item-copy-requested(text) => { root.timeline-item-copy-requested(text); }
                             calendar-setup-requested => { root.calendar-setup-requested(); }
                             event-start-requested(id) => { root.calendar-event-start-requested(id); }
+                        }
+
+                        if root.timeline-page-count > 1: HorizontalLayout {
+                            alignment: center;
+                            padding-top: KitThemeContext.current.spacing.unit * 5;
+
+                            history-pages := KitPagination {
+                                control-size: ControlSize.compact;
+                                ownership: Ownership.controlled;
+                                accessible-name: @tr("Pages de l'historique");
+                                previous-label: @tr("Précédent");
+                                next-label: @tr("Suivant");
+                                position-label: @tr("Page {} sur {} · {} éléments", root.timeline-page + 1, root.timeline-page-count, root.timeline-total);
+                                page-index: root.timeline-page;
+                                page-count: root.timeline-page-count;
+                                page-changed(page) => { root.timeline-page-requested(page); }
+                            }
                         }
                     }
                 }

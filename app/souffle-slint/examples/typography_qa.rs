@@ -21,7 +21,9 @@
 //! SOU276_SCROLL_BENCH_INTERVAL_MS=<ms>, SOU276_SCROLL_BENCH_WHEEL=1 (wheel
 //! events instead of the scroll position), SOU276_BENCH_LIST=snippets,
 //! SOU276_HISTORY_REFRESH=1 (refresh the history instead of scrolling it,
-//! SOU276_HISTORY_REFRESH_SEARCH=1 to alternate a search and its clearing).
+//! SOU276_HISTORY_REFRESH_SEARCH=1 to alternate a search and its clearing,
+//! SOU276_HISTORY_REFRESH_PAGES=1 to alternate two pages).
+//! SOU276_HISTORY_PAGE_SIZE=<n> and SOU276_HISTORY_PAGE=<n> override the page.
 use souffle_slint::*;
 #[allow(dead_code)]
 #[path = "../src/audio_ui.rs"]

@@ -4122,3 +4122,23 @@ msgstr "Réessayer"
 msgctxt "UpdateAvailableDialog"
 msgid "Télécharger la mise à jour"
 msgstr "Télécharger la mise à jour"
+
+#: ui/idle_view.slint
+msgctxt "IdleView"
+msgid "Pages de l'historique"
+msgstr "Pages de l'historique"
+
+#: ui/idle_view.slint
+msgctxt "IdleView"
+msgid "Précédent"
+msgstr "Précédent"
+
+#: ui/idle_view.slint
+msgctxt "IdleView"
+msgid "Suivant"
+msgstr "Suivant"
+
+#: ui/idle_view.slint
+msgctxt "IdleView"
+msgid "Page {} sur {} · {} éléments"
+msgstr "Page {} sur {} · {} éléments"
