@@ -4023,3 +4023,7 @@ msgstr "Next"
 msgctxt "IdleView"
 msgid "Page {} sur {} · {} éléments"
 msgstr "Page {} of {} · {} items"
+
+msgctxt "SettingsAdvancedBlock"
+msgid "Avancé"
+msgstr "Advanced"

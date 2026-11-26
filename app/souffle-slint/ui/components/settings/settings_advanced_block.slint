@@ -1,0 +1,26 @@
+import { KitCollapse, KitFieldSeparator, KitTheme, KitThemeContext } from "@kit";
+
+// Collapsed "Avancé" block that closes a settings card. Its rows use the plain
+// KitFieldRow appearance: the block already insets them like the card's rows.
+export component SettingsAdvancedBlock inherits VerticalLayout {
+    in property <KitTheme> theme: KitThemeContext.current;
+    in property <int> modal-layer;
+    in-out property <bool> expanded;
+    public function take-focus() { collapse.take-focus(); }
+
+    vertical-stretch: 0;
+    KitFieldSeparator { theme: root.theme; }
+    VerticalLayout {
+        // KitCollapse insets its title and body by four spacing units, the
+        // card's rows by five.
+        padding-left: root.theme.spacing.unit;
+        padding-right: root.theme.spacing.unit;
+        collapse := KitCollapse {
+            theme: root.theme;
+            modal-layer: root.modal-layer;
+            title: @tr("Avancé");
+            expanded <=> root.expanded;
+            @children
+        }
+    }
+}

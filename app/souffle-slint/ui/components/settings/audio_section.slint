@@ -4,6 +4,7 @@ import { FieldSetAppearance, FieldRowAppearance,
 } from "@kit";
 import { PickerLabels } from "../picker_labels.slint";
 import { CatalogPicker } from "../catalog_picker.slint";
+import { SettingsAdvancedBlock } from "settings_advanced_block.slint";
 import { Theme } from "../../theme.slint";
 import { MeetingLanguage, AudioRetention } from "../../types.slint";
 
@@ -47,33 +48,6 @@ export component AudioSection inherits KitFieldSet {
     theme: KitThemeContext.current;
     legend: @tr("AUDIO");
     appearance: FieldSetAppearance.card;
-
-    if root.is-laptop: KitFieldRow {
-        theme: root.theme;
-        modal-layer: 0;
-        orientation: Theme.settings-field-orientation(self.width);
-        appearance: FieldRowAppearance.inset;
-        show-divider: true;
-        focus-requested => { clamshell-picker.take-focus(); }
-        private property <bool> control-focused: clamshell-picker.has-focus;
-        changed control-focused => {
-            if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
-        }
-        label: @tr("Microphone quand le capot est fermé");
-        description: @tr("Utiliser ce microphone à la place quand le capot est fermé avec un écran externe connecté.");
-
-        clamshell-picker := CatalogPicker {
-            theme: root.theme;
-            modal-layer: 0;
-            control-label: @tr("Microphone quand le capot est fermé");
-            model: root.clamshell-device-labels;
-            option-values: root.clamshell-device-ids;
-            default-device-index: root.default-device-index;
-            current-value: root.clamshell-device-id;
-            unavailable-label: PickerLabels.display(root.clamshell-device-label);
-            value-chosen(value) => { root.clamshell-device-changed(value); }
-        }
-    }
 
     if root.system-audio-supported: KitFieldRow {
         theme: root.theme;
@@ -333,6 +307,35 @@ export component AudioSection inherits KitFieldSet {
             checked: root.meeting-audio-diagnostic;
             access: root.meeting-audio-retention != AudioRetention.off ? FieldAccess.editable : FieldAccess.disabled;
             toggled(new) => { root.meeting-audio-diagnostic-changed(new); }
+        }
+    }
+
+    if root.is-laptop: SettingsAdvancedBlock {
+        theme: root.theme;
+
+        clamshell-field := KitFieldRow {
+            theme: root.theme;
+            modal-layer: 0;
+            orientation: Theme.settings-field-orientation(self.width);
+            focus-requested => { clamshell-picker.take-focus(); }
+            private property <bool> control-focused: clamshell-picker.has-focus;
+            changed control-focused => {
+                if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
+            }
+            label: @tr("Microphone quand le capot est fermé");
+            description: @tr("Utiliser ce microphone à la place quand le capot est fermé avec un écran externe connecté.");
+
+            clamshell-picker := CatalogPicker {
+                theme: root.theme;
+                modal-layer: 0;
+                control-label: @tr("Microphone quand le capot est fermé");
+                model: root.clamshell-device-labels;
+                option-values: root.clamshell-device-ids;
+                default-device-index: root.default-device-index;
+                current-value: root.clamshell-device-id;
+                unavailable-label: PickerLabels.display(root.clamshell-device-label);
+                value-chosen(value) => { root.clamshell-device-changed(value); }
+            }
         }
     }
 }

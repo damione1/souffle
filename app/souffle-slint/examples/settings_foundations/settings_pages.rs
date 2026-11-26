@@ -421,10 +421,57 @@ pub(super) async fn exercise(w: &MainWindow, path: &Path) {
     );
 }
 
-async fn clamshell_popup(w: &MainWindow, page: &ElementHandle) {
-    use slint::platform::PointerEventButton;
+/// Presses an option of an open picker, runs `held`, then releases. The
+/// testing backend reports the items of a popup that opens upward relative to
+/// that popup, so its origin is rebuilt from the trigger it sits above.
+fn click_option(
+    w: &MainWindow,
+    trigger: &ElementHandle,
+    option: &ElementHandle,
+    held: impl FnOnce(),
+) {
+    use slint::platform::{PointerEventButton, WindowEvent};
+    let surface = ElementQuery::from_root(w)
+        .match_inherits("KitSelectSurface")
+        .find_first()
+        .expect("open picker surface");
+    let origin = surface.absolute_position();
+    let local = option.absolute_position();
+    let size = option.size();
+    let anchor = trigger.absolute_position();
+    let popup_relative = origin.x == 0. && origin.y == 0.;
+    let gap = 4.;
+    let (x, y) = if popup_relative {
+        (
+            anchor.x + local.x,
+            anchor.y - gap - surface.size().height + local.y,
+        )
+    } else {
+        (local.x, local.y)
+    };
+    let position = slint::LogicalPosition::new(x + size.width / 2., y + size.height / 2.);
+    let button = PointerEventButton::Left;
+    w.window()
+        .dispatch_event(WindowEvent::PointerMoved { position });
+    w.window()
+        .dispatch_event(WindowEvent::PointerPressed { position, button });
+    settle(w);
+    held();
+    settle(w);
+    w.window()
+        .dispatch_event(WindowEvent::PointerReleased { position, button });
+    settle(w);
+}
+
+fn clamshell_popup(w: &MainWindow, page: &ElementHandle) {
     let devices = sample_devices(3);
     audio_ui::populate_clamshell_picker(w, &devices, Some("fixture-0"));
+    // The clamshell choice sits in the collapsed "Avancé" block.
+    let advanced = reveal(w, page, "KitCollapse::trigger");
+    assert_eq!(advanced.accessible_expanded(), Some(false));
+    advanced.invoke_accessible_default_action();
+    settle(w);
+    assert_eq!(advanced.accessible_expanded(), Some(true));
     let id = "AudioSection::clamshell-picker";
     let picker = reveal(w, page, id);
     let trigger = picker
@@ -463,21 +510,17 @@ async fn clamshell_popup(w: &MainWindow, page: &ElementHandle) {
         rows().len()
     );
     assert_eq!(rows().len(), 2);
-    rows()[1].single_click(PointerEventButton::Left).await;
-    settle(w);
+    click_option(w, &trigger, &rows()[1], || {});
     assert_eq!(
         choices.borrow().as_slice(),
         &[slint::SharedString::from("fixture-1")]
     );
     click(w, &trigger);
-    let weak = w.as_weak();
     let mut refreshed = devices;
     refreshed.swap(0, 1);
-    slint::Timer::single_shot(std::time::Duration::from_millis(10), move || {
-        audio_ui::populate_clamshell_picker(&weak.unwrap(), &refreshed, Some("fixture-1"));
+    click_option(w, &trigger, &rows()[0], || {
+        audio_ui::populate_clamshell_picker(w, &refreshed, Some("fixture-1"));
     });
-    rows()[0].single_click(PointerEventButton::Left).await;
-    settle(w);
     assert_eq!(choices.borrow().len(), 1, "held choice after reorder");
     if trigger.accessible_expanded() == Some(true) {
         send_key(w, Key::Escape.into());
@@ -494,7 +537,7 @@ async fn audio(w: &MainWindow, path: &Path) {
     w.set_settings_sample_rate_high(true);
     settle(w);
     let page = id(w, "SettingsView::audio-page");
-    clamshell_popup(w, &page).await;
+    clamshell_popup(w, &page);
     for n in [0, 1, 100, 1000] {
         let devices = sample_devices(n);
         audio_ui::populate_clamshell_picker(w, &devices, Some("fixture-1"));

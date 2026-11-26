@@ -3996,3 +3996,7 @@ msgstr ""
 msgctxt "IdleView"
 msgid "Page {} sur {} · {} éléments"
 msgstr ""
+
+msgctxt "SettingsAdvancedBlock"
+msgid "Avancé"
+msgstr ""
