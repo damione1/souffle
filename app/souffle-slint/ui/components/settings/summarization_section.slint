@@ -1,22 +1,23 @@
 import { SummarizationUi } from "../../summarization.slint";
 import { Theme } from "../../theme.slint";
-import { ChoiceLabelPosition, ControlWidth, KitFieldRow, KitFieldSet, KitMetrics, KitSwitch, KitThemeContext, KitThemes, Ownership } from "@kit";
+import { FieldSetAppearance, FieldRowAppearance, ChoiceLabelPosition, ControlWidth, KitFieldRow, KitFieldSet, KitSwitch, KitThemeContext, KitThemes, Ownership } from "@kit";
 
 export component SummarizationSection inherits KitFieldSet {
     theme: KitThemeContext.current;
     legend: @tr("EXPÉRIMENTAL");
+    appearance: FieldSetAppearance.card;
 
     KitFieldRow {
         theme: root.theme;
         modal-layer: 0;
         orientation: Theme.settings-field-orientation(self.width);
-        padding: KitMetrics.field-gap(self.theme);
+        appearance: FieldRowAppearance.inset;
+        show-divider: true;
         focus-requested => { summarization-switch.take-focus(); }
         private property <bool> control-focused: summarization-switch.has-focus;
         changed control-focused => {
             if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
         }
-        show-divider: false;
         label: @tr("Résumés de réunion");
         description: @tr("Active les résumés de réunion et la compaction expérimentaux. La qualité des longs résumés locaux reste à évaluer.");
 

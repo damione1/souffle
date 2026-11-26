@@ -1,5 +1,6 @@
-import { ChoiceLabelPosition, ControlWidth, KitAlert, KitButton, KitFieldRow, KitFieldSet, KitMetrics, KitSwitch, KitTextArea, KitThemeContext, KitThemes, Ownership } from "@kit";
+import { FieldSetAppearance, FieldRowAppearance, AlertActions, ChoiceLabelPosition, ControlWidth, KitAlert, KitButton, KitFieldRow, KitFieldSet, KitSwitch, KitTextArea, KitThemeContext, KitThemes, Ownership, ControlSize, ResizePolicy } from "@kit";
 import { CatalogPicker } from "../catalog_picker.slint";
+import { SettingsNoticeRow } from "settings_notice_row.slint";
 import { Theme } from "../../theme.slint";
 
 export component DictationPolishSection inherits KitFieldSet {
@@ -17,18 +18,19 @@ export component DictationPolishSection inherits KitFieldSet {
 
     theme: KitThemeContext.current;
     legend: @tr("POLISH DE LA DICTÉE");
+    appearance: FieldSetAppearance.card;
 
     KitFieldRow {
         theme: KitThemeContext.current;
         modal-layer: 0;
         orientation: Theme.settings-field-orientation(self.width);
-        padding: KitMetrics.field-gap(self.theme);
+        appearance: FieldRowAppearance.inset;
+        show-divider: true;
         focus-requested => { polish-switch.take-focus(); }
         private property <bool> control-focused: polish-switch.has-focus;
         changed control-focused => {
             if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
         }
-        show-divider: false;
         label: @tr("Nettoyer la dictée avec l'IA");
         description: @tr("Passe le même fournisseur de résumés (Ollama ou Apple Intelligence) après transcription pour corriger ponctuation, termes techniques et autocorrections parlées, sans changer le sens.");
 
@@ -45,19 +47,22 @@ export component DictationPolishSection inherits KitFieldSet {
         }
     }
 
-    if root.enabled && !root.provider-available: provider-notice := KitAlert { bordered: false;
-        theme: root.theme;
-        severity: warning;
-        message: @tr("Aucun fournisseur IA disponible pour la retouche.");
-        KitButton {
+    if root.enabled && !root.provider-available: SettingsNoticeRow {
+        provider-notice := KitAlert { bordered: false; corner-radius: 12px; inset: 12px; actions-placement: AlertActions.trailing;
             theme: root.theme;
-            modal-layer: 0;
-            text: @tr("Choisir un fournisseur");
-            text-wrap: word-wrap;
-            focus-observed(focused) => {
-                if focused { provider-notice.ensure-visible(KitThemes.scroll-behavior(root.theme)); }
+            severity: warning;
+            message: @tr("Aucun fournisseur IA disponible pour la retouche.");
+            KitButton {
+                theme: root.theme;
+                modal-layer: 0;
+                text: @tr("Choisir un fournisseur");
+                control-size: ControlSize.compact;
+                text-wrap: word-wrap;
+                focus-observed(focused) => {
+                    if focused { provider-notice.ensure-visible(KitThemes.scroll-behavior(root.theme)); }
+                }
+                activated => { root.open-provider-settings-requested(); }
             }
-            activated => { root.open-provider-settings-requested(); }
         }
     }
 
@@ -65,7 +70,7 @@ export component DictationPolishSection inherits KitFieldSet {
         theme: KitThemeContext.current;
         modal-layer: 0;
         orientation: Theme.settings-field-orientation(self.width);
-        padding: KitMetrics.field-gap(self.theme);
+        appearance: FieldRowAppearance.inset;
         show-divider: true;
         focus-requested => { model-picker.take-focus(); }
         private property <bool> control-focused: model-picker.has-focus;
@@ -88,9 +93,8 @@ export component DictationPolishSection inherits KitFieldSet {
     if root.enabled && root.template-labels.length > 0: instruction-row := KitFieldRow {
         theme: KitThemeContext.current;
         modal-layer: 0;
-        orientation: vertical;
-        padding: KitMetrics.field-gap(self.theme);
-        padding-bottom: KitThemes.focus-outset(self.theme.focus) + KitMetrics.help-gap(self.theme);
+        orientation: self.width < 600px ? Orientation.vertical : Orientation.horizontal;
+        appearance: FieldRowAppearance.inset;
         show-divider: true;
         focus-requested => { instruction-editor.take-focus(); }
         private property <bool> control-focused: instruction-editor.has-focus;
@@ -103,6 +107,10 @@ export component DictationPolishSection inherits KitFieldSet {
         instruction-editor := KitTextArea {
             theme: KitThemeContext.current;
             modal-layer: 0;
+            width: 340px;
+            min-lines: 4;
+            max-lines: 4;
+            resize-policy: ResizePolicy.fixed;
             text <=> root.active-prompt;
             description: instruction-row.description;
             show-description: false;

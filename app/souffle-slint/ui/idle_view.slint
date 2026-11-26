@@ -1,5 +1,5 @@
 import { AppText, AppTextInput, Typography, TypographyStyle } from "@typography";
-import { ControlSize, KitChipButton, KitScrollArea, KitSearchField, KitThemeContext } from "@kit";
+import { AlertSeverity, ChipAppearance, ControlSize, KitChipButton, KitScrollArea, KitSearchField, KitThemeContext } from "@kit";
 import { Theme } from "theme.slint";
 import { ActionHero } from "components/action_hero.slint";
 import { StatusBanner } from "components/status_banner.slint";
@@ -71,6 +71,10 @@ export component IdleView inherits Rectangle {
         return error;
     }
 
+    // Scroll viewports extend this far past the column so card shadows are
+    // not clipped; their content is inset by the same amount.
+    private property <length> shadow-bleed: 20px;
+
     // Wheel/trackpad anywhere on the page scrolls the history, like a web
     // page: history-scroll only spans the centred column, so the side
     // gutters (and the cards/search above it) used to swallow the scroll.
@@ -96,41 +100,54 @@ export component IdleView inherits Rectangle {
         spacing: KitThemeContext.current.spacing.unit * 6;
 
         if root.transcription-status-message != "" || root.mic-stall-visible || root.dictation-finalizing
-            || root.dictation-recovery-text != "" || root.meeting-status-message != "": notices := KitScrollArea {
-            height: min(notice-list.preferred-height, root.height * 0.45);
-            focusable: self.scrollable;
-            label: @tr("Notifications de capture");
+            || root.dictation-recovery-text != "" || root.meeting-status-message != "": Rectangle {
+            vertical-stretch: 0;
+            height: min(notice-list.preferred-height - root.shadow-bleed, root.height * 0.45);
 
-            notice-list := VerticalLayout {
-                width: notices.visible-width;
-                spacing: 12px;
-                if root.transcription-status-message != "": StatusBanner {
-                    vertical-stretch: 0;
-                    message: root.translate-error(root.transcription-status-message);
-                    dismissed => { root.dismiss-transcription-status(); }
-                }
-                if root.mic-stall-visible: MicStallBanner {
-                    vertical-stretch: 0;
-                    kind: root.mic-stall-kind;
-                    device: root.mic-stall-device;
-                    restart-requested => { root.mic-stall-restart-requested(); }
-                    dismissed => { root.mic-stall-dismissed(); }
-                }
-                if root.dictation-finalizing: AppText {
-                    vertical-stretch: 0;
-                    text: @tr("Reformulation…");
-                    typography: Typography.body;
-                    color: Theme.text-muted;
-                }
-                if root.dictation-recovery-text != "": DictationRecovery {
-                    text <=> root.dictation-recovery-text;
-                    copy-requested => { root.copy-dictation-recovery(); }
-                    discard-requested => { root.discard-dictation-recovery(); }
-                }
-                if root.meeting-status-message != "": StatusBanner {
-                    vertical-stretch: 0;
-                    message: root.translate-error(root.meeting-status-message);
-                    dismissed => { root.dismiss-meeting-status(); }
+            notices := KitScrollArea {
+                x: -root.shadow-bleed;
+                y: 0px;
+                width: parent.width + 2 * root.shadow-bleed;
+                height: parent.height + root.shadow-bleed;
+                overlay-scrollbars: true;
+                focusable: self.scrollable;
+                label: @tr("Notifications de capture");
+
+                notice-list := VerticalLayout {
+                    width: notices.visible-width;
+                    padding-left: root.shadow-bleed;
+                    padding-right: root.shadow-bleed;
+                    padding-bottom: root.shadow-bleed;
+                    spacing: KitThemeContext.current.spacing.unit * 6;
+                    if root.transcription-status-message != "": StatusBanner {
+                        vertical-stretch: 0;
+                        message: root.translate-error(root.transcription-status-message);
+                        dismissed => { root.dismiss-transcription-status(); }
+                    }
+                    if root.mic-stall-visible: MicStallBanner {
+                        vertical-stretch: 0;
+                        kind: root.mic-stall-kind;
+                        device: root.mic-stall-device;
+                        restart-requested => { root.mic-stall-restart-requested(); }
+                        dismissed => { root.mic-stall-dismissed(); }
+                    }
+                    if root.dictation-finalizing: AppText {
+                        vertical-stretch: 0;
+                        text: @tr("Reformulation…");
+                        typography: Typography.body;
+                        color: Theme.text-muted;
+                    }
+                    if root.dictation-recovery-text != "": DictationRecovery {
+                        text <=> root.dictation-recovery-text;
+                        copy-requested => { root.copy-dictation-recovery(); }
+                        discard-requested => { root.discard-dictation-recovery(); }
+                    }
+                    if root.meeting-status-message != "": StatusBanner {
+                        vertical-stretch: 0;
+                        severity: AlertSeverity.error;
+                        message: root.translate-error(root.meeting-status-message);
+                        dismissed => { root.dismiss-meeting-status(); }
+                    }
                 }
             }
         }
@@ -153,6 +170,9 @@ export component IdleView inherits Rectangle {
                 control-size: ControlSize.comfortable;
                 clear-label: @tr("InterfaceSection" => "Effacer");
                 accessible-name: @tr("SearchField" => "Rechercher les transcriptions et réunions");
+                corner-radius: 12px;
+                field-fill: Theme.surface-1;
+                leading-icon-ink: Theme.text-muted;
                 text <=> root.search-query;
                 placeholder: @tr("Rechercher transcriptions et réunions");
                 edited(text) => { root.search-changed(text); }
@@ -162,74 +182,97 @@ export component IdleView inherits Rectangle {
                 horizontal-stretch: 0;
                 spacing: KitThemeContext.current.spacing.unit * 1.5;
                 alignment: center;
+                cross-axis-alignment: center;
 
                 KitChipButton {
                     label: @tr("Tout");
+                    appearance: ChipAppearance.solid;
+                    padding-inline: 14px;
+                    text-size: Typography.hint-emphasis.size;
+                    text-weight: Typography.hint-emphasis.weight;
                     selected: root.kind-filter == TimelineFilter.all;
                     activate => { root.filter-changed(TimelineFilter.all); }
                 }
                 KitChipButton {
                     label: @tr("Réunions");
+                    appearance: ChipAppearance.solid;
+                    padding-inline: 14px;
+                    text-size: Typography.hint-emphasis.size;
+                    text-weight: Typography.hint-emphasis.weight;
                     selected: root.kind-filter == TimelineFilter.meeting;
                     activate => { root.filter-changed(TimelineFilter.meeting); }
                 }
                 KitChipButton {
                     label: @tr("Dictées");
+                    appearance: ChipAppearance.solid;
+                    padding-inline: 14px;
+                    text-size: Typography.hint-emphasis.size;
+                    text-weight: Typography.hint-emphasis.weight;
                     selected: root.kind-filter == TimelineFilter.dictation;
                     activate => { root.filter-changed(TimelineFilter.dictation); }
                 }
             }
         }
 
-        // Stretch pool leftover. Do not bind `content-height` to the
-        // child's `.height` (binding loop, see transcript_section.slint).
-        history-scroll := KitScrollArea {
+        Rectangle {
             vertical-stretch: 1;
-            focusable: self.scrollable;
-            label: @tr("Historique");
-            // Desktop history scrolls by wheel/trackpad. Disabling mouse
-            // drag-panning lets a plain press/release in an empty content
-            // gap reach the page underlay and cancel delete confirmation;
-            // touch panning and wheel scrolling remain available.
-            mouse-drag-pan-enabled: false;
 
-            // The scroll viewport swallows presses, so the page underlay
-            // cannot see clicks on empty gaps inside the column.
-            Rectangle {
-                width: history-scroll.visible-width;
-                height: max(history-content.preferred-height, history-scroll.visible-height);
+            // Stretch pool leftover. Do not bind `content-height` to the
+            // child's `.height` (binding loop, see transcript_section.slint).
+            history-scroll := KitScrollArea {
+                x: -root.shadow-bleed;
+                y: 0px;
+                width: parent.width + 2 * root.shadow-bleed;
+                height: parent.height;
+                overlay-scrollbars: true;
+                focusable: self.scrollable;
+                label: @tr("Historique");
+                // Desktop history scrolls by wheel/trackpad. Disabling mouse
+                // drag-panning lets a plain press/release in an empty content
+                // gap reach the page underlay and cancel delete confirmation;
+                // touch panning and wheel scrolling remain available.
+                mouse-drag-pan-enabled: false;
 
-                TouchArea {
-                    clicked => { timeline-section.dismiss-delete-confirmation(); }
-                }
-
-                history-content := VerticalLayout {
+                // The scroll viewport swallows presses, so the page underlay
+                // cannot see clicks on empty gaps inside the column.
+                Rectangle {
                     width: history-scroll.visible-width;
-                    alignment: start;
-                    padding-bottom: KitThemeContext.current.spacing.unit * 9;
+                    height: max(history-content.preferred-height, history-scroll.visible-height);
 
-                    timeline-section := TimelineSection {
+                    TouchArea {
+                        clicked => { timeline-section.dismiss-delete-confirmation(); }
+                    }
+
+                    history-content := VerticalLayout {
                         width: history-scroll.visible-width;
-                        groups: root.timeline-groups;
-                        is-empty: root.timeline-is-empty;
-                        has-matches: root.timeline-has-matches;
-                        live-meeting-id: root.live-meeting-id;
-                        expanded-dictation-id: root.expanded-dictation-id;
-                        calendar-enabled: root.calendar-enabled;
-                        calendar-permission: root.calendar-permission;
-                        upcoming: root.upcoming;
-                        can-start-event: root.model-ready;
-                        item-opened(kind, id) => {
-                            if kind == TimelineKind.dictation {
-                                root.expanded-dictation-id = root.expanded-dictation-id == id ? "" : id;
-                            } else {
-                                root.timeline-item-opened(kind, id);
+                        alignment: start;
+                        padding-left: root.shadow-bleed;
+                        padding-right: root.shadow-bleed;
+                        padding-bottom: KitThemeContext.current.spacing.unit * 9;
+
+                        timeline-section := TimelineSection {
+                            width: history-scroll.visible-width - 2 * root.shadow-bleed;
+                            groups: root.timeline-groups;
+                            is-empty: root.timeline-is-empty;
+                            has-matches: root.timeline-has-matches;
+                            live-meeting-id: root.live-meeting-id;
+                            expanded-dictation-id: root.expanded-dictation-id;
+                            calendar-enabled: root.calendar-enabled;
+                            calendar-permission: root.calendar-permission;
+                            upcoming: root.upcoming;
+                            can-start-event: root.model-ready;
+                            item-opened(kind, id) => {
+                                if kind == TimelineKind.dictation {
+                                    root.expanded-dictation-id = root.expanded-dictation-id == id ? "" : id;
+                                } else {
+                                    root.timeline-item-opened(kind, id);
+                                }
                             }
+                            item-removed(kind, id) => { root.timeline-item-removed(kind, id); }
+                            item-copy-requested(text) => { root.timeline-item-copy-requested(text); }
+                            calendar-setup-requested => { root.calendar-setup-requested(); }
+                            event-start-requested(id) => { root.calendar-event-start-requested(id); }
                         }
-                        item-removed(kind, id) => { root.timeline-item-removed(kind, id); }
-                        item-copy-requested(text) => { root.timeline-item-copy-requested(text); }
-                        calendar-setup-requested => { root.calendar-setup-requested(); }
-                        event-start-requested(id) => { root.calendar-event-start-requested(id); }
                     }
                 }
             }

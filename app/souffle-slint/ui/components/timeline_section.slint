@@ -1,5 +1,5 @@
 import { AppText, AppNumericText, Typography } from "@typography";
-import { AvatarShape, AvatarSize, KitMetrics, ButtonIntent, ControlSize, KitAvatar, KitBadge, KitButton, KitCard, KitDivider, KitEmptyState, KitIcon, KitIconButton, KitLayoutMetrics, KitThemeContext, LayoutSpace, SurfaceLevel, Tone } from "@kit";
+import { AvatarShape, ButtonIntent, ControlSize, KitAvatar, KitBadge, KitButton, KitCard, KitDivider, KitEmptyState, KitIcon, KitIconButton, KitLayoutMetrics, KitThemeContext, LayoutSpace, SurfaceLevel, Tone } from "@kit";
 import { LucideAccount } from "@kit-icons/account.slint";
 import { LucideCommunication } from "@kit-icons/communication.slint";
 import { LucideText } from "@kit-icons/text.slint";
@@ -78,10 +78,11 @@ export component TimelineSection inherits VerticalLayout {
 
     // Same predicate as TimelineSection.svelte's `showCalendarSetupCta`.
     property <bool> show-calendar-setup: root.upcoming.length == 0 && (!root.calendar-enabled || root.calendar-permission == AccessState.denied);
-    property <length> row-padding-block: KitThemeContext.current.spacing.unit * 3;
-    property <length> row-padding-inline: KitLayoutMetrics.space(KitThemeContext.current, LayoutSpace.regular);
-    property <length> row-spacing: KitThemeContext.current.spacing.unit * 3;
-    property <length> section-spacing: KitLayoutMetrics.space(KitThemeContext.current, LayoutSpace.compact);
+    property <length> row-padding-block: 13px;
+    property <length> row-padding-inline: 18px;
+    property <length> row-spacing: 14px;
+    property <length> section-spacing: 10px;
+    private property <length> row-action-width: 26px;
 
     // `alignment: start` everywhere: without it the layout pool stretches
     // rows whose height is not exposed by their content.
@@ -121,10 +122,13 @@ export component TimelineSection inherits VerticalLayout {
                         spacing: root.row-spacing;
 
                         KitAvatar {
-                            size: KitMetrics.control-height(KitThemeContext.current, ControlSize.compact);
+                            size: 32px;
+                            glyph-size: 16px;
                             shape: AvatarShape.rounded;
                             bordered: false;
                             decorative: true;
+                            fill: Theme.secondary-tint;
+                            ink: Theme.secondary;
                             fallback-icon: LucideTime.calendar-clock();
                         }
 
@@ -132,20 +136,22 @@ export component TimelineSection inherits VerticalLayout {
                             text: event.title;
                             overflow: elide;
                             horizontal-stretch: 1;
-                            typography: Typography.field-label;
+                            typography: Typography.body-emphasis;
                             color: Theme.text-primary;
                             vertical-alignment: center;
                         }
 
                         if event.phase == UpcomingPhase.now: KitBadge {
-                            text: @tr("EN COURS");
+                            text: @tr("En cours");
                             tone: Tone.accent;
                             subtle: true;
                             dot: true;
                         }
                         if event.phase == UpcomingPhase.next: KitBadge {
-                            text: @tr("SUIVANT");
+                            text: @tr("Suivant");
                             tone: Tone.neutral;
+                            outline: true;
+                            label-ink: Theme.text-secondary;
                         }
 
                         if event.participant-count > 0: HorizontalLayout {
@@ -182,13 +188,13 @@ export component TimelineSection inherits VerticalLayout {
                             }
 
                             Rectangle {
-                                width: Theme.row-action-width;
+                                width: root.row-action-width;
 
                                 if event.phase == UpcomingPhase.now || event.phase == UpcomingPhase.next || event.phase == UpcomingPhase.later: KitIconButton {
                                     accessible-name: @tr("Démarrer la transcription");
                                     control-size: ControlSize.compact;
                                     disabled: !root.can-start-event;
-                                    glyph: LucideArrows.play();
+                                    glyph: {stroke: LucideArrows.play().stroke, fill: LucideArrows.play().stroke, viewbox: LucideArrows.play().viewbox};
                                     activated => { root.event-start-requested(event.id); }
                                 }
                             }
@@ -206,15 +212,18 @@ export component TimelineSection inherits VerticalLayout {
         gap: LayoutSpace.none;
 
         HorizontalLayout {
-            padding: KitLayoutMetrics.space(KitThemeContext.current, LayoutSpace.regular);
+            padding: root.row-padding-inline;
             spacing: root.row-spacing;
 
             KitAvatar {
-                avatar-size: AvatarSize.medium;
+                size: 40px;
+                glyph-size: 20px;
+                fill: Theme.secondary-tint;
+                ink: Theme.secondary;
                 shape: AvatarShape.rounded;
                 bordered: false;
                 decorative: true;
-                fallback-icon: LucideTime.calendar-plus();
+                fallback-icon: LucideTime.calendar-clock();
                 y: (parent.height - self.height) / 2;
             }
 
@@ -226,13 +235,13 @@ export component TimelineSection inherits VerticalLayout {
                 AppText {
                     text: @tr("Affichez vos réunions du jour ici");
                     wrap: word-wrap;
-                    typography: Typography.field-label;
+                    typography: Typography.body-emphasis;
                     color: Theme.text-primary;
                 }
                 AppText {
                     text: @tr("Connectez le calendrier macOS pour des rappels et un démarrage en un clic.");
                     wrap: word-wrap;
-                    typography: Typography.secondary;
+                    typography: Typography.content;
                     color: Theme.text-muted;
                 }
             }
@@ -257,6 +266,15 @@ export component TimelineSection inherits VerticalLayout {
         icon: LucideCommunication.mic();
         icon-tone: Tone.accent;
         centered: true;
+        block-padding: 56px;
+        content-spacing: 10px;
+        icon-tile-size: 64px;
+        icon-tile-radius: 20px;
+        icon-size: 28px;
+        title-size: Typography.dialog-strong.size;
+        title-weight: Typography.dialog-strong.weight;
+        description-size: Typography.body.size;
+        description-max-width: 340px;
         title: @tr("Rien ici pour l'instant");
         description: @tr("Vos dictées et meetings apparaîtront ici, du plus récent au plus ancien.");
     }
@@ -265,6 +283,15 @@ export component TimelineSection inherits VerticalLayout {
         icon: LucideText.search();
         icon-tone: Tone.neutral;
         centered: true;
+        block-padding: 48px;
+        content-spacing: 10px;
+        icon-tile-size: 56px;
+        icon-tile-radius: 18px;
+        icon-size: 24px;
+        title-size: Typography.hero-title.size;
+        title-weight: Typography.hero-title.weight;
+        description-size: Typography.body.size;
+        description-max-width: 360px;
         title: @tr("Aucun résultat");
         description: @tr("Essayez d'autres mots-clés : la recherche couvre toutes les transcriptions.");
     }

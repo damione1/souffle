@@ -1,6 +1,7 @@
 import { PermissionRow, PermissionsStep } from "../onboarding/permissions_step.slint";
 import { PermissionKind } from "../../types.slint";
-import { DialogTabPolicy, KitDialog, DialogSize, ButtonIntent } from "@kit";
+import { ControlSize, DialogTabPolicy, KitDialog, DialogSize, ButtonIntent } from "@kit";
+import { Typography } from "@typography";
 
 export component SettingsPermissionsDialog inherits KitDialog {
     in property <[PermissionRow]> rows;
@@ -20,6 +21,16 @@ export component SettingsPermissionsDialog inherits KitDialog {
     tab-policy: DialogTabPolicy.native;
     modal-layer: 1;
     size: DialogSize.medium;
+    quiet-initial-focus: true;
+    close-control-size: ControlSize.compact;
+    stacked-header: true;
+    panel-width: 470px;
+    inset: 26px;
+    content-gap: 16px;
+    overlay-body-scrollbar: true;
+    title-size: Typography.preview.size;
+    title-weight: Typography.dialog-strong.weight;
+    description-size: Typography.field-label.size;
     actions: [{ token: 1, text: @tr("Terminé"), intent: ButtonIntent.primary, disabled: false }];
     dismiss(reason) => { root.close-requested(); }
     action-activated(token) => { root.close-requested(); }

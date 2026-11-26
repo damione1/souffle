@@ -1,5 +1,5 @@
 import { AppText, Typography } from "@typography";
-import { ButtonIntent, ControlSize, KitButton } from "@kit";
+import { ButtonIntent, ButtonRecipe, ControlSize, KitButton, KitThemeContext, KitThemes } from "@kit";
 import { MarkdownBlock } from "markdown_block.slint";
 import { MarkdownBlockKind } from "../../types.slint";
 import { Theme } from "../../theme.slint";
@@ -10,10 +10,14 @@ export component MarkdownView inherits VerticalLayout {
 
     callback link-clicked(string);
 
-    alignment: start;
-    spacing: 8px;
+    private property <ButtonRecipe> link-base: KitThemes.button-recipe(KitThemeContext.current, ButtonIntent.link, ControlSize.compact);
 
-    for block in root.blocks: VerticalLayout {
+    alignment: start;
+    spacing: 12px;
+
+    for block[index] in root.blocks: VerticalLayout {
+        padding-top: index > 0 && block.kind == MarkdownBlockKind.heading ? 4px : 0px;
+
         if block.kind == MarkdownBlockKind.heading: AppText {
             text: block.text;
             typography: Typography.body-emphasis;
@@ -42,6 +46,30 @@ export component MarkdownView inherits VerticalLayout {
             text: block.text;
             intent: ButtonIntent.link;
             control-size: ControlSize.compact;
+            // The kit link recipe without its underline.
+            recipe: {
+                fill: root.link-base.fill,
+                hover-fill: root.link-base.hover-fill,
+                pressed-fill: root.link-base.pressed-fill,
+                disabled-fill: root.link-base.disabled-fill,
+                foreground: root.link-base.foreground,
+                disabled-foreground: root.link-base.disabled-foreground,
+                border: root.link-base.border,
+                radius: root.link-base.radius,
+                padding-inline: root.link-base.padding-inline,
+                padding-block: root.link-base.padding-block,
+                border-width: root.link-base.border-width,
+                height: root.link-base.height,
+                underline: false,
+                busy-mark-size: root.link-base.busy-mark-size,
+                busy-mark-stroke: root.link-base.busy-mark-stroke,
+                elevation: root.link-base.elevation,
+                shadow: root.link-base.shadow,
+                focus: root.link-base.focus,
+            };
+            text-size: Typography.content.size;
+            text-weight: Typography.secondary-emphasis.weight;
+            text-alignment: TextHorizontalAlignment.left;
             text-wrap: word-wrap;
             activated => { root.link-clicked(block.url); }
         }

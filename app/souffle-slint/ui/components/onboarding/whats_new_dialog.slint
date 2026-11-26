@@ -1,4 +1,5 @@
-import { DialogSize, DialogTabPolicy, ButtonIntent, KitDialog } from "@kit";
+import { ControlSize, DialogSize, DialogTabPolicy, ButtonIntent, KitDialog } from "@kit";
+import { Typography } from "@typography";
 import { MarkdownBlock } from "markdown_block.slint";
 import { MarkdownView } from "markdown_view.slint";
 
@@ -7,6 +8,16 @@ export component WhatsNewDialog inherits KitDialog {
     tab-policy: DialogTabPolicy.native;
     modal-layer: 2;
     size: DialogSize.medium;
+    quiet-initial-focus: true;
+    close-control-size: ControlSize.compact;
+    stacked-header: true;
+    panel-width: 470px;
+    inset: 26px;
+    content-gap: 16px;
+    overlay-body-scrollbar: true;
+    title-size: Typography.preview.size;
+    title-weight: Typography.dialog-strong.weight;
+    description-size: Typography.field-label.size;
     body-label: @tr("Notes de version");
     close-label: @tr("SettingsPermissionsDialog" => "Fermer");
     in property <string> version;

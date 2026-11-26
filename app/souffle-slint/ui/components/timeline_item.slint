@@ -1,5 +1,5 @@
-import { AvatarShape, ButtonIntent, ControlSize, KitAvatar, KitButton, KitDivider, KitIcon, KitPressable, Tone } from "@kit";
-import { LucideCursors } from "@kit-icons/cursors.slint";
+import { AvatarShape, ButtonIntent, ControlSize, KitAvatar, KitButton, KitDivider, KitIcon, KitMetrics, KitPressable, KitThemeContext, Tone } from "@kit";
+import { LucideShapes } from "@kit-icons/shapes.slint";
 import { LucideAccount } from "@kit-icons/account.slint";
 import { LucideText } from "@kit-icons/text.slint";
 import { LucideFiles } from "@kit-icons/files.slint";
@@ -47,6 +47,10 @@ export component TimelineItemRow inherits Rectangle {
     property <bool> is-dictation: root.entry.kind == TimelineKind.dictation;
     // Action buttons also stay visible while navigating the row by keyboard.
     property <bool> actions-visible: root.confirming-delete || row-area.hovered || row-area.has-focus || copy-area.hovered || copy-area.has-focus || delete-area.hovered || delete-area.has-focus;
+    property <bool> confirm-shown: root.confirming-delete && !root.delete-blocked;
+    private property <length> control-height: KitMetrics.control-height(KitThemeContext.current, ControlSize.compact);
+    private property <length> column-gap: 14px;
+    private property <length> action-width: 26px;
 
     Timer {
         interval: 1500ms;
@@ -101,6 +105,7 @@ export component TimelineItemRow inherits Rectangle {
                     tone: root.is-dictation ? Tone.neutral : Tone.accent;
                     muted: root.is-dictation;
                     fallback-icon: root.is-dictation ? LucideFiles.file-text() : LucideAccount.users();
+                    glyph-size: 16px;
                 }
             }
 
@@ -116,7 +121,7 @@ export component TimelineItemRow inherits Rectangle {
                 // A collapsed title shares the action row's visual
                 // axis. Expanded dictations still grow downward.
                 vertical-alignment: root.is-dictation && root.expanded ? top : center;
-                typography: Typography.field-label;
+                typography: root.is-dictation ? Typography.row-title : Typography.body-emphasis;
                 color: Theme.text-primary;
             }
 
@@ -133,62 +138,98 @@ export component TimelineItemRow inherits Rectangle {
                 // space from the title, never from the time (SOU-215).
                 horizontal-stretch: 0;
 
+                // Each slot owns its leading gap, so the absent Copier
+                // slot of a meeting row leaves no double gap.
                 HorizontalLayout {
-                    spacing: 10px;
+                    height: root.control-height;
                     alignment: end;
 
-                    if root.entry.has-summary: KitIcon {
-                        glyph: {stroke: LucideCursors.sparkles().stroke, fill: LucideCursors.sparkles().stroke, viewbox: LucideCursors.sparkles().viewbox};
-                        ink: root.entry.summary-is-stale ? Theme.warning : Theme.accent;
+                    Rectangle {
+                        width: 15px;
 
-                        width: 15px; height: 15px;
-                        y: (parent.height - self.height) / 2;
+                        if root.entry.has-summary: KitIcon {
+                            glyph: LucideShapes.sparkle();
+                            ink: root.entry.summary-is-stale ? Theme.warning : Theme.accent;
+                            width: 15px; height: 15px;
+                            y: (parent.height - self.height) / 2;
+                        }
                     }
 
-                    AppNumericText {
-                        text: root.entry.duration-label;
-                        width: Theme.row-duration-width;
-                        horizontal-alignment: right;
-                        text-color: Theme.text-muted;
-                        typography: Typography.small;
-                        vertical-alignment: center;
+                    Rectangle {
+                        width: root.is-dictation ? copy-area.preferred-width + root.column-gap : 0px;
+
+                        copy-area := KitButton {
+                            x: root.column-gap;
+                            width: self.preferred-width;
+                            height: root.control-height;
+                            visible: root.is-dictation;
+                            disabled: !root.is-dictation;
+                            control-size: ControlSize.compact;
+                            intent: ButtonIntent.quiet;
+                            padding-inline: 8px;
+                            text: root.copied ? @tr("Copié !") : @tr("Copier");
+                            leading-icon: LucideText.copy();
+                            opacity: root.actions-visible ? 1 : 0;
+                            activated => { root.copy-requested(); root.copied = true; }
+                        }
                     }
 
-                    AppNumericText {
-                        text: root.entry.time-label;
-                        width: Theme.row-timeline-time-width;
-                        horizontal-alignment: right;
-                        text-color: Theme.text-muted;
-                        typography: Typography.small;
-                        vertical-alignment: center;
+                    Rectangle {
+                        width: Theme.row-duration-width + root.column-gap;
+
+                        AppNumericText {
+                            x: root.column-gap;
+                            text: root.entry.duration-label;
+                            width: Theme.row-duration-width;
+                            horizontal-alignment: right;
+                            text-color: Theme.text-muted;
+                            typography: Typography.secondary;
+                            vertical-alignment: center;
+                        }
                     }
 
-                    copy-area := KitButton {
-                        visible: root.is-dictation;
-                        disabled: !root.is-dictation;
-                        control-size: ControlSize.compact;
-                        intent: ButtonIntent.quiet;
-                        padding-inline: 4px;
-                        text: root.copied ? @tr("Copié !") : @tr("Copier");
-                        leading-icon: LucideText.copy();
-                        opacity: root.actions-visible ? 1 : 0;
-                        activated => { root.copy-requested(); root.copied = true; }
+                    Rectangle {
+                        width: Theme.row-timeline-time-width + root.column-gap;
+
+                        AppNumericText {
+                            x: root.column-gap;
+                            text: root.entry.time-label;
+                            width: Theme.row-timeline-time-width;
+                            horizontal-alignment: right;
+                            text-color: Theme.text-muted;
+                            typography: Typography.secondary;
+                            vertical-alignment: center;
+                        }
                     }
 
-                    delete-area := KitButton {
-                        disabled: root.delete-blocked;
-                        control-size: ControlSize.compact;
-                        padding-inline: 4px;
-                        intent: root.confirming-delete && !root.delete-blocked ? ButtonIntent.destructive : ButtonIntent.quiet;
-                        accessible-name: root.delete-blocked ? ActionGuards.reason(root.delete-permission) : root.confirming-delete ? @tr("Confirmer la suppression") : @tr("Supprimer");
-                        text: root.confirming-delete && !root.delete-blocked ? @tr("Confirmer") : "";
-                        leading-icon: root.confirming-delete && !root.delete-blocked ? { stroke: "", fill: "", viewbox: 24 }
-                            : root.actions-visible ? LucideFiles.trash() : LucideArrows.chevron-right();
-                        opacity: root.actions-visible || root.entry.kind == TimelineKind.meeting ? 1 : 0;
-                        activated => {
-                            if root.delete-blocked { return; }
-                            if root.confirming-delete { root.removed(); }
-                            else { root.confirm-delete-requested(); }
+                    Rectangle {
+                        width: root.column-gap + (root.confirm-shown ? delete-area.preferred-width : root.action-width);
+
+                        // One button for both states, so keyboard focus survives
+                        // the switch to "Confirmer".
+                        delete-area := KitButton {
+                            x: root.column-gap;
+                            width: parent.width - root.column-gap;
+                            height: root.control-height;
+                            disabled: root.delete-blocked;
+                            control-size: ControlSize.compact;
+                            padding-inline: root.confirm-shown ? 10px : 0px;
+                            intent: root.confirm-shown ? ButtonIntent.destructive-soft : ButtonIntent.quiet;
+                            accessible-name: root.delete-blocked ? ActionGuards.reason(root.delete-permission) : root.confirming-delete ? @tr("Confirmer la suppression") : @tr("Supprimer");
+                            text: root.confirm-shown ? @tr("Confirmer") : "";
+                            activated => {
+                                if root.delete-blocked { return; }
+                                if root.confirming-delete { root.removed(); }
+                                else { root.confirm-delete-requested(); }
+                            }
+                        }
+
+                        if !root.confirm-shown: KitIcon {
+                            x: root.column-gap + (root.action-width - self.width) / 2;
+                            y: (parent.height - self.height) / 2;
+                            width: 16px; height: 16px;
+                            glyph: root.actions-visible ? LucideFiles.trash() : LucideArrows.chevron-right();
+                            ink: root.actions-visible && !root.delete-blocked ? Theme.text-secondary : Theme.text-faint;
                         }
                     }
                 }

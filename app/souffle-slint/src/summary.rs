@@ -17,6 +17,25 @@ pub fn extract_key_points(summary: &str) -> Vec<String> {
         .collect()
 }
 
+/// The stored summary minus the lines `extract_key_points` already shows.
+pub fn body_without_key_points(summary: &str) -> String {
+    let mut remaining = extract_key_points(summary).len();
+    summary
+        .lines()
+        .filter(|line| {
+            let line = line.trim();
+            let shown = remaining > 0 && !line.is_empty() && strip_marker(line).is_some();
+            if shown {
+                remaining -= 1;
+            }
+            !shown
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+        .trim()
+        .to_string()
+}
+
 /// Strips a leading `-`, `•`, `*`, or `N.`/`N)` marker (plus the space after
 /// it) from `line`, returning `None` if `line` doesn't start with one of
 /// those markers at all.
@@ -65,6 +84,13 @@ mod tests {
                 "Quatri\u{e8}me point"
             ]
         );
+    }
+
+    #[test]
+    fn body_keeps_prose_and_bullets_beyond_the_key_points() {
+        let summary = "Intro.\n\n- a\n- b\n- c\n- d\n- e";
+        assert_eq!(body_without_key_points(summary), "Intro.\n\n- e");
+        assert_eq!(body_without_key_points("- a\n- b"), "");
     }
 
     #[test]

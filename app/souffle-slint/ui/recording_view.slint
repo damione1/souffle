@@ -1,9 +1,8 @@
 import { AppText, AppNumericText, Typography } from "@typography";
-import { AlertSeverity, ButtonIntent, ControlSize, KitAlert, KitBadge, KitButton, KitCard, KitDivider, KitIcon, KitInline, KitScrollArea, KitSurface, KitTextArea, KitThemeContext, SurfaceLevel, Tone } from "@kit";
+import { AlertActions, AlertSeverity, ButtonIntent, ControlSize, IconGlyph, KitAlert, KitBadge, KitButton, KitCard, KitDivider, KitIcon, KitInline, KitScrollArea, KitSurface, KitTextArea, KitThemeContext, SurfaceLevel, Tone } from "@kit";
 import { ProLevelWaveform } from "@kit-pro";
 import { LucideDesign } from "@kit-icons/design.slint";
 import { LucideText } from "@kit-icons/text.slint";
-import { LucideMultimedia } from "@kit-icons/multimedia.slint";
 import { RecordingMode, SpeakerRole, LiveSystemAudio, MicStall, MeetingIdleBanner, WakeResumeNotice } from "types.slint";
 import { Theme } from "theme.slint";
 import { MicStallBanner } from "components/mic_stall_banner.slint";
@@ -101,6 +100,9 @@ export component RecordingView inherits Rectangle {
     callback alias-save-requested(string, string);
     callback paragraph-edit-requested(int);
 
+    // Lucide only ships the outlined square; Stop is a solid one.
+    private property <IconGlyph> stop-glyph: { stroke: "", fill: "M 6 6 L 18 6 L 18 18 L 6 18 Z", viewbox: 24 };
+
     // Live meeting autoscroll (LiveSessionCard.svelte's scheduleAutoscroll),
     // done here rather than from Rust: follow the bottom while the reader
     // is within `live-follow-slack` of it, and leave them alone once they
@@ -146,11 +148,16 @@ export component RecordingView inherits Rectangle {
 
         KitCard {
             level: SurfaceLevel.raised;
-            inset: compact;
+            inset: none;
+            gap: none;
 
-            KitInline {
-                height: KitThemeContext.current.spacing.unit * 10;
-                gap: regular;
+            HorizontalLayout {
+                height: 60px;
+                padding-top: 10px;
+                padding-bottom: 10px;
+                padding-left: 16px;
+                padding-right: 12px;
+                spacing: 16px;
 
                 CenterY {
                     status := KitBadge {
@@ -168,14 +175,16 @@ export component RecordingView inherits Rectangle {
                     waveform := ProLevelWaveform {
                         running: root.mode != RecordingMode.idle && root.window-visible;
                         level: root.audio-level;
+                        ink: KitThemeContext.current.border-strong;
+                        bar-count: 56;
                     }
                 }
 
                 elapsed-counter := AppNumericText {
-                    width: KitThemeContext.current.spacing.unit * 12;
+                    width: 50px;
                     horizontal-stretch: 0;
                     text: root.elapsed-label;
-                    typography: Typography.body;
+                    typography: Typography.action-title;
                     text-color: Theme.text-primary;
                     horizontal-alignment: right;
                     vertical-alignment: center;
@@ -187,7 +196,7 @@ export component RecordingView inherits Rectangle {
                         text: @tr("Arrêter");
                         intent: ButtonIntent.destructive;
                         disabled: root.stop-pending;
-                        leading-icon: LucideMultimedia.square();
+                        leading-icon: root.stop-glyph;
                         activated => { root.stop-requested(); }
                     }
                 }
@@ -199,6 +208,7 @@ export component RecordingView inherits Rectangle {
         capture-scroll := KitScrollArea {
             focusable: self.scrollable;
             label: status.text;
+            overlay-scrollbars: true;
             Rectangle {
                 width: capture-scroll.visible-width;
                 height: max(capture-scroll.visible-height, sections.min-height);
@@ -206,7 +216,9 @@ export component RecordingView inherits Rectangle {
                 sections := VerticalLayout {
                     padding-bottom: KitThemeContext.current.spacing.unit * 10;
                     spacing: KitThemeContext.current.spacing.unit * 4.5;
-                    if root.mic-stall-visible: MicStallBanner {
+                    // A meeting warns above the transcript; dictation keeps its
+                    // writing card first.
+                    if root.mic-stall-visible && root.mode != RecordingMode.dictation: MicStallBanner {
                         vertical-stretch: 0;
                         kind: root.mic-stall-kind;
                         device: root.mic-stall-device;
@@ -217,10 +229,13 @@ export component RecordingView inherits Rectangle {
                     if root.mode == RecordingMode.meeting && root.wake-resume-notice == WakeResumeNotice.resumed: StatusBanner {
                         vertical-stretch: 0;
                         message: @tr("Enregistrement repris après la mise en veille.");
+                        actions-placement: AlertActions.trailing;
                         dismissed => { root.wake-resume-notice-dismissed(); }
                     }
 
                     if root.mode == RecordingMode.meeting && root.system-audio == LiveSystemAudio.unavailable: KitAlert { bordered: false;
+                        corner-radius: 12px;
+                        inset: 12px;
                         severity: AlertSeverity.warning;
                         accessible-label: @tr("Attention. Seul votre microphone est enregistré. L'audio des autres participants est indisponible.");
                         message: @tr("Seul votre microphone est enregistré. L’audio des autres participants est indisponible.");
@@ -230,6 +245,9 @@ export component RecordingView inherits Rectangle {
                     // (the meeting stops by itself 2 min later otherwise); the
                     // max-duration guard is already stopping it, so no buttons.
                     if root.mode == RecordingMode.meeting && root.meeting-idle-banner != MeetingIdleBanner.hidden: KitAlert { bordered: false;
+                        corner-radius: 12px;
+                        inset: 12px;
+                        actions-placement: AlertActions.trailing;
                         severity: root.meeting-idle-banner == MeetingIdleBanner.max-duration
                             ? AlertSeverity.warning : AlertSeverity.information;
                         message: root.meeting-idle-banner == MeetingIdleBanner.max-duration
@@ -251,7 +269,9 @@ export component RecordingView inherits Rectangle {
                     }
 
                     if root.mode == RecordingMode.dictation: StretchCard {
-                        min-height: KitThemeContext.current.spacing.unit * 75;
+                        // Shorter under a stalled microphone, so its banner below
+                        // stays in view.
+                        min-height: KitThemeContext.current.spacing.unit * (root.mic-stall-visible ? 45 : 75);
                         vertical-stretch: 1;
                         pad-x: KitThemeContext.current.spacing.unit * 7.5;
                         pad-y: KitThemeContext.current.spacing.unit * 7;
@@ -261,6 +281,7 @@ export component RecordingView inherits Rectangle {
                         // or `height: 100%` (SOU-256).
                         dictation-scroll := KitScrollArea {
                             vertical-stretch: 1;
+                            overlay-scrollbars: true;
 
                             VerticalLayout {
                                 width: parent.width;
@@ -276,8 +297,9 @@ export component RecordingView inherits Rectangle {
                                 }
                                 if !root.starting && root.combined-text != "": TranscriptWordFlow {
                                     words: root.live-dictation-words;
-                                    typography: Typography.preview;
+                                    typography: Typography.title-input;
                                     color: Theme.text-primary;
+                                    caret: true;
                                 }
                             }
                         }
@@ -304,6 +326,14 @@ export component RecordingView inherits Rectangle {
                                 }
                             }
                         }
+                    }
+
+                    if root.mic-stall-visible && root.mode == RecordingMode.dictation: MicStallBanner {
+                        vertical-stretch: 0;
+                        kind: root.mic-stall-kind;
+                        device: root.mic-stall-device;
+                        restart-requested => { root.mic-stall-restart-requested(); }
+                        dismissed => { root.mic-stall-dismissed(); }
                     }
 
                     StretchCard {
@@ -340,7 +370,7 @@ export component RecordingView inherits Rectangle {
 
                                     AppText {
                                         text: @tr("TRANSCRIPTION EN DIRECT");
-                                        typography: Typography.caption-emphasis;
+                                        typography: Typography.timeline-heading;
                                         color: Theme.text-muted;
                                         vertical-alignment: center;
                                     }
@@ -359,6 +389,7 @@ export component RecordingView inherits Rectangle {
 
                                 live-scroll := KitScrollArea {
                                     vertical-stretch: 1;
+                                    overlay-scrollbars: true;
 
                                     changed content-height => {
                                         if root.live-follow {
@@ -428,7 +459,7 @@ export component RecordingView inherits Rectangle {
                             }
                             AppText {
                                 text: @tr("NOTES");
-                                typography: Typography.caption-emphasis;
+                                typography: Typography.timeline-heading;
                                 color: Theme.text-muted;
                                 vertical-alignment: center;
                             }

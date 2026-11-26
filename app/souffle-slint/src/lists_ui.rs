@@ -91,13 +91,13 @@ pub(crate) fn mutate_dictionary_suggestion(
 // `snippets_section.slint`. Like the transcript's estimates, a stale error/
 // editing state only skews spacer sizing a little - mounted rows always lay
 // out their real height.
-const DICTIONARY_ROW_HEIGHT_PX: f32 = 64.0;
-const DICTIONARY_ERROR_ROW_HEIGHT_PX: f32 = 88.0;
+const DICTIONARY_ROW_HEIGHT_PX: f32 = 51.0;
+const DICTIONARY_ERROR_ROW_HEIGHT_PX: f32 = 72.0;
 const DICTIONARY_VIEWPORT_HEIGHT_PX: f32 = 360.0;
-const SUGGESTION_ROW_HEIGHT_PX: f32 = 64.0;
+const SUGGESTION_ROW_HEIGHT_PX: f32 = 52.0;
 const SUGGESTION_VIEWPORT_HEIGHT_PX: f32 = 240.0;
-const SNIPPET_ROW_HEIGHT_PX: f32 = 96.0;
-const SNIPPET_ERROR_ROW_HEIGHT_PX: f32 = 116.0;
+const SNIPPET_ROW_HEIGHT_PX: f32 = 58.0;
+const SNIPPET_ERROR_ROW_HEIGHT_PX: f32 = 80.0;
 const SNIPPET_EDITING_ROW_HEIGHT_PX: f32 = 236.0;
 const SNIPPETS_VIEWPORT_HEIGHT_PX: f32 = 420.0;
 // Two viewport-heights of pre-mounted margin on each side, so ordinary
@@ -596,7 +596,7 @@ mod tests {
         // the middle of their content.
         window.set_settings_dictionary_scroll_top(-250.0 * DICTIONARY_ROW_HEIGHT_PX);
         window.set_settings_snippets_scroll_top(-250.0 * SNIPPET_ROW_HEIGHT_PX);
-        window.set_settings_dictionary_suggestion_scroll_top(-250.0 * 64.0);
+        window.set_settings_dictionary_suggestion_scroll_top(-250.0 * SUGGESTION_ROW_HEIGHT_PX);
         slint::platform::update_timers_and_animations();
 
         let dictionary_start = first_dictionary_id().expect("dictionary slice mounted");
@@ -726,7 +726,7 @@ mod tests {
     #[test]
     fn settings_list_windows_stay_bounded_for_0_100_1000_rows() {
         // Viewport (360px) + a 720px margin on each side = 1800px of rows at
-        // 64px each, so about 29 mounted rows, plus the overlap slack
+        // 51px each, so about 36 mounted rows, plus the overlap slack
         // `visible_window` allows on both edges.
         let max_mounted = (((1.0 + 2.0 * SETTINGS_LIST_SCROLL_MARGIN_FACTOR)
             * DICTIONARY_VIEWPORT_HEIGHT_PX)

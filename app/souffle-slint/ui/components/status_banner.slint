@@ -2,14 +2,17 @@ import { AlertSeverity, ButtonIntent, ControlSize, KitAlert, KitButton } from "@
 
 export component StatusBanner inherits KitAlert { bordered: false;
     in property <string> action-label;
+    in property <ButtonIntent> action-intent: ButtonIntent.secondary;
     callback action-triggered();
 
+    corner-radius: 12px;
+    inset: 12px;
     severity: AlertSeverity.warning;
     dismissible: true;
     dismiss-label: @tr("Fermer");
     if root.action-label != "": KitButton {
         text: root.action-label;
-        intent: ButtonIntent.secondary;
+        intent: root.action-intent;
         control-size: ControlSize.compact;
         activated => { root.action-triggered(); }
     }

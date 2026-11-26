@@ -1,6 +1,7 @@
 import { ButtonIntent, ControlSize, ElevationLevel, KitBadge, KitIconButton, KitImage, KitWrap, KitSurface, KitDivider, KitText, KitLayoutMetrics, KitMetrics, Tone } from "@kit";
 import { LucideAccount } from "@kit-icons/account.slint";
 import { LucideAccessibility } from "@kit-icons/accessibility.slint";
+import { AppText, Typography } from "@typography";
 import { Theme } from "../theme.slint";
 import { TranscriptionLabels } from "transcription_labels.slint";
 import { RecordingMode, TranscriptionPhase } from "../types.slint";
@@ -44,8 +45,8 @@ export component AppHeader inherits KitSurface {
         cross-axis-alignment: center;
         theme: root.theme;
         alignment: space-between;
-        padding-left: 88px; // Native traffic-light clearance.
-        padding-right: KitLayoutMetrics.space(root.theme, roomy);
+        padding-left: 100px; // Native traffic-light clearance.
+        padding-right: 20px;
         padding-top: KitLayoutMetrics.space(root.theme, compact);
         padding-bottom: self.padding-top;
         min-height: Theme.header-height;
@@ -53,20 +54,21 @@ export component AppHeader inherits KitSurface {
             flex-wrap: no-wrap;
             cross-axis-alignment: center;
             theme: root.theme;
+            spacing: 12px;
             logo := KitImage {
                 theme: root.theme;
-                control-size: comfortable;
+                width: 26px;
                 source: @image-url("../assets/icon.png");
             }
-            KitText {
-                theme: root.theme;
-                role: subtitle;
+            AppText {
+                typography: Typography.action-title;
+                color: Theme.text-primary;
                 wrap: no-wrap;
                 overflow: elide;
                 min-width: 0px;
                 max-width: max(0px, root.width - bar.padding-left - bar.padding-right
-                    - bar.spacing - KitMetrics.icon-size(root.theme, ControlSize.comfortable) - brand.spacing - status.preferred-width
-                    - 2 * KitMetrics.control-height(root.theme, ControlSize.compact) - 2 * actions.spacing);
+                    - bar.spacing - 26px - brand.spacing - status.preferred-width
+                    - 2 * KitMetrics.control-height(root.theme, ControlSize.medium) - 2 * actions.spacing);
                 text: @tr("Soufflé");
                 vertical-alignment: center;
             }
@@ -75,6 +77,7 @@ export component AppHeader inherits KitSurface {
             flex-wrap: no-wrap;
             cross-axis-alignment: center;
             theme: root.theme;
+            spacing: 12px;
             if root.show-model-label: KitText {
                 theme: root.theme;
                 text: root.model-label == "__APPLE_SPEECH_SYSTEM__" ? TranscriptionLabels.speech-short-label() : root.model-label;
@@ -82,7 +85,7 @@ export component AppHeader inherits KitSurface {
                 min-width: 0px;
                 max-width: max(0px, root.width - bar.padding-left - bar.padding-right
                     - 2 * bar.spacing - brand.preferred-width - status.preferred-width
-                    - 2 * KitMetrics.control-height(root.theme, ControlSize.compact) - 3 * parent.spacing);
+                    - 2 * KitMetrics.control-height(root.theme, ControlSize.medium) - 3 * parent.spacing);
                 wrap: no-wrap;
                 overflow: elide;
                 vertical-alignment: center;
@@ -98,14 +101,14 @@ export component AppHeader inherits KitSurface {
             theme-area := KitIconButton {
                 theme: root.theme;
                 accessible-name: @tr("Basculer clair / sombre");
-                control-size: compact;
+                control-size: medium;
                 glyph: Theme.dark ? LucideAccessibility.sun() : LucideAccessibility.moon();
                 activated => { root.theme-toggle-requested(); }
             }
             settings-area := KitIconButton {
                 theme: root.theme;
                 accessible-name: @tr("Réglages");
-                control-size: compact;
+                control-size: medium;
                 intent: root.settings-open ? ButtonIntent.secondary : ButtonIntent.quiet;
                 glyph: LucideAccount.sliders-horizontal();
                 activated => { root.settings-toggled(); }

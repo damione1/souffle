@@ -1,4 +1,4 @@
-import { ButtonIntent, KitButton, KitFieldRow, KitFieldSet, KitForm, KitInline, KitMetrics, KitTextArea, KitTextField, KitThemeContext, KitThemes, KitWrap } from "@kit";
+import { FieldSetAppearance, FieldRowAppearance, ButtonIntent, KitButton, KitFieldRow, KitFieldSet, KitForm, KitTextArea, KitTextField, KitThemeContext, KitThemes, KitWrap, ControlSize } from "@kit";
 import { CatalogPicker } from "../catalog_picker.slint";
 import { Theme } from "../../theme.slint";
 
@@ -26,18 +26,19 @@ export component SummaryTemplatesSection inherits KitFieldSet {
 
     theme: KitThemeContext.current;
     legend: @tr("MODÈLES DE RÉSUMÉ");
+    appearance: FieldSetAppearance.card;
 
     KitFieldRow {
         theme: KitThemeContext.current;
         modal-layer: 0;
         orientation: Theme.settings-field-orientation(self.width);
-        padding: KitMetrics.field-gap(self.theme);
+        appearance: FieldRowAppearance.inset;
+        show-divider: true;
         focus-requested => { default-picker.take-focus(); }
         private property <bool> control-focused: default-picker.has-focus;
         changed control-focused => {
             if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
         }
-        show-divider: false;
         label: @tr("Modèle par défaut");
         description: @tr("Le modèle par défaut est utilisé lorsque vous générez le résumé d'une réunion terminée.");
 
@@ -56,7 +57,7 @@ export component SummaryTemplatesSection inherits KitFieldSet {
         theme: KitThemeContext.current;
         modal-layer: 0;
         orientation: Theme.settings-field-orientation(self.width);
-        padding: KitMetrics.field-gap(self.theme);
+        appearance: FieldRowAppearance.inset;
         show-divider: true;
         focus-requested => { template-picker.take-focus(); }
         private property <bool> control-focused: template-picker.has-focus;
@@ -83,6 +84,7 @@ export component SummaryTemplatesSection inherits KitFieldSet {
             if !root.editing-is-builtin: KitButton {
                 theme: root.theme;
                 modal-layer: 0;
+                control-size: ControlSize.compact;
                 text: @tr("Supprimer");
                 focus-observed(focused) => {
                     if focused { edit-target-row.ensure-visible(KitThemes.scroll-behavior(root.theme)); }
@@ -96,7 +98,7 @@ export component SummaryTemplatesSection inherits KitFieldSet {
         theme: KitThemeContext.current;
         modal-layer: 0;
         orientation: Theme.settings-field-orientation(self.width);
-        padding: KitMetrics.field-gap(self.theme);
+        appearance: FieldRowAppearance.inset;
         show-divider: true;
         focus-requested => { name-editor.take-focus(); }
         private property <bool> control-focused: name-editor.has-focus;
@@ -119,8 +121,7 @@ export component SummaryTemplatesSection inherits KitFieldSet {
         theme: KitThemeContext.current;
         modal-layer: 0;
         orientation: vertical;
-        padding: KitMetrics.field-gap(self.theme);
-        padding-bottom: KitThemes.focus-outset(self.theme.focus) + KitMetrics.help-gap(self.theme);
+        appearance: FieldRowAppearance.inset;
         show-divider: true;
         focus-requested => { instruction-editor.take-focus(); }
         private property <bool> control-focused: instruction-editor.has-focus;
@@ -151,32 +152,41 @@ export component SummaryTemplatesSection inherits KitFieldSet {
         validation-requested => { return self.valid; }
         submit-requested => { root.add-requested(root.new-template-draft); }
 
-        add-row := KitInline {
+        add-row := KitFieldRow {
             theme: root.theme;
-            alignment: stretch;
-            padding: KitMetrics.field-gap(root.theme);
-            padding-bottom: KitThemes.focus-outset(root.theme.focus) + KitMetrics.help-gap(root.theme);
-            KitTextField {
-                theme: root.theme;
-                modal-layer: 0;
-                text <=> root.new-template-draft;
-                placeholder: @tr("Nom du nouveau modèle");
-                accessible-name: @tr("Nom du nouveau modèle de résumé");
-                horizontal-stretch: 1;
-                focus-observed(focused) => {
-                    if focused { add-row.ensure-visible(KitThemes.scroll-behavior(root.theme)); }
+            modal-layer: 0;
+            orientation: Theme.settings-field-orientation(self.width);
+            appearance: FieldRowAppearance.inset;
+            show-divider: true;
+            label: @tr("Nom du nouveau modèle");
+            focus-requested => { new-name-editor.take-focus(); }
+
+            HorizontalLayout {
+                width: Theme.settings-control-width;
+                spacing: 8px;
+                new-name-editor := KitTextField {
+                    theme: root.theme;
+                    modal-layer: 0;
+                    text <=> root.new-template-draft;
+                    placeholder: @tr("Nom du nouveau modèle");
+                    accessible-name: @tr("Nom du nouveau modèle de résumé");
+                    horizontal-stretch: 1;
+                    focus-observed(focused) => {
+                        if focused { add-row.ensure-visible(KitThemes.scroll-behavior(root.theme)); }
+                    }
                 }
-            }
-            add-button := KitButton {
-                theme: root.theme;
-                modal-layer: 0;
-                text: @tr("Ajouter");
-                intent: ButtonIntent.primary;
-                disabled: !add-form.valid;
-                focus-observed(focused) => {
-                    if focused { add-row.ensure-visible(KitThemes.scroll-behavior(root.theme)); }
+                add-button := KitButton {
+                    theme: root.theme;
+                    modal-layer: 0;
+                    control-size: ControlSize.compact;
+                    text: @tr("Ajouter");
+                    intent: ButtonIntent.primary;
+                    disabled: !add-form.valid;
+                    focus-observed(focused) => {
+                        if focused { add-row.ensure-visible(KitThemes.scroll-behavior(root.theme)); }
+                    }
+                    activated => { add-form.submit(); }
                 }
-                activated => { add-form.submit(); }
             }
         }
     }

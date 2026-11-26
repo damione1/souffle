@@ -1,6 +1,5 @@
 import { AppText, Typography } from "@typography";
-import { ButtonIntent, ControlSize, KitButton, KitFieldError, KitFieldRow, KitFieldSeparator, KitFieldSet, KitMetrics, KitTextArea, KitTextField, KitThemeContext, ResizePolicy, ScrollFrame } from "@kit";
-import { LucideFiles } from "@kit-icons/files.slint";
+import { FieldSetAppearance, FieldRowAppearance, ButtonIntent, ControlSize, KitButton, KitFieldError, KitFieldRow, KitFieldSeparator, KitFieldSet, KitTextArea, KitTextField, KitThemeContext, ResizePolicy, ScrollFrame, KitOverline } from "@kit";
 import { Theme } from "../../theme.slint";
 
 // Port of SnippetsSettingsSection.svelte. Which row is being edited is
@@ -41,25 +40,26 @@ export component SnippetsSection inherits VerticalLayout {
     callback cancel-edit-requested();
     callback save-edit-requested(int, string, string);
 
-    spacing: 22px;
+    spacing: 20px;
     alignment: start;
 
     KitFieldSet {
         theme: KitThemeContext.current;
         legend: @tr("EXTRAITS VOCAUX");
+        appearance: FieldSetAppearance.card;
 
         KitFieldRow {
             theme: KitThemeContext.current;
             modal-layer: 0;
-            padding: KitMetrics.field-gap(self.theme);
-            show-divider: false;
-            label: @tr("Phrase déclencheur en début de dictée");
-            description: @tr("Dites une phrase déclencheur au début d'une dictée pour insérer un bloc de texte. La comparaison ignore la casse et les accents ; aucune retouche IA n'est appliquée quand un extrait correspond.");
+            appearance: FieldRowAppearance.inset;
+            show-divider: true;
+            label: @tr("Dites une phrase déclencheur au début d'une dictée");
+            description: @tr("La comparaison ignore la casse et les accents ; aucune retouche IA n'est appliquée quand un extrait correspond.");
         }
 
         VerticalLayout {
-            padding-left: Theme.settings-inset;
-            padding-right: Theme.settings-inset;
+            padding-left: 20px;
+            padding-right: 20px;
             padding-bottom: 16px;
             spacing: 12px;
 
@@ -67,22 +67,32 @@ export component SnippetsSection inherits VerticalLayout {
                 spacing: 12px;
                 alignment: stretch;
 
-                KitTextField {
-                    text <=> root.new-trigger-draft;
-                    label: @tr("DÉCLENCHEUR");
-                    placeholder: @tr("Phrase déclencheur");
-                    accessible-name: @tr("Phrase déclencheur");
+                VerticalLayout {
+                    spacing: 6px;
+                    alignment: start;
                     width: 220px;
                     horizontal-stretch: 0;
+                    KitOverline { label: @tr("DÉCLENCHEUR"); }
+                    KitTextField {
+                        text <=> root.new-trigger-draft;
+                        placeholder: @tr("Phrase déclencheur");
+                        accessible-name: @tr("Phrase déclencheur");
+                    }
                 }
-                KitTextArea {
-                    text <=> root.new-expansion-draft;
-                    label: @tr("EXPANSION");
-                    placeholder: @tr("Texte à insérer");
-                    accessible-name: @tr("Texte de l'extrait vocal");
-                    resize-policy: ResizePolicy.fixed;
-                    height: 72px;
+                VerticalLayout {
+                    spacing: 6px;
+                    alignment: start;
                     horizontal-stretch: 1;
+                    KitOverline { label: @tr("EXPANSION"); }
+                    KitTextArea {
+                        text <=> root.new-expansion-draft;
+                        placeholder: @tr("Texte à insérer");
+                        accessible-name: @tr("Texte de l'extrait vocal");
+                        resize-policy: ResizePolicy.fixed;
+                        // Enough lines to ask for more than 72px, so the editor fills it.
+                        min-lines: 4;
+                        height: 72px;
+                    }
                 }
             }
 
@@ -122,16 +132,16 @@ export component SnippetsSection inherits VerticalLayout {
                 Rectangle { height: root.list-spacer-before * 1px; }
 
                 for row in root.entries: VerticalLayout {
-                    height: row.editing ? 236px : (root.delete-error != "" && root.delete-error-id == row.id ? 116px : 96px);
+                    height: row.editing ? 236px : (root.delete-error != "" && root.delete-error-id == row.id ? 80px : 58px);
                     alignment: start;
 
                     KitFieldSeparator { theme: KitThemeContext.current; }
 
                     VerticalLayout {
-                        padding-left: Theme.settings-inset;
-                        padding-right: Theme.settings-inset;
-                        padding-top: 10px;
-                        padding-bottom: 10px;
+                        padding-left: 20px;
+                        padding-right: 20px;
+                        padding-top: 12px;
+                        padding-bottom: 12px;
                         spacing: 6px;
                         alignment: start;
 
@@ -141,7 +151,7 @@ export component SnippetsSection inherits VerticalLayout {
 
                             AppText {
                                 text: row.trigger;
-                                typography: Typography.hint-emphasis;
+                                typography: Typography.field-heading;
                                 color: Theme.text-primary;
                                 overflow: elide;
                                 width: 200px;
@@ -150,9 +160,9 @@ export component SnippetsSection inherits VerticalLayout {
                             }
                             AppText {
                                 text: row.expansion;
-                                typography: Typography.secondary;
+                                typography: Typography.content;
                                 color: Theme.text-muted;
-                                max-height: 52px;
+                                max-height: 32px;
                                 wrap: word-wrap;
                                 overflow: elide;
                                 horizontal-stretch: 1;
@@ -172,7 +182,6 @@ export component SnippetsSection inherits VerticalLayout {
                                     text: @tr("Supprimer");
                                     control-size: ControlSize.compact;
                                     intent: ButtonIntent.quiet;
-                                    leading-icon: LucideFiles.trash();
                                     activated => { root.delete-requested(row.id); }
                                 }
                             }
@@ -181,16 +190,17 @@ export component SnippetsSection inherits VerticalLayout {
                         if row.editing: VerticalLayout {
                             spacing: 6px;
 
+                            KitOverline { label: @tr("DÉCLENCHEUR"); }
                             KitTextField {
                                 text <=> root.edit-trigger-draft;
-                                label: @tr("DÉCLENCHEUR");
                                 accessible-name: @tr("Phrase déclencheur");
                             }
+                            KitOverline { label: @tr("EXPANSION"); }
                             KitTextArea {
                                 text <=> root.edit-expansion-draft;
-                                label: @tr("EXPANSION");
                                 accessible-name: @tr("Texte de l'extrait vocal");
                                 resize-policy: ResizePolicy.fixed;
+                                min-lines: 4;
                                 height: 72px;
                             }
                             if root.update-error != "": KitFieldError { text: root.update-error; overflow: elide; }

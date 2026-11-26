@@ -1,13 +1,15 @@
 import {
     AlertSeverity, ButtonIntent, ControlSize, KitAlert, KitAvatar, KitBadge, KitButton, KitDivider,
-    KitFieldDescription, KitText, KitThemeContext, Tone, TypographyRole, AvatarShape
+    KitText, KitThemeContext, Tone, TypographyRole, AvatarShape
 } from "@kit";
 import { IconGlyph } from "@kit";
 import { LucideCommunication } from "@kit-icons/communication.slint";
 import { LucideMultimedia } from "@kit-icons/multimedia.slint";
 import { LucideDevices } from "@kit-icons/devices.slint";
 import { LucideTime } from "@kit-icons/time.slint";
+import { AppText, Typography } from "@typography";
 import { AccessState, PermissionKind } from "../../types.slint";
+import { Theme } from "../../theme.slint";
 
 // Port of PermissionsStep.svelte. Each row's status comes from a real,
 // repeatedly-polled `get_permission_status()` snapshot (main.rs polls every
@@ -54,7 +56,6 @@ export component PermissionsStep inherits VerticalLayout {
         return "";
     }
     pure function row-hint-action-label(kind: PermissionKind, state: AccessState) -> string {
-        if kind == PermissionKind.accessibility && state == AccessState.denied { return @tr("Réglages Système"); }
         if kind == PermissionKind.microphone && state == AccessState.denied { return @tr("Réglages Système"); }
         return "";
     }
@@ -71,15 +72,15 @@ export component PermissionsStep inherits VerticalLayout {
 
     private property <length> unit: KitThemeContext.current.spacing.unit;
 
-    spacing: root.unit * 3;
+    spacing: root.compact ? 16px : 18px;
 
     VerticalLayout {
         for row in root.rows: VerticalLayout {
             KitDivider {}
 
             HorizontalLayout {
-                padding-top: root.compact ? root.unit * 2.75 : root.unit * 3.5;
-                padding-bottom: root.compact ? root.unit * 2.75 : root.unit * 3.5;
+                padding-top: root.compact ? root.unit * 2.75 : root.unit * 4;
+                padding-bottom: root.compact ? root.unit * 2.75 : root.unit * 4;
                 spacing: root.unit * 3.5;
                 cross-axis-alignment: CrossAxisAlignment.center;
 
@@ -91,16 +92,25 @@ export component PermissionsStep inherits VerticalLayout {
                     bordered: false;
                     decorative: true;
                     fallback-icon: row-icon(row.kind);
+                    glyph-size: 16px;
                 }
 
                 VerticalLayout {
                     horizontal-stretch: 1;
                     alignment: center;
-                    KitText {
+                    spacing: 2px;
+                    AppText {
                         text: row-label(row.kind);
-                        role: TypographyRole.control;
+                        typography: Typography.field-heading;
+                        color: Theme.text-primary;
+                        wrap: word-wrap;
                     }
-                    if !root.compact: KitFieldDescription { text: row-description(row.kind); }
+                    if !root.compact: AppText {
+                        text: row-description(row.kind);
+                        typography: Typography.hint;
+                        color: Theme.text-muted;
+                        wrap: word-wrap;
+                    }
                 }
 
                 if row.state == AccessState.granted: KitBadge {
@@ -123,29 +133,45 @@ export component PermissionsStep inherits VerticalLayout {
                     activated => { root.grant-requested(row.kind); }
                 }
             }
+        }
 
-            if row-hint(row.kind, row.state) != "": KitAlert { bordered: false;
-                severity: AlertSeverity.information;
-                message: row-hint(row.kind, row.state);
-                if row-hint-action-label(row.kind, row.state) != "": KitButton {
-                    modal-layer: root.modal-layer;
-                    control-size: ControlSize.compact;
-                    intent: ButtonIntent.link;
-                    text: row-hint-action-label(row.kind, row.state);
-                    activated => { root.hint-action-requested(row.kind); }
+        // Hints follow the whole list so they never split it. The compact
+        // list skips the Accessibility one: its row already opens Settings.
+        for row in root.rows: VerticalLayout {
+            if row-hint(row.kind, row.state) != "" && !(root.compact && row.kind == PermissionKind.accessibility): VerticalLayout {
+                padding-top: root.unit * 3;
+
+                KitAlert {
+                    bordered: false;
+                    inset: 12px;
+                    corner-radius: 12px;
+                    severity: AlertSeverity.information;
+                    // Away from its row, the microphone hint has to name it.
+                    title: row.kind == PermissionKind.microphone ? row-label(row.kind) : "";
+                    message: row-hint(row.kind, row.state);
+                    message-ink: Theme.text-primary;
+                    if row-hint-action-label(row.kind, row.state) != "": KitButton {
+                        modal-layer: root.modal-layer;
+                        control-size: ControlSize.compact;
+                        intent: ButtonIntent.link;
+                        text: row-hint-action-label(row.kind, row.state);
+                        activated => { root.hint-action-requested(row.kind); }
+                    }
                 }
             }
         }
-        KitDivider {}
     }
 
     HorizontalLayout {
         spacing: root.unit * 3;
 
-        KitFieldDescription {
+        AppText {
             text: root.repair-success
                 ? @tr("Réparation effectuée, en attente de confirmation macOS.")
                 : @tr("Un problème persiste ? Réparez l'entrée Accessibilité.");
+            typography: Typography.hint;
+            color: Theme.text-muted;
+            wrap: word-wrap;
             horizontal-stretch: 1;
             vertical-alignment: center;
         }

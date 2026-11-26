@@ -1,6 +1,7 @@
-import { KitAlert, KitBadge, KitButton, KitFieldRow, KitFieldSet, KitMetrics, KitTextField, KitThemeContext, KitThemes, KitWrap, Tone } from "@kit";
+import { FieldSetAppearance, FieldRowAppearance, AlertActions, KitAlert, KitBadge, KitButton, KitFieldRow, KitFieldSet, KitTextField, KitThemeContext, KitThemes, KitWrap, Tone } from "@kit";
 import { SettingsOptions, ClosedSettingsPicker } from "settings_options.slint";
 import { CatalogPicker } from "../catalog_picker.slint";
+import { SettingsNoticeRow } from "settings_notice_row.slint";
 import { Theme } from "../../theme.slint";
 import { AppleIntelligenceUnavailableReason, SummaryProvider } from "../../types.slint";
 
@@ -51,18 +52,19 @@ export component IntelligenceSection inherits KitFieldSet {
 
     theme: KitThemeContext.current;
     legend: root.for-dictation ? @tr("FOURNISSEUR IA DE LA DICTÉE") : @tr("RÉSUMÉS (EXPÉRIMENTAUX)");
+    appearance: FieldSetAppearance.card;
 
     KitFieldRow {
         theme: KitThemeContext.current;
         modal-layer: 0;
         orientation: Theme.settings-field-orientation(self.width);
-        padding: KitMetrics.field-gap(self.theme);
+        appearance: FieldRowAppearance.inset;
+        show-divider: true;
         focus-requested => { engine-picker.take-focus(); }
         private property <bool> control-focused: engine-picker.has-focus;
         changed control-focused => {
             if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
         }
-        show-divider: false;
         label: @tr("Moteur");
         description: root.for-dictation ? @tr("Le moteur qui nettoie la dictée.") : @tr("Le moteur qui rédige les résumés et nettoie la dictée.");
 
@@ -75,25 +77,29 @@ export component IntelligenceSection inherits KitFieldSet {
         }
     }
 
-    if root.provider-unavailable: KitAlert { bordered: false;
-        theme: root.theme;
-        severity: warning;
-        message: root.summary-provider == SummaryProvider.apple-intelligence
-            ? @tr("Apple Intelligence n'est pas disponible sur cet appareil.")
-            : @tr("Aucun modèle Ollama compatible n'est installé.");
+    if root.provider-unavailable: SettingsNoticeRow {
+        KitAlert { bordered: false; corner-radius: 12px; inset: 12px; actions-placement: AlertActions.trailing;
+            theme: root.theme;
+            severity: warning;
+            message: root.summary-provider == SummaryProvider.apple-intelligence
+                ? @tr("Apple Intelligence n'est pas disponible sur cet appareil.")
+                : @tr("Aucun modèle Ollama compatible n'est installé.");
+        }
     }
 
-    if root.refresh-error != "": KitAlert { bordered: false;
-        theme: root.theme;
-        severity: error;
-        message: root.refresh-error;
+    if root.refresh-error != "": SettingsNoticeRow {
+        KitAlert { bordered: false; corner-radius: 12px; inset: 12px; actions-placement: AlertActions.trailing;
+            theme: root.theme;
+            severity: error;
+            message: root.refresh-error;
+        }
     }
 
     apple-row := KitFieldRow {
         theme: KitThemeContext.current;
         modal-layer: 0;
         orientation: Theme.settings-field-orientation(self.width);
-        padding: KitMetrics.field-gap(self.theme);
+        appearance: FieldRowAppearance.inset;
         show-divider: true;
         label: @tr("Apple Intelligence");
         description: root.apple-intelligence-available ? "" : root.apple-reason-label(root.apple-intelligence-reason);
@@ -106,6 +112,8 @@ export component IntelligenceSection inherits KitFieldSet {
                 theme: root.theme;
                 text: root.apple-intelligence-available ? @tr("Disponible") : @tr("Non disponible");
                 tone: root.apple-intelligence-available ? Tone.success : Tone.warning;
+                subtle: true;
+                preferred-height: 24px;
                 dot: root.apple-intelligence-available;
             }
             if !root.apple-intelligence-available && root.apple-intelligence-reason == AppleIntelligenceUnavailableReason.apple-intelligence-not-enabled: KitButton {
@@ -126,8 +134,7 @@ export component IntelligenceSection inherits KitFieldSet {
         theme: KitThemeContext.current;
         modal-layer: 0;
         orientation: Theme.settings-field-orientation(self.width);
-        padding: KitMetrics.field-gap(self.theme);
-        padding-bottom: KitThemes.focus-outset(self.theme.focus) + KitMetrics.help-gap(self.theme);
+        appearance: FieldRowAppearance.inset;
         show-divider: true;
         focus-requested => { url-editor.take-focus(); }
         private property <bool> control-focused: url-editor.has-focus;
@@ -154,7 +161,7 @@ export component IntelligenceSection inherits KitFieldSet {
         theme: KitThemeContext.current;
         modal-layer: 0;
         orientation: Theme.settings-field-orientation(self.width);
-        padding: KitMetrics.field-gap(self.theme);
+        appearance: FieldRowAppearance.inset;
         show-divider: true;
         focus-requested => { connection-button.take-focus(); }
         private property <bool> control-focused: connection-button.has-focus;
@@ -174,6 +181,8 @@ export component IntelligenceSection inherits KitFieldSet {
                 theme: root.theme;
                 text: root.ollama-available ? @tr("Connecté") : @tr("Non disponible");
                 tone: root.ollama-available ? Tone.success : Tone.warning;
+                subtle: true;
+                preferred-height: 24px;
                 dot: root.ollama-available;
             }
             connection-button := KitButton {
@@ -191,7 +200,7 @@ export component IntelligenceSection inherits KitFieldSet {
         theme: KitThemeContext.current;
         modal-layer: 0;
         orientation: Theme.settings-field-orientation(self.width);
-        padding: KitMetrics.field-gap(self.theme);
+        appearance: FieldRowAppearance.inset;
         show-divider: true;
         focus-requested => { model-picker.take-focus(); }
         private property <bool> control-focused: model-picker.has-focus;
@@ -211,17 +220,19 @@ export component IntelligenceSection inherits KitFieldSet {
         }
     }
 
-    if root.show-ollama-setup && root.ollama-pull-error != "": KitAlert { bordered: false;
-        theme: root.theme;
-        severity: error;
-        message: @tr("Échec du téléchargement : {}", root.ollama-pull-error);
+    if root.show-ollama-setup && root.ollama-pull-error != "": SettingsNoticeRow {
+        KitAlert { bordered: false; corner-radius: 12px; inset: 12px; actions-placement: AlertActions.trailing;
+            theme: root.theme;
+            severity: error;
+            message: @tr("Échec du téléchargement : {}", root.ollama-pull-error);
+        }
     }
 
     if root.show-ollama-setup: setup-row := KitFieldRow {
         theme: KitThemeContext.current;
         modal-layer: 0;
         orientation: Theme.settings-field-orientation(self.width);
-        padding: KitMetrics.field-gap(self.theme);
+        appearance: FieldRowAppearance.inset;
         show-divider: true;
         label: @tr("Aucun modèle compatible installé.");
         description: root.ollama-pulling

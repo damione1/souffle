@@ -192,6 +192,7 @@ export component MainWindow inherits Window {
     in-out property <length> meeting-detail-page-scroll-top: 0px;
     in-out property <MeetingDetailView> meeting-detail-view: MeetingDetailView.reading;
     in property <string> meeting-detail-summary;
+    in property <string> meeting-detail-summary-body;
     in property <bool> meeting-detail-summary-is-stale;
     in property <string> meeting-detail-summary-model-label;
     in property <[string]> meeting-detail-summary-key-points;
@@ -834,6 +835,7 @@ export component MainWindow inherits Window {
                 page-scroll-top <=> root.meeting-detail-page-scroll-top;
                 view <=> root.meeting-detail-view;
                 summary: root.meeting-detail-summary;
+                summary-body: root.meeting-detail-summary-body;
                 summary-is-stale: root.meeting-detail-summary-is-stale;
                 summary-model-label: root.meeting-detail-summary-model-label;
                 summary-key-points: root.meeting-detail-summary-key-points;

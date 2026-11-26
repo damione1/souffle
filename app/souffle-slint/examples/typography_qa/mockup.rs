@@ -419,6 +419,7 @@ fn detail(window: &MainWindow, surface: &str) {
     window.set_meeting_detail_notes_save_state(NotesSaveState::Saved);
 
     window.set_meeting_detail_summary("".into());
+    window.set_meeting_detail_summary_body("".into());
     window.set_meeting_detail_summary_key_points(strings(&[]));
     match surface {
         "detail-no-summary" | "detail-no-audio" => {}

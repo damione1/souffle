@@ -1,5 +1,6 @@
 import { SettingsOptions, ClosedSettingsPicker } from "settings_options.slint";
-import { AlertSeverity, ButtonIntent, ChoiceLabelPosition, ControlSize, ControlWidth, FieldAccess, KeycapSize, KitAlert, KitButton, KitFieldRow, KitFieldSet, KitKeycap, KitMetrics, KitModalContext, KitNumberStepper, KitSegmentedControl, KitSwitch, KitText, KitThemeContext, KitThemes, Ownership, TypographyRole } from "@kit";
+import { FieldSetAppearance, FieldRowAppearance, AlertActions, AlertSeverity, ButtonIntent, ChoiceLabelPosition, ControlSize, ControlWidth, FieldAccess, KeycapSize, KitAlert, KitButton, KitFieldRow, KitFieldSet, KitKeycap, KitMetrics, KitModalContext, KitNumberStepper, KitSegmentedControl, KitSwitch, KitText, KitThemeContext, KitThemes, Ownership, TypographyRole, SegmentedAppearance, StepperAppearance } from "@kit";
+import { LucideArrows } from "@kit-icons/arrows.slint";
 import { SettingsNoticeRow } from "settings_notice_row.slint";
 import { Theme } from "../../theme.slint";
 import { AppTheme, AppLocale, PasteMethod, ShortcutField, ShortcutNotice, SettingsCaptureError } from "../../types.slint";
@@ -29,12 +30,11 @@ export global ShortcutNoticeText {
 // component only owns focus/recording UI state. Exported so
 // `onboarding_view.slint`'s shortcut step (SOU-190) reuses it instead of a
 // second FocusScope implementation.
-// `keycap` shows the shortcut as a large key cap instead of a button.
+// Both show the shortcut as a key cap; `keycap` is the large one.
 export enum ShortcutPresentation { button, keycap }
 
 export component ShortcutRecorderButton inherits FocusScope {
     in property <ShortcutPresentation> presentation: ShortcutPresentation.button;
-    private property <bool> as-keycap: root.presentation == ShortcutPresentation.keycap && !root.recording;
     private property <string> display-label: root.recording ? @tr("Appuyez…") : (root.shortcut-label == "" ? @tr("Non défini") : root.shortcut-label);
     enabled: !KitModalContext.inert(0);
     in property <string> shortcut-label;
@@ -51,30 +51,35 @@ export component ShortcutRecorderButton inherits FocusScope {
     callback cleared();
     callback cancelled();
 
-    width: root.as-keycap ? cap-measure.preferred-width : 128px;
-    height: KitMetrics.control-height(KitThemeContext.current, root.presentation == ShortcutPresentation.keycap ? ControlSize.medium : ControlSize.compact);
-    cap-measure := KitKeycap { visible: false; size: KeycapSize.large; text: root.display-label; }
+    private property <bool> large: root.presentation == ShortcutPresentation.keycap;
+    // Settings recorders draw a compact cap, padded past the regular key cap.
+    width: root.recording && !root.large ? 128px : cap-measure.preferred-width + (root.large ? 0px : 8px);
+    height: KitMetrics.control-height(KitThemeContext.current, root.large ? ControlSize.medium : ControlSize.compact);
+    horizontal-stretch: 0;
+    cap-measure := KitKeycap { visible: false; size: root.large ? KeycapSize.large : KeycapSize.regular; text: root.display-label; }
 
     public function take-focus() { trigger.take-focus(); }
 
     trigger := KitButton {
         width: parent.width;
         height: parent.height;
-        control-size: root.presentation == ShortcutPresentation.keycap ? ControlSize.medium : ControlSize.compact;
-        text: root.as-keycap ? "" : root.display-label;
+        control-size: root.large ? ControlSize.medium : ControlSize.compact;
+        text: root.recording ? root.display-label : "";
         accessible-name: root.display-label;
         disabled: !root.enabled;
-        intent: root.recording ? ButtonIntent.primary : root.as-keycap ? ButtonIntent.quiet : ButtonIntent.secondary;
+        intent: root.recording ? ButtonIntent.primary : ButtonIntent.quiet;
         activated => {
             root.focus();
             root.record-requested();
         }
     }
 
-    if root.as-keycap: KitKeycap {
+    if !root.recording: KitKeycap {
         width: parent.width;
-        size: KeycapSize.large;
+        height: parent.height;
+        size: root.large ? KeycapSize.large : KeycapSize.regular;
         text: root.display-label;
+        opacity: !root.enabled ? 0.45 : root.shortcut-label == "" ? 0.75 : 1;
     }
 
     key-pressed(event) => {
@@ -135,19 +140,20 @@ export component InterfaceSection inherits VerticalLayout {
     callback shortcut-cancelled();
     callback permissions-review-requested();
 
-    spacing: 22px;
+    spacing: 20px;
     alignment: start;
 
     KitFieldSet {
         theme: KitThemeContext.current;
         legend: @tr("INTERFACE");
+        appearance: FieldSetAppearance.card;
 
         KitFieldRow {
             theme: KitThemeContext.current;
             modal-layer: 0;
             orientation: Theme.settings-field-orientation(self.width);
-            padding: KitMetrics.field-gap(self.theme);
-            show-divider: false;
+            appearance: FieldRowAppearance.inset;
+            show-divider: true;
             focus-requested => { language-picker.take-focus(); }
             private property <bool> control-focused: language-picker.has-focus;
             changed control-focused => {
@@ -160,7 +166,9 @@ export component InterfaceSection inherits VerticalLayout {
                 theme: KitThemeContext.current;
                 modal-layer: 0;
                 horizontal-stretch: 0;
-                preferred-width: Theme.settings-control-width;
+                appearance: SegmentedAppearance.raised;
+                control-width: ControlWidth.intrinsic;
+                control-size: ControlSize.compact;
                 label: @tr("Langue de l'interface");
                 options: SettingsOptions.locale-options(root.locale).rows;
                 selected: SettingsOptions.locale-options(root.locale).selected;
@@ -173,7 +181,7 @@ export component InterfaceSection inherits VerticalLayout {
             theme: KitThemeContext.current;
             modal-layer: 0;
             orientation: Theme.settings-field-orientation(self.width);
-            padding: KitMetrics.field-gap(self.theme);
+            appearance: FieldRowAppearance.inset;
             show-divider: true;
             focus-requested => { theme-picker.take-focus(); }
             private property <bool> control-focused: theme-picker.has-focus;
@@ -187,7 +195,9 @@ export component InterfaceSection inherits VerticalLayout {
                 theme: KitThemeContext.current;
                 modal-layer: 0;
                 horizontal-stretch: 0;
-                preferred-width: Theme.settings-control-width;
+                appearance: SegmentedAppearance.raised;
+                control-width: ControlWidth.intrinsic;
+                control-size: ControlSize.compact;
                 label: @tr("Thème de l'interface");
                 options: SettingsOptions.theme-options(root.theme).rows;
                 selected: SettingsOptions.theme-options(root.theme).selected;
@@ -200,7 +210,7 @@ export component InterfaceSection inherits VerticalLayout {
             theme: KitThemeContext.current;
             modal-layer: 0;
             orientation: Theme.settings-field-orientation(self.width);
-            padding: KitMetrics.field-gap(self.theme);
+            appearance: FieldRowAppearance.inset;
             show-divider: true;
             focus-requested => { paste-switch.take-focus(); }
             private property <bool> control-focused: paste-switch.has-focus;
@@ -227,7 +237,7 @@ export component InterfaceSection inherits VerticalLayout {
             theme: KitThemeContext.current;
             modal-layer: 0;
             orientation: Theme.settings-field-orientation(self.width);
-            padding: KitMetrics.field-gap(self.theme);
+            appearance: FieldRowAppearance.inset;
             show-divider: true;
             focus-requested => { method-picker.take-focus(); }
             private property <bool> control-focused: method-picker.has-focus;
@@ -250,7 +260,7 @@ export component InterfaceSection inherits VerticalLayout {
             theme: KitThemeContext.current;
             modal-layer: 0;
             orientation: Theme.settings-field-orientation(self.width);
-            padding: KitMetrics.field-gap(self.theme);
+            appearance: FieldRowAppearance.inset;
             show-divider: true;
             focus-requested => { delay-stepper.take-focus(); }
             private property <bool> control-focused: delay-stepper.has-focus;
@@ -263,7 +273,10 @@ export component InterfaceSection inherits VerticalLayout {
             delay-stepper := KitNumberStepper {
                 theme: KitThemeContext.current;
                 modal-layer: 0;
-                width: 140px;
+                appearance: StepperAppearance.compact;
+                control-size: ControlSize.compact;
+                decrement-glyph: LucideArrows.chevron-down();
+                increment-glyph: LucideArrows.chevron-up();
                 increment-label: @tr("Augmenter");
                 decrement-label: @tr("Diminuer");
                 accessible-name: @tr("Délai de collage en millisecondes");
@@ -279,7 +292,7 @@ export component InterfaceSection inherits VerticalLayout {
             theme: KitThemeContext.current;
             modal-layer: 0;
             orientation: Theme.settings-field-orientation(self.width);
-            padding: KitMetrics.field-gap(self.theme);
+            appearance: FieldRowAppearance.inset;
             show-divider: true;
             focus-requested => { toggle-recorder.take-focus(); }
             private property <bool> control-focused: toggle-recorder.has-focus;
@@ -307,6 +320,7 @@ export component InterfaceSection inherits VerticalLayout {
                 if root.toggle-shortcut-label != "": KitButton {
                     text: @tr("Effacer");
                     intent: ButtonIntent.quiet;
+                    control-size: ControlSize.compact;
                     disabled: root.capture-busy;
                     activated => { root.shortcut-cleared(ShortcutField.toggle); }
                 }
@@ -317,7 +331,7 @@ export component InterfaceSection inherits VerticalLayout {
             theme: KitThemeContext.current;
             modal-layer: 0;
             orientation: Theme.settings-field-orientation(self.width);
-            padding: KitMetrics.field-gap(self.theme);
+            appearance: FieldRowAppearance.inset;
             show-divider: true;
             focus-requested => { ptt-recorder.take-focus(); }
             private property <bool> control-focused: ptt-recorder.has-focus;
@@ -345,6 +359,7 @@ export component InterfaceSection inherits VerticalLayout {
                 if root.ptt-shortcut-label != "": KitButton {
                     text: @tr("Effacer");
                     intent: ButtonIntent.quiet;
+                    control-size: ControlSize.compact;
                     disabled: root.capture-busy;
                     activated => { root.shortcut-cleared(ShortcutField.ptt); }
                 }
@@ -361,7 +376,7 @@ export component InterfaceSection inherits VerticalLayout {
         }
 
         if root.native-tap-warning-visible: SettingsNoticeRow {
-            KitAlert { bordered: false;
+            KitAlert { bordered: false; corner-radius: 12px; inset: 12px; actions-placement: AlertActions.trailing;
                 theme: KitThemeContext.current;
                 severity: AlertSeverity.warning;
                 message: @tr("Votre raccourci sur une seule touche ne fonctionnera pas tant que l'Accessibilité n'est pas accordée.");
@@ -376,7 +391,7 @@ export component InterfaceSection inherits VerticalLayout {
         }
 
         if root.shortcut-error != "": SettingsNoticeRow {
-            KitAlert { bordered: false;
+            KitAlert { bordered: false; corner-radius: 12px; inset: 12px; actions-placement: AlertActions.trailing;
                 theme: KitThemeContext.current;
                 severity: AlertSeverity.error;
                 message: root.shortcut-error-kind == SettingsCaptureError.capture-busy ? @tr("Terminez l'enregistrement avant de modifier les raccourcis.")
@@ -386,7 +401,7 @@ export component InterfaceSection inherits VerticalLayout {
         }
 
         if root.shortcut-notice != ShortcutNotice.none: SettingsNoticeRow {
-            KitAlert { bordered: false;
+            KitAlert { bordered: false; corner-radius: 12px; inset: 12px; actions-placement: AlertActions.trailing;
                 theme: KitThemeContext.current;
                 severity: ShortcutNoticeText.is-warning(root.shortcut-notice) ? AlertSeverity.warning : AlertSeverity.error;
                 message: ShortcutNoticeText.text(root.shortcut-notice);
@@ -397,7 +412,7 @@ export component InterfaceSection inherits VerticalLayout {
             theme: KitThemeContext.current;
             modal-layer: 0;
             orientation: Theme.settings-field-orientation(self.width);
-            padding: KitMetrics.field-gap(self.theme);
+            appearance: FieldRowAppearance.inset;
             show-divider: true;
             focus-requested => { overlay-switch.take-focus(); }
             private property <bool> control-focused: overlay-switch.has-focus;
@@ -424,7 +439,7 @@ export component InterfaceSection inherits VerticalLayout {
             theme: KitThemeContext.current;
             modal-layer: 0;
             orientation: Theme.settings-field-orientation(self.width);
-            padding: KitMetrics.field-gap(self.theme);
+            appearance: FieldRowAppearance.inset;
             show-divider: true;
             focus-requested => { screenshot-switch.take-focus(); }
             private property <bool> control-focused: screenshot-switch.has-focus;

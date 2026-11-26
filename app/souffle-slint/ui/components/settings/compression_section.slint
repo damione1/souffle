@@ -2,28 +2,29 @@ import { AppText, Typography } from "@typography";
 import { CompressionUi } from "../../compression.slint";
 import { Theme } from "../../theme.slint";
 import { CompressionStatus } from "../compression_status.slint";
-import { ChoiceLabelPosition, ControlWidth, KitFieldRow, KitFieldSet, KitMetrics, KitSlider, KitSwitch, KitThemeContext, KitThemes, Ownership } from "@kit";
+import { FieldSetAppearance, FieldRowAppearance, ChoiceLabelPosition, ControlWidth, KitFieldRow, KitFieldSet, KitSlider, KitSwitch, KitThemeContext, KitThemes, Ownership, KitFieldSeparator } from "@kit";
 
 export component CompressionSection inherits VerticalLayout {
-    spacing: 22px;
+    spacing: 20px;
     alignment: start;
     vertical-stretch: 0;
 
     KitFieldSet {
         theme: KitThemeContext.current;
         legend: @tr("COMPRESSION DES TRANSCRIPTIONS");
+        appearance: FieldSetAppearance.card;
 
         KitFieldRow {
             theme: KitThemeContext.current;
             modal-layer: 0;
             orientation: Theme.settings-field-orientation(self.width);
-            padding: KitMetrics.field-gap(self.theme);
+            appearance: FieldRowAppearance.inset;
+            show-divider: true;
             focus-requested => { summary-switch.take-focus(); }
             private property <bool> control-focused: summary-switch.has-focus;
             changed control-focused => {
                 if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
             }
-            show-divider: false;
             label: @tr("Compresser les longues transcriptions avant le résumé");
             description: @tr("Réduit l'entrée des étapes intermédiaires. Les résumés courts utilisent le texte original.");
 
@@ -44,13 +45,13 @@ export component CompressionSection inherits VerticalLayout {
             theme: KitThemeContext.current;
             modal-layer: 0;
             orientation: Theme.settings-field-orientation(self.width);
-            padding: KitMetrics.field-gap(self.theme);
+            appearance: FieldRowAppearance.inset;
+            show-divider: true;
             focus-requested => { alongside-switch.take-focus(); }
             private property <bool> control-focused: alongside-switch.has-focus;
             changed control-focused => {
                 if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
             }
-            show-divider: true;
             label: @tr("Créer aussi une version compacte lors du résumé");
             description: @tr("Conserve un texte compact consultable, indépendamment de l'entrée utilisée pour le résumé.");
 
@@ -71,9 +72,9 @@ export component CompressionSection inherits VerticalLayout {
             theme: KitThemeContext.current;
             modal-layer: 0;
             orientation: Theme.settings-field-orientation(self.width);
-            padding: KitMetrics.field-gap(self.theme);
-            focus-requested => { rate-slider.take-focus(); }
+            appearance: FieldRowAppearance.inset;
             show-divider: true;
+            focus-requested => { rate-slider.take-focus(); }
             label: @tr("Texte à conserver");
             description: CompressionUi.rate < CompressionUi.rate-default ? @tr("Une valeur basse omet des mots.") : "";
 
@@ -106,16 +107,22 @@ export component CompressionSection inherits VerticalLayout {
 }
 
 export component CompressionStorageSection inherits VerticalLayout {
-    spacing: 22px;
+    spacing: 20px;
     alignment: start;
     vertical-stretch: 0;
 
     KitFieldSet {
         theme: KitThemeContext.current;
         legend: @tr("MODÈLE DE COMPRESSION LOCAL");
+        appearance: FieldSetAppearance.card;
+
+        KitFieldSeparator { }
 
         VerticalLayout {
-            padding: KitMetrics.field-gap(KitThemeContext.current);
+            padding-left: 20px;
+            padding-right: 20px;
+            padding-top: 14px;
+            padding-bottom: 14px;
             spacing: 8px;
             CompressionStatus { allow-removal: true; }
             AppText {

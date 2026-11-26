@@ -1,5 +1,5 @@
 import { AppText, Typography, TypographyStyle } from "@typography";
-import { KitModalContext, ButtonIntent, ControlSize, KitButton, KitCard, KitIconButton, KitInline, KitTextField, KitWrap, LayoutSpace, SurfaceLevel } from "@kit";
+import { KitModalContext, ButtonIntent, ControlSize, KitButton, KitCard, KitIconButton, KitInline, KitStack, KitTextField, KitWrap, LayoutSpace, SurfaceLevel, Tone } from "@kit";
 import { LucideMath } from "@kit-icons/math.slint";
 import { Theme } from "../theme.slint";
 
@@ -35,6 +35,8 @@ export component TranscriptWordFlow inherits KitWrap {
     in property <[TranscriptWord]> words;
     in property <TypographyStyle> typography: Typography.content;
     in property <brush> color: Theme.text-primary;
+    // An insertion mark after the last word, for the dictation surface.
+    in property <bool> caret: false;
     // The exact token text of the clicked word, and the window position
     // of its bottom-left corner (where the alias popover opens).
     callback word-clicked(string, length, length);
@@ -75,6 +77,17 @@ export component TranscriptWordFlow inherits KitWrap {
             color: root.color;
             typography: root.typography;
             opacity: word.provisional ? Theme.provisional-opacity : 1.0;
+        }
+    }
+
+    if root.caret: Rectangle {
+        width: 7px;
+        height: root.typography.size * 1.2;
+
+        Rectangle {
+            x: 2px;
+            width: 5px;
+            background: Theme.accent;
         }
     }
 }
@@ -124,8 +137,8 @@ export component DictionaryAliasPopover inherits Rectangle {
     }
 
     popup := PopupWindow {
-        width: 288px;
-        height: 210px;
+        width: 300px;
+        height: 252px;
         // The default `close-policy` (`close-on-click`, now deprecated)
         // dismisses the popup on *any* click, including ones on its own
         // `LineEdit`s/button - not just clicks outside it (found the hard
@@ -151,6 +164,7 @@ export component DictionaryAliasPopover inherits Rectangle {
 
             KitCard {
                 level: SurfaceLevel.popover;
+                tone: Tone.accent;
                 inset: LayoutSpace.roomy;
                 gap: LayoutSpace.regular;
 
@@ -173,18 +187,40 @@ export component DictionaryAliasPopover inherits Rectangle {
                     }
                 }
 
-                KitTextField {
-                    accessible-name: self.placeholder;
-                    placeholder: @tr("Terme correct");
-                    text <=> root.term-draft;
-                    commit-requested => { root.save-and-close(); }
+                KitStack {
+                    gap: tight;
+
+                    AppText {
+                        text: @tr("Terme correct").to-uppercase();
+                        typography: Typography.timeline-heading;
+                        color: Theme.text-muted;
+                        // The field below already carries this name.
+                        accessible-role: none;
+                    }
+                    KitTextField {
+                        accessible-name: self.placeholder;
+                        placeholder: @tr("Terme correct");
+                        text <=> root.term-draft;
+                        commit-requested => { root.save-and-close(); }
+                    }
                 }
 
-                KitTextField {
-                    accessible-name: self.placeholder;
-                    placeholder: @tr("Prononciation entendue");
-                    text <=> root.pronunciation-draft;
-                    commit-requested => { root.save-and-close(); }
+                KitStack {
+                    gap: tight;
+
+                    AppText {
+                        text: @tr("Prononciation entendue").to-uppercase();
+                        typography: Typography.timeline-heading;
+                        color: Theme.text-muted;
+                        // The field below already carries this name.
+                        accessible-role: none;
+                    }
+                    KitTextField {
+                        accessible-name: self.placeholder;
+                        placeholder: @tr("Prononciation entendue");
+                        text <=> root.pronunciation-draft;
+                        commit-requested => { root.save-and-close(); }
+                    }
                 }
 
                 save-btn := KitButton {

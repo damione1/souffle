@@ -1,8 +1,8 @@
-import {
-    AlertSeverity, ButtonIntent, ChoiceLabelPosition, ControlSize, ControlWidth,
+import { FieldSetAppearance, FieldRowAppearance, AlertActions,
+    AlertSeverity, ButtonIntent, ChoiceLabelPosition, ControlWidth,
     KitAlert, KitBadge, KitButton, KitFieldRow, KitFieldSet, KitIconButton,
-    KitMetrics, KitModalContext, KitSection, KitSwitch,
-    KitThemeContext, KitThemes, KitWrap, ListView, Ownership
+    KitModalContext, KitSwitch,
+    KitThemeContext, KitThemes, KitWrap, ListView, Ownership, KitFieldSeparator, KitInline
 } from "@kit";
 import { LucideArrows } from "@kit-icons/arrows.slint";
 import { LucideFiles } from "@kit-icons/files.slint";
@@ -66,22 +66,24 @@ component MicrophonePriorityRow inherits KitFieldRow {
     callback remove-requested(string);
 
     orientation: Theme.settings-field-orientation(self.width);
-    padding: KitMetrics.field-gap(self.theme);
-    show-divider: !root.device.is-first;
+    padding-left: 20px;
+    padding-right: 20px;
+    padding-top: 10px;
+    padding-bottom: 10px;
+    show-divider: false;
     opacity: root.device.connected ? 1.0 : 0.7;
     label: root.device.name;
     description: PickerLabels.display(root.device.transport-label)
         + (root.device.is-default ? @tr("MicrophoneSection" => " · par défaut") : "")
-        + (root.last-seen == "" ? "" : "\n" + root.last-seen);
+        + (root.last-seen == "" ? "" : @tr("MicrophoneSection" => " · débranché {}", root.last-seen));
     accessible-role: list-item;
     accessible-label: root.label;
     accessible-description: root.description;
     focus-requested => { hide-button.take-focus(); }
 
-    KitWrap {
+    KitInline {
         theme: root.theme;
-        gap: tight;
-        cross-axis-alignment: center;
+        spacing: 2px;
 
         MicrophoneActionButton {
             theme: root.theme;
@@ -121,7 +123,6 @@ component MicrophonePriorityRow inherits KitFieldRow {
             device-uid: root.device.uid;
             glyph: LucideFiles.trash();
             accessible-name: @tr("MicrophoneSection" => "Supprimer {}", root.device.name);
-            intent: ButtonIntent.destructive;
             requested(uid) => { root.remove-requested(uid); }
             focus-observed(focused) => { if focused { root.ensure-visible(KitThemes.scroll-behavior(root.theme)); } }
         }
@@ -149,6 +150,7 @@ export component MicrophoneSection inherits KitFieldSet {
     in property <bool> allow-bluetooth-mic;
     in property <[MicrophoneRow]> microphones;
     in property <bool> has-disconnected;
+    private property <length> device-row-height: 61px;
 
     callback device-changed(string);
     callback refresh-requested();
@@ -161,12 +163,14 @@ export component MicrophoneSection inherits KitFieldSet {
 
     theme: KitThemeContext.current;
     legend: @tr("MICROPHONE");
+    appearance: FieldSetAppearance.card;
 
     device-field := KitFieldRow {
         theme: root.theme;
         modal-layer: 0;
         orientation: Theme.settings-field-orientation(self.width);
-        padding: KitMetrics.field-gap(self.theme);
+        appearance: FieldRowAppearance.inset;
+        show-divider: true;
         label: @tr("Périphérique d'entrée");
         description: @tr("Choisissez le microphone que Soufflé écoute et configurez le traitement audio.");
         focus-requested => { device-picker.take-focus(); }
@@ -215,7 +219,7 @@ export component MicrophoneSection inherits KitFieldSet {
     }
 
     if root.pin-unavailable: SettingsNoticeRow {
-        KitAlert { bordered: false;
+        KitAlert { bordered: false; corner-radius: 12px; inset: 12px; actions-placement: AlertActions.trailing;
             theme: root.theme;
             severity: AlertSeverity.warning;
             message: @tr("Le périphérique choisi n'est plus disponible ; un autre est utilisé en attendant.");
@@ -226,19 +230,20 @@ export component MicrophoneSection inherits KitFieldSet {
         theme: root.theme;
         modal-layer: 0;
         orientation: Theme.settings-field-orientation(self.width);
-        padding: KitMetrics.field-gap(self.theme);
+        appearance: FieldRowAppearance.inset;
         show-divider: true;
         label: @tr("Fréquence d'échantillonnage");
         description: @tr("Fréquence native du périphérique sélectionné.");
 
         KitBadge {
             theme: root.theme;
+            subtle: true;
             text: root.sample-rate-label;
         }
     }
 
     if root.sample-rate-high: SettingsNoticeRow {
-        rate-alert := KitAlert { bordered: false;
+        rate-alert := KitAlert { bordered: false; corner-radius: 12px; inset: 12px; actions-placement: AlertActions.trailing;
             theme: root.theme;
             severity: AlertSeverity.warning;
             message: root.capture-busy
@@ -260,44 +265,55 @@ export component MicrophoneSection inherits KitFieldSet {
         }
     }
 
-    priority := KitSection {
-        theme: root.theme;
-        gap: compact;
-        padding: KitMetrics.field-gap(self.theme);
-        title: @tr("Ordre de préférence");
-        description: @tr("Utilisé quand plusieurs micros sont branchés en même temps.");
+    KitFieldSeparator { theme: root.theme; }
 
-        if root.microphones.length > 0: priority-list := ListView {
+    priority := KitFieldRow {
+        theme: root.theme;
+        modal-layer: 0;
+        padding-left: 20px;
+        padding-right: 20px;
+        padding-top: 14px;
+        padding-bottom: 6px;
+        label: @tr("Ordre de préférence");
+        description: @tr("Utilisé quand plusieurs micros sont branchés en même temps.");
+    }
+
+    if root.microphones.length > 0: priority-list := ListView {
+        theme: root.theme;
+        enabled: !KitModalContext.inert(0);
+        accessible-label: priority.label;
+        horizontal-scrollbar-policy: always-off;
+        content-width: self.visible-width;
+        // The viewport shows three rows, sized from what a delegate measured.
+        height: min(root.microphones.length, 3) * root.device-row-height;
+        for row[index] in root.microphones: VerticalLayout {
+            private property <length> measured-height: self.preferred-height;
+            changed measured-height => { root.device-row-height = self.measured-height; }
+            init => { root.device-row-height = self.measured-height; }
+            width: priority-list.visible-width;
+            height: self.preferred-height;
+
+            KitFieldSeparator { theme: root.theme; }
+            MicrophonePriorityRow {
                 theme: root.theme;
-                enabled: !KitModalContext.inert(0);
-                accessible-label: priority.title;
-                horizontal-scrollbar-policy: always-off;
-                content-width: self.visible-width;
-                // Only the viewport is bounded. Each delegate measures its actual
-                // copy and controls at the width left by the scrollbar.
-                height: min(root.microphones.length, 3) * 3 * KitMetrics.row-height(self.theme, ControlSize.compact);
-                for row[index] in root.microphones: MicrophonePriorityRow {
-                    theme: root.theme;
-                    modal-layer: 0;
-                    width: priority-list.visible-width;
-                    height: self.preferred-height;
-                    device: row;
-                    last-seen: !row.connected && row.last-seen-age-seconds >= 0
-                        ? root.format-last-seen(row.last-seen-age-seconds) : "";
-                    accessible-item-index: index;
-                    accessible-item-count: root.microphones.length;
-                    move-requested(uid, direction) => { root.move-device-requested(uid, direction); }
-                    hidden-requested(uid, hidden) => { root.toggle-hidden-requested(uid, hidden); }
-                    remove-requested(uid) => { root.remove-device-requested(uid); }
-                }
+                modal-layer: 0;
+                device: row;
+                last-seen: !row.connected && row.last-seen-age-seconds >= 0
+                    ? root.format-last-seen(row.last-seen-age-seconds) : "";
+                accessible-item-index: index;
+                accessible-item-count: root.microphones.length;
+                move-requested(uid, direction) => { root.move-device-requested(uid, direction); }
+                hidden-requested(uid, hidden) => { root.toggle-hidden-requested(uid, hidden); }
+                remove-requested(uid) => { root.remove-device-requested(uid); }
             }
+        }
     }
 
     bluetooth-field := KitFieldRow {
         theme: root.theme;
         modal-layer: 0;
         orientation: Theme.settings-field-orientation(self.width);
-        padding: KitMetrics.field-gap(self.theme);
+        appearance: FieldRowAppearance.inset;
         show-divider: true;
         focus-requested => { bluetooth-switch.take-focus(); }
         label: @tr("Autoriser les micros Bluetooth");

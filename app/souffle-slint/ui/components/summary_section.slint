@@ -1,4 +1,7 @@
-import { AlertSeverity, ButtonIntent, ControlSize, KitAlert, KitButton, KitCard, KitDivider, KitIcon, KitInline, KitProgress, KitStack, KitText, KitThemeContext, ProgressMode, SurfaceLevel, TextViewFont, Tone, TypographyRole } from "@kit";
+import { AppText, Typography } from "@typography";
+import { AlertActions, AlertSeverity, ButtonIntent, ControlSize, ElevationLevel, KitAlert, KitButton, KitCard, KitDivider, KitIcon, KitInline, KitProgress, KitStack, KitThemeContext, ProgressMode, SurfaceLevel } from "@kit";
+import { LucideArrows } from "@kit-icons/arrows.slint";
+import { Theme } from "../theme.slint";
 import { LucideCursors } from "@kit-icons/cursors.slint";
 import { LucideText } from "@kit-icons/text.slint";
 import { LucideNotifications } from "@kit-icons/notifications.slint";
@@ -16,18 +19,19 @@ component SummaryTitle inherits KitInline {
 
     KitIcon {
         glyph: LucideCursors.sparkles();
-        ink: KitThemeContext.current.accent;
+        ink: KitThemeContext.current.accent-ink;
         y: (parent.height - self.height) / 2;
     }
-    KitText {
+    AppText {
         text: @tr("Résumé");
-        role: TypographyRole.subtitle;
+        typography: Typography.hero-title;
+        color: Theme.text-primary;
         vertical-alignment: center;
     }
-    if root.model-label != "": KitText {
+    if root.model-label != "": AppText {
         text: root.model-label;
-        role: TypographyRole.caption;
-        font: TextViewFont.monospace;
+        typography: Typography.secondary;
+        color: Theme.text-muted;
         vertical-alignment: center;
     }
     Rectangle { horizontal-stretch: 1; }
@@ -39,24 +43,29 @@ component SummaryModelRow inherits KitInline {
     in property <[string]> model-ids;
     in-out property <string> selected-id;
     in property <string> action-label;
-    in property <ButtonIntent> action-intent: ButtonIntent.secondary;
     in property <string> action-name;
     callback action-triggered();
 
     gap: compact;
 
     CatalogPicker {
+        combo-width: 250px;
         model: root.models;
         option-values: root.model-ids;
         current-value: root.selected-id;
         value-chosen(id) => { root.selected-id = id; }
     }
-    KitButton {
-        accessible-name: root.action-name;
-        text: root.action-label;
-        control-size: ControlSize.compact;
-        intent: root.action-intent;
-        activated => { root.action-triggered(); }
+    VerticalLayout {
+        alignment: center;
+
+        KitButton {
+            accessible-name: root.action-name;
+            text: root.action-label;
+            control-size: ControlSize.compact;
+            intent: ButtonIntent.secondary;
+            leading-icon: LucideArrows.refresh-cw();
+            activated => { root.action-triggered(); }
+        }
     }
 }
 
@@ -65,20 +74,40 @@ component SummaryColumn inherits KitStack {
     gap: compact;
     horizontal-stretch: 1;
 
-    KitText { text: root.title; role: TypographyRole.caption; }
+    AppText {
+        text: root.title.to-uppercase();
+        accessible-label: root.title;
+        typography: Typography.timeline-heading;
+        color: Theme.text-muted;
+        wrap: word-wrap;
+    }
     @children
 }
 
 component SummaryBullet inherits KitInline {
     in property <string> text;
     gap: compact;
+    alignment: stretch;
 
-    KitText { text: "\u{2022}"; tone: Tone.accent; }
-    KitText { text: root.text; horizontal-stretch: 1; }
+    AppText {
+        text: "\u{2022}";
+        typography: Typography.field-strong;
+        color: Theme.accent;
+        horizontal-stretch: 0;
+        vertical-alignment: top;
+    }
+    AppText {
+        text: root.text;
+        typography: Typography.field-label;
+        color: Theme.text-primary;
+        horizontal-stretch: 1;
+        wrap: word-wrap;
+    }
 }
 
 export component SummarySection inherits KitStack {
     in property <string> summary; // empty means "no summary yet"
+    in property <string> summary-body; // `summary` without the lines listed in `key-points`
     in property <bool> summary-is-stale: false;
     in property <string> summary-model-label;
     in property <[string]> available-models;
@@ -111,145 +140,246 @@ export component SummarySection inherits KitStack {
 
     gap: compact;
 
-    if root.summary == "" && !root.is-generating: KitCard {
+    if root.summary == "" && !root.is-generating && root.available-models.length > 0 && root.generation-error == "": KitCard {
         level: SurfaceLevel.flat;
-        gap: regular;
+        elevation: ElevationLevel.none;
+        border-color: Theme.line-strong;
+        inset: none;
+        gap: none;
 
-        KitInline {
-            gap: regular;
+        HorizontalLayout {
+            padding-top: 20px;
+            padding-bottom: 20px;
+            padding-left: 22px;
+            padding-right: 22px;
+            spacing: 16px;
 
-            KitIcon {
-                glyph: LucideCursors.wand-sparkles();
-                ink: KitThemeContext.current.accent;
+            VerticalLayout {
+                alignment: center;
+                horizontal-stretch: 0;
+
+                Rectangle {
+                    width: 40px;
+                    height: 40px;
+                    border-radius: 12px;
+                    background: Theme.accent-tint;
+
+                    KitIcon {
+                        x: (parent.width - self.width) / 2;
+                        y: (parent.height - self.height) / 2;
+                        glyph: LucideCursors.wand-sparkles();
+                        ink: Theme.accent;
+                    }
+                }
             }
-            KitStack {
-                gap: tight;
+            VerticalLayout {
+                alignment: center;
+                spacing: 4px;
                 horizontal-stretch: 1;
 
-                KitText { text: @tr("Générer le résumé (expérimental)"); role: TypographyRole.subtitle; }
-                KitText { text: @tr("Points clés et actions, générés sur l’appareil"); role: TypographyRole.caption; }
+                AppText {
+                    text: @tr("Générer le résumé (expérimental)");
+                    typography: Typography.body-emphasis;
+                    color: Theme.text-primary;
+                    wrap: word-wrap;
+                }
+                AppText {
+                    text: @tr("Points clés et actions, générés sur l’appareil");
+                    typography: Typography.content;
+                    color: Theme.text-muted;
+                    wrap: word-wrap;
+                }
+            }
+            VerticalLayout {
+                alignment: center;
+                horizontal-stretch: 0;
+
+                CatalogPicker {
+                    combo-width: 220px;
+                    model: root.available-models;
+                    option-values: root.available-model-ids;
+                    current-value: root.selected-model-id;
+                    value-chosen(id) => { root.selected-model-id = id; }
+                }
+            }
+            VerticalLayout {
+                alignment: center;
+                horizontal-stretch: 0;
+
+                KitButton {
+                    accessible-name: @tr("Générer le résumé (expérimental)");
+                    text: @tr("Générer");
+                    intent: ButtonIntent.primary;
+                    activated => { root.generate-requested(); }
+                }
             }
         }
+    }
 
-        if root.available-models.length == 0: KitText {
-            text: @tr("Aucun fournisseur de résumé disponible. Activez Apple Intelligence ou connectez Ollama dans Réglages › IA.");
-            role: TypographyRole.caption;
-        }
+    if root.summary == "" && !root.is-generating && root.available-models.length == 0: KitAlert { bordered: false;
+        corner-radius: 12px;
+        inset: 12px;
+        severity: AlertSeverity.warning;
+        message: @tr("Aucun fournisseur de résumé disponible. Activez Apple Intelligence ou connectez Ollama dans Réglages › IA.");
+    }
 
-        if root.generation-error != "": KitAlert { bordered: false;
-            severity: AlertSeverity.error;
-            message: @tr("La génération du résumé a échoué : {}", root.generation-error);
-            if root.available-models.length > 0: KitButton {
-                text: @tr("Réessayer");
-                intent: ButtonIntent.secondary;
-                control-size: ControlSize.compact;
-                activated => { root.generate-requested(); }
-            }
-        }
-
-        if root.available-models.length > 0: SummaryModelRow {
-            models: root.available-models;
-            model-ids: root.available-model-ids;
-            selected-id <=> root.selected-model-id;
-            action-name: @tr("Générer le résumé (expérimental)");
-            action-label: @tr("Générer");
-            action-intent: ButtonIntent.primary;
-            action-triggered => { root.generate-requested(); }
+    if root.summary == "" && !root.is-generating && root.generation-error != "": KitAlert { bordered: false;
+        corner-radius: 12px;
+        inset: 12px;
+        actions-placement: AlertActions.trailing;
+        severity: AlertSeverity.error;
+        message: @tr("La génération du résumé a échoué : {}", root.generation-error);
+        if root.available-models.length > 0: KitButton {
+            text: @tr("Réessayer");
+            intent: ButtonIntent.secondary;
+            control-size: ControlSize.compact;
+            activated => { root.generate-requested(); }
         }
     }
 
     if root.is-generating: KitCard {
         level: SurfaceLevel.flat;
-        gap: regular;
+        inset: none;
+        gap: none;
 
-        SummaryTitle { }
-        KitProgress {
-            mode: ProgressMode.indeterminate;
-            label: root.generation-progress != "" ? root.generation-progress : @tr("Génération en cours...");
+        VerticalLayout {
+            padding-top: 20px;
+            padding-bottom: 20px;
+            padding-left: 24px;
+            padding-right: 24px;
+            spacing: 14px;
+
+            SummaryTitle { }
+            KitProgress {
+                mode: ProgressMode.indeterminate;
+                caption: root.generation-progress != "" ? root.generation-progress : @tr("Génération en cours...");
+                accessible-label: self.caption;
+            }
         }
     }
 
     if root.summary != "" && !root.is-generating: KitCard {
         level: SurfaceLevel.flat;
-        gap: regular;
+        inset: none;
+        gap: none;
 
-        SummaryTitle {
-            model-label: root.summary-model-label;
+        VerticalLayout {
+            padding-top: 24px;
+            padding-bottom: 24px;
+            padding-left: 26px;
+            padding-right: 26px;
+            spacing: 20px;
 
-            // MeetingSummarySection.svelte's CopyButton: copies the summary as stored.
-            KitButton {
-                accessible-name: @tr("Copier le résumé");
-                text: root.just-copied ? @tr("Copié") : @tr("Copier");
-                control-size: ControlSize.compact;
-                intent: ButtonIntent.quiet;
-                leading-icon: root.just-copied ? LucideNotifications.check() : LucideText.copy();
-                activated => { root.copy-summary(); }
+            SummaryTitle {
+                model-label: root.summary-model-label;
+
+                // MeetingSummarySection.svelte's CopyButton: copies the summary as stored.
+                KitButton {
+                    accessible-name: @tr("Copier le résumé");
+                    text: root.just-copied ? @tr("Copié") : @tr("Copier");
+                    control-size: ControlSize.compact;
+                    intent: ButtonIntent.quiet;
+                    leading-icon: root.just-copied ? LucideNotifications.check() : LucideText.copy();
+                    activated => { root.copy-summary(); }
+                }
             }
-        }
 
-        if root.generation-error != "": KitAlert { bordered: false;
-            severity: AlertSeverity.error;
-            message: @tr("La génération du résumé a échoué : {}", root.generation-error);
-        }
-
-        if root.summary-is-stale: KitAlert { bordered: false;
-            severity: AlertSeverity.warning;
-            message: @tr("Résumé obsolète (audio ajouté depuis)");
-        }
-
-        if root.key-points.length > 0: KitStack {
-            gap: compact;
-
-            KitText { text: @tr("Points clés"); role: TypographyRole.caption; }
-            for point[index] in root.key-points: KitInline {
-                gap: regular;
-
-                KitText { text: (index + 1) + "."; tone: Tone.accent; font: TextViewFont.monospace; }
-                KitText { text: point; horizontal-stretch: 1; }
+            if root.generation-error != "": KitAlert { bordered: false;
+                corner-radius: 12px;
+                inset: 12px;
+                severity: AlertSeverity.error;
+                message: @tr("La génération du résumé a échoué : {}", root.generation-error);
             }
-        }
 
-        KitText { text: root.summary; }
-
-        if root.decisions.length > 0 || root.action-items.length > 0 || root.open-questions.length > 0: KitDivider { }
-
-        if root.decisions.length > 0 || root.action-items.length > 0 || root.open-questions.length > 0: KitInline {
-            gap: roomy;
-            alignment: stretch;
-
-            if root.decisions.length > 0: SummaryColumn {
-                title: @tr("Décisions");
-                for decision in root.decisions: SummaryBullet { text: decision; }
+            if root.summary-is-stale: KitAlert { bordered: false;
+                corner-radius: 12px;
+                inset: 9px;
+                severity: AlertSeverity.warning;
+                message: @tr("Résumé obsolète (audio ajouté depuis)");
             }
-            if root.action-items.length > 0: SummaryColumn {
-                title: @tr("Actions");
-                for item in root.action-items: KitStack {
-                    gap: none;
 
-                    KitText { text: item.text; }
-                    if item.owner != "": KitText {
-                        text: @tr("→ {}", item.owner);
-                        role: TypographyRole.caption;
-                        font: TextViewFont.monospace;
+            if root.key-points.length > 0: KitStack {
+                gap: none;
+                spacing: 12px;
+
+                AppText {
+                    text: @tr("Points clés").to-uppercase();
+                    accessible-label: @tr("Points clés");
+                    typography: Typography.timeline-heading;
+                    color: Theme.text-muted;
+                }
+                for point[index] in root.key-points: HorizontalLayout {
+                    spacing: 12px;
+
+                    AppText {
+                        text: (index + 1) + ".";
+                        typography: Typography.body-emphasis;
+                        color: Theme.accent;
+                        horizontal-stretch: 0;
+                        vertical-alignment: top;
+                    }
+                    AppText {
+                        text: point;
+                        typography: Typography.body;
+                        color: Theme.text-primary;
+                        horizontal-stretch: 1;
+                        wrap: word-wrap;
                     }
                 }
             }
-            if root.open-questions.length > 0: SummaryColumn {
-                title: @tr("Questions ouvertes");
-                for question in root.open-questions: SummaryBullet { text: question; }
+
+            if root.summary-body != "": AppText {
+                text: root.summary-body;
+                typography: Typography.body;
+                color: Theme.text-primary;
+                wrap: word-wrap;
             }
-        }
 
-        if root.available-models.length > 0: KitDivider { }
+            if root.decisions.length > 0 || root.action-items.length > 0 || root.open-questions.length > 0: KitDivider { }
 
-        if root.available-models.length > 0: SummaryModelRow {
-            models: root.available-models;
-            model-ids: root.available-model-ids;
-            selected-id <=> root.selected-model-id;
-            action-name: @tr("Régénérer");
-            action-label: @tr("Régénérer");
-            action-intent: ButtonIntent.secondary;
-            action-triggered => { root.generate-requested(); }
+            if root.decisions.length > 0 || root.action-items.length > 0 || root.open-questions.length > 0: KitInline {
+                gap: roomy;
+                alignment: stretch;
+
+                if root.decisions.length > 0: SummaryColumn {
+                    title: @tr("Décisions");
+                    for decision in root.decisions: SummaryBullet { text: decision; }
+                }
+                if root.action-items.length > 0: SummaryColumn {
+                    title: @tr("Actions");
+                    for item in root.action-items: KitStack {
+                        gap: none;
+
+                        AppText {
+                            text: item.text;
+                            typography: Typography.field-label;
+                            color: Theme.text-primary;
+                            wrap: word-wrap;
+                        }
+                        if item.owner != "": AppText {
+                            text: @tr("→ {}", item.owner);
+                            typography: Typography.small;
+                            color: Theme.text-muted;
+                            wrap: word-wrap;
+                        }
+                    }
+                }
+                if root.open-questions.length > 0: SummaryColumn {
+                    title: @tr("Questions ouvertes");
+                    for question in root.open-questions: SummaryBullet { text: question; }
+                }
+            }
+
+            if root.available-models.length > 0: KitDivider { }
+
+            if root.available-models.length > 0: SummaryModelRow {
+                models: root.available-models;
+                model-ids: root.available-model-ids;
+                selected-id <=> root.selected-model-id;
+                action-name: @tr("Régénérer");
+                action-label: @tr("Régénérer");
+                action-triggered => { root.generate-requested(); }
+            }
         }
     }
 }

@@ -1,17 +1,34 @@
 import { AppText, Typography } from "@typography";
 import { SettingsOptions, ClosedSettingsPicker } from "settings_options.slint";
-import { KitButton, KitTextArea, FieldAccess, KitFieldSet, KitDivider, KitThemeContext, KitThemes, KitFieldRow, KitMetrics, ControlSize } from "@kit";
+import { FieldSetAppearance, FieldRowAppearance, KitButton, KitTextArea, FieldAccess, KitFieldSet, KitThemeContext, KitThemes, KitFieldRow, ControlSize, KitFieldSeparator, FieldDecoration } from "@kit";
 import { LucideFiles } from "@kit-icons/files.slint";
 import { LucideText } from "@kit-icons/text.slint";
 import { Theme } from "../../theme.slint";
 import { AudioRetention } from "../../types.slint";
 
-component CodeBlock inherits KitTextArea {
+component CodeBlock inherits Rectangle {
     in property <string> body;
-    text: root.body;
-    access: FieldAccess.read-only;
-    accessible-name: @tr("Bloc de code sélectionnable");
-    height: 88px;
+    background: Theme.input;
+    border-width: 1px;
+    border-color: Theme.line;
+    border-radius: 10px;
+    vertical-stretch: 0;
+
+    VerticalLayout {
+        KitTextArea {
+            text: root.body;
+            access: FieldAccess.read-only;
+            accessible-name: @tr("Bloc de code sélectionnable");
+            decoration: FieldDecoration.bare;
+            corner-radius: 10px;
+            padding-inline: 14px;
+            padding-block: 12px;
+            text-font-family: KitThemeContext.current.typography.family-monospace;
+            text-size: Typography.secondary.size;
+            min-lines: 1;
+            max-lines: 16;
+        }
+    }
 }
 
 component CopyButton inherits KitButton {
@@ -53,33 +70,34 @@ export component DataSection inherits VerticalLayout {
 
 
 
-    spacing: 22px;
+    spacing: 20px;
     alignment: start;
 
     KitFieldSet {
         theme: KitThemeContext.current;
         legend: @tr("DONNÉES");
+        appearance: FieldSetAppearance.card;
 
-    if root.stats-line != "": VerticalLayout {
-        padding-left: Theme.settings-inset;
-        padding-right: Theme.settings-inset;
-        padding-top: 12px;
-        AppText {
-            text: root.stats-line;
-            typography: Typography.secondary;
-            color: Theme.text-muted;
-            wrap: word-wrap;
-        }
-    }
-    if root.recordings-line != "": VerticalLayout {
-        padding-left: Theme.settings-inset;
-        padding-right: Theme.settings-inset;
-        padding-bottom: 4px;
-        AppText {
-            text: root.recordings-line;
-            typography: Typography.secondary;
-            color: Theme.text-muted;
-            wrap: word-wrap;
+    if root.stats-line != "" || root.recordings-line != "": VerticalLayout {
+        KitFieldSeparator { }
+        VerticalLayout {
+            padding-left: 20px;
+            padding-right: 20px;
+            padding-top: 14px;
+            padding-bottom: 14px;
+            spacing: 4px;
+            if root.stats-line != "": AppText {
+                text: root.stats-line;
+                typography: Typography.secondary;
+                color: Theme.text-muted;
+                wrap: word-wrap;
+            }
+            if root.recordings-line != "": AppText {
+                text: root.recordings-line;
+                typography: Typography.secondary;
+                color: Theme.text-muted;
+                wrap: word-wrap;
+            }
         }
     }
 
@@ -87,13 +105,13 @@ export component DataSection inherits VerticalLayout {
         theme: KitThemeContext.current;
         modal-layer: 0;
         orientation: Theme.settings-field-orientation(self.width);
-        padding: KitMetrics.field-gap(self.theme);
+        appearance: FieldRowAppearance.inset;
+        show-divider: true;
         focus-requested => { retention-picker.take-focus(); }
         private property <bool> control-focused: retention-picker.has-focus;
         changed control-focused => {
             if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
         }
-        show-divider: root.stats-line != "" || root.recordings-line != "";
         label: @tr("Conservation audio des réunions");
         description: @tr("Durée de conservation des enregistrements audio bruts.");
 
@@ -110,7 +128,7 @@ export component DataSection inherits VerticalLayout {
         theme: KitThemeContext.current;
         modal-layer: 0;
         orientation: Theme.settings-field-orientation(self.width);
-        padding: KitMetrics.field-gap(self.theme);
+        appearance: FieldRowAppearance.inset;
         show-divider: true;
         focus-requested => { export-button.take-focus(); }
         private property <bool> control-focused: export-button.has-focus;
@@ -134,7 +152,7 @@ export component DataSection inherits VerticalLayout {
         theme: KitThemeContext.current;
         modal-layer: 0;
         orientation: Theme.settings-field-orientation(self.width);
-        padding: KitMetrics.field-gap(self.theme);
+        appearance: FieldRowAppearance.inset;
         show-divider: true;
         focus-requested => { reveal-button.take-focus(); }
         private property <bool> control-focused: reveal-button.has-focus;
@@ -154,8 +172,8 @@ export component DataSection inherits VerticalLayout {
     }
 
     if root.export-status != "": VerticalLayout {
-        padding-left: Theme.settings-inset;
-        padding-right: Theme.settings-inset;
+        padding-left: 20px;
+        padding-right: 20px;
         padding-bottom: 12px;
         AppText {
             text: root.export-status-is-error ? root.export-status : @tr("Export terminé vers {}" , root.export-status);
@@ -169,12 +187,15 @@ export component DataSection inherits VerticalLayout {
     KitFieldSet {
         theme: KitThemeContext.current;
         legend: @tr("SERVEUR MCP");
+        appearance: FieldSetAppearance.card;
+
+        KitFieldSeparator { }
 
         VerticalLayout {
-            padding-left: Theme.settings-inset;
-            padding-right: Theme.settings-inset;
-            padding-top: 15px;
-            padding-bottom: 8px;
+            padding-left: 20px;
+            padding-right: 20px;
+            padding-top: 14px;
+            padding-bottom: 14px;
             AppText {
                 text: @tr("Permet à Claude Desktop, Claude Code ou un autre client MCP de lire vos transcriptions et résumés. Tout reste sur ce Mac.");
                 typography: Typography.secondary;
@@ -183,17 +204,19 @@ export component DataSection inherits VerticalLayout {
             }
         }
 
+        KitFieldSeparator { }
+
         VerticalLayout {
-            padding-left: Theme.settings-inset;
-            padding-right: Theme.settings-inset;
-            padding-top: 8px;
-            padding-bottom: 12px;
+            padding-left: 20px;
+            padding-right: 20px;
+            padding-top: 14px;
+            padding-bottom: 14px;
             spacing: 8px;
 
             AppText {
                 text: @tr("Binaire sidecar");
-                typography: Typography.field-label;
-                color: Theme.text-secondary;
+                typography: Typography.field-heading;
+                color: Theme.text-primary;
             }
             CodeBlock {
                 body: root.mcp-binary-path;
@@ -206,13 +229,13 @@ export component DataSection inherits VerticalLayout {
             }
         }
 
-        KitDivider { }
+        KitFieldSeparator { }
 
         VerticalLayout {
-            padding-left: Theme.settings-inset;
-            padding-right: Theme.settings-inset;
-            padding-top: 15px;
-            padding-bottom: 12px;
+            padding-left: 20px;
+            padding-right: 20px;
+            padding-top: 14px;
+            padding-bottom: 14px;
             spacing: 8px;
 
             HorizontalLayout {
@@ -222,8 +245,8 @@ export component DataSection inherits VerticalLayout {
                     horizontal-stretch: 1;
                     AppText {
                         text: @tr("Config Claude Desktop");
-                        typography: Typography.field-label;
-                        color: Theme.text-secondary;
+                        typography: Typography.field-heading;
+                        color: Theme.text-primary;
                     }
                     AppText {
                         text: @tr("À coller dans claude_desktop_config.json sous mcpServers.");
@@ -241,13 +264,13 @@ export component DataSection inherits VerticalLayout {
             }
         }
 
-        KitDivider { }
+        KitFieldSeparator { }
 
         VerticalLayout {
-            padding-left: Theme.settings-inset;
-            padding-right: Theme.settings-inset;
-            padding-top: 15px;
-            padding-bottom: 12px;
+            padding-left: 20px;
+            padding-right: 20px;
+            padding-top: 14px;
+            padding-bottom: 14px;
             spacing: 8px;
 
             HorizontalLayout {
@@ -257,8 +280,8 @@ export component DataSection inherits VerticalLayout {
                     horizontal-stretch: 1;
                     AppText {
                         text: @tr("Claude Code");
-                        typography: Typography.field-label;
-                        color: Theme.text-secondary;
+                        typography: Typography.field-heading;
+                        color: Theme.text-primary;
                     }
                     AppText {
                         text: @tr("À exécuter une fois dans un terminal pour enregistrer le serveur.");
@@ -280,7 +303,7 @@ export component DataSection inherits VerticalLayout {
             theme: KitThemeContext.current;
             modal-layer: 0;
             orientation: Theme.settings-field-orientation(self.width);
-            padding: KitMetrics.field-gap(self.theme);
+            appearance: FieldRowAppearance.inset;
             show-divider: true;
             focus-requested => { connection-button.take-focus(); }
             private property <bool> control-focused: connection-button.has-focus;

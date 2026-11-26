@@ -1,5 +1,5 @@
 import { AppText, AppTextInput, Typography } from "@typography";
-import { ButtonIntent, ChoiceLabelPosition, ControlSize, ControlWidth, KitButton, KitSurface, KitSwitch, LayoutSpace, Ownership, ScrollFrame, SurfaceLevel, KitFieldSet, KitThemeContext, KitThemes, KitFieldRow, KitMetrics } from "@kit";
+import { FieldSetAppearance, FieldRowAppearance, ButtonIntent, ChoiceLabelPosition, ControlSize, ControlWidth, KitButton, KitSwitch, Ownership, ScrollFrame, KitFieldSet, KitFieldSeparator, KitText, TypographyRole, KitThemeContext, KitThemes, KitFieldRow } from "@kit";
 import { LucideText } from "@kit-icons/text.slint";
 import { SettingsOptions, ClosedSettingsPicker } from "settings_options.slint";
 import { Theme } from "../../theme.slint";
@@ -34,24 +34,25 @@ export component DiagnosticsSection inherits VerticalLayout {
 
 
 
-    spacing: 22px;
+    spacing: 20px;
     alignment: start;
 
     KitFieldSet {
         theme: KitThemeContext.current;
         legend: @tr("DIAGNOSTICS");
+        appearance: FieldSetAppearance.card;
 
         KitFieldRow {
             theme: KitThemeContext.current;
             modal-layer: 0;
             orientation: Theme.settings-field-orientation(self.width);
-            padding: KitMetrics.field-gap(self.theme);
+            appearance: FieldRowAppearance.inset;
+            show-divider: true;
             focus-requested => { level-picker.take-focus(); }
             private property <bool> control-focused: level-picker.has-focus;
             changed control-focused => {
                 if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
             }
-            show-divider: false;
             label: @tr("Niveau de journal");
             description: @tr("Quantité de détails que Soufflé écrit dans le fichier journal.");
 
@@ -68,7 +69,7 @@ export component DiagnosticsSection inherits VerticalLayout {
             theme: KitThemeContext.current;
             modal-layer: 0;
             orientation: Theme.settings-field-orientation(self.width);
-            padding: KitMetrics.field-gap(self.theme);
+            appearance: FieldRowAppearance.inset;
             show-divider: true;
             focus-requested => { logging-switch.take-focus(); }
             private property <bool> control-focused: logging-switch.has-focus;
@@ -91,26 +92,43 @@ export component DiagnosticsSection inherits VerticalLayout {
             }
         }
 
-        KitFieldRow {
-            theme: KitThemeContext.current;
-            modal-layer: 0;
-            orientation: Orientation.vertical;
-            padding: KitMetrics.field-gap(self.theme);
-            show-divider: true;
-            label: @tr("Journal en direct");
-            description: @tr("Fin du fichier journal actuel, actualisé toutes les quelques secondes.");
+        KitFieldSeparator { }
 
-            KitSurface {
-                theme: KitThemeContext.current;
-                level: SurfaceLevel.inset;
-                inset: LayoutSpace.compact;
-                fill: true;
+        VerticalLayout {
+            padding-left: 20px;
+            padding-right: 20px;
+            padding-top: 14px;
+            padding-bottom: 16px;
+            spacing: 8px;
+
+            VerticalLayout {
+                spacing: 2px;
+                AppText {
+                    text: @tr("Journal en direct");
+                    typography: Typography.field-heading;
+                    color: Theme.text-primary;
+                }
+                KitText {
+                    text: @tr("Fin du fichier journal actuel, actualisé toutes les quelques secondes.");
+                    role: TypographyRole.caption;
+                }
+            }
+
+            Rectangle {
                 height: 96px;
+                background: Theme.input;
+                border-width: 1px;
+                border-color: Theme.line;
+                border-radius: 10px;
                 clip: true;
                 accessible-role: groupbox;
                 accessible-label: @tr("Journal en direct");
 
                 log-viewport := ScrollFrame {
+                    x: 14px;
+                    y: 10px;
+                    width: parent.width - 28px;
+                    height: parent.height - 20px;
                     horizontal-scrollbar-policy: always-off;
                     content-width: self.visible-width;
                     content-height: lines.preferred-height;
@@ -125,8 +143,8 @@ export component DiagnosticsSection inherits VerticalLayout {
 
                         if root.log-line-count == 0: AppText {
                             text: @tr("Aucune entrée de journal pour l'instant.");
-                            typography: Typography.micro-detail;
-                            color: Theme.text-secondary;
+                            typography: Typography.small;
+                            color: Theme.text-muted;
                             wrap: word-wrap;
                         }
 
@@ -135,7 +153,7 @@ export component DiagnosticsSection inherits VerticalLayout {
                         // (SOU-224).
                         for line in root.log-lines: AppTextInput {
                             text: line;
-                            typography: Typography.micro-detail;
+                            typography: Typography.small;
                             color: Theme.text-muted;
                             wrap: word-wrap;
                             single-line: false;
@@ -147,22 +165,19 @@ export component DiagnosticsSection inherits VerticalLayout {
                     }
                 }
             }
-        }
 
-        HorizontalLayout {
-            padding-left: KitMetrics.field-gap(KitThemeContext.current);
-            padding-right: KitMetrics.field-gap(KitThemeContext.current);
-            padding-bottom: KitMetrics.field-gap(KitThemeContext.current);
-            alignment: start;
-            KitButton {
-                theme: KitThemeContext.current;
-                modal-layer: 0;
-                text: root.copying-diagnostics ? @tr("Copie…") : @tr("Copier les diagnostics");
-                intent: ButtonIntent.secondary;
-                control-size: ControlSize.compact;
-                leading-icon: LucideText.copy();
-                disabled: root.copying-diagnostics;
-                activated => { root.copy-diagnostics-requested(); }
+            HorizontalLayout {
+                alignment: start;
+                KitButton {
+                    theme: KitThemeContext.current;
+                    modal-layer: 0;
+                    text: root.copying-diagnostics ? @tr("Copie…") : @tr("Copier les diagnostics");
+                    intent: ButtonIntent.secondary;
+                    control-size: ControlSize.compact;
+                    leading-icon: LucideText.copy();
+                    disabled: root.copying-diagnostics;
+                    activated => { root.copy-diagnostics-requested(); }
+                }
             }
         }
     }

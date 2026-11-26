@@ -1,4 +1,5 @@
-import { ButtonIntent, KitButton, KitCard, KitCardHeader, KitInline, KitTextArea, SurfaceLevel } from "@kit";
+import { ButtonIntent, KitButton, KitCard, KitInline, KitTextArea, LayoutSpace, SurfaceLevel } from "@kit";
+import { AppText, Typography } from "@typography";
 import { LucideText } from "@kit-icons/text.slint";
 import { Theme } from "../theme.slint";
 
@@ -13,31 +14,49 @@ export component DictationRecovery inherits KitCard {
     callback discard-requested();
 
     level: SurfaceLevel.raised;
-    inset: regular;
+    inset: LayoutSpace.none;
+    gap: LayoutSpace.none;
     border-color: Theme.warning;
 
-    KitCardHeader {
-        title: @tr("Dictée à récupérer");
-        description: @tr("Le texte reste ici tant que vous ne l’avez pas copié ou supprimé.");
-    }
-    KitTextArea {
-        text <=> root.text;
-        min-lines: 4;
-        max-lines: 4;
-        accessible-name: @tr("Texte de dictée à récupérer");
-    }
-    KitInline {
-        alignment: end;
-        KitButton {
-            text: @tr("Supprimer");
-            intent: ButtonIntent.quiet;
-            activated => { root.discard-requested(); }
+    VerticalLayout {
+        padding: 16px;
+        spacing: 12px;
+
+        VerticalLayout {
+            AppText {
+                text: @tr("Dictée à récupérer");
+                typography: Typography.body-emphasis;
+                color: Theme.text-primary;
+                wrap: word-wrap;
+            }
+            AppText {
+                text: @tr("Le texte reste ici tant que vous ne l’avez pas copié ou supprimé.");
+                typography: Typography.hint;
+                color: Theme.text-muted;
+                wrap: word-wrap;
+            }
         }
-        KitButton {
-            text: @tr("Copier le texte");
-            intent: ButtonIntent.primary;
-            leading-icon: LucideText.copy();
-            activated => { root.copy-requested(); }
+        KitTextArea {
+            text <=> root.text;
+            min-lines: 1;
+            max-lines: 4;
+            padding-inline: 12px;
+            padding-block: 12px;
+            accessible-name: @tr("Texte de dictée à récupérer");
+        }
+        KitInline {
+            alignment: end;
+            KitButton {
+                text: @tr("Supprimer");
+                intent: ButtonIntent.quiet;
+                activated => { root.discard-requested(); }
+            }
+            KitButton {
+                text: @tr("Copier le texte");
+                intent: ButtonIntent.primary;
+                leading-icon: LucideText.copy();
+                activated => { root.copy-requested(); }
+            }
         }
     }
 }

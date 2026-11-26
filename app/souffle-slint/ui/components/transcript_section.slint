@@ -1,5 +1,5 @@
 import { AppText, Typography } from "@typography";
-import { ButtonIntent, ChatBubbleTone, ChatSide, ControlSize, KitButton, KitCard, KitChatBubble, KitDivider, KitInline, KitSearchField, KitSegmentedControl, KitStack, KitText, KitThemeContext, OptionRow, Ownership, SurfaceLevel, TypographyRole } from "@kit";
+import { ButtonIntent, ChatBubbleTone, ChatSide, ControlSize, ControlWidth, FieldDecoration, KitButton, KitCard, KitChatBubble, KitSearchField, KitSegmentedControl, KitStack, KitText, KitThemeContext, OptionRow, Ownership, SegmentedAppearance, SurfaceLevel, TypographyRole } from "@kit";
 import { LucideText } from "@kit-icons/text.slint";
 import { LucideNotifications } from "@kit-icons/notifications.slint";
 import { Theme } from "../theme.slint";
@@ -86,25 +86,35 @@ export component TranscriptToolbar inherits KitCard {
     }
 
     level: SurfaceLevel.raised;
-    inset: compact;
+    inset: none;
+    gap: none;
 
-    KitInline {
-        gap: regular;
+    HorizontalLayout {
+        padding: 10px;
+        spacing: 14px;
 
-        KitSearchField {
+        VerticalLayout {
+            alignment: center;
             horizontal-stretch: 1;
-            control-size: ControlSize.compact;
-            clear-label: @tr("Effacer");
-            accessible-name: @tr("Rechercher dans la transcription");
-            placeholder: @tr("Rechercher dans la transcription");
-            text <=> root.search;
-            edited(text) => { root.search-changed(text); }
+
+            KitSearchField {
+                control-size: ControlSize.compact;
+                decoration: FieldDecoration.bare;
+                leading-icon-ink: Theme.text-muted;
+                padding-inline: 4px;
+                clear-label: @tr("Effacer");
+                accessible-name: @tr("Rechercher dans la transcription");
+                placeholder: @tr("Rechercher dans la transcription");
+                text <=> root.search;
+                edited(text) => { root.search-changed(text); }
+            }
         }
 
         KitSegmentedControl {
             ownership: Ownership.controlled;
+            appearance: SegmentedAppearance.raised;
+            control-width: ControlWidth.intrinsic;
             horizontal-stretch: 0;
-            preferred-width: KitThemeContext.current.spacing.unit * 56;
             control-size: ControlSize.compact;
             label: @tr("Affichage de la transcription");
             options: root.layout-options;
@@ -112,13 +122,18 @@ export component TranscriptToolbar inherits KitCard {
             chosen(row) => { root.layout = row.token == 1 ? TranscriptLayout.text : TranscriptLayout.conversation; }
         }
 
-        if root.can-copy: KitButton {
-            accessible-name: @tr("Copier la transcription");
-            text: root.just-copied ? @tr("Copié") : @tr("Copier");
-            control-size: ControlSize.compact;
-            intent: ButtonIntent.quiet;
-            leading-icon: root.just-copied ? LucideNotifications.check() : LucideText.copy();
-            activated => { root.copy-transcript(); }
+        if root.can-copy: VerticalLayout {
+            alignment: center;
+            horizontal-stretch: 0;
+
+            KitButton {
+                accessible-name: @tr("Copier la transcription");
+                text: root.just-copied ? @tr("Copié") : @tr("Copier");
+                control-size: ControlSize.compact;
+                intent: ButtonIntent.quiet;
+                leading-icon: root.just-copied ? LucideNotifications.check() : LucideText.copy();
+                activated => { root.copy-transcript(); }
+            }
         }
     }
 }
@@ -137,13 +152,17 @@ component TranscriptRowHeader inherits HorizontalLayout {
         text: root.block.timestamp;
         control-size: ControlSize.compact;
         intent: ButtonIntent.quiet;
+        min-height: 24px;
+        padding-inline: 8px;
+        padding-block: 0px;
+        text-size: Typography.small.size;
         disabled: !root.has-audio;
         activated => { root.seek-requested(); }
     }
 
     if root.block.has-speaker: AppText {
         text: SpeakerLabels.of(root.block.speaker);
-        typography: Typography.caption-strong;
+        typography: Typography.secondary-emphasis;
         color: root.block.speaker == SpeakerRole.me ? Theme.accent : Theme.secondary;
         vertical-alignment: center;
         wrap: no-wrap;
@@ -154,6 +173,10 @@ component TranscriptRowHeader inherits HorizontalLayout {
         text: root.block.timestamp;
         control-size: ControlSize.compact;
         intent: ButtonIntent.quiet;
+        min-height: 24px;
+        padding-inline: 8px;
+        padding-block: 0px;
+        text-size: Typography.small.size;
         disabled: !root.has-audio;
         activated => { root.seek-requested(); }
     }
@@ -239,7 +262,7 @@ export component TranscriptSection inherits KitStack {
 
             for block in root.blocks: VerticalLayout {
                 if !block.is-session-break: VerticalLayout {
-                    spacing: root.unit;
+                    spacing: 5px;
 
                     TranscriptRowHeader {
                         block: block;
@@ -254,11 +277,25 @@ export component TranscriptSection inherits KitStack {
                     // (SOU-258).
                     if root.layout == TranscriptLayout.conversation: KitChatBubble {
                         side: block.speaker == SpeakerRole.me && block.has-speaker ? ChatSide.end : ChatSide.start;
-                        tone: block.speaker == SpeakerRole.me && block.has-speaker ? ChatBubbleTone.accent-subtle : ChatBubbleTone.surface;
+                        tone: block.speaker == SpeakerRole.me && block.has-speaker ? ChatBubbleTone.accent-subtle : ChatBubbleTone.muted;
                         content-share: 0.78;
+                        hug: true;
 
                         Rectangle {
+                            // A wrapping flow has no natural width of its own:
+                            // the paragraph on one line gives it to the bubble.
+                            // Each word is measured alone, so the flow runs a little wider
+                            // than the same text on one line.
+                            preferred-width: one-line.preferred-width + root.unit + block.words.length * 2px;
                             preferred-height: bubble-flow.preferred-height;
+
+                            one-line := AppText {
+                                width: 0px;
+                                text: block.text;
+                                typography: Typography.body;
+                                visible: false;
+                                accessible-role: none;
+                            }
 
                             if root.playing(block): Rectangle {
                                 x: -root.bubble-padding - root.ring-width;
@@ -273,6 +310,7 @@ export component TranscriptSection inherits KitStack {
                             bubble-flow := TranscriptWordFlow {
                                 width: parent.width;
                                 words: block.words;
+                                typography: Typography.body;
                                 word-clicked(word, at-x, at-y) => { alias-popup.open(word, at-x, at-y); }
                             }
                         }
@@ -284,8 +322,23 @@ export component TranscriptSection inherits KitStack {
                     }
                 }
 
-                if block.is-session-break: KitDivider {
-                    label: @tr("Fin de l'enregistrement précédent") + " / " + @tr("Nouvelle session d'enregistrement");
+                if block.is-session-break: HorizontalLayout {
+                    spacing: 3 * root.unit;
+
+                    VerticalLayout {
+                        alignment: center;
+                        Rectangle { height: 1px; background: Theme.line; }
+                    }
+                    AppText {
+                        text: @tr("Fin de l'enregistrement précédent") + " · " + @tr("Nouvelle session d'enregistrement");
+                        typography: Typography.caption;
+                        color: Theme.text-faint;
+                        horizontal-stretch: 0;
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        Rectangle { height: 1px; background: Theme.line; }
+                    }
                 }
             }
 

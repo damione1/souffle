@@ -1,11 +1,12 @@
 import { CompactTranscriptSection } from "components/compact_transcript_section.slint";
 import { SummarizationUi } from "summarization.slint";
 import { AppText, Typography } from "@typography";
-import { AlertSeverity, ButtonIntent, ContentWidth, ControlSize, ControlWidth, KitAlert, KitBadge, KitButton, KitCard, KitDropdownMenu, KitEmptyState, KitFocusBackground, KitIcon, KitInline, KitKeyResult, KitLayoutMetrics, KitPressable, KitScrollArea, KitSegmentedControl, KitStack, KitText, KitTextArea, KitTextField, KitThemeContext, KitWrap, LayoutSpace, OptionRow, Ownership, SurfaceLevel, TextEscapeBehavior, Tone, TypographyRole } from "@kit";
+import { AlertActions, AlertSeverity, ButtonIntent, ContentWidth, ControlSize, ControlWidth, KitAlert, KitBadge, KitButton, KitCard, KitDropdownMenu, KitFocusBackground, KitIcon, KitInline, KitKeyResult, KitLayoutMetrics, KitPressable, KitScrollArea, KitSegmentedControl, KitStack, KitText, KitTextArea, KitTextField, KitThemeContext, KitWrap, LayoutSpace, OptionRow, Ownership, SegmentedAppearance, SurfaceLevel, TextEscapeBehavior, Tone, TypographyRole } from "@kit";
 import { LucideDesign } from "@kit-icons/design.slint";
 import { LucideAccount } from "@kit-icons/account.slint";
 import { LucideFiles } from "@kit-icons/files.slint";
 import { LucideArrows } from "@kit-icons/arrows.slint";
+import { LucideMultimedia } from "@kit-icons/multimedia.slint";
 import { NotesSaveState, MeetingExportFormat, WakeResumeNotice } from "types.slint";
 import { ActionGuards, MeetingDeletePermission } from "action_guards.slint";
 import { StatusBanner } from "components/status_banner.slint";
@@ -84,6 +85,7 @@ export component MeetingDetail inherits Rectangle {
     // on navigation like meeting-detail-transcript-scroll-top.
     in-out property <length> page-scroll-top: 0px;
     in property <string> summary;
+    in property <string> summary-body;
     in property <bool> summary-is-stale: false;
     in property <string> summary-model-label;
     in property <[string]> summary-key-points;
@@ -249,11 +251,13 @@ export component MeetingDetail inherits Rectangle {
                                 if root.model-label != "": KitBadge {
                                     text: root.model-label;
                                     tone: Tone.accent;
+                                    subtle: true;
                                 }
                             }
 
                             if root.participants.length > 0: KitInline {
                                 gap: compact;
+                                alignment: stretch;
 
                                 KitIcon {
                                     glyph: LucideAccount.users();
@@ -265,6 +269,7 @@ export component MeetingDetail inherits Rectangle {
                                     horizontal-stretch: 1;
 
                                     for participant in root.participants: KitBadge {
+                                        subtle: true;
                                         text: participant.is-organizer && participant.is-current-user ? @tr("{} (organisateur) (vous)", participant.name)
                                                                             : participant.is-organizer ? @tr("{} (organisateur)", participant.name)
                                                                             : participant.is-current-user ? @tr("{} (vous)", participant.name)
@@ -286,6 +291,7 @@ export component MeetingDetail inherits Rectangle {
                                     text: @tr("Reprendre");
                                     control-size: ControlSize.compact;
                                     intent: ButtonIntent.primary;
+                                    leading-icon: LucideMultimedia.mic();
                                     activated => { root.resume-requested(); }
                                 }
 
@@ -294,6 +300,7 @@ export component MeetingDetail inherits Rectangle {
                                     text: @tr("Exporter");
                                     accessible-name: @tr("Exporter la réunion");
                                     leading-icon: LucideArrows.download();
+                                    trailing-icon: { stroke: "", fill: "", viewbox: 24 };
                                     options: MeetingExportMenu.rows(root.has-audio, @tr("Audio (.ogg)"));
                                     chosen(row) => {
                                         if row.token >= 0 && row.token < MeetingExportMenu.formats.length {
@@ -334,6 +341,10 @@ export component MeetingDetail inherits Rectangle {
                     if !root.is-empty-meeting: KitInline {
                         KitSegmentedControl {
                             ownership: Ownership.controlled;
+                            appearance: SegmentedAppearance.raised;
+                            control-width: ControlWidth.intrinsic;
+                            control-size: ControlSize.compact;
+                            horizontal-stretch: 0;
                             label: @tr("Affichage de la réunion");
                             options: root.view-options;
                             selected: { present: true, token: root.view == MeetingDetailView.transcript ? 1 : 0 };
@@ -351,6 +362,8 @@ export component MeetingDetail inherits Rectangle {
                     if root.wake-resume-notice == WakeResumeNotice.interrupted: StatusBanner {
                         message: @tr("La mise en veille a interrompu cette réunion. Reprenez l'enregistrement pour continuer.");
                         action-label: root.can-resume ? @tr("Reprendre") : "";
+                        action-intent: ButtonIntent.primary;
+                        actions-placement: AlertActions.trailing;
                         action-triggered => { root.resume-requested(); }
                         dismissed => { root.wake-resume-notice-dismissed(); }
                     }
@@ -364,6 +377,7 @@ export component MeetingDetail inherits Rectangle {
             KitScrollArea {
                 vertical-stretch: 1;
                 gap: none;
+                overlay-scrollbars: true;
                 content-y <=> root.page-scroll-top;
 
                 HorizontalLayout {
@@ -377,10 +391,24 @@ export component MeetingDetail inherits Rectangle {
                         if root.is-empty-meeting: KitCard {
                             level: SurfaceLevel.raised;
                             inset: none;
-                            KitEmptyState {
-                                centered: true;
-                                title: @tr("Cette réunion ne contient aucun enregistrement.");
-                                description: @tr("Aucun audio, aucune transcription et aucun résumé.");
+                            gap: none;
+                            VerticalLayout {
+                                padding: 28px;
+                                spacing: 6px;
+                                AppText {
+                                    text: @tr("Cette réunion ne contient aucun enregistrement.");
+                                    typography: Typography.body-emphasis;
+                                    color: Theme.text-primary;
+                                    horizontal-alignment: center;
+                                    wrap: word-wrap;
+                                }
+                                AppText {
+                                    text: @tr("Aucun audio, aucune transcription et aucun résumé.");
+                                    typography: Typography.content;
+                                    color: Theme.text-muted;
+                                    horizontal-alignment: center;
+                                    wrap: word-wrap;
+                                }
                             }
                         }
 
@@ -399,6 +427,7 @@ export component MeetingDetail inherits Rectangle {
 
                         if SummarizationUi.enabled && !root.is-empty-meeting && root.show-reading: SummarySection {
                             summary: root.summary;
+                            summary-body: root.summary-body;
                             summary-is-stale: root.summary-is-stale;
                             summary-model-label: root.summary-model-label;
                             available-models: root.summary-available-models;
@@ -415,23 +444,24 @@ export component MeetingDetail inherits Rectangle {
                             copy-requested => { root.copy-summary-requested(); }
                         }
 
-                        if SummarizationUi.enabled && root.show-reading: CompactTranscriptSection { }
-
                         if root.show-reading: KitCard {
                             level: SurfaceLevel.raised;
                             inset: regular;
                             gap: compact;
 
                             KitInline {
+                                alignment: stretch;
+
                                 KitIcon {
                                     glyph: LucideDesign.pen-line();
                                     ink: Theme.accent;
                                     vertical-stretch: 0;
                                 }
 
-                                KitText {
+                                AppText {
                                     text: @tr("Notes");
-                                    role: TypographyRole.subtitle;
+                                    typography: Typography.body-emphasis;
+                                    color: Theme.text-primary;
                                     vertical-alignment: center;
                                     horizontal-stretch: 1;
                                 }
@@ -450,8 +480,8 @@ export component MeetingDetail inherits Rectangle {
 
                             notes-edit := KitTextArea {
                                 text <=> root.notes;
-                                min-lines: 4;
-                                max-lines: 4;
+                                min-lines: 3;
+                                max-lines: 3;
                                 placeholder: @tr("Ajoutez les décisions, actions et noms importants…");
                                 accessible-name: @tr("Notes de la réunion");
                                 edited(value) => { root.notes-changed(value); }
@@ -469,9 +499,12 @@ export component MeetingDetail inherits Rectangle {
                             gap: compact;
 
                             KitInline {
-                                KitText {
+                                alignment: stretch;
+
+                                AppText {
                                     text: @tr("Transcription");
-                                    role: TypographyRole.subtitle;
+                                    typography: Typography.action-title;
+                                    color: Theme.text-primary;
                                     vertical-alignment: center;
                                     horizontal-stretch: 1;
                                 }
@@ -499,6 +532,8 @@ export component MeetingDetail inherits Rectangle {
                                 height: min(self.preferred-height, 3 * 1.4 * Typography.content.size);
                             }
                         }
+
+                        if SummarizationUi.enabled && root.show-reading: CompactTranscriptSection { }
 
                         if root.show-transcript: TranscriptSection {
                             blocks: root.transcript-blocks;
@@ -563,6 +598,8 @@ export component MeetingDetail inherits Rectangle {
                             wrap: word-wrap;
                         }
                         if root.show-reading && root.delete-error != "": KitAlert { bordered: false;
+                            corner-radius: 12px;
+                            inset: 12px;
                             severity: AlertSeverity.error;
                             message: @tr("Impossible de supprimer la réunion : {}", root.delete-error);
                         }

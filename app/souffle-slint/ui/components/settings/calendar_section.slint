@@ -1,4 +1,6 @@
-import { AlertSeverity, ChoiceLabelPosition, ButtonIntent, ControlSize, KitAlert, KitText, TypographyRole, CheckState, ControlWidth, KitButton, KitCheckbox, KitNumberStepper, KitSwitch, Ownership, KitFieldSet, KitThemeContext, KitThemes, KitFieldRow, KitMetrics } from "@kit";
+import { FieldSetAppearance, FieldRowAppearance, AlertActions, AlertSeverity, ChoiceLabelPosition, ButtonIntent, ControlSize, KitAlert, KitText, TypographyRole, CheckState, ControlWidth, KitButton, KitCheckbox, KitNumberStepper, KitSwitch, Ownership, KitFieldSet, KitThemeContext, KitThemes, KitFieldRow, KitFieldSeparator, KitOverline, StepperAppearance } from "@kit";
+import { AppText, Typography } from "@typography";
+import { LucideArrows } from "@kit-icons/arrows.slint";
 import { SettingsNoticeRow } from "settings_notice_row.slint";
 import { Theme } from "../../theme.slint";
 import { AccessState } from "../../types.slint";
@@ -26,24 +28,25 @@ export component CalendarSection inherits VerticalLayout {
     callback calendar-toggled(string);
     callback open-system-settings-requested();
 
-    spacing: 22px;
+    spacing: 20px;
     alignment: start;
 
     KitFieldSet {
         theme: KitThemeContext.current;
         legend: @tr("CALENDRIER");
+        appearance: FieldSetAppearance.card;
 
         KitFieldRow {
             theme: KitThemeContext.current;
             modal-layer: 0;
             orientation: Theme.settings-field-orientation(self.width);
-            padding: KitMetrics.field-gap(self.theme);
+            appearance: FieldRowAppearance.inset;
+            show-divider: true;
             focus-requested => { calendar-switch.take-focus(); }
             private property <bool> control-focused: calendar-switch.has-focus;
             changed control-focused => {
                 if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
             }
-            show-divider: false;
             label: @tr("Intégration du calendrier");
             description: @tr("Afficher les réunions du jour sur l'accueil et rappeler avant qu'elles commencent.");
 
@@ -61,7 +64,7 @@ export component CalendarSection inherits VerticalLayout {
         }
 
         if root.permission == AccessState.denied: SettingsNoticeRow {
-            KitAlert { bordered: false;
+            KitAlert { bordered: false; corner-radius: 12px; inset: 12px; actions-placement: AlertActions.trailing;
                 severity: AlertSeverity.warning;
                 message: @tr("L'accès au calendrier a été refusé.");
                 vertical-stretch: 0;
@@ -79,7 +82,7 @@ export component CalendarSection inherits VerticalLayout {
             theme: KitThemeContext.current;
             modal-layer: 0;
             orientation: Theme.settings-field-orientation(self.width);
-            padding: KitMetrics.field-gap(self.theme);
+            appearance: FieldRowAppearance.inset;
             show-divider: true;
             focus-requested => { reminder-switch.take-focus(); }
             private property <bool> control-focused: reminder-switch.has-focus;
@@ -106,7 +109,7 @@ export component CalendarSection inherits VerticalLayout {
             theme: KitThemeContext.current;
             modal-layer: 0;
             orientation: Theme.settings-field-orientation(self.width);
-            padding: KitMetrics.field-gap(self.theme);
+            appearance: FieldRowAppearance.inset;
             show-divider: true;
             focus-requested => { delay-stepper.take-focus(); }
             private property <bool> control-focused: delay-stepper.has-focus;
@@ -119,7 +122,10 @@ export component CalendarSection inherits VerticalLayout {
             delay-stepper := KitNumberStepper {
                 theme: KitThemeContext.current;
                 modal-layer: 0;
-                width: 140px;
+                appearance: StepperAppearance.compact;
+                control-size: ControlSize.compact;
+                decrement-glyph: LucideArrows.chevron-down();
+                increment-glyph: LucideArrows.chevron-up();
                 increment-label: @tr("Augmenter");
                 decrement-label: @tr("Diminuer");
                 accessible-name: @tr("Délai du rappel en minutes");
@@ -132,48 +138,62 @@ export component CalendarSection inherits VerticalLayout {
         }
 
         if root.enabled && root.permission == AccessState.granted && root.calendars.length > 0: VerticalLayout {
-            padding-top: 15px;
-            padding-bottom: 10px;
-            padding-left: Theme.settings-inset;
-            padding-right: Theme.settings-inset;
-            spacing: 4px;
             alignment: start;
 
-            KitText {
-                text: @tr("Calendriers");
-                role: TypographyRole.control;
-            }
-            KitText {
-                text: @tr("Tous les calendriers sont inclus ; décochez ceux à masquer.");
-                role: TypographyRole.caption;
-                wrap: word-wrap;
-            }
+            KitFieldSeparator { }
 
-            for row in root.calendars: VerticalLayout {
+            VerticalLayout {
+                padding-left: 20px;
+                padding-right: 20px;
+                padding-top: 12px;
+                padding-bottom: 12px;
                 alignment: start;
 
-                if row.show-header && row.source-title != "": VerticalLayout {
-                    padding-top: 10px;
+                VerticalLayout {
+                    spacing: 2px;
+                    padding-bottom: 4px;
+                    AppText {
+                        text: @tr("Calendriers");
+                        typography: Typography.field-heading;
+                        color: Theme.text-primary;
+                    }
                     KitText {
-                        text: row.source-title;
+                        text: @tr("Tous les calendriers sont inclus ; décochez ceux à masquer.");
                         role: TypographyRole.caption;
+                        wrap: word-wrap;
                     }
                 }
 
-                HorizontalLayout {
-                    spacing: 12px;
+                for row in root.calendars: VerticalLayout {
+                    alignment: start;
 
-                    KitCheckbox {
-                        ownership: Ownership.controlled;
-                        label: row.title;
-                        state: row.selected ? CheckState.checked : CheckState.unchecked;
-                        horizontal-stretch: 1;
-                        toggled(_) => { root.calendar-toggled(row.id); }
+                    if row.show-header && row.source-title != "": VerticalLayout {
+                        padding-top: 4px;
+                        padding-bottom: 4px;
+                        KitOverline { label: row.source-title; }
                     }
-                    if row.source-title != "": KitText {
-                        text: row.source-title;
-                        role: TypographyRole.caption;
-                        vertical-alignment: center;
+
+                    HorizontalLayout {
+                        spacing: 12px;
+                        padding-top: 3px;
+                        padding-bottom: 3px;
+
+                        KitCheckbox {
+                            ownership: Ownership.controlled;
+                            control-size: ControlSize.compact;
+                            padding-inline: 0px;
+                            text-size: Typography.field-label.size;
+                            text-weight: Typography.field-label.weight;
+                            label: row.title;
+                            state: row.selected ? CheckState.checked : CheckState.unchecked;
+                            horizontal-stretch: 1;
+                            toggled(_) => { root.calendar-toggled(row.id); }
+                        }
+                        if row.source-title != "": KitText {
+                            text: row.source-title;
+                            role: TypographyRole.caption;
+                            vertical-alignment: center;
+                        }
                     }
                 }
             }

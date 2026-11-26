@@ -1,4 +1,4 @@
-import { ButtonIntent, ChoiceLabelPosition, ControlWidth, KitButton, KitSwitch, Ownership, KitBadge, KitFieldRow, KitFieldSet, KitMetrics, KitText, KitThemeContext, KitThemes, TextViewFont, Tone, TypographyRole } from "@kit";
+import { FieldSetAppearance, FieldRowAppearance, ButtonIntent, ChoiceLabelPosition, ControlWidth, KitButton, KitSwitch, Ownership, KitBadge, KitFieldRow, KitFieldSet, KitText, KitThemeContext, KitThemes, TextViewFont, Tone, TypographyRole, ControlSize } from "@kit";
 import { Theme } from "../../theme.slint";
 import { InstallBlockReason, UpdateRowStatus } from "../../types.slint";
 import { UpdateCopy } from "../update_copy.slint";
@@ -84,13 +84,14 @@ export component AboutSection inherits KitFieldSet {
 
     theme: KitThemeContext.current;
     legend: @tr("À PROPOS");
+    appearance: FieldSetAppearance.card;
 
     KitFieldRow {
         theme: root.theme;
         modal-layer: 0;
         orientation: Theme.settings-field-orientation(self.width);
-        padding: KitMetrics.field-gap(self.theme);
-        show-divider: false;
+        appearance: FieldRowAppearance.inset;
+        show-divider: true;
         label: @tr("Version");
 
         KitText {
@@ -109,14 +110,14 @@ export component AboutSection inherits KitFieldSet {
         theme: root.theme;
         modal-layer: 0;
         orientation: Theme.settings-field-orientation(self.width);
-        padding: KitMetrics.field-gap(self.theme);
+        appearance: FieldRowAppearance.inset;
         show-divider: true;
         label: @tr("Transcription");
 
         KitText {
             text: root.transcription-label;
             role: TypographyRole.body;
-            color: Theme.text-secondary;
+            color: Theme.text-tertiary;
             horizontal-alignment: right;
             overflow: elide;
             width: Theme.settings-control-width;
@@ -128,14 +129,14 @@ export component AboutSection inherits KitFieldSet {
         theme: root.theme;
         modal-layer: 0;
         orientation: Theme.settings-field-orientation(self.width);
-        padding: KitMetrics.field-gap(self.theme);
+        appearance: FieldRowAppearance.inset;
         show-divider: true;
         label: @tr("Résumés");
 
         KitText {
             text: root.summary-label;
             role: TypographyRole.body;
-            color: Theme.text-secondary;
+            color: Theme.text-tertiary;
             horizontal-alignment: right;
             overflow: elide;
             width: Theme.settings-control-width;
@@ -147,7 +148,7 @@ export component AboutSection inherits KitFieldSet {
         theme: root.theme;
         modal-layer: 0;
         orientation: Theme.settings-field-orientation(self.width);
-        padding: KitMetrics.field-gap(self.theme);
+        appearance: FieldRowAppearance.inset;
         show-divider: true;
         label: @tr("Confidentialité");
 
@@ -163,7 +164,7 @@ export component AboutSection inherits KitFieldSet {
         theme: root.theme;
         modal-layer: 0;
         orientation: Theme.settings-field-orientation(self.width);
-        padding: KitMetrics.field-gap(self.theme);
+        appearance: FieldRowAppearance.inset;
         show-divider: true;
         focus-requested => { update-button.take-focus(); }
         private property <bool> control-focused: update-button.has-focus;
@@ -176,6 +177,7 @@ export component AboutSection inherits KitFieldSet {
         update-button := KitButton {
             theme: KitThemeContext.current;
             modal-layer: 0;
+            control-size: ControlSize.compact;
             text: root.update-button-label();
             intent: root.update-button-intent();
             disabled: !root.update-button-enabled();
@@ -187,7 +189,7 @@ export component AboutSection inherits KitFieldSet {
         theme: root.theme;
         modal-layer: 0;
         orientation: Theme.settings-field-orientation(self.width);
-        padding: KitMetrics.field-gap(self.theme);
+        appearance: FieldRowAppearance.inset;
         show-divider: true;
         focus-requested => { update-switch.take-focus(); }
         private property <bool> control-focused: update-switch.has-focus;

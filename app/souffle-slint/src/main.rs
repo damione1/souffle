@@ -547,6 +547,7 @@ fn populate_meeting_detail(window: &MainWindow, handle: &AppHandle, meeting: &Me
         .into_iter()
         .map(Into::into)
         .collect();
+    window.set_meeting_detail_summary_body(summary::body_without_key_points(&summary_text).into());
     window.set_meeting_detail_summary(summary_text.into());
     window.set_meeting_detail_summary_is_stale(meeting.summary_is_stale);
     window.set_meeting_detail_summary_model_label(summary_model_label(

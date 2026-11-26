@@ -1,4 +1,4 @@
-import { KitTabs, KitScrollArea, LayoutSpace, TabActivation, Ownership, OptionRow, SelectionRef } from "@kit";
+import { KitTabs, KitScrollArea, LayoutSpace, TabActivation, Ownership, OptionRow, SelectionRef, TabsAppearance } from "@kit";
 import { SettingsTab } from "../../types.slint";
 
 import { SettingsOptionList, SettingsOptions } from "settings_options.slint";
@@ -6,6 +6,7 @@ import { SettingsOptionList, SettingsOptions } from "settings_options.slint";
 export component SettingsTabBar inherits KitTabs {
     in-out property <SettingsTab> current;
     callback changed(SettingsTab);
+    appearance: TabsAppearance.underline;
     accessible-name: @tr("Sections des paramètres");
     activation: TabActivation.automatic;
     ownership: Ownership.controlled;
@@ -28,8 +29,14 @@ export component SettingsTabPage inherits KitScrollArea {
     changed active => { if root.active { root.visited = true; } }
     visible: root.active;
     clip: true;
-    gap: LayoutSpace.roomy;
+    gap: LayoutSpace.none;
     enabled: root.active;
     focusable: root.active && self.scrollable;
-    @children
+    VerticalLayout {
+        spacing: 20px;
+        // Room for the last card's shadow inside the clipped viewport.
+        padding-bottom: 20px;
+        alignment: start;
+        @children
+    }
 }

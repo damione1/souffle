@@ -1,4 +1,4 @@
-import { AlertSeverity, ButtonIntent, ChoiceLabelPosition, ControlSize, ControlWidth, KitAlert, KitButton, KitFieldRow, KitFieldSeparator, KitFieldSet, KitMetrics, KitSwitch, KitText, KitTextField, KitThemeContext, Ownership, TypographyRole } from "@kit";
+import { FieldSetAppearance, FieldRowAppearance, AlertActions, AlertSeverity, ButtonIntent, ChoiceLabelPosition, ControlSize, ControlWidth, KitAlert, KitButton, KitFieldRow, KitFieldSeparator, KitFieldSet, KitSwitch, KitText, KitTextField, KitThemeContext, Ownership, TypographyRole } from "@kit";
 import { Theme } from "../../theme.slint";
 import { AppText, Typography } from "@typography";
 import { AppBranchFallback, AppBranchTestPhase } from "../../types.slint";
@@ -33,27 +33,28 @@ export component AppBranchesSection inherits VerticalLayout {
     callback rule-moved(string, int);
     callback test-requested();
 
-    spacing: 22px;
+    spacing: 20px;
     alignment: start;
     vertical-stretch: 0;
 
     KitFieldSet {
         theme: KitThemeContext.current;
         legend: @tr("RETOUCHE PAR APPLICATION");
+        appearance: FieldSetAppearance.card;
 
         KitFieldRow {
             theme: KitThemeContext.current;
             modal-layer: 0;
             orientation: Theme.settings-field-orientation(self.width);
-            padding: KitMetrics.field-gap(self.theme);
-            show-divider: false;
+            appearance: FieldRowAppearance.inset;
+            show-divider: true;
             label: @tr("Règles par application");
             description: @tr("La première règle active valide gagne. Le nom de l'application contient le motif, sans tenir compte de la casse. Par défaut suit le modèle global ; les instructions sont partagées.");
         }
 
         HorizontalLayout {
-            padding-left: Theme.settings-inset;
-            padding-right: Theme.settings-inset;
+            padding-left: 20px;
+            padding-right: 20px;
             padding-bottom: 14px;
             spacing: 12px;
             KitTextField {
@@ -89,8 +90,8 @@ export component AppBranchesSection inherits VerticalLayout {
             changed pattern-rollback-revision => { pattern-field.text = rule.app-pattern; }
             KitFieldSeparator { }
             VerticalLayout {
-                padding-left: Theme.settings-inset;
-                padding-right: Theme.settings-inset;
+                padding-left: 20px;
+                padding-right: 20px;
                 padding-top: 10px;
                 padding-bottom: 10px;
                 spacing: 8px;
@@ -153,8 +154,8 @@ export component AppBranchesSection inherits VerticalLayout {
 
         KitFieldSeparator { }
         VerticalLayout {
-            padding-left: Theme.settings-inset;
-            padding-right: Theme.settings-inset;
+            padding-left: 20px;
+            padding-right: 20px;
             padding-top: 14px;
             padding-bottom: 14px;
             spacing: 12px;
@@ -162,21 +163,22 @@ export component AppBranchesSection inherits VerticalLayout {
                 alignment: start;
                 KitButton {
                     modal-layer: 0;
+                    control-size: ControlSize.compact;
                     text: @tr("Tester l'application actuelle");
                     activated => { root.test-requested(); }
                 }
             }
-            if root.test-phase == AppBranchTestPhase.waiting: KitAlert { bordered: false;
+            if root.test-phase == AppBranchTestPhase.waiting: KitAlert { bordered: false; corner-radius: 12px; inset: 12px; actions-placement: AlertActions.trailing;
                 severity: AlertSeverity.information;
                 message: @tr("Passez à l'application à tester. Capture dans {} secondes.", root.test-delay-seconds);
             }
-            if root.test-phase == AppBranchTestPhase.resolving: KitAlert { bordered: false;
+            if root.test-phase == AppBranchTestPhase.resolving: KitAlert { bordered: false; corner-radius: 12px; inset: 12px; actions-placement: AlertActions.trailing;
                 severity: AlertSeverity.information;
                 message: @tr("Recherche de la règle pour l'application capturée…");
             }
             if root.test-phase == AppBranchTestPhase.result: VerticalLayout {
                 spacing: 8px;
-                KitAlert { bordered: false;
+                KitAlert { bordered: false; corner-radius: 12px; inset: 12px; actions-placement: AlertActions.trailing;
                     severity: AlertSeverity.information;
                     title: @tr("Application actuelle : {}", root.preview-app);
                     message: root.preview-matched ? @tr("Règle gagnante : {}", root.preview-pattern)

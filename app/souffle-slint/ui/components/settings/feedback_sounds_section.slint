@@ -1,5 +1,4 @@
-import { AppText, Typography } from "@typography";
-import { ChoiceLabelPosition, ControlWidth, KitSlider, KitSwitch, Ownership, SliderPresentation, KitFieldSet, KitThemeContext, KitThemes, KitFieldRow, KitMetrics } from "@kit";
+import { FieldSetAppearance, FieldRowAppearance, ChoiceLabelPosition, ControlWidth, KitSlider, KitSwitch, Ownership, SliderPresentation, KitFieldSet, KitThemeContext, KitThemes, KitFieldRow, KitText, TypographyRole, TextViewFont } from "@kit";
 import { Theme } from "../../theme.slint";
 
 export component FeedbackSoundsSection inherits KitFieldSet {
@@ -13,18 +12,19 @@ export component FeedbackSoundsSection inherits KitFieldSet {
 
     theme: KitThemeContext.current;
     legend: @tr("SONS DE DICTÉE");
+    appearance: FieldSetAppearance.card;
 
     KitFieldRow {
         theme: root.theme;
         modal-layer: 0;
         orientation: Theme.settings-field-orientation(self.width);
-        padding: KitMetrics.field-gap(self.theme);
+        appearance: FieldRowAppearance.inset;
+        show-divider: true;
         focus-requested => { sounds-switch.take-focus(); }
         private property <bool> control-focused: sounds-switch.has-focus;
         changed control-focused => {
             if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
         }
-        show-divider: false;
         label: @tr("Activer les sons");
         description: @tr("Jouer un son au démarrage et à l'arrêt de l'enregistrement.");
 
@@ -45,7 +45,7 @@ export component FeedbackSoundsSection inherits KitFieldSet {
         theme: root.theme;
         modal-layer: 0;
         orientation: Theme.settings-field-orientation(self.width);
-        padding: KitMetrics.field-gap(self.theme);
+        appearance: FieldRowAppearance.inset;
         show-divider: true;
         focus-requested => { volume-slider.take-focus(); }
         label: @tr("Volume");
@@ -58,8 +58,8 @@ export component FeedbackSoundsSection inherits KitFieldSet {
             volume-slider := KitSlider {
                 theme: root.theme;
                 modal-layer: 0;
-                width: 140px;
-                presentation: SliderPresentation.filled;
+                width: 174px;
+                presentation: SliderPresentation.line;
                 ownership: Ownership.controlled;
                 spec: { minimum: root.volume-min, maximum: root.volume-max, step: 1 };
                 label: @tr("Volume des sons de dictée");
@@ -67,12 +67,14 @@ export component FeedbackSoundsSection inherits KitFieldSet {
                 chosen(value) => { root.volume-changed(value.to-float()); }
             }
 
-            AppText {
-                text: @tr("{}%", root.volume);
-                color: Theme.text-muted;
-                typography: Typography.secondary;
+            KitText {
+                theme: root.theme;
+                text: @tr("{} %", root.volume);
+                role: TypographyRole.caption;
+                font: TextViewFont.monospace;
+                wrap: no-wrap;
                 vertical-alignment: center;
-                width: 38px;
+                width: 44px;
                 horizontal-alignment: right;
             }
         }

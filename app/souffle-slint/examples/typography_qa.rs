@@ -346,10 +346,10 @@ fn main() {
         });
         window.set_meeting_detail_transcript_blocks(blocks.clone());
         window.set_meeting_detail_transcript_segment_count(1);
-        window.set_meeting_detail_summary(
-            format!("# Résumé & décisions\n\n{text}\n\n- Dernière ligne : accès clavier & ⌘ ⌥ ⇧")
-                .into(),
-        );
+        let summary =
+            format!("# Résumé & décisions\n\n{text}\n\n- Dernière ligne : accès clavier & ⌘ ⌥ ⇧");
+        window.set_meeting_detail_summary_body(summary.as_str().into());
+        window.set_meeting_detail_summary(summary.into());
         window.set_meeting_detail_summary_key_points(strings(&[text]));
         window.set_meeting_detail_notes(text.into());
         if surface == "detail-empty" {

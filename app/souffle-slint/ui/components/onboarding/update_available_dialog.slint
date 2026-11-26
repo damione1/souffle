@@ -1,8 +1,9 @@
-import { DialogTabPolicy, ButtonIntent, DialogAction, KitDialog, KitText, KitProgress, ProgressMode, TypographyRole, Tone } from "@kit";
+import { ControlSize, DialogTabPolicy, ButtonIntent, DialogAction, KitDialog, KitText, KitProgress, ProgressMode, TypographyRole, Tone } from "@kit";
 import { MarkdownBlock } from "markdown_block.slint";
 import { MarkdownView } from "markdown_view.slint";
 import { InstallBlockReason, UpdatePhase } from "../../types.slint";
 import { UpdateCopy } from "../update_copy.slint";
+import { Typography } from "@typography";
 
 // Port of UpdateAvailableDialog.svelte + UpdateAction.svelte. `download_update`/
 // `install_update` are real commands (`commands/updater.rs`). No live download
@@ -23,6 +24,16 @@ import { UpdateCopy } from "../update_copy.slint";
 export component UpdateAvailableDialog inherits KitDialog {
     tab-policy: DialogTabPolicy.native;
     modal-layer: 3;
+    quiet-initial-focus: true;
+    close-control-size: ControlSize.compact;
+    stacked-header: true;
+    panel-width: 470px;
+    inset: 26px;
+    content-gap: 16px;
+    overlay-body-scrollbar: true;
+    title-size: Typography.preview.size;
+    title-weight: Typography.dialog-strong.weight;
+    description-size: Typography.field-label.size;
     close-label: @tr("SettingsPermissionsDialog" => "Fermer");
     in property <string> latest-version;
     in property <[MarkdownBlock]> release-notes-blocks;
@@ -67,12 +78,13 @@ export component UpdateAvailableDialog inherits KitDialog {
 
     if root.phase == UpdatePhase.downloading: KitProgress {
         mode: ProgressMode.indeterminate;
-        label: @tr("Téléchargement…");
+        caption: @tr("Téléchargement…");
+        accessible-label: self.caption;
     }
 
     if root.error-message != "": KitText {
         text: root.error-message;
-        role: TypographyRole.body;
+        role: TypographyRole.control;
         tone: Tone.danger;
     }
 

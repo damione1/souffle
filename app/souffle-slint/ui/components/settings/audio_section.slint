@@ -1,7 +1,6 @@
 import { SettingsOptions, ClosedSettingsPicker } from "settings_options.slint";
-import {
-    ChoiceLabelPosition, ControlWidth, FieldAccess, KitFieldRow, KitFieldSet, KitMetrics,
-    KitSwitch, KitThemeContext, KitThemes, Ownership
+import { FieldSetAppearance, FieldRowAppearance,
+    ChoiceLabelPosition, ControlWidth, FieldAccess, KitFieldRow, KitFieldSet, KitSwitch, KitThemeContext, KitThemes, Ownership
 } from "@kit";
 import { PickerLabels } from "../picker_labels.slint";
 import { CatalogPicker } from "../catalog_picker.slint";
@@ -47,18 +46,19 @@ export component AudioSection inherits KitFieldSet {
 
     theme: KitThemeContext.current;
     legend: @tr("AUDIO");
+    appearance: FieldSetAppearance.card;
 
     if root.is-laptop: KitFieldRow {
         theme: root.theme;
         modal-layer: 0;
         orientation: Theme.settings-field-orientation(self.width);
-        padding: KitMetrics.field-gap(self.theme);
+        appearance: FieldRowAppearance.inset;
+        show-divider: true;
         focus-requested => { clamshell-picker.take-focus(); }
         private property <bool> control-focused: clamshell-picker.has-focus;
         changed control-focused => {
             if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
         }
-        show-divider: false;
         label: @tr("Microphone quand le capot est fermé");
         description: @tr("Utiliser ce microphone à la place quand le capot est fermé avec un écran externe connecté.");
 
@@ -79,13 +79,13 @@ export component AudioSection inherits KitFieldSet {
         theme: root.theme;
         modal-layer: 0;
         orientation: Theme.settings-field-orientation(self.width);
-        padding: KitMetrics.field-gap(self.theme);
+        appearance: FieldRowAppearance.inset;
+        show-divider: true;
         focus-requested => { system-audio-switch.take-focus(); }
         private property <bool> control-focused: system-audio-switch.has-focus;
         changed control-focused => {
             if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
         }
-        show-divider: root.is-laptop;
         label: @tr("Capturer l'audio système");
         description: @tr("Inclure le son des haut-parleurs (l'autre côté d'un appel) dans les réunions.");
 
@@ -106,13 +106,13 @@ export component AudioSection inherits KitFieldSet {
         theme: root.theme;
         modal-layer: 0;
         orientation: Theme.settings-field-orientation(self.width);
-        padding: KitMetrics.field-gap(self.theme);
+        appearance: FieldRowAppearance.inset;
+        show-divider: true;
         focus-requested => { language-picker.take-focus(); }
         private property <bool> control-focused: language-picker.has-focus;
         changed control-focused => {
             if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
         }
-        show-divider: root.is-laptop || root.system-audio-supported;
         label: @tr("Langue de transcription (réunions)");
         description: @tr("Indice pour la détection de langue, jamais forcé sur le moteur.");
 
@@ -129,7 +129,7 @@ export component AudioSection inherits KitFieldSet {
         theme: root.theme;
         modal-layer: 0;
         orientation: Theme.settings-field-orientation(self.width);
-        padding: KitMetrics.field-gap(self.theme);
+        appearance: FieldRowAppearance.inset;
         show-divider: true;
         focus-requested => { autostop-switch.take-focus(); }
         private property <bool> control-focused: autostop-switch.has-focus;
@@ -156,7 +156,7 @@ export component AudioSection inherits KitFieldSet {
         theme: root.theme;
         modal-layer: 0;
         orientation: Theme.settings-field-orientation(self.width);
-        padding: KitMetrics.field-gap(self.theme);
+        appearance: FieldRowAppearance.inset;
         show-divider: true;
         focus-requested => { delay-picker.take-focus(); }
         private property <bool> control-focused: delay-picker.has-focus;
@@ -179,7 +179,7 @@ export component AudioSection inherits KitFieldSet {
         theme: root.theme;
         modal-layer: 0;
         orientation: Theme.settings-field-orientation(self.width);
-        padding: KitMetrics.field-gap(self.theme);
+        appearance: FieldRowAppearance.inset;
         show-divider: true;
         focus-requested => { duration-picker.take-focus(); }
         private property <bool> control-focused: duration-picker.has-focus;
@@ -202,7 +202,7 @@ export component AudioSection inherits KitFieldSet {
         theme: root.theme;
         modal-layer: 0;
         orientation: Theme.settings-field-orientation(self.width);
-        padding: KitMetrics.field-gap(self.theme);
+        appearance: FieldRowAppearance.inset;
         show-divider: true;
         focus-requested => { vad-switch.take-focus(); }
         private property <bool> control-focused: vad-switch.has-focus;
@@ -229,7 +229,7 @@ export component AudioSection inherits KitFieldSet {
         theme: root.theme;
         modal-layer: 0;
         orientation: Theme.settings-field-orientation(self.width);
-        padding: KitMetrics.field-gap(self.theme);
+        appearance: FieldRowAppearance.inset;
         show-divider: true;
         focus-requested => { filler-switch.take-focus(); }
         private property <bool> control-focused: filler-switch.has-focus;
@@ -256,7 +256,7 @@ export component AudioSection inherits KitFieldSet {
         theme: root.theme;
         modal-layer: 0;
         orientation: Theme.settings-field-orientation(self.width);
-        padding: KitMetrics.field-gap(self.theme);
+        appearance: FieldRowAppearance.inset;
         show-divider: true;
         focus-requested => { stutter-switch.take-focus(); }
         private property <bool> control-focused: stutter-switch.has-focus;
@@ -283,7 +283,7 @@ export component AudioSection inherits KitFieldSet {
         theme: root.theme;
         modal-layer: 0;
         orientation: Theme.settings-field-orientation(self.width);
-        padding: KitMetrics.field-gap(self.theme);
+        appearance: FieldRowAppearance.inset;
         show-divider: true;
         focus-requested => { dictionary-switch.take-focus(); }
         private property <bool> control-focused: dictionary-switch.has-focus;
@@ -310,13 +310,13 @@ export component AudioSection inherits KitFieldSet {
         theme: root.theme;
         modal-layer: 0;
         orientation: Theme.settings-field-orientation(self.width);
-        padding: KitMetrics.field-gap(self.theme);
+        appearance: FieldRowAppearance.inset;
+        show-divider: true;
         focus-requested => { diagnostic-switch.take-focus(); }
         private property <bool> control-focused: diagnostic-switch.has-focus;
         changed control-focused => {
             if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
         }
-        show-divider: true;
         label: @tr("Capture diagnostique avant AEC");
         description: root.meeting-audio-retention == AudioRetention.off
             ? @tr("Activez d'abord la conservation de l'audio dans Données. Aucun diagnostic n'est enregistré sans elle.")

@@ -1,7 +1,6 @@
 import { Theme } from "../../theme.slint";
-import {
-    ButtonIntent, ControlSize, KitButton, KitFieldRow, KitFieldSet, KitMetrics,
-    KitThemeContext, KitThemes
+import { FieldSetAppearance, FieldRowAppearance,
+    ButtonIntent, ControlSize, KitButton, KitFieldRow, KitFieldSet, KitThemeContext, KitThemes
 } from "@kit";
 
 export component PermissionsSection inherits KitFieldSet {
@@ -9,18 +8,19 @@ export component PermissionsSection inherits KitFieldSet {
 
     theme: KitThemeContext.current;
     legend: @tr("PERMISSIONS");
+    appearance: FieldSetAppearance.card;
 
     KitFieldRow {
         theme: root.theme;
         modal-layer: 0;
         orientation: Theme.settings-field-orientation(self.width);
-        padding: KitMetrics.field-gap(self.theme);
+        appearance: FieldRowAppearance.inset;
+        show-divider: true;
         focus-requested => { permissions-button.take-focus(); }
         private property <bool> control-focused: permissions-button.has-focus;
         changed control-focused => {
             if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
         }
-        show-divider: false;
         label: @tr("Permissions");
         description: @tr("Revérifier les permissions macOS si le collage ou l'enregistrement cesse de fonctionner.");
 
