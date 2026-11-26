@@ -1750,7 +1750,7 @@ version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ab8ecd87370524b461f8557c119c405552c396ed91fc0a8eec68679eab26f94a"
 dependencies = [
- "libloading 0.7.4",
+ "libloading 0.8.9",
 ]
 
 [[package]]
@@ -2958,7 +2958,7 @@ dependencies = [
  "log",
  "presser",
  "thiserror 2.0.18",
- "windows 0.58.0",
+ "windows 0.62.2",
 ]
 
 [[package]]
@@ -3580,7 +3580,7 @@ dependencies = [
  "js-sys",
  "log",
  "wasm-bindgen",
- "windows-core 0.58.0",
+ "windows-core 0.62.2",
 ]
 
 [[package]]
@@ -7152,7 +7152,7 @@ dependencies = [
 [[package]]
 name = "slint-kit"
 version = "0.9.0"
-source = "git+https://github.com/damione1/slint-kit.git?rev=16f43fa45bbd78d8e357e598e0c6c14cbc6241cc#16f43fa45bbd78d8e357e598e0c6c14cbc6241cc"
+source = "git+https://github.com/damione1/slint-kit.git?rev=ae41e365363c29b743513f7f272232a659400ba1#ae41e365363c29b743513f7f272232a659400ba1"
 dependencies = [
  "slint",
  "slint-build",
@@ -7163,7 +7163,7 @@ dependencies = [
 [[package]]
 name = "slint-kit-build"
 version = "0.9.0"
-source = "git+https://github.com/damione1/slint-kit.git?rev=16f43fa45bbd78d8e357e598e0c6c14cbc6241cc#16f43fa45bbd78d8e357e598e0c6c14cbc6241cc"
+source = "git+https://github.com/damione1/slint-kit.git?rev=ae41e365363c29b743513f7f272232a659400ba1#ae41e365363c29b743513f7f272232a659400ba1"
 dependencies = [
  "slint-build",
  "slint-kit-core",
@@ -7173,7 +7173,7 @@ dependencies = [
 [[package]]
 name = "slint-kit-core"
 version = "0.9.0"
-source = "git+https://github.com/damione1/slint-kit.git?rev=16f43fa45bbd78d8e357e598e0c6c14cbc6241cc#16f43fa45bbd78d8e357e598e0c6c14cbc6241cc"
+source = "git+https://github.com/damione1/slint-kit.git?rev=ae41e365363c29b743513f7f272232a659400ba1#ae41e365363c29b743513f7f272232a659400ba1"
 dependencies = [
  "chrono",
  "chrono-tz",
@@ -7190,7 +7190,7 @@ dependencies = [
 [[package]]
 name = "slint-kit-pro"
 version = "0.1.0"
-source = "git+https://github.com/damione1/slint-kit-pro.git?rev=ab933a77821d435adb4471c6c869b64bbe6a422b#ab933a77821d435adb4471c6c869b64bbe6a422b"
+source = "git+https://github.com/damione1/slint-kit-pro.git?rev=82c62dbe862f9bd14aa8ed74d0ae9a2e46bd4528#82c62dbe862f9bd14aa8ed74d0ae9a2e46bd4528"
 dependencies = [
  "plotters",
  "slint",
@@ -7202,7 +7202,7 @@ dependencies = [
 [[package]]
 name = "slint-kit-pro-build"
 version = "0.1.0"
-source = "git+https://github.com/damione1/slint-kit-pro.git?rev=ab933a77821d435adb4471c6c869b64bbe6a422b#ab933a77821d435adb4471c6c869b64bbe6a422b"
+source = "git+https://github.com/damione1/slint-kit-pro.git?rev=82c62dbe862f9bd14aa8ed74d0ae9a2e46bd4528#82c62dbe862f9bd14aa8ed74d0ae9a2e46bd4528"
 dependencies = [
  "slint-build",
  "slint-kit-build",
@@ -7211,7 +7211,7 @@ dependencies = [
 [[package]]
 name = "slint-kit-slint"
 version = "0.9.0"
-source = "git+https://github.com/damione1/slint-kit.git?rev=16f43fa45bbd78d8e357e598e0c6c14cbc6241cc#16f43fa45bbd78d8e357e598e0c6c14cbc6241cc"
+source = "git+https://github.com/damione1/slint-kit.git?rev=ae41e365363c29b743513f7f272232a659400ba1#ae41e365363c29b743513f7f272232a659400ba1"
 dependencies = [
  "paste",
  "slint",
