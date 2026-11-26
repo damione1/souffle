@@ -85,6 +85,12 @@ mod tests {
     }
 
     fn settle() {
+        // The list replaces its height estimate as rows are laid out, so a
+        // far seek takes a few frames to come to rest.
+        draw_frames(6);
+    }
+
+    fn draw_frames(count: usize) {
         let window = TEST_WINDOW
             .with(|slot| slot.borrow().clone())
             .expect("no test window");
@@ -93,9 +99,7 @@ mod tests {
             slint::platform::software_renderer::Rgb565Pixel::default();
             (size.width * size.height) as usize
         ];
-        // The list replaces its height estimate as rows are laid out, so a
-        // far seek takes a few frames to come to rest.
-        for _ in 0..6 {
+        for _ in 0..count {
             slint::platform::update_timers_and_animations();
             window.request_redraw();
             window.draw_if_needed(|renderer| {
@@ -315,6 +319,56 @@ mod tests {
         );
         assert!(read.contains(&1400), "the last row was created at the end");
         assert!(!read.contains(&300) && !read.contains(&1000));
+    }
+
+    /// The list re-anchors its offset whenever a new row changes its height
+    /// estimate. What is on screen must still move by exactly the distance
+    /// scrolled, in both directions, across many row boundaries.
+    #[test]
+    fn scrolling_moves_the_text_by_the_distance_scrolled_without_a_jump() {
+        let fixture = transcript_view(600);
+        fixture.scroll_to_share(0.4);
+        let positions = |fixture: &Fixture| -> std::collections::BTreeMap<String, f32> {
+            ElementHandle::find_by_element_type_name(&fixture.window, "TimestampButton")
+                .filter_map(|button| {
+                    Some((
+                        button.accessible_label()?.to_string(),
+                        button.absolute_position().y,
+                    ))
+                })
+                .collect()
+        };
+        let mut boundaries = std::collections::BTreeSet::new();
+        for step in [12.0f32, -12.0, 67.0, -67.0] {
+            for _ in 0..40 {
+                let before = positions(&fixture);
+                let top = fixture.window.get_meeting_detail_transcript_scroll_top();
+                fixture
+                    .window
+                    .set_meeting_detail_transcript_scroll_top(top - step);
+                draw_frames(2);
+                let after = positions(&fixture);
+                let mut tracked = 0;
+                for (label, y) in &before {
+                    if let Some(moved) = after.get(label) {
+                        tracked += 1;
+                        assert!(
+                            (y - moved - step).abs() < 0.6,
+                            "{label} moved {} for a scroll of {step}",
+                            y - moved
+                        );
+                    }
+                }
+                assert!(tracked > 0, "a paragraph stays on screen across a step");
+                boundaries.extend(after.into_keys());
+                fixture.assert_gapless(&format!("after a scroll of {step}"));
+            }
+        }
+        assert!(
+            boundaries.len() > 20,
+            "the scroll crossed many paragraphs ({})",
+            boundaries.len()
+        );
     }
 
     #[test]

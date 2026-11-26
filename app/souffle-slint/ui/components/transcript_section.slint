@@ -302,7 +302,8 @@ component TranscriptRow inherits Rectangle {
                     Rectangle { height: 1px; background: Theme.line; }
                 }
                 AppText {
-                    text: @tr("Fin de l'enregistrement précédent") + " · " + @tr("Nouvelle session d'enregistrement");
+                    // Keep the existing catalogue context when extracting this row.
+                    text: @tr("TranscriptSection" => "Fin de l'enregistrement précédent") + " · " + @tr("TranscriptSection" => "Nouvelle session d'enregistrement");
                     typography: Typography.caption;
                     color: Theme.text-faint;
                     horizontal-stretch: 0;

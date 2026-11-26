@@ -235,17 +235,27 @@ fn long_history(window: &MainWindow, days: i32) {
             ),
         })
         .collect::<Vec<_>>();
-    window.set_timeline_groups(model(groups));
-    if scroll_bench::enabled() {
-        // A day is a heading, a card of rows and the gap to the next one.
-        let travel = days as f32 * (ENTRIES_PER_DAY as f32 * 57.0 + 60.0);
-        scroll_bench::start(
-            window,
-            format!("history {} entries", days * ENTRIES_PER_DAY),
-            scroll_bench::View::wheel(520.0, 600.0, travel),
-            |_| {},
-        );
+    window.set_timeline_groups(model(groups.clone()));
+    if !scroll_bench::enabled() {
+        return;
     }
+    let label = format!("history {} entries", days * ENTRIES_PER_DAY);
+    if std::env::var("SOU276_HISTORY_REFRESH").as_deref() == Ok("1") {
+        // What `refresh_timeline` does after a search key, a filter or a
+        // finished recording: a new model of the same entries.
+        scroll_bench::start_growth(window, format!("{label} replaced"), 40, move |window, _| {
+            window.set_timeline_groups(model(groups.clone()));
+        });
+        return;
+    }
+    // A day is a heading, a card of rows and the gap to the next one.
+    let travel = days as f32 * (ENTRIES_PER_DAY as f32 * 57.0 + 60.0);
+    scroll_bench::start(
+        window,
+        label,
+        scroll_bench::View::wheel(520.0, 600.0, travel),
+        |_| {},
+    );
 }
 
 fn release_notes() -> Vec<MarkdownBlock> {
@@ -707,9 +717,23 @@ fn long_transcript(window: &MainWindow, surface: &str) {
             scroll_bench::View {
                 travel: Box::new(|window| window.get_meeting_detail_transcript_scroll_travel()),
                 position: Box::new(|window| -window.get_meeting_detail_transcript_scroll_top()),
-                scroll_to: Box::new(|window, position| {
-                    window.set_meeting_detail_transcript_scroll_top(-position)
-                }),
+                scroll_to: if std::env::var("SOU276_SCROLL_BENCH_WHEEL").as_deref() == Ok("1") {
+                    // What a trackpad sends: a distance over the list.
+                    Box::new(|window, position| {
+                        let delta = position + window.get_meeting_detail_transcript_scroll_top();
+                        window.window().dispatch_event(
+                            slint::platform::WindowEvent::PointerScrolled {
+                                position: slint::LogicalPosition::new(520.0, 600.0),
+                                delta_x: 0.0,
+                                delta_y: -delta,
+                            },
+                        );
+                    })
+                } else {
+                    Box::new(|window, position| {
+                        window.set_meeting_detail_transcript_scroll_top(-position)
+                    })
+                },
             },
             |_| {},
         );

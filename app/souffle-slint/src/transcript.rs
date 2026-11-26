@@ -271,8 +271,9 @@ pub fn filter_blocks(blocks: &[TranscriptBlock], query: &str) -> Vec<TranscriptB
         .collect()
 }
 
-// Windowing math of the settings lists (`lists_ui`), whose rows have fixed
-// heights. The transcript no longer uses it: the kit list virtualizes it.
+// Windowing math of the settings log (`settings_log`), the one list still
+// windowed from Rust. The transcript no longer uses it: the kit list
+// virtualizes it.
 
 pub struct VisibleWindow {
     pub start: usize,

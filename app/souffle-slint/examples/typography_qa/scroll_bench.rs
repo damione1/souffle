@@ -1,10 +1,12 @@
 //! Scripted scrolling of a fixture list with one scroll step per rendered frame.
 //!
 //! SOU276_SCROLL_BENCH=1 runs three passes (slow, fast, jumps), prints one
-//! line per pass and quits. The list moves once every `STEP_INTERVAL`. Each
-//! step is charged the main-thread CPU time spent until the next one (change
-//! handlers, row creation, layout and the draw), and its wall time: the timer
-//! runs on that same thread, so a step that overruns delays the next one.
+//! line per pass and quits. The list moves once every step interval
+//! (SOU276_SCROLL_BENCH_INTERVAL_MS, 16 by default; 8 is one step per frame
+//! of a 120 Hz display). Each step is charged the main-thread CPU time spent
+//! until the next one (change handlers, row creation, layout and the draw),
+//! and its wall time: the timer runs on that same thread, so a step that
+//! overruns delays the next one.
 use slint::ComponentHandle;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -94,10 +96,21 @@ fn percentile(sorted: &[f64], fraction: f64) -> f64 {
     sorted[((sorted.len() - 1) as f64 * fraction).round() as usize]
 }
 
-/// 60 steps a second: one every other frame of a 120 Hz display.
-const STEP_INTERVAL: std::time::Duration = std::time::Duration::from_millis(16);
+/// 60 steps a second unless SOU276_SCROLL_BENCH_INTERVAL_MS says otherwise.
+fn step_interval() -> std::time::Duration {
+    std::time::Duration::from_millis(
+        std::env::var("SOU276_SCROLL_BENCH_INTERVAL_MS")
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(16),
+    )
+}
+
 /// A step this late has dropped at least one 60 Hz frame.
 const STALL_MS: f64 = 33.4;
+/// The frame time of a 120 Hz display, and of a 60 Hz one.
+const FRAME_120_MS: f64 = 1000.0 / 120.0;
+const FRAME_60_MS: f64 = 1000.0 / 60.0;
 
 fn report(name: &str, label: &str, samples: &Samples) {
     let mut cpu = samples.cpu.clone();
@@ -105,13 +118,16 @@ fn report(name: &str, label: &str, samples: &Samples) {
     cpu.sort_by(f64::total_cmp);
     wall.sort_by(f64::total_cmp);
     let stalls = wall.iter().filter(|ms| **ms > STALL_MS).count();
+    let over = |budget: f64| cpu.iter().filter(|ms| **ms > budget).count();
     eprintln!(
-        "bench {label} {name}: steps {} cpu_ms mean {:.2} p50 {:.2} p95 {:.2} max {:.2} stalls {} wall_ms p50 {:.2} p95 {:.2} max {:.2}",
+        "bench {label} {name}: steps {} cpu_ms mean {:.2} p50 {:.2} p95 {:.2} max {:.2} over_8.3ms {} over_16.7ms {} stalls {} wall_ms p50 {:.2} p95 {:.2} max {:.2}",
         cpu.len(),
         cpu.iter().sum::<f64>() / cpu.len().max(1) as f64,
         percentile(&cpu, 0.5),
         percentile(&cpu, 0.95),
         cpu.last().copied().unwrap_or(0.0),
+        over(FRAME_120_MS),
+        over(FRAME_60_MS),
         stalls,
         percentile(&wall, 0.5),
         percentile(&wall, 0.95),
@@ -227,12 +243,12 @@ pub(super) fn start<W: ComponentHandle + 'static>(
     let weak = window.as_weak();
     slint::Timer::single_shot(std::time::Duration::from_millis(1500), move || {
         if weak.upgrade().is_some() {
-            timer.start(slint::TimerMode::Repeated, STEP_INTERVAL, tick);
+            timer.start(slint::TimerMode::Repeated, step_interval(), tick);
         }
     });
 }
 
-/// Times `steps` calls of `step`, one every `STEP_INTERVAL`, for a view that
+/// Times `steps` calls of `step`, one every step interval, for a view that
 /// grows instead of scrolling. Reports the first and the last quarter apart:
 /// the cost of a step should not follow the amount of content.
 pub(super) fn start_growth<W: ComponentHandle + 'static>(
@@ -275,7 +291,7 @@ pub(super) fn start_growth<W: ComponentHandle + 'static>(
     let weak = window.as_weak();
     slint::Timer::single_shot(std::time::Duration::from_millis(1500), move || {
         if weak.upgrade().is_some() {
-            timer.start(slint::TimerMode::Repeated, STEP_INTERVAL, tick);
+            timer.start(slint::TimerMode::Repeated, step_interval(), tick);
         }
     });
 }

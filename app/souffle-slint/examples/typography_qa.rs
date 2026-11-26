@@ -10,6 +10,17 @@
 //! SOU276_MOCKUP=1 applies the design board data (typography_qa/mockup.rs).
 //! SOU276_SNAPSHOT=<png path> renders the settled window to a file and exits
 //! (see capture_mockup_surfaces.sh; use SLINT_SCALE_FACTOR=1 to match the mockups).
+//!
+//! Load, with SOU276_MOCKUP=1: SOU276_TRANSCRIPT_MINUTES=<n> (a synthetic
+//! meeting on detail-transcript-long, SOU276_TRANSCRIPT_LAYOUT=text for the
+//! text layout), SOU276_LIST_ROWS=<n> (settings-transcription-long),
+//! SOU276_HISTORY_DAYS=<n> (home), SOU276_COMPACT_LINES=<n> (detail),
+//! SOU276_DICTATION_WORDS=<n> (dictation, streamed).
+//! SOU276_SCROLL_BENCH=1 scrolls that list and prints the cost of each step
+//! (typography_qa/scroll_bench.rs): SOU276_SCROLL_BENCH_FRAMES=<steps a pass>,
+//! SOU276_SCROLL_BENCH_INTERVAL_MS=<ms>, SOU276_SCROLL_BENCH_WHEEL=1 (wheel
+//! events instead of the scroll position), SOU276_BENCH_LIST=snippets,
+//! SOU276_HISTORY_REFRESH=1 (replace the history instead of scrolling it).
 use souffle_slint::*;
 #[allow(dead_code)]
 #[path = "../src/audio_ui.rs"]
