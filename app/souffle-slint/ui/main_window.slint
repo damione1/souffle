@@ -217,20 +217,6 @@ export component MainWindow inherits Window {
     in property <bool> settings-autostart-enabled;
     in property <bool> settings-debug-transcription;
     in property <LogLevel> settings-log-level;
-    // SOU-224: virtualized live-log tail. Rust owns the full line list and
-    // only pushes the visible slice + estimated spacers.
-    in property <[string]> settings-log-lines;
-    in property <int> settings-log-line-count;
-    in property <float> settings-log-spacer-before: 0.0;
-    in property <float> settings-log-spacer-after: 0.0;
-    in-out property <length> settings-log-scroll-top: 0px;
-    // The scroll position as a plain float for Rust.
-    out property <float> settings-log-scroll-top-px: root.settings-log-scroll-top / 1px;
-    // SOU-283: `main.rs` re-windows the log slice on actual scroll changes.
-    callback settings-log-scroll-changed(float);
-    changed settings-log-scroll-top => {
-        root.settings-log-scroll-changed(self.settings-log-scroll-top / 1px);
-    }
     in property <bool> settings-copying-diagnostics;
     in property <AppTheme> settings-theme;
     in property <AppLocale> settings-locale;
@@ -412,10 +398,6 @@ export component MainWindow inherits Window {
 
     callback settings-requested();
     callback settings-instrument-input(SettingsInteraction);
-    out property <bool> settings-log-active: root.window-visible && root.settings-open
-        && !root.onboarding-open && root.settings-tab == SettingsTab.system;
-    callback settings-log-activity-changed(bool);
-    changed settings-log-active => { root.settings-log-activity-changed(self.settings-log-active); }
     callback permissions-dialog-changed();
     changed settings-permissions-dialog-open => { root.permissions-dialog-changed(); }
     callback settings-tab-changed();
@@ -880,11 +862,6 @@ export component MainWindow inherits Window {
                 autostart-enabled: root.settings-autostart-enabled;
                 debug-transcription: root.settings-debug-transcription;
                 log-level: root.settings-log-level;
-                log-lines: root.settings-log-lines;
-                log-line-count: root.settings-log-line-count;
-                log-spacer-before: root.settings-log-spacer-before;
-                log-spacer-after: root.settings-log-spacer-after;
-                log-scroll-top <=> root.settings-log-scroll-top;
                 copying-diagnostics: root.settings-copying-diagnostics;
                 app-theme: root.settings-theme;
                 capture-busy: root.settings-backend-capture-busy || root.recording-mode != RecordingMode.idle || root.recording-starting;

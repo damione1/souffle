@@ -156,7 +156,7 @@ Audio, transcripts, notes and summaries are stored in a local SQLite database: S
 
 Open source and actively developed. Every release is signed and notarized, and the engineering is covered by a large test suite. Macs differ enormously in audio hardware and routing, so if something does not behave on yours, a report is genuinely useful.
 
-The fastest useful bug report is Settings > System > Diagnostics, which copies the app version, the current pipeline state and the log settings and paths, plus a live tail of the log. Paste that into a [new issue](https://github.com/damione1/souffle/issues/new/choose) with your macOS version, your Mac model and what you were doing. None of it contains transcript text, though the paths do include your user name.
+The fastest useful bug report is Settings > System > Diagnostics, which copies the app version, the current pipeline state and the log settings and paths, plus the recent tail of the log. Paste that into a [new issue](https://github.com/damione1/souffle/issues/new/choose) with your macOS version, your Mac model and what you were doing. None of it contains transcript text, though the paths do include your user name.
 
 ## Download
 

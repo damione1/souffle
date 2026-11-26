@@ -5,16 +5,6 @@ use crate::settings::AppSettings;
 use crate::state::AppState;
 use crate::update_check::UpdateCheckResult;
 
-/// Return the last N lines from the active rolling log file.
-pub fn get_log_tail(max_lines: u32) -> Result<String, String> {
-    let lines = max_lines.clamp(1, 500) as usize;
-    // Transcript lines are stripped and paths redacted here rather than in the
-    // panel: this is the text the README tells people to paste into an issue.
-    let tail = tail_log_file(lines)?;
-    let (tail, _dropped) = crate::diagnostics::strip_transcript_lines(&tail);
-    Ok(crate::diagnostics::redact_home(&tail))
-}
-
 /// Paths and runtime snapshot for the copy-diagnostics action.
 pub fn get_diagnostics_bundle(state: Arc<AppState>) -> Result<DiagnosticsBundle, String> {
     let settings = AppSettings::load(&state.db)?;

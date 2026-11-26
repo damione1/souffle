@@ -29,7 +29,6 @@ mod settings_drafts;
 mod settings_instrumentation;
 mod settings_io;
 mod settings_kit;
-mod settings_log;
 mod settings_ui;
 mod settings_values;
 mod shortcut_capture;
@@ -82,9 +81,6 @@ type AppHandle = Arc<AppState>;
 /// features/meeting/controller.svelte.ts.
 const NOTES_DEBOUNCE: Duration = Duration::from_millis(800);
 
-/// Matches `DiagnosticsSettingsSection.svelte`'s `TAIL_LINES`/`POLL_MS`.
-const SETTINGS_LOG_TAIL_LINES: u32 = 80;
-const SETTINGS_LOG_POLL: Duration = Duration::from_millis(2000);
 const ARCHIVE_EXPORT_POLL: Duration = Duration::from_millis(150);
 
 /// What the shortcut recorder says about a refused key press (#360).
@@ -841,129 +837,6 @@ fn stop_audio_progress_timer(progress_timer: &Rc<RefCell<Option<slint::Timer>>>)
     if let Some(timer) = progress_timer.borrow().as_ref() {
         timer.stop();
     }
-}
-
-/// Pushes a freshly fetched log tail into the virtualized state + window
-/// (SOU-224). A tick where the tail did not change is a full no-op. When it
-/// did change, the mounted slice is only rebuilt if the lines inside the
-/// current window actually differ - a poll that merely appends lines past
-/// the viewport leaves the rendered rows and the scroll position untouched
-/// (AC2), only the trailing spacer/line count grow.
-fn apply_settings_log_tail(
-    window: &MainWindow,
-    log_state: &Rc<RefCell<settings_log::SettingsLogState>>,
-    tail: &str,
-) {
-    let mut state = log_state.borrow_mut();
-    let lines = settings_log::split_tail(tail);
-    if lines == state.lines {
-        return;
-    }
-    let scroll_top = -window.get_settings_log_scroll_top_px();
-    let offsets = settings_log::compute_offsets(&lines);
-    let win = settings_log::visible_window(&offsets, scroll_top);
-    let slice_unchanged = win.start == state.mounted_start
-        && win.end == state.mounted_end
-        && state.mounted_end <= state.lines.len()
-        && lines[win.start..win.end] == state.lines[state.mounted_start..state.mounted_end];
-    state.lines = lines;
-    state.offsets = offsets;
-    state.mounted_start = win.start;
-    state.mounted_end = win.end;
-    window.set_settings_log_line_count(state.lines.len() as i32);
-    window.set_settings_log_spacer_before(win.spacer_before);
-    window.set_settings_log_spacer_after(win.spacer_after);
-    if !slice_unchanged {
-        window.set_settings_log_lines(
-            std::rc::Rc::new(slint::VecModel::from(
-                state.lines[win.start..win.end].to_vec(),
-            ))
-            .into(),
-        );
-    }
-}
-
-/// Re-windows the mounted log slice for a new scroll position - the log
-/// counterpart of `update_transcript_window`, and equally a no-op while the
-/// slice indices are unchanged.
-fn update_settings_log_window(
-    window: &MainWindow,
-    log_state: &Rc<RefCell<settings_log::SettingsLogState>>,
-    scroll_top: f32,
-) {
-    let mut state = log_state.borrow_mut();
-    let win = settings_log::visible_window(&state.offsets, scroll_top);
-    if win.start == state.mounted_start && win.end == state.mounted_end {
-        return;
-    }
-    state.mounted_start = win.start;
-    state.mounted_end = win.end;
-    window.set_settings_log_lines(
-        std::rc::Rc::new(slint::VecModel::from(
-            state.lines[win.start..win.end].to_vec(),
-        ))
-        .into(),
-    );
-    window.set_settings_log_spacer_before(win.spacer_before);
-    window.set_settings_log_spacer_after(win.spacer_after);
-}
-
-/// Re-fetches the log tail and pushes it into the Settings window - mirrors
-/// `DiagnosticsSettingsSection.svelte`'s `refreshTail()`.
-fn refresh_settings_log_tail(
-    window: &MainWindow,
-    settings_io: Rc<settings_io::SettingsIoCoordinator>,
-    log_state: Rc<RefCell<settings_log::SettingsLogState>>,
-) {
-    let Some(token) = settings_io.current_load_token() else {
-        return;
-    };
-    let weak = window.as_weak();
-    let worker = souffle_lib::async_runtime::spawn_blocking(move || {
-        souffle_lib::commands::get_log_tail(SETTINGS_LOG_TAIL_LINES)
-    });
-    slint::spawn_local(async move {
-        match worker.await {
-            Ok(Ok(tail)) => {
-                if settings_io.accepts_load(token)
-                    && let Some(window) = weak.upgrade()
-                    && window.get_settings_log_active()
-                {
-                    apply_settings_log_tail(&window, &log_state, &tail);
-                }
-            }
-            Ok(Err(error)) => eprintln!("Failed to read log tail: {error}"),
-            Err(error) => eprintln!("Failed to join log tail worker: {error}"),
-        }
-    })
-    .expect("slint event loop not running");
-}
-
-/// Starts or stops the live-log tail poll to match reality: it runs only
-/// while the Settings sheet is open AND the Système tab is the active one
-/// (SOU-224 AC5) - not for the whole life of the sheet, since the other
-/// five tabs are keep-alive and would otherwise relayout the log rows on
-/// every real tail change while invisible. Entering the tab also does one
-/// immediate refresh so the module is not blank for up to 2s.
-fn wire_settings_log_poll(window: &MainWindow, refresh: impl Fn(&MainWindow) + 'static) {
-    let timer = slint::Timer::default();
-    let weak = window.as_weak();
-    let refresh = Rc::new(refresh);
-    window.on_settings_log_activity_changed(move |active| {
-        timer.stop();
-        if active && let Some(window) = weak.upgrade() {
-            refresh(&window);
-            let refresh = refresh.clone();
-            let weak = window.as_weak();
-            timer.start(slint::TimerMode::Repeated, SETTINGS_LOG_POLL, move || {
-                if let Some(window) = weak.upgrade()
-                    && window.get_settings_log_active()
-                {
-                    refresh(&window);
-                }
-            });
-        }
-    });
 }
 
 fn spawn_settings_load_stage<T: Send + 'static>(
@@ -5066,21 +4939,6 @@ fn wire_callbacks(
     // `wire_update_dialogs` (SOU-226) so the updater's "Install and restart"
     // flushes through the same controller instance as quit, rather than a
     // second one that could drift out of sync.
-    // Full line list + window bookkeeping behind the virtualized live log
-    // (SOU-224) - `MainWindow.settings-log-lines` only ever holds the
-    // visible slice of this.
-    let settings_log_state: Rc<RefCell<settings_log::SettingsLogState>> =
-        Rc::new(RefCell::new(settings_log::SettingsLogState::default()));
-    // SOU-283: re-window the log on actual scroll changes, not an 80ms
-    // poll. Flickable's content-y is negative-going-down, same as the
-    // transcript's `transcript-scroll-changed`.
-    let weak_log_scroll = window.as_weak();
-    let log_state_for_scroll = settings_log_state.clone();
-    window.on_settings_log_scroll_changed(move |scroll_top_px| {
-        if let Some(window) = weak_log_scroll.upgrade() {
-            update_settings_log_window(&window, &log_state_for_scroll, -scroll_top_px);
-        }
-    });
     let settings_drafts_for_quit = settings_drafts.clone();
     let weak_quit = window.as_weak();
     let io_quit = settings_io.clone();
@@ -5144,11 +5002,6 @@ fn wire_callbacks(
     let model_options_state_for_open = model_options_state.clone();
     let snippets_list_state_for_open = snippets_list_state.clone();
     let snippet_editing_for_open = snippet_editing.clone();
-    let log_io = settings_io.clone();
-    let log_state = settings_log_state.clone();
-    wire_settings_log_poll(window, move |window| {
-        refresh_settings_log_tail(window, log_io.clone(), log_state.clone());
-    });
     let settings_drafts_for_open = settings_drafts.clone();
     let settings_io_for_open = settings_io.clone();
     let settings_values_for_open = settings_values.clone();
@@ -8807,49 +8660,6 @@ mod tests {
         assert!(window.get_settings_open());
         assert!(modifier.borrow().is_none());
         assert_ne!(ticket, fields.invoke_begin_shortcut_session());
-    }
-
-    #[test]
-    fn log_poll_ticks_only_on_the_visible_system_page_and_resumes_after_reopen() {
-        i_slint_backend_testing::init_no_event_loop();
-        let window = crate::settings_kit::new_window().unwrap();
-        let polls = Rc::new(Cell::new(0));
-        let seen = polls.clone();
-        super::wire_settings_log_poll(&window, move |_| seen.set(seen.get() + 1));
-        let tick = || {
-            i_slint_backend_testing::mock_elapsed_time(
-                super::SETTINGS_LOG_POLL + Duration::from_millis(1),
-            )
-        };
-        window.set_settings_open(true);
-        tick();
-        assert_eq!(polls.get(), 0);
-        window.set_settings_tab(crate::SettingsTab::System);
-        tick();
-        let started = polls.get();
-        tick();
-        assert_eq!(polls.get(), started + 1);
-        window.set_settings_tab(crate::SettingsTab::Ai);
-        tick();
-        let stopped = polls.get();
-        tick();
-        assert_eq!(polls.get(), stopped);
-        window.set_settings_tab(crate::SettingsTab::System);
-        tick();
-        assert!(polls.get() > stopped);
-        window.set_settings_open(false);
-        tick();
-        let closed = polls.get();
-        tick();
-        assert_eq!(polls.get(), closed);
-        window.set_settings_open(true);
-        tick();
-        assert!(polls.get() > closed);
-        window.set_window_visible(false);
-        tick();
-        let hidden = polls.get();
-        tick();
-        assert_eq!(polls.get(), hidden);
     }
 
     // SOU-226 AC2: a save-error banner from a closed Settings session must

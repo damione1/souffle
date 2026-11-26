@@ -1028,14 +1028,6 @@ fn settings(window: &MainWindow) {
     // System
     window.set_settings_autostart_enabled(true);
     window.set_settings_log_level(LogLevel::Info);
-    let lines = [
-        "22:41:08 INFO model ready kyutai-stt-1b",
-        "22:41:11 INFO mic stream opened 48000 Hz",
-        "22:42:30 WARN mic stall timeout, retry in 2s",
-        "22:42:33 INFO mic recovered",
-    ];
-    window.set_settings_log_lines(strings(&lines));
-    window.set_settings_log_line_count(lines.len() as i32);
     window.set_settings_meeting_audio_retention(AudioRetention::Keep30d);
     window.set_settings_mcp_exists(true);
     window

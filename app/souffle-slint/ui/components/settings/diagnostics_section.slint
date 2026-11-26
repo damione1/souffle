@@ -1,31 +1,12 @@
-import { AppText, AppTextInput, Typography } from "@typography";
-import { FieldSetAppearance, FieldRowAppearance, ButtonIntent, ChoiceLabelPosition, ControlSize, ControlWidth, KitButton, KitSwitch, Ownership, ScrollFrame, KitFieldSet, KitFieldSeparator, KitText, TypographyRole, KitThemeContext, KitThemes, KitFieldRow } from "@kit";
+import { FieldSetAppearance, FieldRowAppearance, ButtonIntent, ChoiceLabelPosition, ControlSize, ControlWidth, KitButton, KitSwitch, Ownership, KitFieldSet, KitFieldSeparator, KitThemeContext, KitThemes, KitFieldRow } from "@kit";
 import { LucideText } from "@kit-icons/text.slint";
 import { SettingsOptions, ClosedSettingsPicker } from "settings_options.slint";
 import { Theme } from "../../theme.slint";
 import { LogLevel } from "../../types.slint";
 
-// Port of DiagnosticsSettingsSection.svelte. The live log is virtualized
-// (SOU-224): main.rs owns the full tail and only pushes the visible slice
-// (`log-lines`) plus estimated spacers, same pattern as TranscriptSection.
-// The refresh/scroll timers only run while the Système tab is actually
-// active (see `sync_settings_log_timers` in main.rs), not for the whole
-// life of the Settings sheet.
 export component DiagnosticsSection inherits VerticalLayout {
     in-out property <bool> debug-transcription;
     in property <LogLevel> log-level;
-    // Only the currently visible slice of the log tail - main.rs owns the
-    // full line list and re-windows it as `log-scroll-top` moves (SOU-224).
-    in property <[string]> log-lines;
-    in property <int> log-line-count;
-    // Estimated px height of the lines scrolled past above/below the
-    // mounted slice - plain `float` for the same set_*/get_* reason as
-    // TranscriptSection's spacers.
-    in property <float> log-spacer-before: 0.0;
-    in property <float> log-spacer-after: 0.0;
-    // Two-way bound up to MainWindow so main.rs can react to the real scroll
-    // position and decide the next slice.
-    in-out property <length> log-scroll-top: 0px;
     in property <bool> copying-diagnostics: false;
 
     callback debug-transcription-changed(bool);
@@ -99,76 +80,9 @@ export component DiagnosticsSection inherits VerticalLayout {
             padding-right: 20px;
             padding-top: 14px;
             padding-bottom: 16px;
-            spacing: 8px;
-
-            VerticalLayout {
-                spacing: 2px;
-                AppText {
-                    text: @tr("Journal en direct");
-                    typography: Typography.field-heading;
-                    color: Theme.text-primary;
-                }
-                KitText {
-                    text: @tr("Fin du fichier journal actuel, actualisé toutes les quelques secondes.");
-                    role: TypographyRole.caption;
-                }
-            }
-
-            Rectangle {
-                height: 96px;
-                background: Theme.input;
-                border-width: 1px;
-                border-color: Theme.line;
-                border-radius: 10px;
-                clip: true;
-                accessible-role: groupbox;
-                accessible-label: @tr("Journal en direct");
-
-                log-viewport := ScrollFrame {
-                    x: 14px;
-                    y: 10px;
-                    width: parent.width - 28px;
-                    height: parent.height - 20px;
-                    horizontal-scrollbar-policy: always-off;
-                    content-width: self.visible-width;
-                    content-height: lines.preferred-height;
-                    content-y <=> root.log-scroll-top;
-
-                    lines := VerticalLayout {
-                        width: log-viewport.visible-width;
-                        spacing: 4px;
-                        alignment: start;
-
-                        Rectangle { height: root.log-spacer-before * 1px; }
-
-                        if root.log-line-count == 0: AppText {
-                            text: @tr("Aucune entrée de journal pour l'instant.");
-                            typography: Typography.mono-small;
-                            color: Theme.text-muted;
-                            wrap: word-wrap;
-                        }
-
-                        // One read-only TextInput per mounted line so a poll
-                        // that appends lines never relayouts rendered ones
-                        // (SOU-224).
-                        for line in root.log-lines: AppTextInput {
-                            text: line;
-                            typography: Typography.mono-small;
-                            color: Theme.text-muted;
-                            wrap: word-wrap;
-                            single-line: false;
-                            read-only: true;
-                            selection-background-color: Theme.accent.with-alpha(0.28);
-                        }
-
-                        Rectangle { height: root.log-spacer-after * 1px; }
-                    }
-                }
-            }
 
             HorizontalLayout {
                 alignment: start;
-                padding-top: 6px;
                 KitButton {
                     theme: KitThemeContext.current;
                     modal-layer: 0;

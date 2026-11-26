@@ -271,60 +271,6 @@ pub fn filter_blocks(blocks: &[TranscriptBlock], query: &str) -> Vec<TranscriptB
         .collect()
 }
 
-// Windowing math of the settings log (`settings_log`), the one list still
-// windowed from Rust. The transcript no longer uses it: the kit list
-// virtualizes it.
-
-pub struct VisibleWindow {
-    pub start: usize,
-    pub end: usize, // exclusive
-    pub spacer_before: f32,
-    pub spacer_after: f32,
-}
-
-/// Which row indices fall within `[scroll_top, scroll_top + viewport_height]`
-/// plus `margin` on each side. `offsets[i]` is the top of row `i` and the last
-/// entry is the total content height.
-/// Always returns at least one block (when there is at least one) so the
-/// caller never has to special-case an empty slice.
-pub fn visible_window(
-    offsets: &[f32],
-    scroll_top: f32,
-    viewport_height: f32,
-    margin: f32,
-) -> VisibleWindow {
-    let block_count = offsets.len().saturating_sub(1);
-    if block_count == 0 {
-        return VisibleWindow {
-            start: 0,
-            end: 0,
-            spacer_before: 0.0,
-            spacer_after: 0.0,
-        };
-    }
-    let total = offsets[block_count];
-    let lo = (scroll_top - margin).max(0.0);
-    let hi = (scroll_top + viewport_height + margin).min(total);
-
-    // First block whose start offset is >= lo, then step back one: that
-    // earlier block may still overlap [lo, hi) even though it starts
-    // before lo.
-    let first_at_or_after_lo = offsets[..block_count].partition_point(|&top| top < lo);
-    let start = first_at_or_after_lo.saturating_sub(1).min(block_count - 1);
-
-    // First block whose start offset is > hi is the exclusive end.
-    let end = offsets[..=block_count]
-        .partition_point(|&top| top <= hi)
-        .clamp(start + 1, block_count);
-
-    VisibleWindow {
-        start,
-        end,
-        spacer_before: offsets[start],
-        spacer_after: total - offsets[end],
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -513,55 +459,6 @@ mod tests {
         assert_eq!(blocks.len(), 2);
         assert_eq!(blocks[0].end_time, 60.0);
         assert_eq!(blocks[1].end_time, 63.0);
-    }
-
-    fn uniform_offsets(rows: usize, height: f32) -> Vec<f32> {
-        (0..=rows).map(|row| row as f32 * height).collect()
-    }
-
-    #[test]
-    fn visible_window_returns_everything_when_it_all_fits() {
-        let offsets = uniform_offsets(5, 80.0);
-        let window = visible_window(&offsets, 0.0, 10_000.0, 0.0);
-        assert_eq!((window.start, window.end), (0, 5));
-        assert_eq!(window.spacer_before, 0.0);
-        assert_eq!(window.spacer_after, 0.0);
-    }
-
-    #[test]
-    fn visible_window_slices_a_huge_list_to_a_bounded_count() {
-        let rows = 2000;
-        let offsets = uniform_offsets(rows, 80.0);
-        let total_height = *offsets.last().unwrap();
-        let viewport_height = 260.0;
-        let margin = 3.0 * viewport_height;
-
-        let window = visible_window(&offsets, total_height / 2.0, viewport_height, margin);
-
-        assert!(window.start > 0, "not scrolled to the very top");
-        assert!(window.end < rows, "not scrolled to the very bottom");
-        let mounted = window.end - window.start;
-        assert!(
-            mounted < 60,
-            "expected a small bounded window regardless of 2000 total rows, got {mounted}"
-        );
-        assert!(window.spacer_before > 0.0);
-        assert!(window.spacer_after > 0.0);
-    }
-
-    #[test]
-    fn visible_window_at_the_very_end_still_bounded_and_has_no_after_spacer() {
-        let rows = 2000;
-        let offsets = uniform_offsets(rows, 80.0);
-        let total_height = *offsets.last().unwrap();
-        let viewport_height = 260.0;
-        let margin = 3.0 * viewport_height;
-
-        let window = visible_window(&offsets, total_height, viewport_height, margin);
-
-        assert_eq!(window.end, rows);
-        assert_eq!(window.spacer_after, 0.0);
-        assert!(window.end - window.start < 60);
     }
 
     #[test]
