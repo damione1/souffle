@@ -468,8 +468,6 @@ fn production_batch_preview_replay() {
                 session_corrections: vec![],
                 diarize: dual,
                 idle_config: None,
-                meeting_transcription_language:
-                    souffle_lib::settings::MeetingTranscriptionLanguage::Auto,
             },
             Box::new(move |s| {
                 let elapsed = callback_started.lock().unwrap().elapsed().as_secs_f64();

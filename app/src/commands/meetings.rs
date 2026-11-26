@@ -821,11 +821,8 @@ pub async fn summarize_meeting_with_settings(
 
     let final_system_prompt =
         crate::summary::resolve_summary_template_prompt(&settings, template_id.as_deref());
-    let output_language = crate::summary::resolve_summary_language(
-        settings.meeting_transcription_language,
-        &transcript.segments,
-        &settings.locale,
-    );
+    let output_language =
+        crate::summary::resolve_summary_language(&transcript.segments, &settings.locale);
 
     let channel_clone = channel.clone();
     let db = state.db.clone();

@@ -1,9 +1,8 @@
 use crate::engine::TranscriptionSegment;
 use crate::lid::LanguageCode;
-use crate::settings::MeetingTranscriptionLanguage;
 
-/// Language the summary must be written in. Same two codes the meeting
-/// language setting and segment `language` fields already use.
+/// Language the summary must be written in. Same two codes the segment
+/// `language` fields already use.
 pub use crate::lid::LanguageCode as SummaryLanguage;
 
 /// English display name used in the system-prompt instruction. The rest of
@@ -56,16 +55,12 @@ pub fn majority_language_from_segments(
 
 /// Resolve the language a meeting summary should be written in.
 ///
-/// Explicit `MeetingTranscriptionLanguage` (En / Fr) wins: the user already
-/// told the engine that prior via `set_meeting_language_prior`. Auto votes
-/// on identified segments, then the UI locale, then English.
+/// The identified segments vote, then the UI locale, then English.
 pub fn resolve_summary_language(
-    setting: MeetingTranscriptionLanguage,
     segments: &[TranscriptionSegment],
     ui_locale: &str,
 ) -> SummaryLanguage {
-    LanguageCode::from_setting(setting)
-        .or_else(|| majority_language_from_segments(segments))
+    majority_language_from_segments(segments)
         .or_else(|| language_from_tag(ui_locale))
         .unwrap_or(LanguageCode::En)
 }
@@ -94,7 +89,6 @@ mod tests {
     use crate::constants::{OLLAMA_MAP_PROMPT, OLLAMA_MERGE_PROMPT, OLLAMA_SUMMARIZE_PROMPT};
     use crate::engine::TranscriptionSegment;
     use crate::lid::LanguageCode;
-    use crate::settings::MeetingTranscriptionLanguage;
 
     fn seg(language: Option<&str>) -> TranscriptionSegment {
         TranscriptionSegment {
@@ -158,58 +152,29 @@ mod tests {
     }
 
     #[test]
-    fn explicit_setting_beats_segment_majority() {
-        let french_meeting = [seg(Some("fr")), seg(Some("fr")), seg(Some("en"))];
-        assert_eq!(
-            resolve_summary_language(MeetingTranscriptionLanguage::En, &french_meeting, "fr"),
-            LanguageCode::En
-        );
-        assert_eq!(
-            resolve_summary_language(
-                MeetingTranscriptionLanguage::Fr,
-                &[seg(Some("en")), seg(Some("en"))],
-                "en"
-            ),
-            LanguageCode::Fr
-        );
-    }
-
-    #[test]
-    fn auto_uses_majority_then_locale_then_english() {
+    fn uses_majority_then_locale_then_english() {
         let french = [seg(Some("fr")), seg(Some("fr")), seg(Some("en"))];
-        assert_eq!(
-            resolve_summary_language(MeetingTranscriptionLanguage::Auto, &french, "en"),
-            LanguageCode::Fr
-        );
+        assert_eq!(resolve_summary_language(&french, "en"), LanguageCode::Fr);
 
         let unidentified = [seg(None), seg(Some("unknown"))];
         assert_eq!(
-            resolve_summary_language(MeetingTranscriptionLanguage::Auto, &unidentified, "fr-CA"),
+            resolve_summary_language(&unidentified, "fr-CA"),
             LanguageCode::Fr
         );
         assert_eq!(
-            resolve_summary_language(MeetingTranscriptionLanguage::Auto, &unidentified, ""),
+            resolve_summary_language(&unidentified, ""),
             LanguageCode::En
         );
 
         let tied = [seg(Some("fr")), seg(Some("en"))];
-        assert_eq!(
-            resolve_summary_language(MeetingTranscriptionLanguage::Auto, &tied, "fr"),
-            LanguageCode::Fr
-        );
-        assert_eq!(
-            resolve_summary_language(MeetingTranscriptionLanguage::Auto, &tied, "en"),
-            LanguageCode::En
-        );
+        assert_eq!(resolve_summary_language(&tied, "fr"), LanguageCode::Fr);
+        assert_eq!(resolve_summary_language(&tied, "en"), LanguageCode::En);
     }
 
     #[test]
     fn map_and_final_prompts_contain_the_chosen_language() {
-        let language = resolve_summary_language(
-            MeetingTranscriptionLanguage::Auto,
-            &[seg(Some("fr")), seg(Some("fr")), seg(Some("en"))],
-            "en",
-        );
+        let language =
+            resolve_summary_language(&[seg(Some("fr")), seg(Some("fr")), seg(Some("en"))], "en");
         assert_eq!(language, LanguageCode::Fr);
 
         let map = with_language_instruction(OLLAMA_MAP_PROMPT, language);

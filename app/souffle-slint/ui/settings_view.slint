@@ -26,7 +26,7 @@ import { KitButton, KitAppShell, KitStack, KitInline, KitFocusBackground, KitAle
 import { LucideArrows } from "@kit-icons/arrows.slint";
 import { SettingsOptions } from "components/settings/settings_options.slint";
 import { SettingsTabBar, SettingsTabPage } from "components/settings/settings_tabs.slint";
-import { TranscriptionPhase, AppTheme, AppLocale, PasteMethod, MeetingLanguage, LogLevel, AudioRetention, AccessState, ShortcutField, ShortcutNotice, SettingsCaptureError, SummaryProvider, AppleIntelligenceUnavailableReason, SettingsTab, InstallBlockReason, UpdateRowStatus, DictionaryLearningMode } from "types.slint";
+import { TranscriptionPhase, AppTheme, AppLocale, PasteMethod, LogLevel, AudioRetention, AccessState, ShortcutField, ShortcutNotice, SettingsCaptureError, SummaryProvider, AppleIntelligenceUnavailableReason, SettingsTab, InstallBlockReason, UpdateRowStatus, DictionaryLearningMode } from "types.slint";
 import { ModelDeletionError, TranscriptionUnavailableReason, SystemSettingsPane } from "types.slint";
 
 // The six tab pages share one overlay and mount their sections on first visit.
@@ -96,7 +96,6 @@ export component SettingsView inherits KitAppShell {
     in property <bool> meeting-audio-diagnostic;
     in property <int> diagnostic-max-minutes;
     in property <int> diagnostic-megabytes-per-hour;
-    in property <MeetingLanguage> meeting-transcription-language;
     in property <bool> meeting-autostop-enabled;
     in property <[string]> meeting-autostop-labels;
     in property <string> meeting-autostop-label;
@@ -253,7 +252,6 @@ export component SettingsView inherits KitAppShell {
     callback clamshell-device-changed(string);
     callback capture-system-audio-changed(bool);
     callback meeting-audio-diagnostic-changed(bool);
-    callback meeting-transcription-language-changed(MeetingLanguage);
     callback meeting-autostop-enabled-changed(bool);
     callback meeting-autostop-changed(string);
     callback meeting-max-duration-changed(string);
@@ -592,7 +590,6 @@ export component SettingsView inherits KitAppShell {
                                     meeting-audio-retention: root.meeting-audio-retention;
                                     diagnostic-max-minutes: root.diagnostic-max-minutes;
                                     diagnostic-megabytes-per-hour: root.diagnostic-megabytes-per-hour;
-                                    meeting-transcription-language: root.meeting-transcription-language;
                                     meeting-autostop-enabled: root.meeting-autostop-enabled;
                                     meeting-autostop-labels: root.meeting-autostop-labels;
                                     meeting-autostop-label: root.meeting-autostop-label;
@@ -603,7 +600,6 @@ export component SettingsView inherits KitAppShell {
                                     clamshell-device-changed(value) => { root.clamshell-device-changed(value); }
                                     capture-system-audio-changed(value) => { root.capture-system-audio-changed(value); }
                                     meeting-audio-diagnostic-changed(value) => { root.meeting-audio-diagnostic-changed(value); }
-                                    meeting-transcription-language-changed(value) => { root.meeting-transcription-language-changed(value); }
                                     meeting-autostop-enabled-changed(value) => { root.meeting-autostop-enabled-changed(value); }
                                     meeting-autostop-changed(value) => { root.meeting-autostop-changed(value); }
                                     meeting-max-duration-changed(value) => { root.meeting-max-duration-changed(value); }

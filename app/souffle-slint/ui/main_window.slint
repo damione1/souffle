@@ -38,8 +38,8 @@ import { TimelineDayGroup, UpcomingEvent } from "components/timeline_section.sli
 import { TranscriptBlock, TranscriptLayout } from "components/transcript_section.slint";
 import { TranscriptWord } from "components/transcript_words.slint";
 import { StructuredActionItem } from "components/summary_section.slint";
-import { RecordingMode, LiveSystemAudio, MicStall, MeetingIdleBanner, WakeResumeNotice,SpeakerRole, TimelineFilter, TimelineKind, NotesSaveState, ModelPhase, TranscriptionPhase, UpcomingPhase, SettingsTab, SettingsInteraction, AppTheme, AppLocale, PasteMethod, MeetingLanguage, LogLevel, AudioRetention, AccessState, PermissionKind, ShortcutField, ShortcutNotice, SettingsCaptureError, SummaryProvider, AppleIntelligenceUnavailableReason, OnboardingStep, UpdatePhase, InstallBlockReason, UpdateRowStatus, MeetingExportFormat, DictionaryLearningMode } from "types.slint";
-export { SettingsTab, SettingsInteraction, AppTheme, AppLocale, PasteMethod, MeetingLanguage, LogLevel, AudioRetention, AccessState, PermissionKind, ShortcutField, SummaryProvider, AppleIntelligenceUnavailableReason, SpeakerRole }
+import { RecordingMode, LiveSystemAudio, MicStall, MeetingIdleBanner, WakeResumeNotice,SpeakerRole, TimelineFilter, TimelineKind, NotesSaveState, ModelPhase, TranscriptionPhase, UpcomingPhase, SettingsTab, SettingsInteraction, AppTheme, AppLocale, PasteMethod, LogLevel, AudioRetention, AccessState, PermissionKind, ShortcutField, ShortcutNotice, SettingsCaptureError, SummaryProvider, AppleIntelligenceUnavailableReason, OnboardingStep, UpdatePhase, InstallBlockReason, UpdateRowStatus, MeetingExportFormat, DictionaryLearningMode } from "types.slint";
+export { SettingsTab, SettingsInteraction, AppTheme, AppLocale, PasteMethod, LogLevel, AudioRetention, AccessState, PermissionKind, ShortcutField, SummaryProvider, AppleIntelligenceUnavailableReason, SpeakerRole }
 import { Theme } from "theme.slint";
 import { ModelDeletionError } from "types.slint";
 import { TranscriptionLabels } from "components/transcription_labels.slint";
@@ -279,7 +279,6 @@ export component MainWindow inherits Window {
     in property <bool> settings-meeting-audio-diagnostic;
     in property <int> settings-diagnostic-max-minutes;
     in property <int> settings-diagnostic-megabytes-per-hour;
-    in property <MeetingLanguage> settings-meeting-transcription-language;
     in property <bool> settings-meeting-autostop-enabled;
     in property <[string]> settings-meeting-autostop-labels;
     in property <string> settings-meeting-autostop-label;
@@ -469,7 +468,6 @@ export component MainWindow inherits Window {
     callback settings-clamshell-device-changed(string);
     callback settings-capture-system-audio-changed(bool);
     callback settings-meeting-audio-diagnostic-changed(bool);
-    callback settings-meeting-transcription-language-changed(MeetingLanguage);
     callback settings-meeting-autostop-enabled-changed(bool);
     callback settings-meeting-autostop-changed(string);
     callback settings-meeting-max-duration-changed(string);
@@ -945,7 +943,6 @@ export component MainWindow inherits Window {
                 meeting-audio-diagnostic: root.settings-meeting-audio-diagnostic;
                 diagnostic-max-minutes: root.settings-diagnostic-max-minutes;
                 diagnostic-megabytes-per-hour: root.settings-diagnostic-megabytes-per-hour;
-                meeting-transcription-language: root.settings-meeting-transcription-language;
                 meeting-autostop-enabled: root.settings-meeting-autostop-enabled;
                 meeting-autostop-labels: root.settings-meeting-autostop-labels;
                 meeting-autostop-label: root.settings-meeting-autostop-label;
@@ -1106,7 +1103,6 @@ export component MainWindow inherits Window {
                 clamshell-device-changed(value) => { root.settings-clamshell-device-changed(value); }
                 capture-system-audio-changed(value) => { root.settings-capture-system-audio-changed(value); }
                 meeting-audio-diagnostic-changed(value) => { root.settings-meeting-audio-diagnostic-changed(value); }
-                meeting-transcription-language-changed(value) => { root.settings-meeting-transcription-language-changed(value); }
                 meeting-autostop-enabled-changed(value) => { root.settings-meeting-autostop-enabled-changed(value); }
                 meeting-autostop-changed(value) => { root.settings-meeting-autostop-changed(value); }
                 meeting-max-duration-changed(value) => { root.settings-meeting-max-duration-changed(value); }

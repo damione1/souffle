@@ -123,7 +123,7 @@ fn main() {
         actor.start_session(273, SessionConfig {
             pipeline_config: PipelineConfig { vad_model_path: Some(resolve_vad_model_path().unwrap()), filler_removal_enabled: true, dictionary_correction_enabled: false },
             dictionary_entries: vec![], session_terms: vec![], session_corrections: vec![], diarize: dual,
-            idle_config: None, meeting_transcription_language: souffle_lib::settings::MeetingTranscriptionLanguage::Auto,
+            idle_config: None,
         }, Box::new(move |segment| {
             let published = Instant::now();
             let elapsed = callback_started.lock().unwrap().elapsed().as_secs_f64();

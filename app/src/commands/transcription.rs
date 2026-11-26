@@ -468,7 +468,6 @@ fn start_pipeline_blocking(
         session_corrections: vec![],
         diarize,
         idle_config,
-        meeting_transcription_language: settings.meeting_transcription_language,
     };
 
     // SOU-260: capture starts now, not once the engine is ready, so the

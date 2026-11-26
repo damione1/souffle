@@ -263,7 +263,6 @@ fn soft_only_full_fixture() {
     assert_eq!(intervals.len(), 18);
     assert!(duration > 460.0);
     let mut engine = KyutaiEngine::new();
-    engine.set_meeting_language_prior(MeetingTranscriptionLanguage::Fr);
     engine.load_model(&model_path).unwrap();
     assert!(matches!(
         engine.model.as_ref().unwrap().device,
@@ -633,7 +632,7 @@ fn reset_session_bookkeeping_restores_fresh_values_and_lane_changes_rebuild() {
         FRAME_COUNT.store(42, Ordering::Relaxed);
         *DEBUG_SAMPLES.lock().unwrap() = Some(vec![0.1]);
 
-        model.reset_session_bookkeeping(1, MeetingTranscriptionLanguage::Auto);
+        model.reset_session_bookkeeping(1);
         assert_fresh(model, 1);
     }
 

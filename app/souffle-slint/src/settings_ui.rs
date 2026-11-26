@@ -7,7 +7,7 @@
 
 use crate::{
     AccessState, AppLocale, AppTheme, AudioRetention as SlintAudioRetention, CalendarRow,
-    LogLevel as SlintLogLevel, MainWindow, MeetingLanguage, PasteMethod as SlintPasteMethod,
+    LogLevel as SlintLogLevel, MainWindow, PasteMethod as SlintPasteMethod,
     PermissionKind as SlintPermissionKind,
 };
 use souffle_lib::calendar::CalendarInfo;
@@ -45,8 +45,8 @@ pub(crate) fn capture_error_to_slint(
 use souffle_lib::logging::LogLevel;
 use souffle_lib::permissions::{PermState, PermissionKind};
 use souffle_lib::settings::{
-    AppSettings, DictionaryLearningMode, MeetingAudioRetention, MeetingTranscriptionLanguage,
-    PasteMethod, SettingsOptions, ShortcutSettings, Theme,
+    AppSettings, DictionaryLearningMode, MeetingAudioRetention, PasteMethod, SettingsOptions,
+    ShortcutSettings, Theme,
 };
 
 /// Pushes `settings` into the Slint properties this shell currently wires.
@@ -86,9 +86,6 @@ pub fn populate(window: &MainWindow, settings: &AppSettings) {
 
     window.set_settings_capture_system_audio(settings.capture_system_audio);
     window.set_settings_meeting_audio_diagnostic(settings.meeting_audio_diagnostic);
-    window.set_settings_meeting_transcription_language(meeting_language_to_slint(
-        settings.meeting_transcription_language,
-    ));
     window.set_settings_meeting_autostop_enabled(settings.meeting_autostop_enabled);
     window.set_settings_meeting_autostop_label(
         crate::audio_ui::minute_label(settings.meeting_autostop_minutes).into(),
@@ -150,22 +147,6 @@ pub fn dictionary_learning_from_slint(
         crate::DictionaryLearningMode::Disabled => DictionaryLearningMode::Disabled,
         crate::DictionaryLearningMode::Suggestions => DictionaryLearningMode::Suggestions,
         crate::DictionaryLearningMode::Automatic => DictionaryLearningMode::Automatic,
-    }
-}
-
-pub fn meeting_language_to_slint(value: MeetingTranscriptionLanguage) -> MeetingLanguage {
-    match value {
-        MeetingTranscriptionLanguage::Auto => MeetingLanguage::Auto,
-        MeetingTranscriptionLanguage::En => MeetingLanguage::En,
-        MeetingTranscriptionLanguage::Fr => MeetingLanguage::Fr,
-    }
-}
-
-pub fn meeting_language_from_slint(value: MeetingLanguage) -> MeetingTranscriptionLanguage {
-    match value {
-        MeetingLanguage::Auto => MeetingTranscriptionLanguage::Auto,
-        MeetingLanguage::En => MeetingTranscriptionLanguage::En,
-        MeetingLanguage::Fr => MeetingTranscriptionLanguage::Fr,
     }
 }
 

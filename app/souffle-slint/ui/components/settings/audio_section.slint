@@ -6,7 +6,7 @@ import { PickerLabels } from "../picker_labels.slint";
 import { CatalogPicker } from "../catalog_picker.slint";
 import { SettingsAdvancedBlock } from "settings_advanced_block.slint";
 import { Theme } from "../../theme.slint";
-import { MeetingLanguage, AudioRetention } from "../../types.slint";
+import { AudioRetention } from "../../types.slint";
 
 // Rust supplies the duration catalogues and clamshell device identities.
 export component AudioSection inherits KitFieldSet {
@@ -22,7 +22,6 @@ export component AudioSection inherits KitFieldSet {
     in property <AudioRetention> meeting-audio-retention;
     in property <int> diagnostic-max-minutes;
     in property <int> diagnostic-megabytes-per-hour;
-    in property <MeetingLanguage> meeting-transcription-language;
     in property <bool> meeting-autostop-enabled;
     in property <[string]> meeting-autostop-labels;
     in property <string> meeting-autostop-label;
@@ -34,7 +33,6 @@ export component AudioSection inherits KitFieldSet {
     callback clamshell-device-changed(string);
     callback capture-system-audio-changed(bool);
     callback meeting-audio-diagnostic-changed(bool);
-    callback meeting-transcription-language-changed(MeetingLanguage);
     callback meeting-autostop-enabled-changed(bool);
     callback meeting-autostop-changed(string);
     callback meeting-max-duration-changed(string);
@@ -69,29 +67,6 @@ export component AudioSection inherits KitFieldSet {
             accessible-label: @tr("Capturer l'audio système");
             checked: root.capture-system-audio;
             toggled(new) => { root.capture-system-audio-changed(new); }
-        }
-    }
-
-    KitFieldRow {
-        theme: root.theme;
-        modal-layer: 0;
-        orientation: Theme.settings-field-orientation(self.width);
-        appearance: FieldRowAppearance.inset;
-        show-divider: true;
-        focus-requested => { language-picker.take-focus(); }
-        private property <bool> control-focused: language-picker.has-focus;
-        changed control-focused => {
-            if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
-        }
-        label: @tr("Langue de transcription (réunions)");
-        description: @tr("Indice pour la détection de langue, jamais forcé sur le moteur.");
-
-        language-picker := ClosedSettingsPicker {
-            theme: root.theme;
-            modal-layer: 0;
-            label: @tr("Langue de transcription des réunions");
-            choices: SettingsOptions.meeting-language-options(root.meeting-transcription-language);
-            chosen(row) => { root.meeting-transcription-language-changed(SettingsOptions.meeting-language-value(row, root.meeting-transcription-language)); }
         }
     }
 

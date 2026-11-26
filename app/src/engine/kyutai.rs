@@ -13,7 +13,6 @@ use super::{
 use crate::constants::{MIMI_FRAME_SIZE, MIMI_FRAMES_PER_SECOND, SAMPLE_RATE};
 use crate::lid::{LanguageTracker, detect_word};
 use crate::platform::with_autorelease_pool;
-use crate::settings::MeetingTranscriptionLanguage;
 
 #[cfg(test)]
 #[path = "kyutai_verification.rs"]
@@ -345,11 +344,7 @@ impl LoadedModel {
     /// The destructuring below is deliberately exhaustive (no `..`): a new
     /// `LoadedModel` field fails to compile here until someone decides
     /// whether a session boundary must reset it.
-    fn reset_session_bookkeeping(
-        &mut self,
-        lanes: usize,
-        meeting_language_prior: MeetingTranscriptionLanguage,
-    ) {
+    fn reset_session_bookkeeping(&mut self, lanes: usize) {
         let LoadedModel {
             integrity,
             completed_salvage,
@@ -383,7 +378,7 @@ impl LoadedModel {
         *frames_since_refresh = 0;
         *refresh_count = 0;
         *vad_pause_streak = vec![0; lanes];
-        language_tracker.resize(lanes, meeting_language_prior);
+        language_tracker.resize(lanes);
         language_tracker.reset_all();
         *pending_words = vec![None; lanes];
         orphaned_words.clear();
@@ -481,8 +476,6 @@ pub struct KyutaiEngine {
     /// and system audio (Them) legs are transcribed as independent batch lanes
     /// of one model. Takes effect on the next `reset_state`.
     diarize: bool,
-    /// Heuristic prior for LID/mismatch resets (never passed to moshi).
-    meeting_language_prior: MeetingTranscriptionLanguage,
 }
 
 impl Default for KyutaiEngine {
@@ -496,7 +489,6 @@ impl KyutaiEngine {
         Self {
             model: None,
             diarize: false,
-            meeting_language_prior: MeetingTranscriptionLanguage::Auto,
         }
     }
 
@@ -555,7 +547,6 @@ impl KyutaiEngine {
         config: KyutaiConfig,
         text_tokenizer: sentencepiece::SentencePieceProcessor,
         batch_size: usize,
-        meeting_language_prior: MeetingTranscriptionLanguage,
     ) -> Result<LoadedModel, EngineError> {
         let model_file = model_path.join("model.safetensors");
         let has_extra_heads = Self::checkpoint_has_semantic_vad(&model_file);
@@ -588,7 +579,7 @@ impl KyutaiEngine {
             refresh_count: 0,
             vad_pause_streak: vec![0; batch_size],
             has_extra_heads,
-            language_tracker: LanguageTracker::new(batch_size, meeting_language_prior),
+            language_tracker: LanguageTracker::new(batch_size),
             pending_words: vec![None; batch_size],
             orphaned_words: Vec::new(),
         })
@@ -1296,16 +1287,6 @@ impl KyutaiEngine {
         })
     }
 
-    pub fn set_meeting_language_prior(&mut self, prior: MeetingTranscriptionLanguage) {
-        self.meeting_language_prior = prior;
-        if let Some(model) = self.model.as_mut() {
-            let batch_size = model.state.batch_size();
-            model
-                .language_tracker
-                .resize(batch_size, self.meeting_language_prior);
-        }
-    }
-
     /// Reset the ASR state for a new recording session.
     ///
     /// When the loaded state already has the lane count this session needs
@@ -1324,14 +1305,13 @@ impl KyutaiEngine {
     /// its timeline at zero; the old model's timeline is not carried over.
     pub fn reset_state(&mut self) -> Result<(), EngineError> {
         let lanes = self.batch_size();
-        let meeting_language_prior = self.meeting_language_prior;
         if let Some(model) = self.model.as_mut()
             && model.state.batch_size() == lanes
             && model.integrity.ensure_ready().is_ok()
         {
             match model.state.reset() {
                 Ok(()) => {
-                    model.reset_session_bookkeeping(lanes, meeting_language_prior);
+                    model.reset_session_bookkeeping(lanes);
                     info!(lanes, "ASR state soft-reset for new session");
                     return Ok(());
                 }
@@ -1376,7 +1356,6 @@ impl KyutaiEngine {
 
         // Captured before the rebuild closure moves the model fields.
         let batch_size = self.batch_size();
-        let meeting_language_prior = self.meeting_language_prior;
         let old = self.model.take().ok_or(EngineError::NotInitialized)?;
 
         // Read the timeline off the old model before its fields are moved
@@ -1414,19 +1393,12 @@ impl KyutaiEngine {
 
         let mut rebuilt = with_autorelease_pool(move || -> Result<LoadedModel, EngineError> {
             let device = Self::select_device()?;
-            Self::build_loaded_model(
-                device,
-                model_path,
-                config,
-                text_tokenizer,
-                batch_size,
-                meeting_language_prior,
-            )
+            Self::build_loaded_model(device, model_path, config, text_tokenizer, batch_size)
         })?;
         // The rebuilt model is already fresh from `build_loaded_model`; this
         // also clears the process-wide debug counters, so one function
         // defines what a session boundary resets.
-        rebuilt.reset_session_bookkeeping(batch_size, meeting_language_prior);
+        rebuilt.reset_session_bookkeeping(batch_size);
 
         if let Some((epoch_origin_seconds, last_emitted_start)) = carried_timeline {
             // The rebuilt model's vectors are sized from `batch_size`, so a
@@ -1497,7 +1469,6 @@ impl TranscriptionEngine for KyutaiEngine {
         // Initial load is always single-stream; diarization is enabled later via
         // set_diarization + reset_state.
         let batch_size = self.batch_size();
-        let meeting_language_prior = self.meeting_language_prior;
         let loaded = with_autorelease_pool(move || {
             Self::build_loaded_model(
                 device,
@@ -1505,7 +1476,6 @@ impl TranscriptionEngine for KyutaiEngine {
                 config,
                 text_tokenizer,
                 batch_size,
-                meeting_language_prior,
             )
         })?;
 
@@ -1684,10 +1654,6 @@ impl TranscriptionEngine for KyutaiEngine {
         self.diarize = enabled;
     }
 
-    fn set_meeting_language_prior(&mut self, prior: crate::settings::MeetingTranscriptionLanguage) {
-        KyutaiEngine::set_meeting_language_prior(self, prior);
-    }
-
     fn transcribe_dual(
         &mut self,
         me: &[f32],
@@ -1842,7 +1808,7 @@ mod tests {
             )
         }
         fn new(lanes: usize, prefix: f64) -> Self {
-            let mut tracker = LanguageTracker::new(lanes, MeetingTranscriptionLanguage::Auto);
+            let mut tracker = LanguageTracker::new(lanes);
             // Establish English lock-in and stop one mismatch short of the
             // real LID threshold. No forced reset request in the test seam.
             for lane in 0..lanes {

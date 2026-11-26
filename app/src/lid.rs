@@ -1,12 +1,9 @@
 //! Lightweight French/English language identification for meeting segments.
 //!
 //! Heuristic-only: accent density plus stopword hits. Used to populate
-//! `segment.language` when Kyutai leaves it unset. A per-lane KV wipe on
-//! mismatch is reserved for Auto (inferred prior) — an explicit Français/
-//! Anglais setting is a code-switch, not a model lock-in (SOU-060). Never
-//! passed to moshi as a forced language.
-
-use crate::settings::MeetingTranscriptionLanguage;
+//! `segment.language` when Kyutai leaves it unset. A per-lane KV wipe fires
+//! when a lane drifts away from the language inferred for it. Never passed to
+//! moshi as a forced language.
 
 /// BCP-47-ish codes we emit on segments.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -21,14 +18,6 @@ impl LanguageCode {
         match self {
             LanguageCode::En => "en",
             LanguageCode::Fr => "fr",
-        }
-    }
-
-    pub fn from_setting(prior: MeetingTranscriptionLanguage) -> Option<Self> {
-        match prior {
-            MeetingTranscriptionLanguage::Auto => None,
-            MeetingTranscriptionLanguage::En => Some(LanguageCode::En),
-            MeetingTranscriptionLanguage::Fr => Some(LanguageCode::Fr),
         }
     }
 }
@@ -228,21 +217,10 @@ pub fn detect_text(text: &str) -> Option<LanguageCode> {
 /// Consecutive words that disagree with the lane prior before forcing reset.
 pub const MISMATCH_STREAK_THRESHOLD: usize = 3;
 
-/// Whether a mismatch streak should wipe the lane KV cache.
-///
-/// Labeling (`segment.language`) always uses the detector. A wipe is only
-/// justified when Auto inferred a prior the model may have locked itself
-/// into — not when the user set Français/Anglais and someone code-switches
-/// (SOU-060).
-pub fn decide_mismatch_reset(setting: MeetingTranscriptionLanguage, streak_reached: bool) -> bool {
-    streak_reached && LanguageCode::from_setting(setting).is_none()
-}
-
 /// Rolling per-lane language state with hysteresis for mismatch resets.
 #[derive(Debug, Clone)]
 pub struct LanguageLaneTracker {
-    setting_prior: MeetingTranscriptionLanguage,
-    /// Inferred majority when setting is Auto (after enough evidence).
+    /// Inferred majority, once there is enough evidence.
     inferred_prior: Option<LanguageCode>,
     en_hits: u32,
     fr_hits: u32,
@@ -250,10 +228,15 @@ pub struct LanguageLaneTracker {
     mismatch_streak: usize,
 }
 
+impl Default for LanguageLaneTracker {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl LanguageLaneTracker {
-    pub fn new(setting_prior: MeetingTranscriptionLanguage) -> Self {
+    pub fn new() -> Self {
         Self {
-            setting_prior,
             inferred_prior: None,
             en_hits: 0,
             fr_hits: 0,
@@ -268,10 +251,6 @@ impl LanguageLaneTracker {
         self.fr_hits = 0;
         self.mismatch_lang = None;
         self.mismatch_streak = 0;
-    }
-
-    fn effective_prior(&self) -> Option<LanguageCode> {
-        LanguageCode::from_setting(self.setting_prior).or(self.inferred_prior)
     }
 
     fn note_majority(&mut self, detected: LanguageCode) {
@@ -304,7 +283,7 @@ impl LanguageLaneTracker {
 
         self.note_majority(detected);
 
-        let Some(prior) = self.effective_prior() else {
+        let Some(prior) = self.inferred_prior else {
             self.mismatch_lang = None;
             self.mismatch_streak = 0;
             return false;
@@ -323,10 +302,7 @@ impl LanguageLaneTracker {
             self.mismatch_streak = 1;
         }
 
-        decide_mismatch_reset(
-            self.setting_prior,
-            self.mismatch_streak >= MISMATCH_STREAK_THRESHOLD,
-        )
+        self.mismatch_streak >= MISMATCH_STREAK_THRESHOLD
     }
 }
 
@@ -337,22 +313,18 @@ pub struct LanguageTracker {
 }
 
 impl LanguageTracker {
-    pub fn new(batch_size: usize, setting_prior: MeetingTranscriptionLanguage) -> Self {
+    pub fn new(batch_size: usize) -> Self {
         Self {
             lanes: (0..batch_size)
-                .map(|_| LanguageLaneTracker::new(setting_prior))
+                .map(|_| LanguageLaneTracker::new())
                 .collect(),
         }
     }
 
-    pub fn resize(&mut self, batch_size: usize, setting_prior: MeetingTranscriptionLanguage) {
-        if self.lanes.len() == batch_size {
-            for lane in &mut self.lanes {
-                lane.setting_prior = setting_prior;
-            }
-            return;
+    pub fn resize(&mut self, batch_size: usize) {
+        if self.lanes.len() != batch_size {
+            *self = Self::new(batch_size);
         }
-        *self = Self::new(batch_size, setting_prior);
     }
 
     pub fn reset_lane(&mut self, batch_idx: usize) {
@@ -378,7 +350,6 @@ impl LanguageTracker {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::settings::MeetingTranscriptionLanguage;
 
     #[test]
     fn detect_french_accents_and_stopwords() {
@@ -406,11 +377,11 @@ mod tests {
     }
 
     fn infer_english_prior() -> LanguageLaneTracker {
-        let mut lane = LanguageLaneTracker::new(MeetingTranscriptionLanguage::Auto);
+        let mut lane = LanguageLaneTracker::new();
         for _ in 0..5 {
             assert!(!lane.on_word("the"));
         }
-        assert_eq!(lane.effective_prior(), Some(LanguageCode::En));
+        assert_eq!(lane.inferred_prior, Some(LanguageCode::En));
         lane
     }
 
@@ -426,34 +397,6 @@ mod tests {
     fn accented_capital_counts_as_french() {
         assert_eq!(detect_word("École"), Some(LanguageCode::Fr));
         assert_eq!(detect_word("Ça"), Some(LanguageCode::Fr));
-    }
-
-    #[test]
-    fn decide_mismatch_reset_only_for_inferred_prior() {
-        assert!(!decide_mismatch_reset(
-            MeetingTranscriptionLanguage::En,
-            true
-        ));
-        assert!(!decide_mismatch_reset(
-            MeetingTranscriptionLanguage::Fr,
-            true
-        ));
-        assert!(decide_mismatch_reset(
-            MeetingTranscriptionLanguage::Auto,
-            true
-        ));
-        assert!(!decide_mismatch_reset(
-            MeetingTranscriptionLanguage::Auto,
-            false
-        ));
-    }
-
-    #[test]
-    fn explicit_prior_never_resets_lane() {
-        let mut lane = LanguageLaneTracker::new(MeetingTranscriptionLanguage::En);
-        let words = ["bonjour", "merci", "réunion", "bonjour", "merci", "réunion"];
-        let resets = words.iter().filter(|w| lane.on_word(w)).count();
-        assert_eq!(resets, 0);
     }
 
     #[test]
@@ -485,24 +428,14 @@ mod tests {
     }
 
     #[test]
-    fn explicit_en_scattered_french_does_not_trigger() {
-        let mut lane = LanguageLaneTracker::new(MeetingTranscriptionLanguage::En);
-        let words = [
-            "bonjour", "project", "project", "merci", "project", "réunion",
-        ];
-        let resets = words.iter().filter(|w| lane.on_word(w)).count();
-        assert_eq!(resets, 0);
-    }
-
-    #[test]
     fn auto_prior_inferred_from_majority() {
-        let mut lane = LanguageLaneTracker::new(MeetingTranscriptionLanguage::Auto);
+        let mut lane = LanguageLaneTracker::new();
         for _ in 0..4 {
             assert!(!lane.on_word("the"));
         }
         for _ in 0..2 {
             assert!(!lane.on_word("bonjour"));
         }
-        assert_eq!(lane.effective_prior(), Some(LanguageCode::En));
+        assert_eq!(lane.inferred_prior, Some(LanguageCode::En));
     }
 }

@@ -1,5 +1,5 @@
 import { ControlSize, KitSelect, KitStrings, Ownership, OptionRow, SelectionRef } from "@kit";
-import { AppLocale, AppTheme, PasteMethod, AudioRetention, MeetingLanguage, SummaryProvider, LogLevel, SettingsTab } from "../../types.slint";
+import { AppLocale, AppTheme, PasteMethod, AudioRetention, SummaryProvider, LogLevel, SettingsTab } from "../../types.slint";
 import { Theme } from "../../theme.slint";
 
 export struct SettingsOptionList { rows: [OptionRow], selected: SelectionRef }
@@ -69,15 +69,6 @@ export global SettingsOptions {
         if value == AudioRetention.keep-30d { return @tr("DataSection" => "Conserver 30 jours"); }
         if value == AudioRetention.keep-forever { return @tr("DataSection" => "Conserver indéfiniment"); }
         if value == AudioRetention.off { return @tr("DataSection" => "Ne pas conserver"); }
-        return "";
-    }
-
-    pure callback meeting-language-options(MeetingLanguage) -> SettingsOptionList;
-    pure callback meeting-language-value(OptionRow, MeetingLanguage) -> MeetingLanguage;
-    public pure function meeting-language-label(value: MeetingLanguage) -> string {
-        if value == MeetingLanguage.en { return @tr("AudioSection" => "Anglais"); }
-        if value == MeetingLanguage.fr { return @tr("AudioSection" => "Français"); }
-        if value == MeetingLanguage.auto { return @tr("AudioSection" => "Automatique"); }
         return "";
     }
 

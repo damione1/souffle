@@ -142,11 +142,6 @@ pub(crate) fn new_window() -> Result<MainWindow, slint::PlatformError> {
         on_retention_value
     );
     bind_options!(
-        on_meeting_language_options,
-        invoke_meeting_language_label,
-        on_meeting_language_value
-    );
-    bind_options!(
         on_provider_options,
         invoke_provider_label,
         on_provider_value

@@ -80,7 +80,6 @@ const DICTATION_LEARN_FROM_EDIT_KEY: &str = "dictation_learn_from_edit";
 const DICTIONARY_LEARNING_MODE_KEY: &str = "dictionary_learning_mode";
 const MEETING_AUDIO_RETENTION_KEY: &str = "meeting_audio_retention";
 const MEETING_AUDIO_DIAGNOSTIC_KEY: &str = "meeting_audio_diagnostic";
-const MEETING_TRANSCRIPTION_LANGUAGE_KEY: &str = "meeting_transcription_language";
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
@@ -192,17 +191,6 @@ pub enum Theme {
 
 /// How long recorded meeting audio is kept on disk before the startup sweep
 /// deletes it. Opt-in: recording itself only happens when this is not `Off`.
-/// Heuristic prior for meeting language detection and mismatch resets.
-/// Never passed to the STT engine as a forced decode language.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum MeetingTranscriptionLanguage {
-    #[default]
-    Auto,
-    En,
-    Fr,
-}
-
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum MeetingAudioRetention {
@@ -310,9 +298,6 @@ pub struct AppSettings {
     /// meeting audio retention is enabled; snapshotted at session start.
     #[serde(default)]
     pub meeting_audio_diagnostic: bool,
-    /// Heuristic prior for meeting language stability (LID + lane resets).
-    /// Does not force Kyutai/moshi decode language.
-    pub meeting_transcription_language: MeetingTranscriptionLanguage,
     /// Optional LLM post-processing applied to dictation before paste/history.
     pub dictation_polish_enabled: bool,
     /// Active polish template id (clean, email, bullets, no_fillers).
@@ -453,7 +438,6 @@ impl Default for AppSettings {
             autostart_enabled: false,
             meeting_audio_retention: MeetingAudioRetention::default(),
             meeting_audio_diagnostic: false,
-            meeting_transcription_language: MeetingTranscriptionLanguage::default(),
             dictation_polish_enabled: true,
             dictation_polish_template_id: crate::summary::TEMPLATE_CLEAN.to_string(),
             dictation_polish_templates: crate::summary::default_polish_templates(),
@@ -648,13 +632,6 @@ impl AppSettings {
         }
         if let Some(enabled) = read_json_setting::<bool>(db, MEETING_AUDIO_DIAGNOSTIC_KEY)? {
             settings.meeting_audio_diagnostic = enabled;
-        }
-        if let Some(meeting_transcription_language) = read_json_setting::<
-            MeetingTranscriptionLanguage,
-        >(
-            db, MEETING_TRANSCRIPTION_LANGUAGE_KEY
-        )? {
-            settings.meeting_transcription_language = meeting_transcription_language;
         }
         if let Some(dictation_polish_enabled) =
             read_json_setting::<bool>(db, DICTATION_POLISH_ENABLED_KEY)?
@@ -857,16 +834,6 @@ impl AppSettings {
         }
         if !MEETING_MAX_DURATION_MINUTES_RANGE.contains(&normalized.meeting_max_duration_minutes) {
             normalized.meeting_max_duration_minutes = Self::default().meeting_max_duration_minutes;
-        }
-
-        if !matches!(
-            normalized.meeting_transcription_language,
-            MeetingTranscriptionLanguage::Auto
-                | MeetingTranscriptionLanguage::En
-                | MeetingTranscriptionLanguage::Fr
-        ) {
-            normalized.meeting_transcription_language =
-                Self::default().meeting_transcription_language;
         }
 
         normalized.dictation_polish_template_id =
@@ -1174,11 +1141,6 @@ impl AppSettings {
                 transaction,
                 MEETING_AUDIO_DIAGNOSTIC_KEY,
                 &normalized.meeting_audio_diagnostic,
-            )?;
-            write_json_setting_in_transaction(
-                transaction,
-                MEETING_TRANSCRIPTION_LANGUAGE_KEY,
-                &normalized.meeting_transcription_language,
             )?;
             write_json_setting_in_transaction(
                 transaction,
@@ -1590,7 +1552,6 @@ mod tests {
             autostart_enabled: true,
             meeting_audio_retention: MeetingAudioRetention::Keep30d,
             meeting_audio_diagnostic: true,
-            meeting_transcription_language: super::MeetingTranscriptionLanguage::Fr,
             dictation_polish_enabled: true,
             dictation_polish_template_id: "email".into(),
             dictation_polish_templates: crate::summary::default_polish_templates(),
@@ -2178,6 +2139,7 @@ mod tests {
             ("vad_enabled", "false"),
             ("stutter_collapse", "true"),
             ("dictation_ceiling_seconds", "120"),
+            ("meeting_transcription_language", "\"fr\""),
         ];
         for (key, value) in retired {
             db.set_setting(key, value).expect("seed the retired key");

@@ -390,7 +390,7 @@ mod tests {
     };
     use crate::audio::InputPriority;
     use crate::engine::default_transcription_profile;
-    use crate::settings::{AppSettings, MeetingTranscriptionLanguage, ShortcutSettings, Theme};
+    use crate::settings::{AppSettings, ShortcutSettings, Theme};
     use crate::state_machine::AppStateMachine;
     use crate::test_helpers::fixtures::test_db;
 
@@ -613,7 +613,7 @@ mod tests {
     }
 
     #[test]
-    fn recording_allows_theme_locale_language_and_microphone_policy_changes() {
+    fn recording_allows_theme_locale_and_microphone_policy_changes() {
         let (db, _dir) = test_db();
         // A model selection is persisted before its asynchronous load starts.
         // Hot settings must remain writable if recording begins on the still
@@ -626,7 +626,6 @@ mod tests {
         let candidate = AppSettings {
             theme: Theme::Dark,
             locale: "fr".into(),
-            meeting_transcription_language: MeetingTranscriptionLanguage::Fr,
             input_priority: InputPriority {
                 priorities: vec!["preferred-mic".into()],
                 ..InputPriority::default()
@@ -645,10 +644,6 @@ mod tests {
         let stored = AppSettings::load(&db).expect("load hot settings");
         assert_eq!(stored.theme, Theme::Dark);
         assert_eq!(stored.locale, "fr");
-        assert_eq!(
-            stored.meeting_transcription_language,
-            MeetingTranscriptionLanguage::Fr
-        );
         assert_eq!(stored.input_priority.priorities, ["preferred-mic"]);
         assert_eq!(stored.transcription_model_id, "stt-2.6b-en");
     }
