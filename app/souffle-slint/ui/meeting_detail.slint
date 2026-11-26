@@ -399,6 +399,9 @@ export component MeetingDetail inherits Rectangle {
                     KitStack {
                         width: root.column-width;
                         gap: roomy;
+                        // Below the view selector. The transcript list's windowing
+                        // assumes no extra space above it.
+                        padding-top: root.show-reading ? 6px : 0px;
                         padding-bottom: KitLayoutMetrics.space(KitThemeContext.current, LayoutSpace.section);
 
                         if root.is-empty-meeting: KitCard {
@@ -502,6 +505,7 @@ export component MeetingDetail inherits Rectangle {
                                     text <=> root.notes;
                                     min-lines: 3;
                                     max-lines: 3;
+                                    padding-block-start: 14px;
                                     placeholder: @tr("Ajoutez les décisions, actions et noms importants…");
                                     accessible-name: @tr("Notes de la réunion");
                                     edited(value) => { root.notes-changed(value); }

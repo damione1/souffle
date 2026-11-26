@@ -544,7 +544,12 @@ fn main() {
             let weak = window.as_weak();
             capture.start(
                 slint::TimerMode::SingleShot,
-                std::time::Duration::from_millis(1500),
+                std::time::Duration::from_millis(
+                    std::env::var("SOU276_SNAPSHOT_DELAY_MS")
+                        .ok()
+                        .and_then(|value| value.parse().ok())
+                        .unwrap_or(1500),
+                ),
                 move || {
                     save_png(&weak.unwrap(), &path);
                     slint::quit_event_loop().unwrap();

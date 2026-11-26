@@ -176,17 +176,22 @@ export component SummaryTemplatesSection inherits KitFieldSet {
                         if focused { add-row.ensure-visible(KitThemes.scroll-behavior(root.theme)); }
                     }
                 }
-                add-button := KitButton {
-                    theme: root.theme;
-                    modal-layer: 0;
-                    control-size: ControlSize.compact;
-                    text: @tr("Ajouter");
-                    intent: ButtonIntent.primary;
-                    disabled: !add-form.valid;
-                    focus-observed(focused) => {
-                        if focused { add-row.ensure-visible(KitThemes.scroll-behavior(root.theme)); }
+                VerticalLayout {
+                    alignment: center;
+                    horizontal-stretch: 0;
+
+                    add-button := KitButton {
+                        theme: root.theme;
+                        modal-layer: 0;
+                        control-size: ControlSize.compact;
+                        text: @tr("Ajouter");
+                        intent: ButtonIntent.primary;
+                        disabled: !add-form.valid;
+                        focus-observed(focused) => {
+                            if focused { add-row.ensure-visible(KitThemes.scroll-behavior(root.theme)); }
+                        }
+                        activated => { add-form.submit(); }
                     }
-                    activated => { add-form.submit(); }
                 }
             }
         }

@@ -1,4 +1,4 @@
-import { FieldSetAppearance, FieldRowAppearance, AlertActions, ChoiceLabelPosition, ControlWidth, KitAlert, KitButton, KitFieldRow, KitFieldSet, KitSwitch, KitTextArea, KitThemeContext, KitThemes, Ownership, ControlSize, ResizePolicy } from "@kit";
+import { FieldSetAppearance, FieldRowAppearance, FieldRowAlignment, AlertActions, ChoiceLabelPosition, ControlWidth, KitAlert, KitButton, KitFieldRow, KitFieldSet, KitSwitch, KitTextArea, KitThemeContext, KitThemes, Ownership, ControlSize, ResizePolicy } from "@kit";
 import { CatalogPicker } from "../catalog_picker.slint";
 import { SettingsNoticeRow } from "settings_notice_row.slint";
 import { SettingsOptions } from "settings_options.slint";
@@ -96,6 +96,7 @@ export component DictationPolishSection inherits KitFieldSet {
         theme: KitThemeContext.current;
         modal-layer: 0;
         orientation: self.width < 600px ? Orientation.vertical : Orientation.horizontal;
+        row-alignment: FieldRowAlignment.top;
         appearance: FieldRowAppearance.inset;
         show-divider: true;
         focus-requested => { instruction-editor.take-focus(); }
@@ -112,6 +113,7 @@ export component DictationPolishSection inherits KitFieldSet {
             width: 340px;
             min-lines: 4;
             max-lines: 4;
+            padding-block-start: 11px;
             resize-policy: ResizePolicy.fixed;
             text <=> root.active-prompt;
             description: instruction-row.description;

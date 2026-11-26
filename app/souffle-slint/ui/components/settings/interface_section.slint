@@ -1,5 +1,5 @@
 import { SettingsOptions, ClosedSettingsPicker } from "settings_options.slint";
-import { FieldSetAppearance, FieldRowAppearance, AlertActions, AlertSeverity, ButtonIntent, ChoiceLabelPosition, ControlSize, ControlWidth, FieldAccess, KeycapSize, KitAlert, KitButton, KitFieldRow, KitFieldSet, KitKeycap, KitMetrics, KitModalContext, KitNumberStepper, KitSegmentedControl, KitSwitch, KitText, KitThemeContext, KitThemes, Ownership, TypographyRole, SegmentedAppearance, StepperAppearance, TextViewFont } from "@kit";
+import { FieldSetAppearance, FieldRowAppearance, AlertActions, AlertSeverity, ButtonIntent, ChoiceLabelPosition, ControlSize, ControlWidth, FieldAccess, KeycapSize, KitAlert, KitButton, KitFieldRow, KitFieldSet, KitKeycap, KitMetrics, KitModalContext, KitNumberStepper, KitSegmentedControl, KitSwitch, KitText, KitThemeContext, KitThemes, Ownership, TypographyRole, SegmentedAppearance, StepperAppearance, TextViewFont, KitTheme } from "@kit";
 import { LucideArrows } from "@kit-icons/arrows.slint";
 import { SettingsNoticeRow } from "settings_notice_row.slint";
 import { Theme } from "../../theme.slint";
@@ -74,7 +74,19 @@ export component ShortcutRecorderButton inherits FocusScope {
         }
     }
 
+    // An unset compact recorder takes a muted ink, which only the cap's theme
+    // can carry.
+    private property <KitTheme> base-theme: KitThemeContext.current;
+    private property <KitTheme> muted-theme;
+    function refresh-muted-theme() {
+        root.muted-theme = root.base-theme;
+        root.muted-theme.keycap-ink = Theme.text-muted;
+    }
+    init => { root.refresh-muted-theme(); }
+    changed base-theme => { root.refresh-muted-theme(); }
+
     if !root.recording: KitKeycap {
+        theme: !root.large && root.shortcut-label == "" ? root.muted-theme : root.base-theme;
         width: parent.width;
         height: parent.height;
         size: root.large ? KeycapSize.large : KeycapSize.regular;
@@ -275,6 +287,8 @@ export component InterfaceSection inherits VerticalLayout {
                 modal-layer: 0;
                 appearance: StepperAppearance.compact;
                 value-font: TextViewFont.monospace;
+                // The editor's end padding adds to this gap.
+                value-button-gap: 5px;
                 // Keeps the editor slack before the value, next to the unit and buttons.
                 text-alignment: TextHorizontalAlignment.right;
                 control-size: ControlSize.compact;

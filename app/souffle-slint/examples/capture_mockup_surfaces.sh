@@ -46,6 +46,8 @@ Reglages-Transcription settings-transcription-long-middle 0 1040 2220 long-middl
 Reglages-Transcription settings-transcription-long-end 0 1040 2220 long-end
 Reglages-Transcription settings-transcription-long-errors 0 1040 2220 long-errors
 Reunion-Transcription detail-transcript-long 0 1040 1300 long
+Reunion-Transcription detail-transcript-long-middle 0 1040 1300 long-middle
+Reunion-Transcription detail-transcript-long-end 0 1040 1300 long-end
 Reglages-IA settings-ai 0 1040 1720
 Reglages-IA settings-ai 0 1040 2900 full
 Reglages-IA settings-ai-ollama 0 1040 1720 ollama

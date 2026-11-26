@@ -476,6 +476,9 @@ export component RecordingView inherits Rectangle {
                             }
 
                             notes-input := KitTextArea {
+                                padding-block-start: 13px;
+                                // Gives the added top space back, so the card keeps its height.
+                                padding-block: 1px;
                                 min-lines: 3;
                                 max-lines: 3;
                                 text <=> root.notes;

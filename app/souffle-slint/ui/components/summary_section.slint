@@ -75,6 +75,9 @@ component SummaryColumn inherits KitStack {
     in property <string> title;
     gap: compact;
     horizontal-stretch: 1;
+    // Equal columns whatever their text.
+    min-width: 0px;
+    preferred-width: 0px;
 
     AppText {
         text: root.title.to-uppercase();
@@ -88,7 +91,8 @@ component SummaryColumn inherits KitStack {
 
 component SummaryBullet inherits KitInline {
     in property <string> text;
-    gap: compact;
+    gap: none;
+    spacing: 4px;
     alignment: stretch;
 
     AppText {

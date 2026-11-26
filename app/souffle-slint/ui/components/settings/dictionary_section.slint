@@ -222,8 +222,8 @@ export component DictionarySection inherits VerticalLayout {
 
             HorizontalLayout {
                 spacing: 12px;
-                KitOverline { label: @tr("TERME"); horizontal-stretch: 1; }
-                KitOverline { label: @tr("PRONONCIATION"); horizontal-stretch: 1; }
+                KitOverline { label: @tr("TERME"); horizontal-stretch: 1; min-width: 0px; preferred-width: 0px; }
+                KitOverline { label: @tr("PRONONCIATION"); horizontal-stretch: 1; min-width: 0px; preferred-width: 0px; }
                 KitOverline { label: @tr("CATÉGORIE"); width: 100px; }
                 Rectangle { width: 110px; height: 1px; horizontal-stretch: 0; }
             }

@@ -50,8 +50,12 @@ fn waveform(peaks: &[f32]) -> String {
         .iter()
         .enumerate()
         .map(|(i, peak)| {
-            let top = (1.0 - peak) / 2.0;
-            format!("M{i} {top:.3}h0.7v{peak:.3}h-0.7z")
+            let ry = (1.5_f32 / 44.0).min(peak / 2.0);
+            let start = (1.0 - peak) / 2.0 + ry;
+            let side = peak - 2.0 * ry;
+            format!(
+                "M{i} {start:.3}a0.265 {ry:.3} 0 0 1 0.53 0v{side:.3}a0.265 {ry:.3} 0 0 1 -0.53 0z"
+            )
         })
         .collect()
 }
@@ -561,7 +565,25 @@ fn long_transcript(window: &MainWindow, surface: &str) {
         "detail-transcript-long-end" => end,
         _ => 0.0,
     };
-    window.set_meeting_detail_page_scroll_top(-scroll);
+    // The page does not exist before the first frame, so a scroll set now would
+    // never reach its change handlers.
+    let weak = window.as_weak();
+    slint::Timer::single_shot(std::time::Duration::from_millis(700), move || {
+        if let Some(window) = weak.upgrade() {
+            window.set_meeting_detail_page_scroll_top(-scroll);
+        }
+    });
+    let weak = window.as_weak();
+    slint::Timer::single_shot(std::time::Duration::from_millis(1300), move || {
+        if let Some(window) = weak.upgrade() {
+            eprintln!(
+                "transcript scroll {} spacers {} {}",
+                window.get_meeting_detail_transcript_scroll_top_px(),
+                window.get_meeting_detail_transcript_spacer_before(),
+                window.get_meeting_detail_transcript_spacer_after(),
+            );
+        }
+    });
 }
 
 thread_local! {

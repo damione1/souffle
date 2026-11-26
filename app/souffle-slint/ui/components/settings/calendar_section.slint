@@ -133,6 +133,9 @@ export component CalendarSection inherits VerticalLayout {
                 decrement-label: @tr("Diminuer");
                 accessible-name: @tr("Délai du rappel en minutes");
                 suffix: " min";
+                affix-in-value-ink: true;
+                // The editor's end padding adds to this gap.
+                value-button-gap: 4px;
                 // Only the caret room: the suffix's own space gives "5 min".
                 suffix-gap: 8px;
                 text: root.reminder-minutes;

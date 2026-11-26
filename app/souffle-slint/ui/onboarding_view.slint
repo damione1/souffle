@@ -1,5 +1,5 @@
 import { AppText, AppTextInput, Typography, TypographyStyle } from "@typography";
-import { AlertSeverity, AvatarShape, ButtonIntent, ControlSize, KitAlert, KitAvatar, KitBadge, KitButton, KitCard, KitIcon, KitImage, KitInline, KitProgress, KitScrollArea, KitStack, KitSurface, KitText, LayoutSpace, ProgressMode, SurfaceBorder, SurfaceLevel, Tone } from "@kit";
+import { ElevationLevel, AlertSeverity, AvatarShape, ButtonIntent, ControlSize, KitAlert, KitAvatar, KitBadge, KitButton, KitCard, KitIcon, KitImage, KitInline, KitProgress, KitScrollArea, KitStack, KitSurface, KitText, LayoutSpace, ProgressMode, SurfaceBorder, SurfaceLevel, Tone } from "@kit";
 import { LucideArrows } from "@kit-icons/arrows.slint";
 import { ProLevelMeter, ProPager } from "@kit-pro";
 import { LucideDevelopment } from "@kit-icons/development.slint";
@@ -353,6 +353,7 @@ export component OnboardingView inherits Rectangle {
                                         control-label: @tr("Modèle de transcription");
                                         enabled: !root.busy && root.model-phase == ModelPhase.pick;
                                         full-ink-when-disabled: true;
+                                        trigger-elevation: ElevationLevel.xs;
                                         selected-index(index) => { root.model-picked(index); }
                                     }
                                 }

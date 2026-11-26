@@ -1,4 +1,4 @@
-import { FieldAccess, FieldSetAppearance, FieldRowAppearance, AlertActions,
+import { FieldSetAppearance, FieldRowAppearance, AlertActions,
     AlertSeverity, ButtonIntent, ChoiceLabelPosition, ControlWidth,
     KitAlert, KitBadge, KitButton, KitFieldRow, KitFieldSet, KitIconButton,
     KitModalContext, KitSwitch,
@@ -72,7 +72,7 @@ component MicrophonePriorityRow inherits KitFieldRow {
     padding-bottom: 10px;
     show-divider: false;
     // Dims the name only: every action on a disconnected device still runs.
-    access: root.device.connected ? FieldAccess.editable : FieldAccess.disabled;
+    label-opacity: root.device.connected ? 1 : 0.55;
     label: root.device.name;
     description: PickerLabels.display(root.device.transport-label)
         + (root.device.is-default ? @tr("MicrophoneSection" => " · par défaut") : "")

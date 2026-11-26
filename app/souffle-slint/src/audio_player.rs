@@ -358,16 +358,22 @@ pub fn load(
 /// `Rectangle` per bar (SOU-258).
 pub fn waveform_commands(peaks: &[f32]) -> String {
     use std::fmt::Write as _;
-    const BAR_WIDTH: f32 = 0.7;
-    // ~2px of the 56px strip: silence still reads as a flat line.
+    const BAR_WIDTH: f32 = 0.53;
+    const CAP_RADIUS_X: f32 = BAR_WIDTH / 2.0;
+    // 1.5px of the 44px strip, so the ends of a 3px bar are round.
+    const CAP_RADIUS_Y: f32 = 1.5 / 44.0;
+    // ~2px of the 44px strip: silence still reads as a flat line.
     const MIN_HEIGHT: f32 = 0.04;
     let mut commands = String::with_capacity(peaks.len() * 32);
     for (i, peak) in peaks.iter().enumerate() {
         let height = peak.clamp(MIN_HEIGHT, 1.0);
-        let top = (1.0 - height) / 2.0;
+        let ry = CAP_RADIUS_Y.min(height / 2.0);
+        let start = (1.0 - height) / 2.0 + ry;
+        let side = height - 2.0 * ry;
         let _ = write!(
             commands,
-            "M{i} {top:.3}h{BAR_WIDTH}v{height:.3}h-{BAR_WIDTH}z"
+            "M{i} {start:.3}a{CAP_RADIUS_X} {ry:.3} 0 0 1 {BAR_WIDTH} 0v{side:.3}\
+             a{CAP_RADIUS_X} {ry:.3} 0 0 1 -{BAR_WIDTH} 0z"
         );
     }
     commands
@@ -436,8 +442,11 @@ mod tests {
         assert_eq!(commands.matches('M').count(), 2);
         assert_eq!(commands.matches('z').count(), 2);
         // A full peak spans the whole height, silence keeps a thin line.
-        assert!(commands.starts_with("M0 0.000h0.7v1.000h-0.7z"));
-        assert!(commands.contains("M1 0.480h0.7v0.040h-0.7z"));
+        assert!(
+            commands
+                .starts_with("M0 0.034a0.265 0.034 0 0 1 0.53 0v0.932a0.265 0.034 0 0 1 -0.53 0z")
+        );
+        assert!(commands.contains("M1 0.500a0.265 0.020 0 0 1 0.53 0v0.000"));
         assert!(waveform_commands(&[]).is_empty());
     }
 

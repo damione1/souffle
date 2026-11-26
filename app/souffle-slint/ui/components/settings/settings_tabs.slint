@@ -1,4 +1,4 @@
-import { KitTabs, KitScrollArea, LayoutSpace, TabActivation, Ownership, OptionRow, SelectionRef, TabsAppearance } from "@kit";
+import { KitTabs, KitScrollArea, LayoutSpace, TabActivation, Ownership, OptionRow, SelectionRef, TabsAppearance, KitTheme, KitThemeContext } from "@kit";
 import { SettingsTab } from "../../types.slint";
 import { Theme } from "../../theme.slint";
 
@@ -8,6 +8,17 @@ export component SettingsTabBar inherits KitTabs {
     in-out property <SettingsTab> current;
     callback changed(SettingsTab);
     appearance: TabsAppearance.underline;
+    // Kit tab rows take their height from the theme only, so the strip gets a
+    // copy with taller rows.
+    private property <KitTheme> base-theme: KitThemeContext.current;
+    private property <KitTheme> tab-theme;
+    function refresh-theme() {
+        root.tab-theme = root.base-theme;
+        root.tab-theme.spacing.medium.height = 42px;
+    }
+    init => { root.refresh-theme(); }
+    changed base-theme => { root.refresh-theme(); }
+    theme: root.tab-theme;
     accessible-name: @tr("Sections des paramètres");
     activation: TabActivation.automatic;
     ownership: Ownership.controlled;
