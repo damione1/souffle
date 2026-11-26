@@ -279,6 +279,7 @@ pub const STYLES: &[TextStyle] = &[
     TextStyle::mono("mono-small", 11.5, Weight::Regular),
     TextStyle::mono("mono", 12., Weight::Regular),
     TextStyle::mono("mono-label", 12.5, Weight::Medium),
+    TextStyle::mono("mono-emphasis", 14., Weight::SemiBold),
     TextStyle::mono("mono-time", 15., Weight::Medium),
 ];
 
