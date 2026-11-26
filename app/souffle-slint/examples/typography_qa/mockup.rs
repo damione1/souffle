@@ -1,9 +1,10 @@
 //! Data reproducing the states drawn on the design boards, applied on top of the
 //! typography fixture when SOU276_MOCKUP=1. French only, no live services.
 use super::{
-    audio_ui, ia_ui, lists_ui, microphone_list, model, strings, transcript, transcript_window,
+    audio_ui, ia_ui, lists_ui, microphone_list, model, scroll_bench, strings, transcript,
+    transcript_window,
 };
-use slint::{ComponentHandle, SharedString};
+use slint::{ComponentHandle, Model, SharedString};
 use souffle_lib::audio::{AudioInputDevice, InputPriority, KnownDevice, TransportType};
 use souffle_lib::db::dictionary::DictionarySuggestion;
 use souffle_lib::db::snippets::SnippetEntry;
@@ -504,86 +505,166 @@ fn detail(window: &MainWindow, surface: &str) {
 }
 
 const LONG_TRANSCRIPT_PARAGRAPHS: usize = 60;
-/// Height of the page's scroll region in the 1300px transcript captures.
-const TRANSCRIPT_PAGE_VIEWPORT_PX: f32 = 816.0;
-/// The list's leading gap and the page's bottom padding around the blocks.
-const TRANSCRIPT_PAGE_CHROME_PX: f32 = 16.0 + 32.0;
 
-/// Segments through the real grouper and the real windowing.
+/// Segments through the real grouper into the real list.
 fn long_transcript(window: &MainWindow, surface: &str) {
     const TEXTS: [&str; 3] = [
         "D'accord, je note la décision.",
         "Du coup côté planning, on peut viser la bêta pour mi-décembre si l'équipe valide le périmètre cette semaine, sinon on décale à janvier sans toucher au reste.",
         "Oui, je pense que c'est réaliste. Il faut juste figer la liste des réglages avant lundi, sinon on risque de glisser sur la documentation et sur les captures. Camille relit le guide jeudi matin, Julien prépare les notes de version, et on garde une demi-journée pour les retours de l'équipe support avant d'ouvrir la bêta aux premiers testeurs.",
     ];
-    let segments: Vec<TranscriptionSegment> = (0..LONG_TRANSCRIPT_PARAGRAPHS)
-        .map(|i| TranscriptionSegment {
-            text: format!("Point {:02}. {}", i + 1, TEXTS[(i * 7 / 3) % TEXTS.len()]),
-            start_time: i as f64 * 20.0,
-            end_time: i as f64 * 20.0 + 10.0,
+    let minutes = std::env::var("SOU276_TRANSCRIPT_MINUTES")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok());
+    let (segments, sessions) = match minutes {
+        Some(minutes) => synthetic_meeting(minutes),
+        None => {
+            let segments: Vec<TranscriptionSegment> = (0..LONG_TRANSCRIPT_PARAGRAPHS)
+                .map(|i| TranscriptionSegment {
+                    text: format!("Point {:02}. {}", i + 1, TEXTS[(i * 7 / 3) % TEXTS.len()]),
+                    start_time: i as f64 * 20.0,
+                    end_time: i as f64 * 20.0 + 10.0,
+                    is_final: true,
+                    language: None,
+                    confidence: None,
+                    speaker: Some(if i % 2 == 0 {
+                        Speaker::Them
+                    } else {
+                        Speaker::Me
+                    }),
+                })
+                .collect();
+            let half = LONG_TRANSCRIPT_PARAGRAPHS as u64 / 2;
+            let sessions: Vec<MeetingRecordingSession> = [(0, half), (half, half * 2)]
+                .into_iter()
+                .map(|(start, end)| MeetingRecordingSession {
+                    id: format!("session-{start}"),
+                    started_at: chrono::Utc::now(),
+                    ended_at: chrono::Utc::now(),
+                    duration_seconds: 600.0,
+                    start_segment_index: start,
+                    end_segment_index: end,
+                })
+                .collect();
+            (segments, sessions)
+        }
+    };
+    let blocks = transcript::build_transcript_blocks(&segments, &sessions);
+    let (block_count, word_count) = (
+        blocks.len(),
+        blocks
+            .iter()
+            .map(|block| block.words.row_count())
+            .sum::<usize>(),
+    );
+    let state = Rc::new(RefCell::new(None));
+    transcript_window::mount_transcript(window, blocks, &state);
+    window.set_meeting_detail_transcript_segment_count(segments.len() as i32);
+    // After mounting, which resets the page to the reading view.
+    window.set_meeting_detail_view(MeetingDetailView::Transcript);
+    if std::env::var("SOU276_TRANSCRIPT_LAYOUT").as_deref() == Ok("text") {
+        window.set_meeting_detail_transcript_layout(TranscriptLayout::Text);
+    }
+    // The list estimates its height from the rows it has laid out, so a
+    // position is a share of the travel it reports at that moment.
+    let share = match surface {
+        "detail-transcript-long-middle" => 0.5,
+        "detail-transcript-long-end" => 1.0,
+        _ => 0.0,
+    };
+    if scroll_bench::enabled() {
+        let label = format!(
+            "{}min {} blocks {block_count} words {word_count}",
+            minutes.unwrap_or(0),
+            std::env::var("SOU276_TRANSCRIPT_LAYOUT").unwrap_or_else(|_| "chat".into()),
+        );
+        scroll_bench::start(
+            window,
+            label,
+            scroll_bench::View {
+                travel: Box::new(|window| window.get_meeting_detail_transcript_scroll_travel()),
+                position: Box::new(|window| -window.get_meeting_detail_transcript_scroll_top()),
+                scroll_to: Box::new(|window, position| {
+                    window.set_meeting_detail_transcript_scroll_top(-position)
+                }),
+            },
+            |_| {},
+        );
+        return;
+    }
+    // The list does not exist before the first frame, and it needs a few
+    // frames at the end to replace its estimate with the last rows.
+    for delay in [700, 800, 900, 1000] {
+        let weak = window.as_weak();
+        slint::Timer::single_shot(std::time::Duration::from_millis(delay), move || {
+            if let Some(window) = weak.upgrade() {
+                let travel = window.get_meeting_detail_transcript_scroll_travel();
+                window.set_meeting_detail_transcript_scroll_top(-share * travel);
+            }
+        });
+    }
+}
+
+/// A two-lane meeting of `minutes` in two recording sessions, at a speaking
+/// rate of about 150 words a minute. Deterministic.
+fn synthetic_meeting(minutes: usize) -> (Vec<TranscriptionSegment>, Vec<MeetingRecordingSession>) {
+    const SENTENCES: [&str; 10] = [
+        "D'accord, je note la décision.",
+        "Oui, tout à fait.",
+        "Du coup côté planning, on peut viser la bêta pour mi-décembre si l'équipe valide le périmètre cette semaine.",
+        "Il faut juste figer la liste des réglages avant lundi, sinon on risque de glisser sur la documentation et sur les captures.",
+        "Camille relit le guide jeudi matin, Julien prépare les notes de version, et on garde une demi-journée pour les retours de l'équipe support.",
+        "Est-ce que quelqu'un a regardé les chiffres de la semaine dernière ?",
+        "Je propose qu'on reprenne ce point après la démonstration, parce que le prototype change pas mal la discussion sur le lecteur audio et sur l'export des sous-titres.",
+        "Non, pas encore, mais je peux m'en occuper cet après-midi.",
+        "Très bien, alors on avance comme ça et on refait un point vendredi avec les premiers retours des testeurs.",
+        "Dernier sujet, la traduction de l'interface : on garde le français et l'anglais pour la bêta, et on ajoute l'espagnol seulement si les textes sont stables d'ici la fin du mois.",
+    ];
+    let mut seed = 0x9e37_79b9u32;
+    let mut next = |bound: u32| {
+        seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+        (seed >> 8) % bound
+    };
+    let mut segments = Vec::new();
+    let mut time = 0.0f64;
+    let mut speaker = Speaker::Them;
+    let mut turn_left = 0;
+    while time < minutes as f64 * 60.0 {
+        if turn_left == 0 {
+            turn_left = 1 + next(6);
+            speaker = match speaker {
+                Speaker::Them => Speaker::Me,
+                Speaker::Me => Speaker::Them,
+            };
+            time += 0.4;
+        }
+        turn_left -= 1;
+        let text = SENTENCES[next(SENTENCES.len() as u32) as usize];
+        let duration = text.split_whitespace().count() as f64 / 2.6;
+        segments.push(TranscriptionSegment {
+            text: text.into(),
+            start_time: time,
+            end_time: time + duration,
             is_final: true,
             language: None,
             confidence: None,
-            speaker: Some(if i % 2 == 0 {
-                Speaker::Them
-            } else {
-                Speaker::Me
-            }),
-        })
-        .collect();
-    let half = LONG_TRANSCRIPT_PARAGRAPHS as u64 / 2;
-    let sessions: Vec<MeetingRecordingSession> = [(0, half), (half, half * 2)]
+            speaker: Some(speaker),
+        });
+        time += duration + if next(5) == 0 { 2.0 } else { 0.3 };
+    }
+    let half = segments.len() as u64 / 2;
+    let sessions = [(0, half), (half, segments.len() as u64)]
         .into_iter()
         .map(|(start, end)| MeetingRecordingSession {
             id: format!("session-{start}"),
             started_at: chrono::Utc::now(),
             ended_at: chrono::Utc::now(),
-            duration_seconds: 600.0,
+            duration_seconds: minutes as f64 * 30.0,
             start_segment_index: start,
             end_segment_index: end,
         })
         .collect();
-    let blocks = transcript::build_transcript_blocks(&segments, &sessions);
-    let total = transcript::compute_offsets(&blocks)
-        .last()
-        .copied()
-        .unwrap_or(0.0);
-    let state = Rc::new(RefCell::new(None));
-    transcript_window::mount_transcript(window, blocks, &state);
-    let weak = window.as_weak();
-    window.on_transcript_scroll_changed(move |scroll_top_px| {
-        if let Some(window) = weak.upgrade() {
-            transcript_window::update_transcript_window(&window, &state, -scroll_top_px);
-        }
-    });
-    window.set_meeting_detail_transcript_segment_count(LONG_TRANSCRIPT_PARAGRAPHS as i32);
-    // After mounting, which resets the page to the reading view.
-    window.set_meeting_detail_view(MeetingDetailView::Transcript);
-    let end = total + TRANSCRIPT_PAGE_CHROME_PX - TRANSCRIPT_PAGE_VIEWPORT_PX;
-    let scroll = match surface {
-        "detail-transcript-long-middle" => end / 2.0,
-        "detail-transcript-long-end" => end,
-        _ => 0.0,
-    };
-    // The page does not exist before the first frame, so a scroll set now would
-    // never reach its change handlers.
-    let weak = window.as_weak();
-    slint::Timer::single_shot(std::time::Duration::from_millis(700), move || {
-        if let Some(window) = weak.upgrade() {
-            window.set_meeting_detail_page_scroll_top(-scroll);
-        }
-    });
-    let weak = window.as_weak();
-    slint::Timer::single_shot(std::time::Duration::from_millis(1300), move || {
-        if let Some(window) = weak.upgrade() {
-            eprintln!(
-                "transcript scroll {} spacers {} {}",
-                window.get_meeting_detail_transcript_scroll_top_px(),
-                window.get_meeting_detail_transcript_spacer_before(),
-                window.get_meeting_detail_transcript_spacer_after(),
-            );
-        }
-    });
+    (segments, sessions)
 }
 
 thread_local! {

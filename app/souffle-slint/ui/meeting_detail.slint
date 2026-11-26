@@ -82,13 +82,11 @@ export component MeetingDetail inherits Rectangle {
     in property <int> audio-session-index: -1;
     in property <[TranscriptBlock]> transcript-blocks;
     in property <int> transcript-segment-count;
-    in property <float> transcript-spacer-before: 0.0;
-    in property <float> transcript-spacer-after: 0.0;
-    // The page's scroll position while the transcript is shown: the list has
-    // no scroller of its own, so `main.rs` windows it from the page scroll.
+    // The transcript list's own scroll position, exposed so main_window.slint
+    // can put it back at the top for another meeting or a new search.
     in-out property <length> transcript-scroll-top: 0px;
-    // Opening of the transcript as running text for the reading view, from
-    // the whole meeting (`transcript-blocks` is only the mounted slice).
+    in-out property <length> transcript-scroll-travel: 0px;
+    // Opening of the transcript as running text for the reading view.
     in property <string> transcript-preview;
     in-out property <string> transcript-search;
     in-out property <TranscriptLayout> transcript-layout: TranscriptLayout.conversation;
@@ -168,9 +166,6 @@ export component MeetingDetail inherits Rectangle {
         root.view = next;
         root.page-scroll-top = 0px;
         root.transcript-scroll-top = 0px;
-    }
-    changed page-scroll-top => {
-        if root.show-transcript { root.transcript-scroll-top = root.page-scroll-top; }
     }
     function commit-title(value: string) {
         // `accepted` (Enter) removes the field, which then also reports a
@@ -383,11 +378,10 @@ export component MeetingDetail inherits Rectangle {
                 }
             }
 
-            // The header above stays on screen; everything below it is the
-            // page's single scroll region. The transcript is virtualized
-            // against that region (`transcript-scroll-top`) so long meetings
-            // never mount thousands of paragraphs at once.
-            KitScrollArea {
+            // The header above stays on screen. Below it the reading view is one
+            // scroll region; the transcript view is the virtualized list, which
+            // scrolls by itself.
+            if root.show-reading: KitScrollArea {
                 vertical-stretch: 1;
                 gap: none;
                 overlay-scrollbars: true;
@@ -399,9 +393,8 @@ export component MeetingDetail inherits Rectangle {
                     KitStack {
                         width: root.column-width;
                         gap: roomy;
-                        // Below the view selector. The transcript list's windowing
-                        // assumes no extra space above it.
-                        padding-top: root.show-reading ? 6px : 0px;
+                        // Below the view selector.
+                        padding-top: 6px;
                         padding-bottom: KitLayoutMetrics.space(KitThemeContext.current, LayoutSpace.section);
 
                         if root.is-empty-meeting: KitCard {
@@ -569,22 +562,6 @@ export component MeetingDetail inherits Rectangle {
 
                         if SummarizationUi.enabled && root.show-reading: CompactTranscriptSection { }
 
-                        if root.show-transcript: TranscriptSection {
-                            blocks: root.transcript-blocks;
-                            segment-count: root.transcript-segment-count;
-                            has-audio: root.has-audio;
-                            spacer-before: root.transcript-spacer-before;
-                            spacer-after: root.transcript-spacer-after;
-                            layout: root.transcript-layout;
-                            filtered: root.transcript-search != "";
-                            audio-position-seconds: root.audio-position-seconds;
-                            audio-session-index: root.audio-session-index;
-                            row-width: root.column-width;
-                            paragraph-clicked(session, time) => { root.transcript-paragraph-clicked(session, time); }
-                            background-clicked => { focus-bg.focus(); }
-                            alias-save-requested(term, pronunciation) => { root.transcript-alias-save-requested(term, pronunciation); }
-                        }
-
                         if root.show-reading: KitInline {
                             gap: compact;
 
@@ -640,6 +617,24 @@ export component MeetingDetail inherits Rectangle {
                         }
                     }
                 }
+            }
+
+            if root.show-transcript: TranscriptSection {
+                vertical-stretch: 1;
+                blocks: root.transcript-blocks;
+                segment-count: root.transcript-segment-count;
+                has-audio: root.has-audio;
+                layout: root.transcript-layout;
+                filtered: root.transcript-search != "";
+                audio-position-seconds: root.audio-position-seconds;
+                audio-session-index: root.audio-session-index;
+                column-width: root.column-width;
+                bottom-inset: KitLayoutMetrics.space(KitThemeContext.current, LayoutSpace.section);
+                scroll-top <=> root.transcript-scroll-top;
+                changed scroll-travel => { root.transcript-scroll-travel = self.scroll-travel; }
+                paragraph-clicked(session, time) => { root.transcript-paragraph-clicked(session, time); }
+                background-clicked => { focus-bg.focus(); }
+                alias-save-requested(term, pronunciation) => { root.transcript-alias-save-requested(term, pronunciation); }
             }
 
             if root.show-transcript: HorizontalLayout {

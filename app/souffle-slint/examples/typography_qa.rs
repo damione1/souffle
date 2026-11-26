@@ -43,6 +43,8 @@ mod app_branch_ui {
 }
 #[path = "typography_qa/mockup.rs"]
 mod mockup;
+#[path = "typography_qa/scroll_bench.rs"]
+mod scroll_bench;
 use slint::winit_030::WinitWindowAccessor;
 use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
 use std::ffi::CString;

@@ -68,7 +68,7 @@ use std::sync::{
     atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
 };
 use std::time::Duration;
-use transcript_window::{TranscriptState, mount_transcript, update_transcript_window};
+use transcript_window::{TranscriptState, filter_transcript, mount_transcript, unmount_transcript};
 
 /// `AppHandle` was Tauri's cloneable, 'static, `Send`+`Sync` handle used to
 /// reach `AppState` from any thread/task. `Arc<AppState>` has exactly the
@@ -608,10 +608,7 @@ fn load_meeting_summary_models(window_weak: slint::Weak<MainWindow>, state: Arc<
     });
 }
 
-/// Sets `transcript_state` to `meeting`'s full block list + offsets, mounts
-/// the initial (scroll-top) slice. Later slices follow the user's scroll
-/// through `MainWindow.transcript-scroll-changed` (SOU-283), which only
-/// fires when the Flickable actually moves. Separate from
+/// Builds `meeting`'s paragraphs and shows them from the top. Separate from
 /// `populate_meeting_detail` because it owns mutable shared state the
 /// header/notes population doesn't need.
 fn load_meeting_transcript_window(
@@ -622,36 +619,6 @@ fn load_meeting_transcript_window(
     let blocks =
         transcript::build_transcript_blocks(&meeting.segments, &meeting.recording_sessions);
     mount_transcript(window, blocks, transcript_state);
-}
-
-/// Narrows the mounted transcript to the paragraphs containing `query` (all
-/// of them when it is blank), then re-windows from the top.
-fn filter_transcript_window(
-    window: &MainWindow,
-    transcript_state: &Rc<RefCell<Option<TranscriptState>>>,
-    query: &str,
-) {
-    {
-        let mut guard = transcript_state.borrow_mut();
-        let Some(state) = guard.as_mut() else {
-            return;
-        };
-        state.blocks = transcript::filter_blocks(&state.source, query);
-        state.offsets = transcript::compute_offsets(&state.blocks);
-        state.mounted_start = usize::MAX;
-        state.mounted_end = usize::MAX;
-    }
-    window.invoke_reset_meeting_detail_transcript_scroll_position();
-    update_transcript_window(window, transcript_state, 0.0);
-}
-
-/// Drops the transcript window state - mirrors `stop_audio_player`.
-/// Called before loading a different meeting's transcript and when leaving
-/// MeetingDetail, so a stale huge block list never lingers in memory and a
-/// late scroll change never re-windows a slice that no longer applies
-/// (`update_transcript_window` is a no-op on `None`).
-fn stop_transcript_window(transcript_state: &Rc<RefCell<Option<TranscriptState>>>) {
-    *transcript_state.borrow_mut() = None;
 }
 
 /// Stops and drops any currently loaded audio player/progress timer -
@@ -690,7 +657,7 @@ fn wire_meeting_detail_delete(
                 if stopped_by_sleep(&handle, &id) {
                     handle.clear_sleep_paused_meeting();
                 }
-                stop_transcript_window(&transcript_state);
+                unmount_transcript(&window, &transcript_state);
                 window.set_meeting_detail_delete_error("".into());
                 window.set_active_meeting_id("".into());
                 refresh_timeline(&window, &handle);
@@ -1891,7 +1858,7 @@ fn open_meeting_detail(
     weak: slint::Weak<MainWindow>,
 ) {
     stop_audio_player(player, progress_timer);
-    stop_transcript_window(transcript_state);
+    unmount_transcript(window, transcript_state);
     let state = Arc::clone(handle);
     match souffle_lib::commands::get_meeting(state, meeting_id.to_string()) {
         Ok(meeting) => {
@@ -4236,23 +4203,13 @@ fn wire_callbacks(
             parked: RefCell::new(None),
         }));
     });
-    // Same sharing pattern, for the virtualized transcript list (AC15).
+    // Same sharing pattern, for the transcript list (AC15).
     let transcript_state: Rc<RefCell<Option<TranscriptState>>> = Rc::new(RefCell::new(None));
-    // SOU-283: re-window on actual scroll changes instead of an 80ms poll.
-    // Flickable's content-y is negative-going-down; `update_transcript_window`
-    // takes the positive "distance scrolled from the top".
-    let weak = window.as_weak();
-    let transcript_state_for_scroll = transcript_state.clone();
-    window.on_transcript_scroll_changed(move |scroll_top_px| {
-        if let Some(window) = weak.upgrade() {
-            update_transcript_window(&window, &transcript_state_for_scroll, -scroll_top_px);
-        }
-    });
     let weak = window.as_weak();
     let transcript_state_for_search = transcript_state.clone();
     window.on_transcript_search_changed(move |query| {
         if let Some(window) = weak.upgrade() {
-            filter_transcript_window(&window, &transcript_state_for_search, &query);
+            filter_transcript(&window, &transcript_state_for_search, &query);
         }
     });
     let upcoming_cache: Rc<RefCell<Vec<CalendarEvent>>> = Rc::new(RefCell::new(Vec::new()));
@@ -4613,9 +4570,9 @@ fn wire_callbacks(
             // Without this, a just-finished meeting doesn't appear until
             // the next unrelated refresh (filter change, search, restart).
             refresh_timeline(&window, &handle);
+            unmount_transcript(&window, &transcript_state_for_back);
         }
         stop_audio_player(&player_for_back, &progress_timer_for_back);
-        stop_transcript_window(&transcript_state_for_back);
     });
 
     wire_meeting_detail_delete(
@@ -8742,13 +8699,7 @@ mod tests {
         let state = Arc::new(state);
         let player = Rc::new(RefCell::new(None));
         let timer = Rc::new(RefCell::new(Some(slint::Timer::default())));
-        let transcript = Rc::new(RefCell::new(Some(TranscriptState {
-            source: vec![],
-            blocks: vec![],
-            offsets: vec![],
-            mounted_start: 0,
-            mounted_end: 0,
-        })));
+        let transcript = Rc::new(RefCell::new(Some(TranscriptState { source: vec![] })));
         wire_meeting_detail_delete(
             &window,
             Arc::clone(&state),

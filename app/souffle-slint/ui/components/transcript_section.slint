@@ -1,5 +1,5 @@
 import { AppText, Typography } from "@typography";
-import { ButtonIntent, ChatBubbleTone, ChatSide, ControlSize, ControlWidth, FieldDecoration, KitButton, KitCard, KitChatBubble, KitPressable, KitSearchField, KitSegmentedControl, KitStack, KitText, KitThemeContext, OptionRow, Ownership, SegmentedAppearance, SurfaceLevel, TypographyRole } from "@kit";
+import { ButtonIntent, ChatBubbleTone, ChatSide, ControlSize, ControlWidth, FieldDecoration, KitButton, KitCard, KitChatBubble, KitLayoutMetrics, KitPressable, KitSearchField, KitSegmentedControl, KitText, KitThemeContext, LayoutSpace, ListView, OptionRow, Ownership, SegmentedAppearance, SurfaceLevel, TypographyRole } from "@kit";
 import { LucideText } from "@kit-icons/text.slint";
 import { LucideNotifications } from "@kit-icons/notifications.slint";
 import { Theme } from "../theme.slint";
@@ -9,7 +9,7 @@ import { SpeakerRole } from "../types.slint";
 
 // Port of MeetingTranscriptSection.svelte - paragraph grouping with speaker
 // labels and session-break dividers, click-to-seek on a paragraph's
-// timestamp, virtualized scrolling (AC15), and per-word dictionary-alias
+// timestamp, virtualized scrolling (the kit list), and per-word dictionary-alias
 // popover (TranscriptWordLine.svelte, milestone 8d). Not yet ported: bulk
 // edit mode (the "Edit" affordance next to this title) - copying and
 // exporting the transcript (SOU-195-slice) don't need it.
@@ -66,8 +66,8 @@ export component TranscriptToolbar inherits KitCard {
     in property <bool> can-copy: true;
 
     callback search-changed(string);
-    // Rust renders the text fresh from the full, un-windowed meeting: the
-    // list is only the on-screen slice (AC15), never a safe source for a copy.
+    // Rust renders the text fresh from the whole meeting, whatever the search
+    // currently shows.
     callback copy-requested();
 
     property <bool> just-copied: false;
@@ -192,42 +192,20 @@ component TranscriptRowHeader inherits HorizontalLayout {
     }
 }
 
-export component TranscriptSection inherits KitStack {
-    // Only the currently visible slice of the transcript, not the whole
-    // thing - `main.rs` owns the full block list and pushes a new slice in
-    // whenever the page scroll moves far enough (AC15: only on-screen rows +
-    // margin are ever mounted here, verifiable by `blocks.length` staying
-    // small regardless of how many total paragraphs the meeting has).
-    in property <[TranscriptBlock]> blocks;
-    in property <int> segment-count;
-    in property <bool> has-audio: false;
-    // Estimated height in px (`main.rs`, see `transcript::compute_offsets`)
-    // of everything scrolled past above/below the current slice - plain
-    // `float`, not `length`, since `main.rs` only has access to Slint's
-    // stable `set_*`/`get_*` API, not the `length`-wrapping type used
-    // internally by generated component code. Rendered as blank spacers so
-    // the scrollbar/drag physics feel like a real list of `segment-count`
-    // items instead of just `blocks.length` of them.
-    in property <float> spacer-before: 0.0;
-    in property <float> spacer-after: 0.0;
-    in property <TranscriptLayout> layout: TranscriptLayout.conversation;
-    // True while a search narrows the list, so an empty slice reads as "no
-    // match" and not as an empty meeting.
-    in property <bool> filtered: false;
-    // The paragraph holding the audio position gets the brand ring.
-    in property <float> audio-position-seconds: 0.0;
-    in property <int> audio-session-index: -1;
-    // The width of the column the list sits in. The host passes it because
-    // reading the list's own width from a bubble's preferred width would loop.
-    in property <length> row-width: 820px;
+// One paragraph or session break of the list, with the gap below it. A direct
+// child of the list's repeater, so it is created only while it is on screen.
+component TranscriptRow inherits Rectangle {
+    in property <TranscriptBlock> block;
+    in property <bool> has-audio;
+    in property <TranscriptLayout> layout;
+    in property <bool> playing;
+    // The width of the centred reading column inside the full-width row.
+    in property <length> column-width;
+    in property <length> gap-above;
+    in property <length> gap-below;
 
-    // (recording-session-index, start-time) of the clicked paragraph.
-    callback paragraph-clicked(int, float);
-    // (term, pronunciation) once the user saves the alias popover.
-    callback alias-save-requested(string, string);
-    // A click on the transcript that no word or timestamp handled - lets
-    // the page drop keyboard focus from the title/notes fields (a scroll area
-    // keeps unhandled presses, so the page could never see them).
+    callback seek-requested();
+    callback word-clicked(string, length, length);
     callback background-clicked();
 
     property <length> unit: KitThemeContext.current.spacing.unit;
@@ -237,7 +215,139 @@ export component TranscriptSection inherits KitStack {
     // `content-share` only splits spare space, so a long paragraph also needs a
     // cap on its natural width to wrap.
     property <float> bubble-share: 0.78;
-    property <length> bubble-text-limit: root.bubble-share * root.row-width - 2 * root.bubble-padding;
+    property <length> bubble-text-limit: root.bubble-share * root.column-width - 2 * root.bubble-padding;
+    property <bool> mine: root.block.speaker == SpeakerRole.me && root.block.has-speaker;
+    // A paragraph this long is wider than the cap whatever its glyphs are (no
+    // text averages under 0.29 em a character), so its one-line width is not
+    // measured: that costs a second text per word.
+    property <bool> fills-bubble: root.block.text.character-count * Typography.reading.size * 0.29 >= root.bubble-text-limit;
+
+    // The list keeps unhandled presses, so the page could never see them.
+    TouchArea {
+        clicked => { root.background-clicked(); }
+    }
+
+    HorizontalLayout {
+        alignment: center;
+        padding-top: root.gap-above;
+        padding-bottom: root.gap-below;
+
+        VerticalLayout {
+            width: root.column-width;
+
+            if !root.block.is-session-break: VerticalLayout {
+                spacing: 5px;
+
+                TranscriptRowHeader {
+                    block: root.block;
+                    has-audio: root.has-audio;
+                    mirrored: root.layout == TranscriptLayout.conversation && root.mine;
+                    seek-requested => { root.seek-requested(); }
+                }
+
+                // SOU-223: click-to-correct words, no underline and no
+                // link look. Always the word flow, never swapped for a
+                // wrapped Text on hover: the two break lines differently
+                // (SOU-258).
+                if root.layout == TranscriptLayout.conversation: KitChatBubble {
+                    side: root.mine ? ChatSide.end : ChatSide.start;
+                    tone: root.mine ? ChatBubbleTone.accent-subtle : ChatBubbleTone.muted;
+                    content-share: root.bubble-share;
+                    hug: true;
+
+                    Rectangle {
+                        preferred-width: root.fills-bubble ? root.bubble-text-limit : min(one-line.preferred-width, root.bubble-text-limit);
+                        preferred-height: bubble-flow.preferred-height;
+
+                        one-line := TranscriptNaturalWidth {
+                            // Positioned, so its unwrapped min-width does not
+                            // propagate to the bubble and defeat the cap.
+                            x: 0px;
+                            y: 0px;
+                            words: root.fills-bubble ? [] : root.block.words;
+                            typography: Typography.reading;
+                        }
+
+                        if root.playing: playing-ring := Rectangle {
+                            x: -root.bubble-padding - root.ring-width;
+                            y: -root.bubble-padding - root.ring-width;
+                            width: parent.width + 2 * (root.bubble-padding + root.ring-width);
+                            height: parent.height + 2 * (root.bubble-padding + root.ring-width);
+                            border-width: root.ring-width;
+                            border-color: Theme.brand;
+                            border-radius: KitThemeContext.current.shape.radius-container + root.ring-width;
+                        }
+
+                        bubble-flow := TranscriptWordFlow {
+                            width: parent.width;
+                            words: root.block.words;
+                            typography: Typography.reading;
+                            line-ratio: 1.55;
+                            word-clicked(word, at-x, at-y) => { root.word-clicked(word, at-x, at-y); }
+                        }
+                    }
+                }
+
+                if root.layout == TranscriptLayout.text: TranscriptWordFlow {
+                    words: root.block.words;
+                    word-clicked(word, at-x, at-y) => { root.word-clicked(word, at-x, at-y); }
+                }
+            }
+
+            if root.block.is-session-break: HorizontalLayout {
+                spacing: 3 * root.unit;
+
+                VerticalLayout {
+                    alignment: center;
+                    Rectangle { height: 1px; background: Theme.line; }
+                }
+                AppText {
+                    text: @tr("Fin de l'enregistrement précédent") + " · " + @tr("Nouvelle session d'enregistrement");
+                    typography: Typography.caption;
+                    color: Theme.text-faint;
+                    horizontal-stretch: 0;
+                }
+                VerticalLayout {
+                    alignment: center;
+                    Rectangle { height: 1px; background: Theme.line; }
+                }
+            }
+        }
+    }
+}
+
+// The transcript and its scroller. `blocks` is the whole (or searched)
+// transcript: the kit list creates a row only while it is on screen, lays it out
+// at its real height and estimates the rest for the scroll bar, so no height is
+// guessed here and scrolling costs the same whatever the meeting length.
+export component TranscriptSection inherits Rectangle {
+    in property <[TranscriptBlock]> blocks;
+    in property <int> segment-count;
+    in property <bool> has-audio: false;
+    in property <TranscriptLayout> layout: TranscriptLayout.conversation;
+    // True while a search narrows the list, so an empty list reads as "no
+    // match" and not as an empty meeting.
+    in property <bool> filtered: false;
+    // The paragraph holding the audio position gets the brand ring.
+    in property <float> audio-position-seconds: 0.0;
+    in property <int> audio-session-index: -1;
+    // The width of the reading column, centred in the list.
+    in property <length> column-width: 820px;
+    // Free space under the last paragraph.
+    in property <length> bottom-inset: 0px;
+    in-out property <length> scroll-top <=> list.content-y;
+    // How far the list can scroll, from its current height estimate.
+    out property <length> scroll-travel: max(0px, list.content-height - list.visible-height);
+
+    // (recording-session-index, start-time) of the clicked paragraph.
+    callback paragraph-clicked(int, float);
+    // (term, pronunciation) once the user saves the alias popover.
+    callback alias-save-requested(string, string);
+    // A click on the transcript that no word or timestamp handled - lets
+    // the page drop keyboard focus from the title field.
+    callback background-clicked();
+
+    property <length> row-gap: KitLayoutMetrics.space(KitThemeContext.current, LayoutSpace.regular);
 
     pure function playing(block: TranscriptBlock) -> bool {
         return root.has-audio
@@ -246,118 +356,46 @@ export component TranscriptSection inherits KitStack {
             && root.audio-position-seconds < block.end-time;
     }
 
-    if root.segment-count == 0: KitText {
-        text: @tr("Aucun texte transcrit pour cette r\u{e9}union.");
-        role: TypographyRole.caption;
+    // One shared popover rather than one instance per word. Opens under
+    // the clicked word.
+    alias-popup := DictionaryAliasPopover {
+        save-requested(term, pronunciation) => { root.alias-save-requested(term, pronunciation); }
     }
 
-    if root.segment-count > 0 && root.filtered && root.blocks.length == 0: KitText {
-        text: @tr("Aucun passage ne correspond à la recherche.");
-        role: TypographyRole.caption;
-    }
+    if root.segment-count == 0 || (root.filtered && root.blocks.length == 0): HorizontalLayout {
+        alignment: center;
 
-    if root.segment-count > 0 && root.blocks.length > 0: Rectangle {
-        preferred-height: list.preferred-height;
+        VerticalLayout {
+            width: root.column-width;
+            alignment: start;
 
-        // One shared popover rather than one instance per word. Opens under
-        // the clicked word.
-        alias-popup := DictionaryAliasPopover {
-            save-requested(term, pronunciation) => { root.alias-save-requested(term, pronunciation); }
-        }
-
-        TouchArea {
-            clicked => { root.background-clicked(); }
-        }
-
-        list := KitStack {
-            y: 0px;
-            width: parent.width;
-            height: self.preferred-height;
-            gap: regular;
-
-            Rectangle { height: root.spacer-before * 1px; }
-
-            for block in root.blocks: VerticalLayout {
-                if !block.is-session-break: VerticalLayout {
-                    spacing: 5px;
-
-                    TranscriptRowHeader {
-                        block: block;
-                        has-audio: root.has-audio;
-                        mirrored: root.layout == TranscriptLayout.conversation && block.speaker == SpeakerRole.me && block.has-speaker;
-                        seek-requested => { root.paragraph-clicked(block.recording-session-index, block.start-time); }
-                    }
-
-                    // SOU-223: click-to-correct words, no underline and no
-                    // link look. Always the word flow, never swapped for a
-                    // wrapped Text on hover: the two break lines differently
-                    // (SOU-258).
-                    if root.layout == TranscriptLayout.conversation: KitChatBubble {
-                        side: block.speaker == SpeakerRole.me && block.has-speaker ? ChatSide.end : ChatSide.start;
-                        tone: block.speaker == SpeakerRole.me && block.has-speaker ? ChatBubbleTone.accent-subtle : ChatBubbleTone.muted;
-                        content-share: root.bubble-share;
-                        hug: true;
-
-                        Rectangle {
-                            preferred-width: min(one-line.preferred-width, root.bubble-text-limit);
-                            preferred-height: bubble-flow.preferred-height;
-
-                            one-line := TranscriptNaturalWidth {
-                                // Positioned, so its unwrapped min-width does not
-                                // propagate to the bubble and defeat the cap.
-                                x: 0px;
-                                y: 0px;
-                                words: block.words;
-                                typography: Typography.reading;
-                            }
-
-                            if root.playing(block): Rectangle {
-                                x: -root.bubble-padding - root.ring-width;
-                                y: -root.bubble-padding - root.ring-width;
-                                width: parent.width + 2 * (root.bubble-padding + root.ring-width);
-                                height: parent.height + 2 * (root.bubble-padding + root.ring-width);
-                                border-width: root.ring-width;
-                                border-color: Theme.brand;
-                                border-radius: KitThemeContext.current.shape.radius-container + root.ring-width;
-                            }
-
-                            bubble-flow := TranscriptWordFlow {
-                                width: parent.width;
-                                words: block.words;
-                                typography: Typography.reading;
-                                line-ratio: 1.55;
-                                word-clicked(word, at-x, at-y) => { alias-popup.open(word, at-x, at-y); }
-                            }
-                        }
-                    }
-
-                    if root.layout == TranscriptLayout.text: TranscriptWordFlow {
-                        words: block.words;
-                        word-clicked(word, at-x, at-y) => { alias-popup.open(word, at-x, at-y); }
-                    }
-                }
-
-                if block.is-session-break: HorizontalLayout {
-                    spacing: 3 * root.unit;
-
-                    VerticalLayout {
-                        alignment: center;
-                        Rectangle { height: 1px; background: Theme.line; }
-                    }
-                    AppText {
-                        text: @tr("Fin de l'enregistrement précédent") + " · " + @tr("Nouvelle session d'enregistrement");
-                        typography: Typography.caption;
-                        color: Theme.text-faint;
-                        horizontal-stretch: 0;
-                    }
-                    VerticalLayout {
-                        alignment: center;
-                        Rectangle { height: 1px; background: Theme.line; }
-                    }
-                }
+            empty-note := KitText {
+                text: root.segment-count == 0
+                    ? @tr("Aucun texte transcrit pour cette r\u{e9}union.")
+                    : @tr("Aucun passage ne correspond à la recherche.");
+                role: TypographyRole.caption;
             }
+        }
+    }
 
-            Rectangle { height: root.spacer-after * 1px; }
+    list := ListView {
+        width: 100%;
+        height: 100%;
+        overlay-scrollbars: true;
+        horizontal-scrollbar-policy: always-off;
+
+        for block[index] in root.blocks: TranscriptRow {
+            width: list.visible-width;
+            block: block;
+            has-audio: root.has-audio;
+            layout: root.layout;
+            playing: root.playing(block);
+            column-width: root.column-width;
+            gap-above: index == 0 ? root.row-gap : 0px;
+            gap-below: index + 1 == root.blocks.length ? root.row-gap + root.bottom-inset : root.row-gap;
+            seek-requested => { root.paragraph-clicked(block.recording-session-index, block.start-time); }
+            word-clicked(word, at-x, at-y) => { alias-popup.open(word, at-x, at-y); }
+            background-clicked => { root.background-clicked(); }
         }
     }
 }

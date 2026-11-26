@@ -164,31 +164,18 @@ export component MainWindow inherits Window {
     in property <int> meeting-detail-audio-session-index: -1;
     in property <[TranscriptBlock]> meeting-detail-transcript-blocks;
     in property <int> meeting-detail-transcript-segment-count;
-    in property <float> meeting-detail-transcript-spacer-before: 0.0;
-    in property <float> meeting-detail-transcript-spacer-after: 0.0;
     in property <string> meeting-detail-transcript-preview;
     in-out property <string> meeting-detail-transcript-search;
     in-out property <TranscriptLayout> meeting-detail-transcript-layout: TranscriptLayout.conversation;
     callback transcript-search-changed(string);
-    // `length`-typed so it can two-way bind all the way down to the real
-    // Flickable inside TranscriptSection (see that component's doc comment
-    // on `scroll-top`) - internal plumbing only, not read directly by Rust.
+    // The transcript list's scroll position, two-way bound down to the list
+    // so the functions below can put it back at the top. The list is
+    // virtualized by the kit, so Rust never reads it.
     in-out property <length> meeting-detail-transcript-scroll-top: 0px;
-    // The same value as above, converted to a plain float so Rust doesn't
-    // need Slint's internal `length`-wrapping type.
-    out property <float> meeting-detail-transcript-scroll-top-px: root.meeting-detail-transcript-scroll-top / 1px;
-    // SOU-283: `main.rs` re-windows the transcript (AC15) only when the
-    // scroll position actually moves, instead of polling it on a timer.
-    // Change handlers run once per event-loop iteration, so a fast flick
-    // is naturally coalesced. Not fired on first mount or data replacement:
-    // Rust mounts the initial slice itself.
-    callback transcript-scroll-changed(float);
-    changed meeting-detail-transcript-scroll-top => {
-        root.transcript-scroll-changed(self.meeting-detail-transcript-scroll-top / 1px);
-    }
-    // MeetingDetail's own single-page scroll (SOU-243) - no Rust polling
-    // needed (unlike the transcript above, it isn't virtualized), just
-    // reset on navigation like meeting-detail-transcript-scroll-top below.
+    // How far that list can scroll, for the design fixture.
+    in-out property <length> meeting-detail-transcript-scroll-travel: 0px;
+    // The reading view's scroll region (SOU-243), reset on navigation like
+    // meeting-detail-transcript-scroll-top.
     in-out property <length> meeting-detail-page-scroll-top: 0px;
     in-out property <MeetingDetailView> meeting-detail-view: MeetingDetailView.reading;
     in property <string> meeting-detail-summary;
@@ -829,9 +816,8 @@ export component MainWindow inherits Window {
                 transcript-search-changed(query) => { root.transcript-search-changed(query); }
                 transcript-blocks: root.meeting-detail-transcript-blocks;
                 transcript-segment-count: root.meeting-detail-transcript-segment-count;
-                transcript-spacer-before: root.meeting-detail-transcript-spacer-before;
-                transcript-spacer-after: root.meeting-detail-transcript-spacer-after;
                 transcript-scroll-top <=> root.meeting-detail-transcript-scroll-top;
+                transcript-scroll-travel <=> root.meeting-detail-transcript-scroll-travel;
                 page-scroll-top <=> root.meeting-detail-page-scroll-top;
                 view <=> root.meeting-detail-view;
                 summary: root.meeting-detail-summary;
