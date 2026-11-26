@@ -178,7 +178,7 @@ pub struct UpcomingMeeting {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum MeetingIdleReason {
-    /// No transcript segment with text for the configured silence threshold.
+    /// No transcript segment with text for the silence threshold.
     Silence,
     /// The session has run past the configured max-duration failsafe.
     MaxDuration,

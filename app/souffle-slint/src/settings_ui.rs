@@ -87,12 +87,6 @@ pub fn populate(window: &MainWindow, settings: &AppSettings) {
     window.set_settings_capture_system_audio(settings.capture_system_audio);
     window.set_settings_meeting_audio_diagnostic(settings.meeting_audio_diagnostic);
     window.set_settings_meeting_autostop_enabled(settings.meeting_autostop_enabled);
-    window.set_settings_meeting_autostop_label(
-        crate::audio_ui::minute_label(settings.meeting_autostop_minutes).into(),
-    );
-    window.set_settings_meeting_max_duration_label(
-        crate::audio_ui::minute_label(settings.meeting_max_duration_minutes).into(),
-    );
     window.set_settings_filler_removal(settings.filler_removal);
     window.set_settings_dictionary_correction(settings.dictionary_correction);
 
@@ -108,12 +102,6 @@ pub fn populate(window: &MainWindow, settings: &AppSettings) {
     window.set_settings_feedback_sounds_volume_max(bounds.feedback_sounds_volume_max as i32);
     window.set_settings_calendar_reminder_minutes_min(bounds.calendar_reminder_minutes_min as i32);
     window.set_settings_calendar_reminder_minutes_max(bounds.calendar_reminder_minutes_max as i32);
-    window.set_settings_meeting_autostop_labels(shared_string_model(
-        &crate::audio_ui::minute_labels(&bounds.meeting_autostop_minutes),
-    ));
-    window.set_settings_meeting_max_duration_labels(shared_string_model(
-        &crate::audio_ui::minute_labels(&bounds.meeting_max_duration_minutes),
-    ));
 }
 
 pub fn populate_platform_capabilities(
@@ -123,11 +111,6 @@ pub fn populate_platform_capabilities(
 ) {
     window.set_settings_is_laptop(is_laptop);
     window.set_settings_system_audio_supported(system_audio_supported);
-}
-
-fn shared_string_model(values: &[String]) -> slint::ModelRc<slint::SharedString> {
-    let values: Vec<slint::SharedString> = values.iter().map(|v| v.as_str().into()).collect();
-    std::rc::Rc::new(slint::VecModel::from(values)).into()
 }
 
 pub fn dictionary_learning_to_slint(

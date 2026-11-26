@@ -23,10 +23,6 @@ export component AudioSection inherits KitFieldSet {
     in property <int> diagnostic-max-minutes;
     in property <int> diagnostic-megabytes-per-hour;
     in property <bool> meeting-autostop-enabled;
-    in property <[string]> meeting-autostop-labels;
-    in property <string> meeting-autostop-label;
-    in property <[string]> meeting-max-duration-labels;
-    in property <string> meeting-max-duration-label;
     in property <bool> filler-removal;
     in property <bool> dictionary-correction;
 
@@ -34,8 +30,6 @@ export component AudioSection inherits KitFieldSet {
     callback capture-system-audio-changed(bool);
     callback meeting-audio-diagnostic-changed(bool);
     callback meeting-autostop-enabled-changed(bool);
-    callback meeting-autostop-changed(string);
-    callback meeting-max-duration-changed(string);
     callback filler-removal-changed(bool);
     callback dictionary-correction-changed(bool);
 
@@ -82,7 +76,7 @@ export component AudioSection inherits KitFieldSet {
             if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
         }
         label: @tr("Arrêt automatique des réunions");
-        description: @tr("Arrêter l'enregistrement quand plus personne ne parle depuis longtemps.");
+        description: @tr("Arrête la réunion après 10 minutes de silence, puis 2 minutes pour annuler, et dans tous les cas au bout de 4 heures. Désactivé, aucune de ces limites ne s'applique.");
 
         autostop-switch := KitSwitch {
             theme: root.theme;
@@ -94,52 +88,6 @@ export component AudioSection inherits KitFieldSet {
             accessible-label: @tr("Arrêt automatique des réunions");
             checked: root.meeting-autostop-enabled;
             toggled(new) => { root.meeting-autostop-enabled-changed(new); }
-        }
-    }
-
-    if root.meeting-autostop-enabled: KitFieldRow {
-        theme: root.theme;
-        modal-layer: 0;
-        orientation: Theme.settings-field-orientation(self.width);
-        appearance: FieldRowAppearance.inset;
-        show-divider: true;
-        focus-requested => { delay-picker.take-focus(); }
-        private property <bool> control-focused: delay-picker.has-focus;
-        changed control-focused => {
-            if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
-        }
-        label: @tr("Délai avant arrêt");
-
-        delay-picker := CatalogPicker {
-            theme: root.theme;
-            modal-layer: 0;
-            control-label: @tr("Délai avant arrêt automatique");
-            model: root.meeting-autostop-labels;
-            current-value: root.meeting-autostop-label;
-            value-chosen(value) => { root.meeting-autostop-changed(value); }
-        }
-    }
-
-    if root.meeting-autostop-enabled: KitFieldRow {
-        theme: root.theme;
-        modal-layer: 0;
-        orientation: Theme.settings-field-orientation(self.width);
-        appearance: FieldRowAppearance.inset;
-        show-divider: true;
-        focus-requested => { duration-picker.take-focus(); }
-        private property <bool> control-focused: duration-picker.has-focus;
-        changed control-focused => {
-            if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
-        }
-        label: @tr("Durée maximale d'une réunion");
-
-        duration-picker := CatalogPicker {
-            theme: root.theme;
-            modal-layer: 0;
-            control-label: @tr("Durée maximale d'une réunion");
-            model: root.meeting-max-duration-labels;
-            current-value: root.meeting-max-duration-label;
-            value-chosen(value) => { root.meeting-max-duration-changed(value); }
         }
     }
 

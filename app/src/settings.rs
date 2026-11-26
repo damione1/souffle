@@ -49,8 +49,6 @@ pub const LAST_UPDATE_CHECK_AT_KEY: &str = "last_update_check_at";
 /// preference: the overlay re-clamps it when the screen changes.
 pub const PILL_POSITION_KEY: &str = "pill_position";
 const MEETING_AUTOSTOP_ENABLED_KEY: &str = "meeting_autostop_enabled";
-const MEETING_AUTOSTOP_MINUTES_KEY: &str = "meeting_autostop_minutes";
-const MEETING_MAX_DURATION_MINUTES_KEY: &str = "meeting_max_duration_minutes";
 const AUTOSTART_ENABLED_KEY: &str = "autostart_enabled";
 const LOCALE_KEY: &str = "locale";
 const SHORTCUT_TOGGLE_KEY: &str = "shortcut_toggle";
@@ -280,13 +278,8 @@ pub struct AppSettings {
     pub model_unload_timeout_minutes: u32,
     /// Detect a meeting that has probably ended (no speech for a while, or
     /// the max-duration failsafe) and offer/auto-stop. A session snapshots
-    /// these settings at start; changes apply from the next meeting.
+    /// this setting at start; a change applies from the next meeting.
     pub meeting_autostop_enabled: bool,
-    /// Silence duration (minutes) before the meeting is considered idle.
-    pub meeting_autostop_minutes: u32,
-    /// Hard failsafe: stop the meeting after this many minutes regardless of
-    /// speech activity.
-    pub meeting_max_duration_minutes: u32,
     /// Launch Soufflé at login (SMAppService login item, SOU-036). The stored
     /// value is a fallback only: `get_settings` overwrites it with the state
     /// the system reports, and an absent key means "never asked", not "on".
@@ -323,17 +316,8 @@ pub struct AppSettings {
 /// options offered in the settings UI.
 const ALLOWED_UNLOAD_TIMEOUT_MINUTES: [u32; 4] = [0, 5, 15, 60];
 
-const MEETING_AUTOSTOP_MINUTES_RANGE: std::ops::RangeInclusive<u32> = 3..=60;
-const MEETING_MAX_DURATION_MINUTES_RANGE: std::ops::RangeInclusive<u32> = 60..=720;
 const CALENDAR_REMINDER_MINUTES_RANGE: std::ops::RangeInclusive<u32> = 1..=30;
 const FEEDBACK_SOUNDS_VOLUME_RANGE: std::ops::RangeInclusive<u32> = 0..=100;
-
-/// The discrete steps the settings UI offers inside the two ranges above.
-/// They live here, next to the bounds that validate them, so that narrowing a
-/// range breaks `offered_options_survive_sanitize` instead of silently
-/// folding the user's choice back to the default on the next save.
-const MEETING_AUTOSTOP_MINUTES_OPTIONS: [u32; 4] = [5, 10, 15, 30];
-const MEETING_MAX_DURATION_MINUTES_OPTIONS: [u32; 3] = [120, 240, 480];
 
 pub const MIN_PASTE_DELAY_MS: u64 = 50;
 pub const MAX_PASTE_DELAY_MS: u64 = 1000;
@@ -346,8 +330,6 @@ pub struct SettingsOptions {
     pub meeting_diagnostic_max_minutes: u32,
     pub meeting_diagnostic_megabytes_per_hour: u32,
     pub model_unload_timeout_minutes: Vec<u32>,
-    pub meeting_autostop_minutes: Vec<u32>,
-    pub meeting_max_duration_minutes: Vec<u32>,
     pub paste_delay_ms_min: u64,
     pub paste_delay_ms_max: u64,
     pub calendar_reminder_minutes_min: u32,
@@ -367,8 +349,6 @@ impl SettingsOptions {
             meeting_diagnostic_max_minutes: crate::audio::diagnostic::MAX_MINUTES,
             meeting_diagnostic_megabytes_per_hour: crate::audio::diagnostic::MEGABYTES_PER_HOUR,
             model_unload_timeout_minutes: ALLOWED_UNLOAD_TIMEOUT_MINUTES.to_vec(),
-            meeting_autostop_minutes: MEETING_AUTOSTOP_MINUTES_OPTIONS.to_vec(),
-            meeting_max_duration_minutes: MEETING_MAX_DURATION_MINUTES_OPTIONS.to_vec(),
             paste_delay_ms_min: MIN_PASTE_DELAY_MS,
             paste_delay_ms_max: MAX_PASTE_DELAY_MS,
             calendar_reminder_minutes_min: *CALENDAR_REMINDER_MINUTES_RANGE.start(),
@@ -433,8 +413,6 @@ impl Default for AppSettings {
             feedback_sounds_volume: 70,
             model_unload_timeout_minutes: 60,
             meeting_autostop_enabled: true,
-            meeting_autostop_minutes: 10,
-            meeting_max_duration_minutes: 240,
             autostart_enabled: false,
             meeting_audio_retention: MeetingAudioRetention::default(),
             meeting_audio_diagnostic: false,
@@ -611,16 +589,6 @@ impl AppSettings {
             read_json_setting::<bool>(db, MEETING_AUTOSTOP_ENABLED_KEY)?
         {
             settings.meeting_autostop_enabled = meeting_autostop_enabled;
-        }
-        if let Some(meeting_autostop_minutes) =
-            read_json_setting::<u32>(db, MEETING_AUTOSTOP_MINUTES_KEY)?
-        {
-            settings.meeting_autostop_minutes = meeting_autostop_minutes;
-        }
-        if let Some(meeting_max_duration_minutes) =
-            read_json_setting::<u32>(db, MEETING_MAX_DURATION_MINUTES_KEY)?
-        {
-            settings.meeting_max_duration_minutes = meeting_max_duration_minutes;
         }
         if let Some(autostart_enabled) = read_json_setting::<bool>(db, AUTOSTART_ENABLED_KEY)? {
             settings.autostart_enabled = autostart_enabled;
@@ -827,13 +795,6 @@ impl AppSettings {
 
         if !ALLOWED_UNLOAD_TIMEOUT_MINUTES.contains(&normalized.model_unload_timeout_minutes) {
             normalized.model_unload_timeout_minutes = Self::default().model_unload_timeout_minutes;
-        }
-
-        if !MEETING_AUTOSTOP_MINUTES_RANGE.contains(&normalized.meeting_autostop_minutes) {
-            normalized.meeting_autostop_minutes = Self::default().meeting_autostop_minutes;
-        }
-        if !MEETING_MAX_DURATION_MINUTES_RANGE.contains(&normalized.meeting_max_duration_minutes) {
-            normalized.meeting_max_duration_minutes = Self::default().meeting_max_duration_minutes;
         }
 
         normalized.dictation_polish_template_id =
@@ -1116,16 +1077,6 @@ impl AppSettings {
                 transaction,
                 MEETING_AUTOSTOP_ENABLED_KEY,
                 &normalized.meeting_autostop_enabled,
-            )?;
-            write_json_setting_in_transaction(
-                transaction,
-                MEETING_AUTOSTOP_MINUTES_KEY,
-                &normalized.meeting_autostop_minutes,
-            )?;
-            write_json_setting_in_transaction(
-                transaction,
-                MEETING_MAX_DURATION_MINUTES_KEY,
-                &normalized.meeting_max_duration_minutes,
             )?;
             write_json_setting_in_transaction(
                 transaction,
@@ -1477,26 +1428,6 @@ mod tests {
             .unwrap();
             assert_eq!(normalized.model_unload_timeout_minutes, minutes);
         }
-
-        for minutes in options.meeting_autostop_minutes {
-            let normalized = AppSettings {
-                meeting_autostop_minutes: minutes,
-                ..AppSettings::default()
-            }
-            .sanitize_for_save()
-            .unwrap();
-            assert_eq!(normalized.meeting_autostop_minutes, minutes);
-        }
-
-        for minutes in options.meeting_max_duration_minutes {
-            let normalized = AppSettings {
-                meeting_max_duration_minutes: minutes,
-                ..AppSettings::default()
-            }
-            .sanitize_for_save()
-            .unwrap();
-            assert_eq!(normalized.meeting_max_duration_minutes, minutes);
-        }
     }
 
     /// AC3: the menus the user sees are unchanged by this refactor.
@@ -1504,8 +1435,6 @@ mod tests {
     fn offered_options_are_unchanged() {
         let options = SettingsOptions::current();
         assert_eq!(options.model_unload_timeout_minutes, vec![0, 5, 15, 60]);
-        assert_eq!(options.meeting_autostop_minutes, vec![5, 10, 15, 30]);
-        assert_eq!(options.meeting_max_duration_minutes, vec![120, 240, 480]);
     }
 
     #[test]
@@ -1547,8 +1476,6 @@ mod tests {
             feedback_sounds_volume: 40,
             model_unload_timeout_minutes: 15,
             meeting_autostop_enabled: false,
-            meeting_autostop_minutes: 15,
-            meeting_max_duration_minutes: 120,
             autostart_enabled: true,
             meeting_audio_retention: MeetingAudioRetention::Keep30d,
             meeting_audio_diagnostic: true,
@@ -2031,52 +1958,6 @@ mod tests {
     }
 
     #[test]
-    fn meeting_autostop_minutes_out_of_range_falls_back_to_default() {
-        let (db, _dir) = test_db();
-        db.set_setting("meeting_autostop_minutes", "2")
-            .expect("save minutes");
-        let settings = AppSettings::load(&db).expect("load settings");
-        assert_eq!(settings.meeting_autostop_minutes, 10);
-
-        db.set_setting("meeting_autostop_minutes", "61")
-            .expect("save minutes");
-        let settings = AppSettings::load(&db).expect("load settings");
-        assert_eq!(settings.meeting_autostop_minutes, 10);
-
-        for minutes in [3, 30, 60] {
-            let s = AppSettings {
-                meeting_autostop_minutes: minutes,
-                ..AppSettings::default()
-            };
-            let clean = s.sanitize_for_save().unwrap();
-            assert_eq!(clean.meeting_autostop_minutes, minutes);
-        }
-    }
-
-    #[test]
-    fn meeting_max_duration_minutes_out_of_range_falls_back_to_default() {
-        let (db, _dir) = test_db();
-        db.set_setting("meeting_max_duration_minutes", "59")
-            .expect("save minutes");
-        let settings = AppSettings::load(&db).expect("load settings");
-        assert_eq!(settings.meeting_max_duration_minutes, 240);
-
-        db.set_setting("meeting_max_duration_minutes", "721")
-            .expect("save minutes");
-        let settings = AppSettings::load(&db).expect("load settings");
-        assert_eq!(settings.meeting_max_duration_minutes, 240);
-
-        for minutes in [60, 240, 480, 720] {
-            let s = AppSettings {
-                meeting_max_duration_minutes: minutes,
-                ..AppSettings::default()
-            };
-            let clean = s.sanitize_for_save().unwrap();
-            assert_eq!(clean.meeting_max_duration_minutes, minutes);
-        }
-    }
-
-    #[test]
     fn meeting_autostop_enabled_defaults_true() {
         assert!(AppSettings::default().meeting_autostop_enabled);
     }
@@ -2140,6 +2021,8 @@ mod tests {
             ("stutter_collapse", "true"),
             ("dictation_ceiling_seconds", "120"),
             ("meeting_transcription_language", "\"fr\""),
+            ("meeting_autostop_minutes", "30"),
+            ("meeting_max_duration_minutes", "480"),
         ];
         for (key, value) in retired {
             db.set_setting(key, value).expect("seed the retired key");

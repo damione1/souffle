@@ -10,7 +10,7 @@
 //!
 //! - max duration: stop at once, whatever the user dismissed;
 //! - silence: show the banner, and stop once the silence reaches the
-//!   configured threshold plus [`SILENCE_AUTOSTOP_GRACE_SECONDS`];
+//!   signalled threshold plus [`SILENCE_AUTOSTOP_GRACE_SECONDS`];
 //! - "Keep recording" hides the banner and cancels the stop for this silence
 //!   episode only: speech resuming ends the episode, and the next one shows
 //!   the banner again.
@@ -25,7 +25,7 @@ use souffle_lib::app_events::MeetingIdleReason;
 use souffle_lib::pipeline::LiveMeetingIdle;
 
 /// Extra silence tolerated after the banner first appears before the meeting
-/// stops by itself, on top of the configured silence threshold (the Tauri
+/// stops by itself, on top of the signalled silence threshold (the Tauri
 /// controller's `SILENCE_AUTOSTOP_GRACE_SECONDS`).
 pub const SILENCE_AUTOSTOP_GRACE_SECONDS: u64 = 120;
 

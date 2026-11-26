@@ -881,36 +881,10 @@ async fn audio_actions(w: &MainWindow, path: &Path) {
         );
         log.borrow_mut().clear();
     }
-    let present = |name: &str| ElementHandle::find_by_element_id(w, name).next().is_some();
-    for enabled in [true, false, true] {
-        w.set_settings_meeting_autostop_enabled(enabled);
-        settle(w);
-        // Only the part of the page inside the viewport is instantiated, so the rows
-        // are scrolled into view before their presence is read. The absence case is
-        // read with the neighbouring switches mounted.
-        if enabled {
-            reveal(w, &page, "AudioSection::delay-picker");
-            reveal(w, &page, "AudioSection::duration-picker");
-        } else {
-            reveal(w, &page, "AudioSection::vad-switch");
-            assert!(
-                present("AudioSection::autostop-switch"),
-                "the neighbourhood of the hidden rows is mounted"
-            );
-        }
-        assert_eq!(
-            (
-                present("AudioSection::delay-picker"),
-                present("AudioSection::duration-picker")
-            ),
-            (enabled, enabled),
-            "delay and maximum duration follow auto-stop"
-        );
-    }
     frame(w, path, "controls");
     println!(
-        "audio actions: {} gestures observed with exact UID, bounds, ownership and conditional rows",
-        17
+        "audio actions: {} gestures observed with exact UID, bounds and ownership",
+        15
     );
 }
 

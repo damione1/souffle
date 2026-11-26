@@ -97,10 +97,6 @@ export component SettingsView inherits KitAppShell {
     in property <int> diagnostic-max-minutes;
     in property <int> diagnostic-megabytes-per-hour;
     in property <bool> meeting-autostop-enabled;
-    in property <[string]> meeting-autostop-labels;
-    in property <string> meeting-autostop-label;
-    in property <[string]> meeting-max-duration-labels;
-    in property <string> meeting-max-duration-label;
     in property <bool> filler-removal;
     in property <bool> dictionary-correction;
     in property <string> data-stats-line;
@@ -253,8 +249,6 @@ export component SettingsView inherits KitAppShell {
     callback capture-system-audio-changed(bool);
     callback meeting-audio-diagnostic-changed(bool);
     callback meeting-autostop-enabled-changed(bool);
-    callback meeting-autostop-changed(string);
-    callback meeting-max-duration-changed(string);
     callback filler-removal-changed(bool);
     callback dictionary-correction-changed(bool);
     callback meeting-audio-retention-changed(AudioRetention);
@@ -591,18 +585,12 @@ export component SettingsView inherits KitAppShell {
                                     diagnostic-max-minutes: root.diagnostic-max-minutes;
                                     diagnostic-megabytes-per-hour: root.diagnostic-megabytes-per-hour;
                                     meeting-autostop-enabled: root.meeting-autostop-enabled;
-                                    meeting-autostop-labels: root.meeting-autostop-labels;
-                                    meeting-autostop-label: root.meeting-autostop-label;
-                                    meeting-max-duration-labels: root.meeting-max-duration-labels;
-                                    meeting-max-duration-label: root.meeting-max-duration-label;
                                     filler-removal: root.filler-removal;
                                     dictionary-correction: root.dictionary-correction;
                                     clamshell-device-changed(value) => { root.clamshell-device-changed(value); }
                                     capture-system-audio-changed(value) => { root.capture-system-audio-changed(value); }
                                     meeting-audio-diagnostic-changed(value) => { root.meeting-audio-diagnostic-changed(value); }
                                     meeting-autostop-enabled-changed(value) => { root.meeting-autostop-enabled-changed(value); }
-                                    meeting-autostop-changed(value) => { root.meeting-autostop-changed(value); }
-                                    meeting-max-duration-changed(value) => { root.meeting-max-duration-changed(value); }
                                     filler-removal-changed(value) => { root.filler-removal-changed(value); }
                                     dictionary-correction-changed(value) => { root.dictionary-correction-changed(value); }
                                 }

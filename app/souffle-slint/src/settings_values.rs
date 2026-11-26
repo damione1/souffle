@@ -334,12 +334,6 @@ impl SettingsValueController {
             )
             .into(),
         );
-        window.set_settings_meeting_autostop_label(
-            audio_ui::minute_label(settings.meeting_autostop_minutes).into(),
-        );
-        window.set_settings_meeting_max_duration_label(
-            audio_ui::minute_label(settings.meeting_max_duration_minutes).into(),
-        );
         window.set_settings_meeting_audio_retention(settings_ui::audio_retention_to_slint(
             settings.meeting_audio_retention,
         ));
@@ -462,22 +456,6 @@ pub(crate) fn wire(window: &MainWindow, controller: Rc<SettingsValueController>)
         c.apply(SettingsSaveLane::General, move |s| {
             s.clamshell_audio_device = uid.clone()
         });
-    });
-    let c = controller.clone();
-    window.on_settings_meeting_autostop_changed(move |label| {
-        if let Some(minutes) = audio_ui::parse_minute_label(&label) {
-            c.apply(SettingsSaveLane::General, move |s| {
-                s.meeting_autostop_minutes = minutes
-            });
-        }
-    });
-    let c = controller.clone();
-    window.on_settings_meeting_max_duration_changed(move |label| {
-        if let Some(minutes) = audio_ui::parse_minute_label(&label) {
-            c.apply(SettingsSaveLane::General, move |s| {
-                s.meeting_max_duration_minutes = minutes
-            });
-        }
     });
     let c = controller.clone();
     window.on_settings_meeting_audio_retention_changed(move |value| {
@@ -1152,12 +1130,10 @@ mod tests {
         window.invoke_settings_feedback_sounds_volume_changed(16);
         window.invoke_settings_calendar_reminder_minutes_changed(5);
         window.invoke_settings_clamshell_device_changed("mic-1".into());
-        window.invoke_settings_meeting_autostop_changed("5 min".into());
-        window.invoke_settings_meeting_max_duration_changed("2 h".into());
         window.invoke_settings_meeting_audio_retention_changed(crate::AudioRetention::Keep7d);
         window.invoke_settings_ollama_model_changed("model-b".into());
         window.invoke_settings_unload_timeout_changed("5 min".into());
-        harness.wait_for_saves(13);
+        harness.wait_for_saves(11);
 
         assert_eq!(window.get_settings_theme(), crate::AppTheme::Dark);
         assert!(window.global::<Theme>().get_dark());
@@ -1173,14 +1149,6 @@ mod tests {
         assert_eq!(
             window.get_settings_clamshell_device_label().as_str(),
             "Studio Mic"
-        );
-        assert_eq!(
-            window.get_settings_meeting_autostop_label().as_str(),
-            "5 min"
-        );
-        assert_eq!(
-            window.get_settings_meeting_max_duration_label().as_str(),
-            "2 h"
         );
         assert_eq!(
             window.get_settings_meeting_audio_retention(),
@@ -1201,8 +1169,6 @@ mod tests {
         assert_eq!(stored.feedback_sounds_volume, 16);
         assert_eq!(stored.calendar_reminder_minutes, 5);
         assert_eq!(stored.clamshell_audio_device.as_deref(), Some("mic-1"));
-        assert_eq!(stored.meeting_autostop_minutes, 5);
-        assert_eq!(stored.meeting_max_duration_minutes, 120);
         assert_eq!(
             stored.meeting_audio_retention,
             MeetingAudioRetention::Keep7d
@@ -1210,7 +1176,7 @@ mod tests {
         assert_eq!(stored.ollama_model, "model-b");
         assert_eq!(stored.model_unload_timeout_minutes, 5);
 
-        assert_eq!(harness.saves.load(Ordering::SeqCst), 13);
+        assert_eq!(harness.saves.load(Ordering::SeqCst), 11);
         assert_eq!(harness.fallback_loads.load(Ordering::SeqCst), 0);
         assert_eq!(harness.devices.borrow()[0].uid, "mic-1");
         assert_eq!(
@@ -1226,7 +1192,7 @@ mod tests {
 
         // The header follows the same canonical theme round trip.
         window.invoke_theme_toggle_requested();
-        harness.wait_for_saves(14);
+        harness.wait_for_saves(12);
         assert_eq!(window.get_settings_theme(), crate::AppTheme::Light);
         assert!(!window.global::<Theme>().get_dark());
         assert_eq!(harness.appearance.get(), Some(false));
@@ -1238,7 +1204,7 @@ mod tests {
         // A value accepted by the callback but normalized by AppSettings must
         // publish the persisted default, never the requested label.
         window.invoke_settings_unload_timeout_changed("7 min".into());
-        harness.wait_for_saves(15);
+        harness.wait_for_saves(13);
         assert_eq!(window.get_settings_unload_timeout_label().as_str(), "1 h");
         assert_eq!(
             AppSettings::load(&harness.db)
@@ -1246,7 +1212,7 @@ mod tests {
                 .model_unload_timeout_minutes,
             60
         );
-        assert_eq!(harness.saves.load(Ordering::SeqCst), 15);
+        assert_eq!(harness.saves.load(Ordering::SeqCst), 13);
 
         assert_failure_projection_contract();
     }

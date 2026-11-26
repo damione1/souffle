@@ -983,10 +983,6 @@ fn settings(window: &MainWindow) {
     window.set_settings_system_audio_supported(true);
     window.set_settings_capture_system_audio(true);
     window.set_settings_meeting_autostop_enabled(true);
-    window.set_settings_meeting_autostop_labels(strings(&["5 min", "15 min"]));
-    window.set_settings_meeting_autostop_label("5 min".into());
-    window.set_settings_meeting_max_duration_labels(strings(&["3 h", "4 h"]));
-    window.set_settings_meeting_max_duration_label("3 h".into());
     window.set_settings_filler_removal(true);
     window.set_settings_dictionary_correction(true);
 

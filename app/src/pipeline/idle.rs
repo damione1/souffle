@@ -1,5 +1,5 @@
 //! Detects a meeting that has probably ended: either no speech for a
-//! configured silence threshold, or a hard max-duration failsafe.
+//! silence threshold, or a hard max-duration failsafe.
 //!
 //! Pure and unit-testable: all time math runs on `Instant`s passed in by the
 //! caller, so tests never sleep for real.

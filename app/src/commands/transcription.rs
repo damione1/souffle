@@ -24,6 +24,12 @@ use crate::transcript::{MeetingCalendarContext, MeetingTranscript};
 /// speech — the upper bound on what a crash can lose.
 const MEETING_FLUSH_THRESHOLD: usize = 16;
 
+/// Silence after which a meeting is signalled as probably over. The recording
+/// view then adds its own grace period before stopping.
+const AUTOSTOP_SILENCE: Duration = Duration::from_secs(10 * 60);
+/// Longest meeting session auto-stop lets run.
+const AUTOSTOP_SESSION_CAP: Duration = Duration::from_secs(4 * 60 * 60);
+
 /// Build a header-only transcript (no segments) for `upsert_meeting_header`.
 /// `started_at` follows the first recording session on resume, else this
 /// session's start — matching `MeetingAccumulator::into_transcript`.
@@ -449,16 +455,10 @@ fn start_pipeline_blocking(
     // short and user-driven, so "meeting is over" doesn't apply. This is a
     // session-start snapshot; a setting changed mid-meeting only takes effect
     // on the next meeting.
-    let idle_config =
-        (mode == PipelineMode::Meeting && settings.meeting_autostop_enabled).then(|| {
-            crate::pipeline::MeetingIdleConfig {
-                silence_threshold: Some(Duration::from_secs(u64::from(
-                    settings.meeting_autostop_minutes * 60,
-                ))),
-                max_duration: Some(Duration::from_secs(u64::from(
-                    settings.meeting_max_duration_minutes * 60,
-                ))),
-            }
+    let idle_config = (mode == PipelineMode::Meeting && settings.meeting_autostop_enabled)
+        .then_some(crate::pipeline::MeetingIdleConfig {
+            silence_threshold: Some(AUTOSTOP_SILENCE),
+            max_duration: Some(AUTOSTOP_SESSION_CAP),
         });
 
     let config = SessionConfig {

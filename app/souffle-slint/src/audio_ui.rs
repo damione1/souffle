@@ -1,8 +1,7 @@
 //! Audio + Microphone tabs (SOU-188 milestone 4). The clamshell picker forwards
-//! a chosen UID back to Rust, even when several devices share a name. Minute
-//! dropdowns (autostop/max-duration) format their own labels from
-//! `SettingsOptions::current()`'s values (AC3: no bounds redeclared here)
-//! and parse them back deterministically, so no lookup table is needed on
+//! a chosen UID back to Rust, even when several devices share a name. The
+//! minute dropdown of the model unload delay formats its labels here and
+//! parses them back deterministically, so no lookup table is needed on
 //! either side of the round trip.
 
 use crate::microphone_list::{self, MicrophoneListEntry};
@@ -102,10 +101,6 @@ pub fn minute_label(value: u32) -> String {
     } else {
         format!("{value} min")
     }
-}
-
-pub fn minute_labels(values: &[u32]) -> Vec<String> {
-    values.iter().copied().map(minute_label).collect()
 }
 
 pub fn parse_minute_label(label: &str) -> Option<u32> {
