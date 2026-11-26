@@ -93,13 +93,13 @@ pub(crate) fn mutate_dictionary_suggestion(
 // out their real height.
 const DICTIONARY_ROW_HEIGHT_PX: f32 = 51.0;
 const DICTIONARY_ERROR_ROW_HEIGHT_PX: f32 = 72.0;
-const DICTIONARY_VIEWPORT_HEIGHT_PX: f32 = 360.0;
+pub(crate) const DICTIONARY_VIEWPORT_HEIGHT_PX: f32 = 357.0;
 const SUGGESTION_ROW_HEIGHT_PX: f32 = 52.0;
-const SUGGESTION_VIEWPORT_HEIGHT_PX: f32 = 240.0;
+pub(crate) const SUGGESTION_VIEWPORT_HEIGHT_PX: f32 = 240.0;
 const SNIPPET_ROW_HEIGHT_PX: f32 = 58.0;
 const SNIPPET_ERROR_ROW_HEIGHT_PX: f32 = 80.0;
 const SNIPPET_EDITING_ROW_HEIGHT_PX: f32 = 236.0;
-const SNIPPETS_VIEWPORT_HEIGHT_PX: f32 = 420.0;
+pub(crate) const SNIPPETS_VIEWPORT_HEIGHT_PX: f32 = 406.0;
 // Two viewport-heights of pre-mounted margin on each side, so ordinary
 // scrolling hits already-mounted rows and the re-window is invisible.
 const SETTINGS_LIST_SCROLL_MARGIN_FACTOR: f32 = 2.0;
@@ -725,8 +725,8 @@ mod tests {
     // it to viewport + margin regardless of the total.
     #[test]
     fn settings_list_windows_stay_bounded_for_0_100_1000_rows() {
-        // Viewport (360px) + a 720px margin on each side = 1800px of rows at
-        // 51px each, so about 36 mounted rows, plus the overlap slack
+        // Viewport (357px) + a 714px margin on each side = 1785px of rows at
+        // 51px each, so 35 mounted rows, plus the overlap slack
         // `visible_window` allows on both edges.
         let max_mounted = (((1.0 + 2.0 * SETTINGS_LIST_SCROLL_MARGIN_FACTOR)
             * DICTIONARY_VIEWPORT_HEIGHT_PX)

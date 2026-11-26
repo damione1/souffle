@@ -121,6 +121,8 @@ export component DictionarySection inherits VerticalLayout {
             text: root.suggestion-error; color: Theme.danger; typography: Typography.caption; wrap: word-wrap;
         }
         suggestion-list := ScrollFrame {
+            // A reserved scrollbar gutter would shorten the correction strips.
+            overlay-scrollbars: true;
             height: min(root.suggestion-content-height * 1px, 240px);
             horizontal-scrollbar-policy: always-off;
             content-width: self.visible-width;
@@ -273,7 +275,8 @@ export component DictionarySection inherits VerticalLayout {
     dictionary-list := ScrollFrame {
         // Rows pad their own trailing edge, so their dividers reach the card's.
         overlay-scrollbars: true;
-        height: min(root.list-content-height * 1px, 360px);
+        // Seven whole rows, so the card edge never cuts one at either end.
+        height: min(root.list-content-height * 1px, 357px);
         visible: root.entry-count > 0;
         horizontal-scrollbar-policy: always-off;
         content-width: self.visible-width;
@@ -307,6 +310,8 @@ export component DictionarySection inherits VerticalLayout {
                         overflow: elide;
                         vertical-alignment: center;
                         horizontal-stretch: 1;
+                        // Equal columns whatever the text, so they line up across rows.
+                        preferred-width: 0px;
                     }
                     KitText {
                         text: row.aliases-display;
@@ -315,11 +320,17 @@ export component DictionarySection inherits VerticalLayout {
                         overflow: elide;
                         vertical-alignment: center;
                         horizontal-stretch: 1;
+                        preferred-width: 0px;
                     }
-                    if row.category != "": VerticalLayout {
-                        alignment: center;
+                    // Reserved even without a category.
+                    HorizontalLayout {
+                        min-width: 100px;
                         horizontal-stretch: 0;
-                        KitBadge { text: row.category; subtle: true; }
+                        alignment: end;
+                        if row.category != "": VerticalLayout {
+                            alignment: center;
+                            KitBadge { text: row.category; subtle: true; }
+                        }
                     }
                     KitButton {
                         text: @tr("Supprimer");

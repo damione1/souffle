@@ -1,17 +1,32 @@
 //! Data reproducing the states drawn on the design boards, applied on top of the
 //! typography fixture when SOU276_MOCKUP=1. French only, no live services.
-use super::{audio_ui, ia_ui, microphone_list, model, strings};
+use super::{
+    audio_ui, ia_ui, lists_ui, microphone_list, model, strings, transcript, transcript_window,
+};
 use slint::{ComponentHandle, SharedString};
 use souffle_lib::audio::{AudioInputDevice, InputPriority, KnownDevice, TransportType};
+use souffle_lib::db::dictionary::DictionarySuggestion;
+use souffle_lib::db::snippets::SnippetEntry;
+use souffle_lib::engine::{Speaker, TranscriptionSegment};
+use souffle_lib::filter::DictionaryEntry;
 use souffle_lib::settings::{AppSettings, SummaryTemplate};
 use souffle_lib::summary::{
     SummaryModelDescriptor, SummaryProviderChoice, SummaryProviderKind, SummaryProvidersStatus,
 };
+use souffle_lib::transcript::MeetingRecordingSession;
 use souffle_slint::*;
+use std::{cell::RefCell, rc::Rc};
 
 pub(super) fn apply(window: &MainWindow, surface: &str) {
     // The boards draw the meeting summaries, which sit behind an opt-in.
     window.global::<SummarizationUi>().set_enabled(true);
+    window.global::<CompressionUi>().set_model_size(
+        format!(
+            "{:.1} MB",
+            souffle_lib::models::compression::download_bytes() as f64 / 1_000_000.
+        )
+        .into(),
+    );
     window.set_dictation_shortcut("⌥ Espace".into());
     window.set_header_model_label("Kyutai STT 1B".into());
     if surface.starts_with("settings-") {
@@ -272,17 +287,21 @@ fn onboarding(window: &MainWindow) {
 }
 
 fn paragraph(speaker: SpeakerRole, timestamp: &str, text: &str, tail: &str) -> TranscriptBlock {
-    let words = text
-        .split_whitespace()
-        .map(|word| (word, false))
-        .chain(tail.split_whitespace().map(|word| (word, true)))
-        .map(|(word, provisional)| TranscriptWord {
-            text: word.into(),
-            trailing_text: " ".into(),
-            clickable: !provisional,
-            provisional,
-        })
-        .collect::<Vec<_>>();
+    let mut words = transcript::build_words(text);
+    if !tail.is_empty() {
+        if let Some(last) = words.last_mut() {
+            last.trailing_text = format!("{} ", last.trailing_text).into();
+        }
+        words.extend(
+            transcript::build_words(tail)
+                .into_iter()
+                .map(|word| TranscriptWord {
+                    clickable: false,
+                    provisional: true,
+                    ..word
+                }),
+        );
+    }
     TranscriptBlock {
         has_speaker: true,
         speaker,
@@ -473,8 +492,111 @@ fn detail(window: &MainWindow, surface: &str) {
             ]));
         }
     }
-    if surface == "detail-transcript" {
+    if surface.starts_with("detail-transcript-long") {
+        long_transcript(window, surface);
+    } else if surface == "detail-transcript" {
         window.set_meeting_detail_view(MeetingDetailView::Transcript);
+    }
+}
+
+const LONG_TRANSCRIPT_PARAGRAPHS: usize = 60;
+/// Height of the page's scroll region in the 1300px transcript captures.
+const TRANSCRIPT_PAGE_VIEWPORT_PX: f32 = 816.0;
+/// The list's leading gap and the page's bottom padding around the blocks.
+const TRANSCRIPT_PAGE_CHROME_PX: f32 = 16.0 + 32.0;
+
+/// Segments through the real grouper and the real windowing.
+fn long_transcript(window: &MainWindow, surface: &str) {
+    const TEXTS: [&str; 3] = [
+        "D'accord, je note la décision.",
+        "Du coup côté planning, on peut viser la bêta pour mi-décembre si l'équipe valide le périmètre cette semaine, sinon on décale à janvier sans toucher au reste.",
+        "Oui, je pense que c'est réaliste. Il faut juste figer la liste des réglages avant lundi, sinon on risque de glisser sur la documentation et sur les captures. Camille relit le guide jeudi matin, Julien prépare les notes de version, et on garde une demi-journée pour les retours de l'équipe support avant d'ouvrir la bêta aux premiers testeurs.",
+    ];
+    let segments: Vec<TranscriptionSegment> = (0..LONG_TRANSCRIPT_PARAGRAPHS)
+        .map(|i| TranscriptionSegment {
+            text: format!("Point {:02}. {}", i + 1, TEXTS[(i * 7 / 3) % TEXTS.len()]),
+            start_time: i as f64 * 20.0,
+            end_time: i as f64 * 20.0 + 10.0,
+            is_final: true,
+            language: None,
+            confidence: None,
+            speaker: Some(if i % 2 == 0 {
+                Speaker::Them
+            } else {
+                Speaker::Me
+            }),
+        })
+        .collect();
+    let half = LONG_TRANSCRIPT_PARAGRAPHS as u64 / 2;
+    let sessions: Vec<MeetingRecordingSession> = [(0, half), (half, half * 2)]
+        .into_iter()
+        .map(|(start, end)| MeetingRecordingSession {
+            id: format!("session-{start}"),
+            started_at: chrono::Utc::now(),
+            ended_at: chrono::Utc::now(),
+            duration_seconds: 600.0,
+            start_segment_index: start,
+            end_segment_index: end,
+        })
+        .collect();
+    let blocks = transcript::build_transcript_blocks(&segments, &sessions);
+    let total = transcript::compute_offsets(&blocks)
+        .last()
+        .copied()
+        .unwrap_or(0.0);
+    let state = Rc::new(RefCell::new(None));
+    transcript_window::mount_transcript(window, blocks, &state);
+    let weak = window.as_weak();
+    window.on_transcript_scroll_changed(move |scroll_top_px| {
+        if let Some(window) = weak.upgrade() {
+            transcript_window::update_transcript_window(&window, &state, -scroll_top_px);
+        }
+    });
+    window.set_meeting_detail_transcript_segment_count(LONG_TRANSCRIPT_PARAGRAPHS as i32);
+    // After mounting, which resets the page to the reading view.
+    window.set_meeting_detail_view(MeetingDetailView::Transcript);
+    let end = total + TRANSCRIPT_PAGE_CHROME_PX - TRANSCRIPT_PAGE_VIEWPORT_PX;
+    let scroll = match surface {
+        "detail-transcript-long-middle" => end / 2.0,
+        "detail-transcript-long-end" => end,
+        _ => 0.0,
+    };
+    window.set_meeting_detail_page_scroll_top(-scroll);
+}
+
+thread_local! {
+    static LISTS: RefCell<Option<Rc<lists_ui::SettingsListModels>>> = const { RefCell::new(None) };
+}
+
+fn suggestion(id: i64, misspelling: &str, term: &str) -> DictionarySuggestion {
+    DictionarySuggestion {
+        id,
+        misspelling: misspelling.into(),
+        term: term.into(),
+    }
+}
+
+fn dictionary_entry(
+    id: i64,
+    term: &str,
+    pronunciation: &str,
+    category: Option<&str>,
+) -> DictionaryEntry {
+    DictionaryEntry {
+        id,
+        term: term.into(),
+        pronunciation: Some(pronunciation.into()),
+        category: category.map(Into::into),
+        created_at: String::new(),
+    }
+}
+
+fn snippet(id: i64, trigger: &str, expansion: &str) -> SnippetEntry {
+    SnippetEntry {
+        id,
+        trigger: trigger.into(),
+        expansion: expansion.into(),
+        created_at: String::new(),
     }
 }
 
@@ -493,37 +615,18 @@ fn settings(window: &MainWindow) {
     window.set_settings_model_files_deletable(true);
     window.set_settings_unload_timeout_labels(strings(&["__NEVER__", "15 min"]));
     window.set_settings_unload_timeout_label("15 min".into());
-    window.set_settings_dictionary_suggestions(model(vec![DictionarySuggestionRow {
-        id: 1,
-        misspelling: "coubernétisse".into(),
-        term: "Kubernetes".into(),
-    }]));
-    window.set_settings_dictionary_suggestion_count(1);
-    window.set_settings_dictionary_suggestion_content_height(64.0);
-    window.set_settings_dictionary_entries(model(
-        [
-            (1, "Kubernetes", "coubernétisse", "tech"),
-            (2, "Soufflé", "soufflet", "produit"),
-        ]
-        .into_iter()
-        .map(|(id, term, aliases, category)| DictionaryRow {
-            id,
-            term: term.into(),
-            aliases_display: aliases.into(),
-            category: category.into(),
-        })
-        .collect::<Vec<_>>(),
-    ));
-    window.set_settings_dictionary_count(2);
-    window.set_settings_dictionary_content_height(104.0);
-    window.set_settings_snippets(model(vec![SnippetRow {
-        id: 1,
-        trigger: "mon adresse".into(),
-        expansion: "12 rue des Lilas, 75011 Paris".into(),
-        editing: false,
-    }]));
-    window.set_settings_snippets_count(1);
-    window.set_settings_snippets_content_height(52.0);
+    let lists = lists_ui::SettingsListModels::install(window);
+    lists.populate_suggestions(&[suggestion(1, "coubernétisse", "Kubernetes")]);
+    lists.populate_dictionary(&[
+        dictionary_entry(1, "Kubernetes", "coubernétisse", Some("tech")),
+        dictionary_entry(2, "Soufflé", "soufflet", Some("produit")),
+    ]);
+    lists.populate_snippets(
+        &[snippet(1, "mon adresse", "12 rue des Lilas, 75011 Paris")],
+        None,
+    );
+    // The scroll callbacks only hold weak references.
+    LISTS.with(|slot| *slot.borrow_mut() = Some(lists));
 
     // AI
     let app_settings = AppSettings {
@@ -667,15 +770,16 @@ fn settings(window: &MainWindow) {
     window.set_settings_mcp_claude_code_command("claude mcp add souffle -- souffle-mcp".into());
 }
 
-const LONG_LIST_ROWS: i32 = 30;
-/// First row of the mounted slice in the scrolled long-list state.
-const SCROLLED_FIRST_ROW: i32 = 10;
+const LONG_LIST_ROWS: i64 = 30;
+const LONG_SUGGESTION_ROWS: i64 = 12;
 
 /// States without an artboard, selected by surface suffix.
 fn settings_state(window: &MainWindow, surface: &str) {
     match surface {
-        "settings-transcription-long" => long_lists(window, 0),
-        "settings-transcription-long-scrolled" => long_lists(window, SCROLLED_FIRST_ROW),
+        "settings-transcription-long" => long_lists(window, ListPosition::Top),
+        "settings-transcription-long-middle" => long_lists(window, ListPosition::Middle),
+        "settings-transcription-long-end" => long_lists(window, ListPosition::End),
+        "settings-transcription-long-errors" => long_lists(window, ListPosition::Errors),
         "settings-meetings-denied" => {
             window.set_settings_calendar_permission(AccessState::Denied);
         }
@@ -699,40 +803,73 @@ fn settings_state(window: &MainWindow, surface: &str) {
     }
 }
 
-/// Mirrors the windowing of `lists_ui.rs`: a slice of the rows between two
-/// spacers sized with its row height constants (51px and 58px).
-fn long_lists(window: &MainWindow, first: i32) {
-    window.set_settings_dictionary_entries(model(
-        (first..LONG_LIST_ROWS)
-            .map(|i| DictionaryRow {
-                id: i + 1,
-                term: format!("Terme {:02}", i + 1).into(),
-                aliases_display: format!("prononciation {:02}", i + 1).into(),
-                category: if i % 2 == 0 { "tech" } else { "" }.into(),
-            })
-            .collect::<Vec<_>>(),
-    ));
-    window.set_settings_dictionary_count(LONG_LIST_ROWS);
-    window.set_settings_dictionary_content_height(LONG_LIST_ROWS as f32 * 51.0);
-    window.set_settings_dictionary_spacer_before(first as f32 * 51.0);
-    window.set_settings_dictionary_spacer_after(0.0);
-    window.set_settings_snippets(model(
-        (first..LONG_LIST_ROWS)
-            .map(|i| SnippetRow {
-                id: i + 1,
-                trigger: format!("extrait {:02}", i + 1).into(),
-                expansion: format!("Texte inséré par l'extrait numéro {:02}", i + 1).into(),
-                editing: false,
-            })
-            .collect::<Vec<_>>(),
-    ));
-    window.set_settings_snippets_count(LONG_LIST_ROWS);
-    window.set_settings_snippets_content_height(LONG_LIST_ROWS as f32 * 58.0);
-    window.set_settings_snippets_spacer_before(first as f32 * 58.0);
-    window.set_settings_snippets_spacer_after(0.0);
-    if first > 0 {
-        // A few pixels into the second mounted row.
-        window.set_settings_dictionary_scroll_top(-((first + 1) as f32 * 51.0 + 20.0));
-        window.set_settings_snippets_scroll_top(-((first + 1) as f32 * 58.0 + 20.0));
+#[derive(Clone, Copy, PartialEq)]
+enum ListPosition {
+    Top,
+    Middle,
+    End,
+    /// Top of the lists with the taller error and editing rows.
+    Errors,
+}
+
+/// Long lists through the real windowing of `lists_ui.rs`: only the full
+/// entry lists and the scroll offsets are set here.
+fn long_lists(window: &MainWindow, position: ListPosition) {
+    let Some(lists) = LISTS.with(|slot| slot.borrow().clone()) else {
+        return;
+    };
+    if position == ListPosition::Errors {
+        window.set_settings_dictionary_delete_error_id(2);
+        window.set_settings_dictionary_delete_error("Suppression impossible.".into());
+        window.set_settings_snippet_delete_error_id(3);
+        window.set_settings_snippet_delete_error("Suppression impossible.".into());
     }
+    lists.populate_suggestions(
+        &(1..=LONG_SUGGESTION_ROWS)
+            .map(|i| suggestion(i, &format!("faute {i:02}"), &format!("Correction {i:02}")))
+            .collect::<Vec<_>>(),
+    );
+    lists.populate_dictionary(
+        &(1..=LONG_LIST_ROWS)
+            .map(|i| {
+                dictionary_entry(
+                    i,
+                    &format!("Terme {i:02}"),
+                    &format!("prononciation {i:02}"),
+                    (i % 2 == 1).then_some("tech"),
+                )
+            })
+            .collect::<Vec<_>>(),
+    );
+    lists.populate_snippets(
+        &(1..=LONG_LIST_ROWS)
+            .map(|i| {
+                snippet(
+                    i,
+                    &format!("extrait {i:02}"),
+                    &format!("Texte inséré par l'extrait numéro {i:02}"),
+                )
+            })
+            .collect::<Vec<_>>(),
+        (position == ListPosition::Errors).then_some(2),
+    );
+    let share = match position {
+        ListPosition::Middle => 0.5,
+        ListPosition::End => 1.0,
+        ListPosition::Top | ListPosition::Errors => return,
+    };
+    // The distance each list can scroll, from the projection's own height.
+    let offset = |content: f32, viewport: f32| -(content - viewport).max(0.0) * share;
+    window.set_settings_dictionary_suggestion_scroll_top(offset(
+        window.get_settings_dictionary_suggestion_content_height(),
+        lists_ui::SUGGESTION_VIEWPORT_HEIGHT_PX,
+    ));
+    window.set_settings_dictionary_scroll_top(offset(
+        window.get_settings_dictionary_content_height(),
+        lists_ui::DICTIONARY_VIEWPORT_HEIGHT_PX,
+    ));
+    window.set_settings_snippets_scroll_top(offset(
+        window.get_settings_snippets_content_height(),
+        lists_ui::SNIPPETS_VIEWPORT_HEIGHT_PX,
+    ));
 }

@@ -41,8 +41,11 @@ Reunion-Etats detail-error 0 1040 1180
 Reunion-Etats detail-empty 0 1040 1180
 Reunion-Etats detail-no-audio 0 1040 1180
 Reglages-Transcription settings-transcription 0 1040 1700
-Reglages-Transcription settings-transcription-long 0 1040 1900 long
-Reglages-Transcription settings-transcription-long-scrolled 0 1040 1900 long-scrolled
+Reglages-Transcription settings-transcription-long 0 1040 2220 long
+Reglages-Transcription settings-transcription-long-middle 0 1040 2220 long-middle
+Reglages-Transcription settings-transcription-long-end 0 1040 2220 long-end
+Reglages-Transcription settings-transcription-long-errors 0 1040 2220 long-errors
+Reunion-Transcription detail-transcript-long 0 1040 1300 long
 Reglages-IA settings-ai 0 1040 1720
 Reglages-IA settings-ai 0 1040 2900 full
 Reglages-IA settings-ai-ollama 0 1040 1720 ollama

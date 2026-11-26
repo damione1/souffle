@@ -18,11 +18,23 @@ mod audio_ui;
 #[path = "../src/ia_ui.rs"]
 mod ia_ui;
 #[allow(dead_code)]
+#[path = "../src/lists_ui.rs"]
+mod lists_ui;
+#[allow(dead_code)]
 #[path = "../src/microphone_list.rs"]
 mod microphone_list;
 #[allow(dead_code)]
 #[path = "../src/settings_kit.rs"]
 mod settings_kit;
+#[allow(dead_code)]
+#[path = "../src/timeline.rs"]
+mod timeline;
+#[allow(dead_code)]
+#[path = "../src/transcript.rs"]
+mod transcript;
+#[allow(dead_code)]
+#[path = "../src/transcript_window.rs"]
+mod transcript_window;
 #[path = "../src/typography.rs"]
 mod typography;
 // The app rule projection needs the live settings I/O stack.
@@ -67,7 +79,7 @@ fn remove_fixture_suggestion(window: &MainWindow, id: i32) {
         .filter(|row| row.id != id)
         .collect::<Vec<_>>();
     window.set_settings_dictionary_suggestion_count(remaining.len() as i32);
-    window.set_settings_dictionary_suggestion_content_height(remaining.len() as f32 * 64.0);
+    window.set_settings_dictionary_suggestion_content_height(remaining.len() as f32 * 52.0);
     window.set_settings_dictionary_suggestions(model(remaining));
 }
 fn save_png(window: &MainWindow, path: &std::path::Path) {
@@ -205,7 +217,7 @@ fn main() {
             ]
         };
         window.set_settings_dictionary_suggestion_count(rows.len() as i32);
-        window.set_settings_dictionary_suggestion_content_height(rows.len() as f32 * 64.0);
+        window.set_settings_dictionary_suggestion_content_height(rows.len() as f32 * 52.0);
         window.set_settings_dictionary_suggestions(model(rows));
         window.set_settings_dictionary_suggestion_busy(surface == "settings-suggestions-loading");
         if surface == "settings-suggestions-error" {

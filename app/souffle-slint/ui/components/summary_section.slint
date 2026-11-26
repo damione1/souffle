@@ -256,6 +256,7 @@ export component SummarySection inherits KitStack {
             SummaryTitle { }
             KitProgress {
                 mode: ProgressMode.indeterminate;
+                bar-fill: @linear-gradient(90deg, Theme.brand 0%, Theme.accent-tint 100%);
                 caption: root.generation-progress != "" ? root.generation-progress : @tr("Génération en cours...");
                 accessible-label: self.caption;
             }
@@ -318,7 +319,9 @@ export component SummarySection inherits KitStack {
 
                     AppText {
                         text: (index + 1) + ".";
-                        typography: Typography.body-emphasis;
+                        typography: Typography.mono-emphasis;
+                        // The point's line box, so both first lines sit level.
+                        line-height-factor: 1.28;
                         color: Theme.accent;
                         horizontal-stretch: 0;
                         vertical-alignment: top;

@@ -37,6 +37,7 @@ mod shortcut_label;
 mod summary;
 mod timeline;
 mod transcript;
+mod transcript_window;
 mod typography;
 mod update_ui;
 mod wake_resume_ui;
@@ -67,6 +68,7 @@ use std::sync::{
     atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
 };
 use std::time::Duration;
+use transcript_window::{TranscriptState, mount_transcript, update_transcript_window};
 
 /// `AppHandle` was Tauri's cloneable, 'static, `Send`+`Sync` handle used to
 /// reach `AppState` from any thread/task. `Arc<AppState>` has exactly the
@@ -78,30 +80,10 @@ type AppHandle = Arc<AppState>;
 /// features/meeting/controller.svelte.ts.
 const NOTES_DEBOUNCE: Duration = Duration::from_millis(800);
 
-/// Upper bound of the meeting page's scroll region, which the transcript
-/// list scrolls in - the windowing math below only needs to be approximately
-/// right (it pads with `TRANSCRIPT_SCROLL_MARGIN` on each side), not
-/// pixel-exact.
-const TRANSCRIPT_VIEWPORT_HEIGHT: f32 = 900.0;
-const TRANSCRIPT_SCROLL_MARGIN: f32 = 1.5 * TRANSCRIPT_VIEWPORT_HEIGHT;
-
 /// Matches `DiagnosticsSettingsSection.svelte`'s `TAIL_LINES`/`POLL_MS`.
 const SETTINGS_LOG_TAIL_LINES: u32 = 80;
 const SETTINGS_LOG_POLL: Duration = Duration::from_millis(2000);
 const ARCHIVE_EXPORT_POLL: Duration = Duration::from_millis(150);
-
-/// Backing data for the virtualized transcript list: the full block list
-/// plus precomputed cumulative height estimates (see
-/// `transcript::compute_offsets`). `MeetingDetail`'s `transcript-blocks`
-/// property only ever holds the current visible slice of this, never the
-/// whole thing - that's the actual virtualization.
-struct TranscriptState {
-    source: Vec<TranscriptBlock>,
-    blocks: Vec<TranscriptBlock>,
-    offsets: Vec<f32>,
-    mounted_start: usize,
-    mounted_end: usize,
-}
 
 /// What the shortcut recorder says about a refused key press (#360).
 fn rejection_notice(rejection: shortcut_capture::Rejection) -> ShortcutNotice {
@@ -639,57 +621,7 @@ fn load_meeting_transcript_window(
 ) {
     let blocks =
         transcript::build_transcript_blocks(&meeting.segments, &meeting.recording_sessions);
-    let offsets = transcript::compute_offsets(&blocks);
-    window.set_meeting_detail_transcript_preview(transcript::preview_text(&blocks).into());
-    *transcript_state.borrow_mut() = Some(TranscriptState {
-        source: blocks.clone(),
-        blocks,
-        offsets,
-        mounted_start: usize::MAX,
-        mounted_end: usize::MAX,
-    });
-    window.invoke_reset_meeting_detail_transcript_scroll();
-    update_transcript_window(window, transcript_state, 0.0);
-}
-
-/// Recomputes which slice of `transcript_state`'s blocks should be mounted
-/// for `scroll_top` (px scrolled down from the top) and pushes it into
-/// `MeetingDetail`'s properties, but only when the slice actually changed -
-/// small scroll steps inside the pre-mounted margin must not rebuild the
-/// Slint model.
-fn update_transcript_window(
-    window: &MainWindow,
-    transcript_state: &Rc<RefCell<Option<TranscriptState>>>,
-    scroll_top: f32,
-) {
-    let mut guard = transcript_state.borrow_mut();
-    let Some(state) = guard.as_mut() else {
-        return;
-    };
-    let win = transcript::visible_window(
-        &state.offsets,
-        scroll_top,
-        TRANSCRIPT_VIEWPORT_HEIGHT,
-        TRANSCRIPT_SCROLL_MARGIN,
-    );
-    if win.start == state.mounted_start && win.end == state.mounted_end {
-        return;
-    }
-    state.mounted_start = win.start;
-    state.mounted_end = win.end;
-    let slice = state.blocks[win.start..win.end].to_vec();
-    let mounted = slice.len();
-    let total = state.blocks.len();
-    window.set_meeting_detail_transcript_blocks(
-        std::rc::Rc::new(slint::VecModel::from(slice)).into(),
-    );
-    window.set_meeting_detail_transcript_spacer_before(win.spacer_before);
-    window.set_meeting_detail_transcript_spacer_after(win.spacer_after);
-    // AC15's "active node counter" evidence: this stays small and bounded
-    // even for a meeting with thousands of paragraphs - see
-    // `transcript::tests::visible_window_slices_a_huge_transcript_to_a_bounded_count`
-    // for the automated version of this same claim.
-    eprintln!("transcript window: {mounted}/{total} blocks mounted (SOU-187 AC15)");
+    mount_transcript(window, blocks, transcript_state);
 }
 
 /// Narrows the mounted transcript to the paragraphs containing `query` (all

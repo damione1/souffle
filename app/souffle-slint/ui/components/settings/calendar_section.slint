@@ -1,4 +1,4 @@
-import { FieldSetAppearance, FieldRowAppearance, AlertActions, AlertSeverity, ChoiceLabelPosition, ButtonIntent, ControlSize, KitAlert, KitText, TypographyRole, CheckState, ControlWidth, KitButton, KitCheckbox, KitNumberStepper, KitSwitch, Ownership, KitFieldSet, KitThemeContext, KitThemes, KitFieldRow, KitFieldSeparator, KitOverline, StepperAppearance } from "@kit";
+import { FieldSetAppearance, FieldRowAppearance, AlertActions, AlertSeverity, ChoiceLabelPosition, ButtonIntent, ControlSize, KitAlert, KitText, TypographyRole, CheckState, ControlWidth, KitButton, KitCheckbox, KitNumberStepper, KitSwitch, Ownership, KitFieldSet, KitThemeContext, KitThemes, KitFieldRow, KitFieldSeparator, KitOverline, StepperAppearance, TextViewFont } from "@kit";
 import { AppText, Typography } from "@typography";
 import { LucideArrows } from "@kit-icons/arrows.slint";
 import { SettingsNoticeRow } from "settings_notice_row.slint";
@@ -123,6 +123,7 @@ export component CalendarSection inherits VerticalLayout {
                 theme: KitThemeContext.current;
                 modal-layer: 0;
                 appearance: StepperAppearance.compact;
+                value-font: TextViewFont.monospace;
                 // Keeps the editor slack before the value, next to the unit and buttons.
                 text-alignment: TextHorizontalAlignment.right;
                 control-size: ControlSize.compact;
@@ -132,6 +133,8 @@ export component CalendarSection inherits VerticalLayout {
                 decrement-label: @tr("Diminuer");
                 accessible-name: @tr("Délai du rappel en minutes");
                 suffix: " min";
+                // Only the caret room: the suffix's own space gives "5 min".
+                suffix-gap: 8px;
                 text: root.reminder-minutes;
                 min: root.reminder-minutes-min;
                 max: root.reminder-minutes-max;

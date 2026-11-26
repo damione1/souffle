@@ -1,4 +1,5 @@
-import { FieldSetAppearance, FieldRowAppearance, ChoiceLabelPosition, ControlWidth, KitSlider, KitSwitch, Ownership, SliderPresentation, KitFieldSet, KitThemeContext, KitThemes, KitFieldRow, KitText, TypographyRole, TextViewFont } from "@kit";
+import { FieldSetAppearance, FieldRowAppearance, ChoiceLabelPosition, ControlWidth, KitSlider, KitSwitch, Ownership, SliderPresentation, KitFieldSet, KitThemeContext, KitThemes, KitFieldRow } from "@kit";
+import { AppText, Typography } from "@typography";
 import { Theme } from "../../theme.slint";
 
 export component FeedbackSoundsSection inherits KitFieldSet {
@@ -51,14 +52,15 @@ export component FeedbackSoundsSection inherits KitFieldSet {
         label: @tr("Volume");
 
         HorizontalLayout {
-            spacing: 10px;
             alignment: center;
             horizontal-stretch: 0;
 
             volume-slider := KitSlider {
                 theme: root.theme;
                 modal-layer: 0;
-                width: 174px;
+                // The track is inset by the thumb on both sides: 174px visible.
+                width: 196px;
+                height: 20px;
                 presentation: SliderPresentation.line;
                 // A plain value bar; the kit still outlines the thumb on keyboard focus.
                 handle-brush: transparent;
@@ -70,14 +72,13 @@ export component FeedbackSoundsSection inherits KitFieldSet {
                 chosen(value) => { root.volume-changed(value.to-float()); }
             }
 
-            KitText {
-                theme: root.theme;
+            AppText {
                 text: @tr("{} %", root.volume);
-                role: TypographyRole.caption;
-                font: TextViewFont.monospace;
+                typography: Typography.mono;
+                color: Theme.text-muted;
                 wrap: no-wrap;
                 vertical-alignment: center;
-                width: 44px;
+                width: 38px;
                 horizontal-alignment: right;
             }
         }

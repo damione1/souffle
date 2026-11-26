@@ -259,6 +259,8 @@ export component MeetingDetail inherits Rectangle {
                                 if root.meta.sessions > 1: MetaText { text: "·"; accessible-role: none; }
                                 if root.meta.sessions > 1: MetaText { text: @tr("{} sessions", root.meta.sessions); }
 
+                                if root.model-label != "": MetaText { text: "·"; accessible-role: none; }
+
                                 if root.model-label != "": KitBadge {
                                     text: root.model-label;
                                     tone: Tone.accent;

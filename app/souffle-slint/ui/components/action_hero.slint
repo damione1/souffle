@@ -34,6 +34,18 @@ component CaptureAction inherits KitPressable {
     padding-inline: 0px;
     min-height: content.preferred-height;
 
+    // The kit drops a faded disabled button's shadow because its fill is then
+    // translucent. This card's disabled fill stays opaque, so it keeps it.
+    if root.disabled: Rectangle {
+        background: root.recipe.disabled-fill;
+        border-radius: root.recipe.radius;
+        border-width: root.recipe.border-width;
+        border-color: root.recipe.border;
+        drop-shadow-offset-y: root.recipe.shadow.offset-y;
+        drop-shadow-blur: root.recipe.shadow.blur;
+        drop-shadow-color: root.recipe.shadow.color;
+    }
+
     content := VerticalLayout {
         padding: KitThemeContext.current.spacing.unit * 5;
         spacing: KitThemeContext.current.spacing.unit * 3.5;

@@ -280,10 +280,14 @@ export component OnboardingView inherits Rectangle {
                                         control-label: @tr("Choisissez votre microphone");
                                         selected-index(index) => { root.device-changed(index); }
                                     }
-                                    refresh-btn := KitButton {
-                                        text: @tr("Actualiser");
-                                        control-size: ControlSize.compact;
-                                        activated => { root.refresh-devices-requested(); }
+                                    VerticalLayout {
+                                        alignment: center;
+                                        horizontal-stretch: 0;
+                                        refresh-btn := KitButton {
+                                            text: @tr("Actualiser");
+                                            control-size: ControlSize.compact;
+                                            activated => { root.refresh-devices-requested(); }
+                                        }
                                     }
                                 }
                                 KitSurface {
@@ -348,6 +352,7 @@ export component OnboardingView inherits Rectangle {
                                         selection: self.selection-at(root.selected-model-index);
                                         control-label: @tr("Modèle de transcription");
                                         enabled: !root.busy && root.model-phase == ModelPhase.pick;
+                                        full-ink-when-disabled: true;
                                         selected-index(index) => { root.model-picked(index); }
                                     }
                                 }

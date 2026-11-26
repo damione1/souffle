@@ -55,7 +55,7 @@ export component ModelSection inherits KitFieldSet {
             VerticalLayout {
                 alignment: center;
                 horizontal-stretch: 0;
-                KitBadge {
+                phase-badge := KitBadge {
                     theme: root.theme;
                     text: root.model-phase == TranscriptionPhase.download-required ? @tr("Téléchargement requis")
                         : root.model-phase == TranscriptionPhase.downloading ? @tr("Téléchargement…")
@@ -74,6 +74,7 @@ export component ModelSection inherits KitFieldSet {
             }
             model-picker := CatalogPicker {
                 theme: root.theme;
+                combo-width: max(140px, Theme.settings-control-width - phase-badge.preferred-width - root.theme.spacing.unit * 2);
                 modal-layer: 0;
                 control-label: @tr("Modèle de transcription");
                 model: root.model-labels;

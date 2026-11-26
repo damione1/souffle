@@ -255,11 +255,11 @@ pub fn build_transcript_blocks(
 /// per row only affects spacer sizing (scrollbar proportion), never the
 /// actually mounted rows: those are still laid out for real inside a
 /// `VerticalLayout`.
-const CHARS_PER_LINE: usize = 80;
+const CHARS_PER_LINE: usize = 86;
 const LINE_HEIGHT_PX: f32 = 22.0;
-const HEADER_HEIGHT_PX: f32 = 62.0; // header row + bubble padding
-const BLOCK_SPACING_PX: f32 = 18.0; // the list's `gap`
-const SESSION_BREAK_HEIGHT_PX: f32 = 30.0;
+const HEADER_HEIGHT_PX: f32 = 58.0; // header row, its gap and bubble padding
+const BLOCK_SPACING_PX: f32 = 16.0; // the list's `gap`
+const SESSION_BREAK_HEIGHT_PX: f32 = 13.0;
 
 fn estimate_block_height(block: &TranscriptBlock) -> f32 {
     let content_height = if block.is_session_break {
