@@ -726,7 +726,7 @@
               ],
               [
                 "Priorité des micros<br><span class=\"docs-tab\">Audio</span>",
-                "Une liste ordonnée d'entrées préférées, un choix distinct pour le mode écran rabattu, et une option qui écarte les casques Bluetooth du rôle de micro pour qu'ils restent en stéréo."
+                "Une liste ordonnée d'entrées préférées et un choix distinct pour le mode écran rabattu."
               ],
               [
                 "Arrêt automatique des réunions<br><span class=\"docs-tab\">Audio</span>",
@@ -947,7 +947,7 @@
               ],
               [
                 "Ce n'est pas le bon micro qui est pris",
-                "Fixez une entrée, et une autre pour le mode écran rabattu, dans Paramètres → Audio. Les casques Bluetooth sont écartés de la sélection automatique par défaut : les utiliser comme micro les fait basculer en HFP et vous coûte le son stéréo."
+                "Fixez une entrée, et une autre pour le mode écran rabattu, dans Paramètres → Audio."
               ],
               [
                 "Le polish ou les résumés ne font rien",

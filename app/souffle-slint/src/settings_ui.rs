@@ -84,7 +84,6 @@ pub fn populate(window: &MainWindow, settings: &AppSettings) {
     window.set_settings_calendar_autostart_enabled(settings.calendar_autostart_enabled);
     window.set_settings_calendar_reminder_minutes(settings.calendar_reminder_minutes as i32);
 
-    window.set_settings_allow_bluetooth_mic(settings.allow_bluetooth_mic);
     window.set_settings_capture_system_audio(settings.capture_system_audio);
     window.set_settings_meeting_audio_diagnostic(settings.meeting_audio_diagnostic);
     window.set_settings_meeting_transcription_language(meeting_language_to_slint(

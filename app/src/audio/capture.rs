@@ -2459,8 +2459,6 @@ pub struct AudioCapture {
     clamshell_device: Option<String>,
     /// Ordered input preferences and remembered devices.
     input_priority: InputPriority,
-    /// When false, skip Bluetooth inputs during automatic device selection.
-    allow_bluetooth_mic: bool,
     active_session_id: Arc<AtomicU64>,
     audio_rms: Arc<AtomicU32>,
     /// Shared with the cpal callback so stop() can flush the resampler tail
@@ -2587,7 +2585,6 @@ impl AudioCapture {
                     selected_device: None,
                     clamshell_device: None,
                     input_priority: InputPriority::default(),
-                    allow_bluetooth_mic: false,
                     active_session_id: Arc::new(AtomicU64::new(0)),
                     audio_rms,
                     resampler: None,
@@ -2755,12 +2752,8 @@ impl AudioCapture {
                                 break;
                             }
                         }
-                        AudioCommand::SetInputPolicy {
-                            priority,
-                            allow_bluetooth_mic,
-                        } => {
+                        AudioCommand::SetInputPolicy { priority } => {
                             capture.input_priority = priority;
-                            capture.allow_bluetooth_mic = allow_bluetooth_mic;
                             if capture.refresh_input_route() {
                                 break;
                             }
@@ -2790,7 +2783,7 @@ impl AudioCapture {
     }
 
     /// Which device UID `find_device` should target, given the user's pin,
-    /// clamshell preference, priority list, and anti-Bluetooth policy.
+    /// clamshell preference and priority list.
     fn resolved_input_uid(&self, connected: &[AudioInputDevice]) -> Option<String> {
         let clamshell_active = self.selected_device.is_none()
             && self.clamshell_device.is_some()
@@ -2803,7 +2796,6 @@ impl AudioCapture {
                 clamshell_pref: self.clamshell_device.as_deref(),
                 clamshell_active,
                 priority: &self.input_priority,
-                allow_bluetooth_mic: self.allow_bluetooth_mic,
             },
         )
     }
@@ -2837,10 +2829,6 @@ impl AudioCapture {
             warn!("Input device '{uid}' not found, falling back to default");
         }
 
-        // Also reached when `resolve_input` found no auto-eligible device
-        // (Bluetooth-only with the Bluetooth preference off): recording on the
-        // OS default, even an excluded one, beats not recording at all. The policy only steers the
-        // automatic choice among alternatives.
         host.default_input_device()
             .ok_or_else(|| "No input device available".to_string())
     }
@@ -3745,8 +3733,8 @@ impl AudioCapture {
             .is_some_and(|id| !mic_device_is_alive(id));
 
         // Two guards keep UID-change rebuilds from looping every interval:
-        // - `None` (no auto-eligible device under the current policy) never
-        //   tears down a healthy stream; a dead one is caught above.
+        // - `None` (no device connected) never tears down a healthy stream; a
+        //   dead one is caught above.
         // - A target already attempted without converging is parked in
         //   `route_attempt_uid` until an explicit route event retries it.
         let resolved = self.resolved_input_uid(&list_input_devices_impl());

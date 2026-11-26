@@ -28,14 +28,12 @@ pub fn select_audio_device(state: Arc<AppState>, device_uid: String) -> Result<(
 /// Store the current device list so the first real CoreAudio change toasts
 /// instead of being treated as boot.
 pub fn prime_input_route_snapshot(db: &Database) {
-    let Ok((priority, allow_bluetooth_mic)) = AppSettings::sync_input_priority_from_devices(db)
-    else {
+    let Ok(priority) = AppSettings::sync_input_priority_from_devices(db) else {
         return;
     };
     let devices = list_input_devices();
     let settings = AppSettings::load(db).ok();
-    let resolved =
-        resolved_capture_uid(&devices, settings.as_ref(), &priority, allow_bluetooth_mic);
+    let resolved = resolved_capture_uid(&devices, settings.as_ref(), &priority);
     let _ = observe_and_notices(&devices, resolved);
 }
 
@@ -45,18 +43,16 @@ pub fn handle_input_route_change(
     db: &Database,
     cmd_tx: &Sender<AudioCommand>,
 ) -> Result<(), String> {
-    let (priority, allow_bluetooth_mic) = AppSettings::sync_input_priority_from_devices(db)?;
+    let priority = AppSettings::sync_input_priority_from_devices(db)?;
     cmd_tx
         .send(AudioCommand::SetInputPolicy {
             priority: priority.clone(),
-            allow_bluetooth_mic,
         })
         .map_err(|e| format!("Failed to push input policy: {e}"))?;
 
     let devices = list_input_devices();
     let settings = AppSettings::load(db).ok();
-    let resolved =
-        resolved_capture_uid(&devices, settings.as_ref(), &priority, allow_bluetooth_mic);
+    let resolved = resolved_capture_uid(&devices, settings.as_ref(), &priority);
     // Notices (device switched/connected/lost) had no consumer once the
     // Svelte frontend was removed — `observe_and_notices` still runs for its
     // real side effect (updating the "last known device" bookkeeping it
@@ -70,7 +66,6 @@ fn resolved_capture_uid(
     devices: &[AudioInputDevice],
     settings: Option<&AppSettings>,
     priority: &InputPriority,
-    allow_bluetooth_mic: bool,
 ) -> Option<String> {
     let pin = settings.and_then(|s| s.audio_device.as_deref());
     let clamshell_pref = settings.and_then(|s| s.clamshell_audio_device.as_deref());
@@ -83,7 +78,6 @@ fn resolved_capture_uid(
             clamshell_pref,
             clamshell_active,
             priority,
-            allow_bluetooth_mic,
         },
     )
 }

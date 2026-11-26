@@ -236,7 +236,6 @@ fn apply_settings_effects(
         .audio_cmd_sender
         .send(crate::state::AudioCommand::SetInputPolicy {
             priority: settings.input_priority.clone(),
-            allow_bluetooth_mic: settings.allow_bluetooth_mic,
         });
     crate::pill::set_hidden(settings.pill_hidden);
     crate::pill::set_hidden_in_captures(settings.pill_hidden_in_captures);
@@ -521,7 +520,6 @@ mod tests {
             AppSettings {
                 theme: Theme::Dark,
                 locale: "fr".into(),
-                allow_bluetooth_mic: true,
                 ..initial
             },
             &gate,
@@ -535,7 +533,6 @@ mod tests {
         let stored = AppSettings::load(&db).unwrap();
         assert_eq!(stored.theme, Theme::Dark);
         assert_eq!(stored.locale, "fr");
-        assert!(stored.allow_bluetooth_mic);
     }
 
     #[test]
@@ -630,7 +627,6 @@ mod tests {
             theme: Theme::Dark,
             locale: "fr".into(),
             meeting_transcription_language: MeetingTranscriptionLanguage::Fr,
-            allow_bluetooth_mic: true,
             input_priority: InputPriority {
                 priorities: vec!["preferred-mic".into()],
                 ..InputPriority::default()
@@ -653,7 +649,6 @@ mod tests {
             stored.meeting_transcription_language,
             MeetingTranscriptionLanguage::Fr
         );
-        assert!(stored.allow_bluetooth_mic);
         assert_eq!(stored.input_priority.priorities, ["preferred-mic"]);
         assert_eq!(stored.transcription_model_id, "stt-2.6b-en");
     }

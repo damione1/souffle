@@ -89,9 +89,7 @@ export component SettingsView inherits KitAppShell {
     in property <string> sample-rate-label;
     in property <bool> sample-rate-high;
     in property <bool> resetting-sample-rate;
-    in property <bool> allow-bluetooth-mic;
     in property <[MicrophoneRow]> microphones;
-    in property <bool> has-disconnected-devices;
     in property <bool> is-laptop;
     in property <[string]> clamshell-device-labels;
     in property <string> clamshell-device-label;
@@ -256,9 +254,7 @@ export component SettingsView inherits KitAppShell {
     callback calendar-open-system-settings-requested();
     callback device-changed(string);
     callback refresh-devices-requested();
-    callback reset-devices-requested();
     callback reset-sample-rate-requested();
-    callback allow-bluetooth-mic-changed(bool);
     callback move-device-requested(string, int);
     callback remove-device-requested(string);
     callback clamshell-device-changed(string);
@@ -591,14 +587,10 @@ export component SettingsView inherits KitAppShell {
                                     sample-rate-high: root.sample-rate-high;
                                     resetting-sample-rate: root.resetting-sample-rate;
                                     capture-busy: root.capture-busy;
-                                    allow-bluetooth-mic: root.allow-bluetooth-mic;
                                     microphones: root.microphones;
-                                    has-disconnected: root.has-disconnected-devices;
                                     device-changed(value) => { root.device-changed(value); }
                                     refresh-requested => { root.refresh-devices-requested(); }
-                                    reset-devices-requested => { root.reset-devices-requested(); }
                                     reset-sample-rate-requested => { root.reset-sample-rate-requested(); }
-                                    allow-bluetooth-mic-changed(value) => { root.allow-bluetooth-mic-changed(value); }
                                     move-device-requested(uid, direction) => { root.move-device-requested(uid, direction); }
                                     remove-device-requested(uid) => { root.remove-device-requested(uid); }
                                 }

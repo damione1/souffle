@@ -2594,11 +2594,6 @@ msgctxt "MicrophoneSection"
 msgid "Actualiser les microphones"
 msgstr "Refresh microphones"
 
-#: ui/components/settings/microphone_section.slint:211
-msgctxt "MicrophoneSection"
-msgid "Réinitialiser la liste"
-msgstr "Reset list"
-
 #: ui/components/settings/microphone_section.slint:225
 msgctxt "MicrophoneSection"
 msgid ""
@@ -2649,20 +2644,6 @@ msgstr "Preference order"
 msgctxt "MicrophoneSection"
 msgid "Utilisé quand plusieurs micros sont branchés en même temps."
 msgstr "Used when multiple mics are plugged in at once."
-
-#: ui/components/settings/microphone_section.slint:320
-msgctxt "MicrophoneSection"
-msgid "Autoriser les micros Bluetooth"
-msgstr "Allow Bluetooth microphones"
-
-#: ui/components/settings/microphone_section.slint:321
-msgctxt "MicrophoneSection"
-msgid ""
-"Sinon, un casque Bluetooth n'est jamais sélectionné automatiquement (évite "
-"le mode mono basse qualité)."
-msgstr ""
-"Otherwise, a Bluetooth headset is never automatically selected (avoids low "
-"quality mono mode)."
 
 #: ui/components/settings/model_delete_section.slint:32
 msgctxt "ModelDeleteSection"

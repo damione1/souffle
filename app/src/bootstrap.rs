@@ -156,7 +156,6 @@ pub fn bootstrap() -> Arc<AppState> {
                 ));
             let _ = state.audio_cmd_sender.send(AudioCommand::SetInputPolicy {
                 priority: app_settings.input_priority,
-                allow_bluetooth_mic: app_settings.allow_bluetooth_mic,
             });
             // Directory walk over recordings/ can take a moment with a large
             // history; never block startup on it.

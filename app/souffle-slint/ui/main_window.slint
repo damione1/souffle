@@ -272,9 +272,7 @@ export component MainWindow inherits Window {
     in property <bool> settings-sample-rate-high;
     in property <bool> settings-resetting-sample-rate;
     in property <bool> settings-backend-capture-busy: false;
-    in property <bool> settings-allow-bluetooth-mic;
     in property <[MicrophoneRow]> settings-microphones;
-    in property <bool> settings-has-disconnected-devices;
     in property <bool> settings-is-laptop;
     in property <[string]> settings-clamshell-device-labels;
     in property <string> settings-clamshell-device-label;
@@ -472,9 +470,7 @@ export component MainWindow inherits Window {
     callback settings-calendar-open-system-settings-requested();
     callback settings-device-changed(string);
     callback settings-refresh-devices-requested();
-    callback settings-reset-devices-requested();
     callback settings-reset-sample-rate-requested();
-    callback settings-allow-bluetooth-mic-changed(bool);
     callback settings-move-device-requested(string, int);
     callback settings-remove-device-requested(string);
     callback settings-clamshell-device-changed(string);
@@ -951,9 +947,7 @@ export component MainWindow inherits Window {
                 sample-rate-label: root.settings-sample-rate-label;
                 sample-rate-high: root.settings-sample-rate-high;
                 resetting-sample-rate: root.settings-resetting-sample-rate;
-                allow-bluetooth-mic: root.settings-allow-bluetooth-mic;
                 microphones: root.settings-microphones;
-                has-disconnected-devices: root.settings-has-disconnected-devices;
                 is-laptop: root.settings-is-laptop;
                 clamshell-device-labels: root.settings-clamshell-device-labels;
                 clamshell-device-label: root.settings-clamshell-device-label;
@@ -1122,9 +1116,7 @@ export component MainWindow inherits Window {
                 calendar-open-system-settings-requested => { root.settings-calendar-open-system-settings-requested(); }
                 device-changed(value) => { root.settings-device-changed(value); }
                 refresh-devices-requested => { root.settings-refresh-devices-requested(); }
-                reset-devices-requested => { root.settings-reset-devices-requested(); }
                 reset-sample-rate-requested => { root.settings-reset-sample-rate-requested(); }
-                allow-bluetooth-mic-changed(value) => { root.settings-allow-bluetooth-mic-changed(value); }
                 move-device-requested(uid, direction) => { root.settings-move-device-requested(uid, direction); }
                 remove-device-requested(uid) => { root.settings-remove-device-requested(uid); }
                 clamshell-device-changed(value) => { root.settings-clamshell-device-changed(value); }

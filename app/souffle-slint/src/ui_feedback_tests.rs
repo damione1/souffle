@@ -199,7 +199,6 @@ fn microphone_rows_show_whole_ages_and_keep_their_actions_in_columns() {
     };
     let list = microphone_list::build_microphone_list(&connected, &priority);
     audio_ui::populate_microphones(&window, &list);
-    window.set_settings_has_disconnected_devices(true);
     settle();
 
     let rows = ElementQuery::from_root(&window)

@@ -726,7 +726,7 @@
               ],
               [
                 "Microphone priority<br><span class=\"docs-tab\">Audio</span>",
-                "An ordered list of preferred inputs, a separate choice for clamshell mode, and a switch that keeps Bluetooth headsets from being used as microphones so they stay in stereo."
+                "An ordered list of preferred inputs and a separate choice for clamshell mode."
               ],
               [
                 "Meeting auto-stop<br><span class=\"docs-tab\">Audio</span>",
@@ -947,7 +947,7 @@
               ],
               [
                 "The wrong microphone is picked",
-                "Pin an input, and a separate one for clamshell mode, in Settings → Audio. Bluetooth headsets are left out of automatic selection by default: using one as a microphone switches it to HFP and costs you stereo sound."
+                "Pin an input, and a separate one for clamshell mode, in Settings → Audio."
               ],
               [
                 "Polish or summaries do nothing",

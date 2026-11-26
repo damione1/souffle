@@ -32,25 +32,10 @@ pub struct ResolveInputParams<'a> {
     /// Whether clamshell mode is active right now.
     pub clamshell_active: bool,
     pub priority: &'a InputPriority,
-    /// When false, Bluetooth inputs are skipped unless explicitly pinned or
-    /// configured for clamshell (avoids waking HFP mono on headset output).
-    pub allow_bluetooth_mic: bool,
-}
-
-/// Whether `transport` is a Bluetooth headset input.
-pub fn is_bluetooth_transport(transport: TransportType) -> bool {
-    matches!(
-        transport,
-        TransportType::Bluetooth | TransportType::BluetoothLe
-    )
 }
 
 fn is_connected<'a>(devices: &'a [AudioInputDevice], uid: &str) -> Option<&'a AudioInputDevice> {
     devices.iter().find(|device| device.uid == uid)
-}
-
-fn is_auto_eligible(device: &AudioInputDevice, allow_bluetooth_mic: bool) -> bool {
-    allow_bluetooth_mic || !is_bluetooth_transport(device.transport)
 }
 
 /// Update `known` from the current connected-device snapshot.
@@ -81,13 +66,7 @@ pub fn touch_known(priority: &mut InputPriority, connected: &[AudioInputDevice])
 /// Pick the input UID to capture on, or `None` when no device is connected.
 ///
 /// Order: explicit pin (if connected) -> clamshell preference (when active and
-/// connected) -> first connected eligible priority entry -> system default
-/// (with anti-Bluetooth preference when `allow_bluetooth_mic` is false).
-///
-/// `None` is also returned when devices are connected but none is
-/// auto-eligible (Bluetooth-only with Bluetooth disallowed).
-/// The caller decides that fallback: capture opens the OS default anyway so
-/// recording still works, and never rebuilds toward a `None` resolution.
+/// connected) -> first connected priority entry -> system default.
 pub fn resolve_input(
     connected: &[AudioInputDevice],
     params: ResolveInputParams<'_>,
@@ -112,37 +91,29 @@ pub fn resolve_input(
     }
 
     for uid in &params.priority.priorities {
-        if let Some(device) = is_connected(connected, uid)
-            && is_auto_eligible(device, params.allow_bluetooth_mic)
+        if let Some(device) = is_connected(connected, uid) {
+            return Some(device.uid.clone());
+        }
+    }
+
+    resolve_default(connected)
+}
+
+fn resolve_default(connected: &[AudioInputDevice]) -> Option<String> {
+    if let Some(device) = connected.iter().find(|device| device.is_default) {
+        return Some(device.uid.clone());
+    }
+
+    for preferred in [TransportType::BuiltIn, TransportType::Usb] {
+        if let Some(device) = connected
+            .iter()
+            .find(|device| device.transport == preferred)
         {
             return Some(device.uid.clone());
         }
     }
 
-    resolve_default(connected, params.allow_bluetooth_mic)
-}
-
-fn resolve_default(connected: &[AudioInputDevice], allow_bluetooth_mic: bool) -> Option<String> {
-    let eligible: Vec<&AudioInputDevice> = connected
-        .iter()
-        .filter(|device| is_auto_eligible(device, allow_bluetooth_mic))
-        .collect();
-
-    if eligible.is_empty() {
-        return None;
-    }
-
-    if let Some(device) = eligible.iter().find(|device| device.is_default) {
-        return Some(device.uid.clone());
-    }
-
-    for preferred in [TransportType::BuiltIn, TransportType::Usb] {
-        if let Some(device) = eligible.iter().find(|device| device.transport == preferred) {
-            return Some(device.uid.clone());
-        }
-    }
-
-    Some(eligible[0].uid.clone())
+    connected.first().map(|device| device.uid.clone())
 }
 
 #[cfg(test)]
@@ -172,14 +143,12 @@ mod tests {
         clamshell_pref: Option<&'a str>,
         clamshell_active: bool,
         priority: &'a InputPriority,
-        allow_bluetooth_mic: bool,
     ) -> ResolveInputParams<'a> {
         ResolveInputParams {
             pin,
             clamshell_pref,
             clamshell_active,
             priority,
-            allow_bluetooth_mic,
         }
     }
 
@@ -192,7 +161,7 @@ mod tests {
         assert_eq!(
             resolve_input(
                 &connected,
-                params(Some("usb"), None, false, &empty_priority(), false),
+                params(Some("usb"), None, false, &empty_priority()),
             ),
             Some("usb".into()),
         );
@@ -204,7 +173,7 @@ mod tests {
         assert_eq!(
             resolve_input(
                 &connected,
-                params(Some("ghost"), None, false, &empty_priority(), false),
+                params(Some("ghost"), None, false, &empty_priority()),
             ),
             Some("builtin".into()),
         );
@@ -219,7 +188,7 @@ mod tests {
         assert_eq!(
             resolve_input(
                 &connected,
-                params(None, Some("webcam"), true, &empty_priority(), false),
+                params(None, Some("webcam"), true, &empty_priority()),
             ),
             Some("webcam".into()),
         );
@@ -234,13 +203,7 @@ mod tests {
         assert_eq!(
             resolve_input(
                 &connected,
-                params(
-                    Some("builtin"),
-                    Some("webcam"),
-                    true,
-                    &empty_priority(),
-                    false
-                ),
+                params(Some("builtin"), Some("webcam"), true, &empty_priority()),
             ),
             Some("builtin".into()),
         );
@@ -255,7 +218,7 @@ mod tests {
         assert_eq!(
             resolve_input(
                 &connected,
-                params(None, Some("webcam"), false, &empty_priority(), false),
+                params(None, Some("webcam"), false, &empty_priority()),
             ),
             Some("builtin".into()),
         );
@@ -273,7 +236,7 @@ mod tests {
             known: Vec::new(),
         };
         assert_eq!(
-            resolve_input(&connected, params(None, None, false, &priority, true)),
+            resolve_input(&connected, params(None, None, false, &priority)),
             Some("hdmi".into()),
         );
     }
@@ -288,58 +251,13 @@ mod tests {
             device("usb", "USB", TransportType::Usb, false),
         ];
         assert_eq!(
-            resolve_input(&connected, params(None, None, false, &priority, true)),
+            resolve_input(&connected, params(None, None, false, &priority)),
             Some("usb".into()),
         );
     }
 
     #[test]
-    fn bluetooth_default_skipped_when_not_allowed() {
-        let connected = vec![
-            device("bt", "AirPods", TransportType::Bluetooth, true),
-            device("builtin", "Built-in", TransportType::BuiltIn, false),
-        ];
-        assert_eq!(
-            resolve_input(
-                &connected,
-                params(None, None, false, &empty_priority(), false),
-            ),
-            Some("builtin".into()),
-        );
-    }
-
-    #[test]
-    fn bluetooth_default_used_when_allowed() {
-        let connected = vec![
-            device("bt", "AirPods", TransportType::Bluetooth, true),
-            device("builtin", "Built-in", TransportType::BuiltIn, false),
-        ];
-        assert_eq!(
-            resolve_input(
-                &connected,
-                params(None, None, false, &empty_priority(), true),
-            ),
-            Some("bt".into()),
-        );
-    }
-
-    #[test]
-    fn pinned_bluetooth_still_used_when_not_allowed() {
-        let connected = vec![
-            device("bt", "AirPods", TransportType::Bluetooth, true),
-            device("builtin", "Built-in", TransportType::BuiltIn, false),
-        ];
-        assert_eq!(
-            resolve_input(
-                &connected,
-                params(Some("bt"), None, false, &empty_priority(), false),
-            ),
-            Some("bt".into()),
-        );
-    }
-
-    #[test]
-    fn bluetooth_skipped_in_priorities_when_not_allowed() {
+    fn a_bluetooth_microphone_ranked_first_wins() {
         let connected = vec![
             device("bt", "AirPods", TransportType::Bluetooth, false),
             device("usb", "USB", TransportType::Usb, true),
@@ -349,27 +267,27 @@ mod tests {
             known: Vec::new(),
         };
         assert_eq!(
-            resolve_input(&connected, params(None, None, false, &priority, false)),
-            Some("usb".into()),
+            resolve_input(&connected, params(None, None, false, &priority)),
+            Some("bt".into()),
+        );
+    }
+
+    #[test]
+    fn a_bluetooth_system_default_wins_without_a_ranking() {
+        let connected = vec![
+            device("builtin", "Built-in", TransportType::BuiltIn, false),
+            device("bt", "AirPods", TransportType::Bluetooth, true),
+        ];
+        assert_eq!(
+            resolve_input(&connected, params(None, None, false, &empty_priority())),
+            Some("bt".into()),
         );
     }
 
     #[test]
     fn empty_connected_returns_none() {
         assert_eq!(
-            resolve_input(&[], params(None, None, false, &empty_priority(), false)),
-            None,
-        );
-    }
-
-    #[test]
-    fn bluetooth_only_returns_none_for_caller_fallback() {
-        let connected = vec![device("bt", "AirPods", TransportType::Bluetooth, true)];
-        assert_eq!(
-            resolve_input(
-                &connected,
-                params(None, None, false, &empty_priority(), false),
-            ),
+            resolve_input(&[], params(None, None, false, &empty_priority())),
             None,
         );
     }

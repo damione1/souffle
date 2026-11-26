@@ -208,7 +208,6 @@ mod tests {
                     clamshell_pref: None,
                     clamshell_active: false,
                     priority: &priority,
-                    allow_bluetooth_mic: false,
                 },
             )
         };

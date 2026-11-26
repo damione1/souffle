@@ -1,8 +1,8 @@
 import { FieldSetAppearance, FieldRowAppearance, AlertActions,
-    AlertSeverity, ButtonIntent, ChoiceLabelPosition, ControlWidth,
+    AlertSeverity, ButtonIntent,
     KitAlert, KitBadge, KitButton, KitFieldRow, KitFieldSet, KitIconButton,
-    KitModalContext, KitSwitch,
-    KitThemeContext, KitThemes, KitWrap, ListView, Ownership, KitFieldSeparator, KitInline
+    KitModalContext,
+    KitThemeContext, KitThemes, KitWrap, ListView, KitFieldSeparator, KitInline
 } from "@kit";
 import { LucideArrows } from "@kit-icons/arrows.slint";
 import { LucideFiles } from "@kit-icons/files.slint";
@@ -124,16 +124,12 @@ export component MicrophoneSection inherits KitFieldSet {
     in property <bool> sample-rate-high;
     in property <bool> resetting-sample-rate;
     in property <bool> capture-busy;
-    in property <bool> allow-bluetooth-mic;
     in property <[MicrophoneRow]> microphones;
-    in property <bool> has-disconnected;
     private property <length> device-row-height: 61px;
 
     callback device-changed(string);
     callback refresh-requested();
-    callback reset-devices-requested();
     callback reset-sample-rate-requested();
-    callback allow-bluetooth-mic-changed(bool);
     callback move-device-requested(string, int);
     callback remove-device-requested(string);
 
@@ -176,17 +172,6 @@ export component MicrophoneSection inherits KitFieldSet {
                 glyph: LucideArrows.refresh-cw();
                 accessible-name: @tr("Actualiser les microphones");
                 activated => { root.refresh-requested(); }
-                focus-observed(focused) => {
-                    if focused { device-field.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
-                }
-            }
-            if root.has-disconnected: KitButton {
-                theme: root.theme;
-                modal-layer: device-field.modal-layer;
-                control-size: compact;
-                text: @tr("Réinitialiser la liste");
-                text-wrap: word-wrap;
-                activated => { root.reset-devices-requested(); }
                 focus-observed(focused) => {
                     if focused { device-field.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
                 }
@@ -281,32 +266,6 @@ export component MicrophoneSection inherits KitFieldSet {
                 accessible-item-count: root.microphones.length;
                 move-requested(uid, direction) => { root.move-device-requested(uid, direction); }
                 remove-requested(uid) => { root.remove-device-requested(uid); }
-            }
-        }
-    }
-
-    bluetooth-field := KitFieldRow {
-        theme: root.theme;
-        modal-layer: 0;
-        orientation: Theme.settings-field-orientation(self.width);
-        appearance: FieldRowAppearance.inset;
-        show-divider: true;
-        focus-requested => { bluetooth-switch.take-focus(); }
-        label: @tr("Autoriser les micros Bluetooth");
-        description: @tr("Sinon, un casque Bluetooth n'est jamais sélectionné automatiquement (évite le mode mono basse qualité).");
-
-        bluetooth-switch := KitSwitch {
-            theme: root.theme;
-            modal-layer: bluetooth-field.modal-layer;
-            label-position: ChoiceLabelPosition.start;
-            padding-inline: 0px;
-            ownership: Ownership.controlled;
-            control-width: ControlWidth.intrinsic;
-            accessible-name: bluetooth-field.label;
-            checked: root.allow-bluetooth-mic;
-            toggled(new) => { root.allow-bluetooth-mic-changed(new); }
-            focus-observed(focused) => {
-                if focused { bluetooth-field.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
             }
         }
     }

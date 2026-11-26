@@ -5892,19 +5892,6 @@ fn wire_callbacks(
     });
 
     let weak = window.as_weak();
-    let settings_io_for_bt = settings_io.clone();
-    window.on_settings_allow_bluetooth_mic_changed(move |allowed| {
-        save_settings_field(
-            &settings_io_for_bt,
-            souffle_lib::commands::SettingsSaveLane::General,
-            move |settings| settings.allow_bluetooth_mic = allowed,
-        );
-        if let Some(window) = weak.upgrade() {
-            window.set_settings_allow_bluetooth_mic(allowed);
-        }
-    });
-
-    let weak = window.as_weak();
     let settings_io_for_system_audio = settings_io.clone();
     window.on_settings_capture_system_audio_changed(move |enabled| {
         save_settings_field(
@@ -6063,72 +6050,6 @@ fn wire_callbacks(
                 }
             },
         );
-    });
-
-    let weak = window.as_weak();
-    let settings_state_for_reset_devices = settings_state.clone();
-    let audio_devices_state_for_reset_devices = audio_devices_state.clone();
-    let audio_device_projection_for_reset_devices = audio_device_projection_state.clone();
-    let settings_io_for_reset_devices = settings_io.clone();
-    window.on_settings_reset_devices_requested(move || {
-        let weak = weak.clone();
-        let state = settings_state_for_reset_devices.clone();
-        let devices = audio_devices_state_for_reset_devices.clone();
-        let projection_state = audio_device_projection_for_reset_devices.clone();
-        let io = settings_io_for_reset_devices.clone();
-        let Some(token) = io.current_load_token() else {
-            return;
-        };
-        let worker =
-            souffle_lib::async_runtime::spawn_blocking(souffle_lib::commands::list_audio_devices);
-        slint::spawn_local(async move {
-            let connected = match worker.await {
-                Ok(Ok(connected)) => connected,
-                Ok(Err(error)) => {
-                    eprintln!("Failed to list connected devices for reset: {error}");
-                    return;
-                }
-                Err(error) => {
-                    eprintln!("Failed to join connected device reset worker: {error}");
-                    return;
-                }
-            };
-            if !io.accepts_load(token) {
-                return;
-            }
-            let connected_uids: Vec<String> =
-                connected.iter().map(|device| device.uid.clone()).collect();
-            let publication_io = io.clone();
-            save_settings_field_then(
-                &io,
-                souffle_lib::commands::SettingsSaveLane::General,
-                move |settings| {
-                    settings
-                        .input_priority
-                        .priorities
-                        .retain(|uid| connected_uids.contains(uid));
-                    settings
-                        .input_priority
-                        .known
-                        .retain(|entry| connected_uids.contains(&entry.uid));
-                },
-                move |order, _outcome| {
-                    if !order.publishes_to_open_window() {
-                        return;
-                    }
-                    if let Some(window) = weak.upgrade() {
-                        load_audio_devices(
-                            &window,
-                            &state,
-                            &devices,
-                            &projection_state,
-                            publication_io,
-                        );
-                    }
-                },
-            );
-        })
-        .expect("slint event loop not running");
     });
 
     let weak = window.as_weak();

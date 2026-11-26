@@ -642,7 +642,6 @@ async fn audio_actions(w: &MainWindow, path: &Path) {
     w.set_settings_meeting_autostop_enabled(true);
     w.set_settings_sample_rate_label("96 kHz".into());
     w.set_settings_sample_rate_high(true);
-    w.set_settings_has_disconnected_devices(true);
     let log: Log = Default::default();
     macro_rules! record {
         ($setter:ident, $name:literal) => {{
@@ -659,8 +658,6 @@ async fn audio_actions(w: &MainWindow, path: &Path) {
         w.on_settings_remove_device_requested(move |uid| {
             l3.borrow_mut().push(format!("remove {uid}"))
         });
-        let l4 = log.clone();
-        w.on_settings_reset_devices_requested(move || l4.borrow_mut().push("reset-list".into()));
         let l5 = log.clone();
         w.on_settings_reset_sample_rate_requested(move || {
             l5.borrow_mut().push("reset-rate".into())
@@ -668,7 +665,6 @@ async fn audio_actions(w: &MainWindow, path: &Path) {
         let l6 = log.clone();
         w.on_settings_refresh_devices_requested(move || l6.borrow_mut().push("refresh".into()));
     }
-    record!(on_settings_allow_bluetooth_mic_changed, "bluetooth");
     record!(on_settings_capture_system_audio_changed, "system-audio");
     record!(on_settings_meeting_autostop_enabled_changed, "autostop");
     record!(on_settings_vad_enabled_changed, "vad");
@@ -791,16 +787,6 @@ async fn audio_actions(w: &MainWindow, path: &Path) {
     println!("rebound delegates: no gesture reaches the replacement device");
 
     reveal(w, &page, "MicrophoneSection::device-picker");
-    let reset = items(w, "KitButton").into_iter().find(|e| {
-        e.accessible_label().as_deref()
-            == Some(if en {
-                "Reset list"
-            } else {
-                "Réinitialiser la liste"
-            })
-    });
-    let reset = reset.expect("reset list is offered while a device is disconnected");
-    reset.invoke_accessible_default_action();
     let refresh = items(w, "KitIconButton").into_iter().find(|e| {
         e.accessible_label().as_deref()
             == Some(if en {
@@ -812,21 +798,8 @@ async fn audio_actions(w: &MainWindow, path: &Path) {
     refresh
         .expect("refresh button")
         .invoke_accessible_default_action();
-    assert_eq!(log.borrow().as_slice(), ["reset-list", "refresh"]);
+    assert_eq!(log.borrow().as_slice(), ["refresh"]);
     log.borrow_mut().clear();
-    w.set_settings_has_disconnected_devices(false);
-    settle(w);
-    assert!(
-        !reset.is_valid()
-            || items(w, "KitButton")
-                .iter()
-                .all(|e| e.accessible_label().as_deref()
-                    != Some(if en {
-                        "Reset list"
-                    } else {
-                        "Réinitialiser la liste"
-                    }))
-    );
 
     reveal(w, &page, "MicrophoneSection::rate-alert");
     let rate = items(w, "KitButton").into_iter().find(|e| {
@@ -853,20 +826,6 @@ async fn audio_actions(w: &MainWindow, path: &Path) {
     w.set_settings_resetting_sample_rate(false);
     w.set_settings_sample_rate_high(false);
     settle(w);
-
-    let bluetooth = reveal(w, &page, "MicrophoneSection::bluetooth-switch");
-    assert_eq!(bluetooth.accessible_checked(), Some(false));
-    bluetooth.invoke_accessible_default_action();
-    assert_eq!(log.borrow().as_slice(), ["bluetooth true"]);
-    assert_eq!(
-        bluetooth.accessible_checked(),
-        Some(false),
-        "the host owns the value"
-    );
-    log.borrow_mut().clear();
-    w.set_settings_allow_bluetooth_mic(true);
-    settle(w);
-    assert_eq!(bluetooth.accessible_checked(), Some(true));
 
     for (name, setter) in [
         ("system-audio", "AudioSection::system-audio-switch"),

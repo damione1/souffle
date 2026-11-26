@@ -148,7 +148,6 @@ pub fn parse_minute_label(label: &str) -> Option<u32> {
 }
 
 pub fn populate_microphones(window: &MainWindow, list: &[MicrophoneListEntry]) {
-    let has_disconnected = list.iter().any(|e| !e.connected);
     let count = list.len();
     let rows: Vec<MicrophoneRow> = list
         .iter()
@@ -168,7 +167,6 @@ pub fn populate_microphones(window: &MainWindow, list: &[MicrophoneListEntry]) {
         })
         .collect();
     window.set_settings_microphones(std::rc::Rc::new(slint::VecModel::from(rows)).into());
-    window.set_settings_has_disconnected_devices(has_disconnected);
 }
 
 #[cfg(test)]
