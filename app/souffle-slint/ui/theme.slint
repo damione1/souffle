@@ -112,6 +112,7 @@ export global Theme {
         KitThemeContext.current.geometry.switch-inset = 3px;
         KitThemeContext.current.choice-thumb = #ffffff;
         KitThemeContext.current.field-background = root.input;
+        KitThemeContext.current.geometry.choice-compact = 18px;
         KitThemeContext.current.geometry.choice-medium = 22px;
         KitThemeContext.current.geometry.content-reading = 820px;
         KitThemeContext.current.geometry.progress-thickness = 6px;
@@ -206,6 +207,9 @@ export global Theme {
     }
     out property <length> header-height: 56px;
     out property <length> page-column-width: 760px;
+    // How far a scroll viewport extends past its column so card shadows are
+    // not clipped; the content is inset by the same amount.
+    out property <length> shadow-bleed: 20px;
     out property <length> page-top-padding: 30px;
     out property <length> settings-control-height: KitMetrics.control-height(KitThemeContext.current, ControlSize.medium);
     out property <length> settings-inset: KitMetrics.field-gap(KitThemeContext.current) - KitThemeContext.current.spacing.unit;

@@ -206,7 +206,3 @@ panic = "unwind"
 
 [build-dependencies]
 souffle-typography = { path = "souffle-typography" }
-
-# The private slint-kit-pro workspace pins an older slint-kit revision. Both
-# link the native library `kit`, so every slint-kit crate resolves to one
-# checkout. Replace with the Pro release built for this revision once published.

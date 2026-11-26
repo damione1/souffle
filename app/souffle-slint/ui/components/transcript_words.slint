@@ -92,6 +92,22 @@ export component TranscriptWordFlow inherits KitWrap {
     }
 }
 
+// The width of a `TranscriptWordFlow` paragraph on one line, from the same
+// separately measured pieces. A wrapping flow's own preferred width is only a
+// compact estimate, and the joined text measures narrower than its pieces.
+export component TranscriptNaturalWidth inherits HorizontalLayout {
+    in property <[TranscriptWord]> words;
+    in property <TypographyStyle> typography: Typography.content;
+    visible: false;
+    width: 0px;
+    height: 0px;
+
+    for word in root.words: HorizontalLayout {
+        AppText { text: word.text; typography: root.typography; accessible-role: none; }
+        AppText { text: word.trailing-text; typography: root.typography; accessible-role: none; }
+    }
+}
+
 // The "add to dictionary" popover. One instance per view, opened for the
 // clicked word with `open(word, x, y)`, which moves this anchor under the
 // word before showing the popup. It keeps its own drafts, so the text

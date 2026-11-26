@@ -1,5 +1,6 @@
 import { KitTabs, KitScrollArea, LayoutSpace, TabActivation, Ownership, OptionRow, SelectionRef, TabsAppearance } from "@kit";
 import { SettingsTab } from "../../types.slint";
+import { Theme } from "../../theme.slint";
 
 import { SettingsOptionList, SettingsOptions } from "settings_options.slint";
 
@@ -30,12 +31,15 @@ export component SettingsTabPage inherits KitScrollArea {
     visible: root.active;
     clip: true;
     gap: LayoutSpace.none;
+    overlay-scrollbars: true;
     enabled: root.active;
     focusable: root.active && self.scrollable;
     VerticalLayout {
         spacing: 20px;
-        // Room for the last card's shadow inside the clipped viewport.
-        padding-bottom: 20px;
+        // Room for the card shadows inside the clipped viewport.
+        padding-left: Theme.shadow-bleed;
+        padding-right: Theme.shadow-bleed;
+        padding-bottom: Theme.shadow-bleed;
         alignment: start;
         @children
     }

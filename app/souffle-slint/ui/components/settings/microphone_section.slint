@@ -283,6 +283,7 @@ export component MicrophoneSection inherits KitFieldSet {
         enabled: !KitModalContext.inert(0);
         accessible-label: priority.label;
         horizontal-scrollbar-policy: always-off;
+        overlay-scrollbars: true;
         content-width: self.visible-width;
         // The viewport shows three rows, sized from what a delegate measured.
         height: min(root.microphones.length, 3) * root.device-row-height;

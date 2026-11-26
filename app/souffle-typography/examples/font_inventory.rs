@@ -21,11 +21,14 @@ fn main() {
             font.sha256
         );
     }
-    println!("\n| Role | Size (px / pt) | Weight | Letter spacing |\n| --- | ---: | ---: | ---: |");
+    println!(
+        "\n| Role | Family | Size (px / pt) | Weight | Letter spacing |\n| --- | --- | ---: | ---: | ---: |"
+    );
     for style in souffle_typography::STYLES {
         println!(
-            "| `{}` | {} | {} | {} |",
+            "| `{}` | {} | {} | {} | {} |",
             style.name,
+            style.face.family(),
             style.size,
             style.weight.number(),
             style.spacing

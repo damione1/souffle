@@ -71,10 +71,6 @@ export component IdleView inherits Rectangle {
         return error;
     }
 
-    // Scroll viewports extend this far past the column so card shadows are
-    // not clipped; their content is inset by the same amount.
-    private property <length> shadow-bleed: 20px;
-
     // Wheel/trackpad anywhere on the page scrolls the history, like a web
     // page: history-scroll only spans the centred column, so the side
     // gutters (and the cards/search above it) used to swallow the scroll.
@@ -102,22 +98,22 @@ export component IdleView inherits Rectangle {
         if root.transcription-status-message != "" || root.mic-stall-visible || root.dictation-finalizing
             || root.dictation-recovery-text != "" || root.meeting-status-message != "": Rectangle {
             vertical-stretch: 0;
-            height: min(notice-list.preferred-height - root.shadow-bleed, root.height * 0.45);
+            height: min(notice-list.preferred-height - Theme.shadow-bleed, root.height * 0.45);
 
             notices := KitScrollArea {
-                x: -root.shadow-bleed;
+                x: -Theme.shadow-bleed;
                 y: 0px;
-                width: parent.width + 2 * root.shadow-bleed;
-                height: parent.height + root.shadow-bleed;
+                width: parent.width + 2 * Theme.shadow-bleed;
+                height: parent.height + Theme.shadow-bleed;
                 overlay-scrollbars: true;
                 focusable: self.scrollable;
                 label: @tr("Notifications de capture");
 
                 notice-list := VerticalLayout {
                     width: notices.visible-width;
-                    padding-left: root.shadow-bleed;
-                    padding-right: root.shadow-bleed;
-                    padding-bottom: root.shadow-bleed;
+                    padding-left: Theme.shadow-bleed;
+                    padding-right: Theme.shadow-bleed;
+                    padding-bottom: Theme.shadow-bleed;
                     spacing: KitThemeContext.current.spacing.unit * 6;
                     if root.transcription-status-message != "": StatusBanner {
                         vertical-stretch: 0;
@@ -220,9 +216,9 @@ export component IdleView inherits Rectangle {
             // Stretch pool leftover. Do not bind `content-height` to the
             // child's `.height` (binding loop, see transcript_section.slint).
             history-scroll := KitScrollArea {
-                x: -root.shadow-bleed;
+                x: -Theme.shadow-bleed;
                 y: 0px;
-                width: parent.width + 2 * root.shadow-bleed;
+                width: parent.width + 2 * Theme.shadow-bleed;
                 height: parent.height;
                 overlay-scrollbars: true;
                 focusable: self.scrollable;
@@ -246,12 +242,12 @@ export component IdleView inherits Rectangle {
                     history-content := VerticalLayout {
                         width: history-scroll.visible-width;
                         alignment: start;
-                        padding-left: root.shadow-bleed;
-                        padding-right: root.shadow-bleed;
+                        padding-left: Theme.shadow-bleed;
+                        padding-right: Theme.shadow-bleed;
                         padding-bottom: KitThemeContext.current.spacing.unit * 9;
 
                         timeline-section := TimelineSection {
-                            width: history-scroll.visible-width - 2 * root.shadow-bleed;
+                            width: history-scroll.visible-width - 2 * Theme.shadow-bleed;
                             groups: root.timeline-groups;
                             is-empty: root.timeline-is-empty;
                             has-matches: root.timeline-has-matches;

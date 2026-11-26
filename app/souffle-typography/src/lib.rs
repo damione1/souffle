@@ -1,11 +1,14 @@
 //! Shared text contract: bundled Inter, role styles and build-time projections.
-//! No OS-installed fonts or duplicated Slint/Swift style tables.
+//! No duplicated Slint/Swift style tables. Only the `mono` roles use a system
+//! face; all other text uses the bundled fonts.
 use sha2::{Digest, Sha256};
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 pub use ttf_parser::name_id::POST_SCRIPT_NAME;
 
 pub const FAMILY: &str = "Inter";
+/// Ships with macOS in regular and bold, so a medium role renders regular.
+pub const MONO_FAMILY: &str = "Menlo";
 pub const VERSION: &str = "4.1";
 pub const REFERENCE_GLYPHS: &str = "& é è ê ë à ç œ Œ É « » ’ … € 0123456789 00:09 00:10 ⌘ ⌥ ⇧";
 const SPECIMEN_SIZE: f32 = 24.;
@@ -182,9 +185,24 @@ pub const FONTS: &[FontAsset] = &[
     ),
 ];
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Face {
+    Inter,
+    Mono,
+}
+impl Face {
+    pub const fn family(self) -> &'static str {
+        match self {
+            Self::Inter => FAMILY,
+            Self::Mono => MONO_FAMILY,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct TextStyle {
     pub name: &'static str,
+    pub face: Face,
     pub size: f32,
     pub weight: Weight,
     pub spacing: f32,
@@ -193,9 +211,18 @@ impl TextStyle {
     const fn new(name: &'static str, size: f32, weight: Weight, spacing: f32) -> Self {
         Self {
             name,
+            face: Face::Inter,
             size,
             weight,
             spacing,
+        }
+    }
+    /// Not for `AppNumericText`: its cells are measured with Inter, and a
+    /// monospace face already keeps digits in place.
+    const fn mono(name: &'static str, size: f32, weight: Weight) -> Self {
+        Self {
+            face: Face::Mono,
+            ..Self::new(name, size, weight, 0.)
         }
     }
 }
@@ -229,9 +256,12 @@ pub const STYLES: &[TextStyle] = &[
     TextStyle::new("field-strong", 13.5, Weight::Bold, 0.),
     TextStyle::new("row-title", 14., Weight::Medium, 0.),
     TextStyle::new("body-emphasis", 14., Weight::SemiBold, 0.),
+    TextStyle::new("body-strong", 14., Weight::Bold, 0.),
     TextStyle::new("brand", 14.5, Weight::SemiBold, 0.),
+    TextStyle::new("reading", 14.5, Weight::Regular, 0.),
     TextStyle::new("action-title", 15., Weight::SemiBold, 0.),
     TextStyle::new("action-body", 15., Weight::Regular, 0.),
+    TextStyle::new("action-strong", 15., Weight::Bold, -0.15),
     TextStyle::new("hero-title", 17., Weight::Bold, -0.17),
     TextStyle::new("dialog-title", 18., Weight::SemiBold, 0.),
     TextStyle::new("dialog-strong", 18., Weight::Bold, 0.),
@@ -239,11 +269,17 @@ pub const STYLES: &[TextStyle] = &[
     TextStyle::new("settings-title", 20., Weight::Bold, 0.),
     TextStyle::new("title-input", 22., Weight::Regular, 0.),
     TextStyle::new("title", 24., Weight::Bold, 0.),
+    TextStyle::new("onboarding-title", 26., Weight::Bold, -0.52),
     TextStyle::new("title-display", 30., Weight::Bold, -0.6),
     TextStyle::new("table-heading", 10.5, Weight::Bold, 1.),
     TextStyle::new("date-heading", 10.5, Weight::SemiBold, 0.6),
     TextStyle::new("timeline-heading", 11., Weight::SemiBold, 1.1),
     TextStyle::new("eyebrow", 11., Weight::SemiBold, 1.65),
+    TextStyle::mono("mono-caption", 11., Weight::Regular),
+    TextStyle::mono("mono-small", 11.5, Weight::Regular),
+    TextStyle::mono("mono", 12., Weight::Regular),
+    TextStyle::mono("mono-label", 12.5, Weight::Medium),
+    TextStyle::mono("mono-time", 15., Weight::Medium),
 ];
 
 pub fn font_for(weight: Weight, slant: Slant) -> &'static FontAsset {
@@ -784,7 +820,7 @@ pub fn slint_projection() -> String {
     }
     out.push_str("}\nexport struct TypographyStyle { family: string, size: length, weight: int, face-weight: TypefaceWeight, spacing: length, italic: bool }\nexport struct NumericGlyph { text: string, width: length, offset: length }\nexport global Typography {\n    pure callback numeric-cells(string, TypographyStyle) -> [NumericGlyph];\n    pure callback numeric-width(string, TypographyStyle) -> length;\n");
     for style in STYLES {
-        writeln!(out, "    out property <TypographyStyle> {}: {{family: \"{FAMILY}\", size: {}px, weight: {}, face-weight: TypefaceWeight.{}, spacing: {}px, italic: false}};", style.name, style.size, style.weight.number(), style.weight.slint_name(), style.spacing).unwrap();
+        writeln!(out, "    out property <TypographyStyle> {}: {{family: \"{}\", size: {}px, weight: {}, face-weight: TypefaceWeight.{}, spacing: {}px, italic: false}};", style.name, style.face.family(), style.size, style.weight.number(), style.weight.slint_name(), style.spacing).unwrap();
     }
     out.push_str("}\n");
     for (component, builtin) in [("AppText", "Text"), ("AppTextInput", "TextInput")] {

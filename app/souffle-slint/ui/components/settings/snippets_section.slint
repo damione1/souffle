@@ -118,6 +118,8 @@ export component SnippetsSection inherits VerticalLayout {
         }
 
         snippets-list := ScrollFrame {
+            // Rows pad their own trailing edge, so their dividers reach the card's.
+            overlay-scrollbars: true;
             height: min(root.list-content-height * 1px, 420px);
             visible: root.entry-count > 0;
             horizontal-scrollbar-policy: always-off;

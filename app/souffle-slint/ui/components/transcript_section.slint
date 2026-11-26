@@ -3,7 +3,7 @@ import { ButtonIntent, ChatBubbleTone, ChatSide, ControlSize, ControlWidth, Fiel
 import { LucideText } from "@kit-icons/text.slint";
 import { LucideNotifications } from "@kit-icons/notifications.slint";
 import { Theme } from "../theme.slint";
-import { TranscriptWord, TranscriptWordFlow, DictionaryAliasPopover } from "transcript_words.slint";
+import { TranscriptWord, TranscriptWordFlow, DictionaryAliasPopover, TranscriptNaturalWidth } from "transcript_words.slint";
 export { TranscriptWord }
 import { SpeakerRole } from "../types.slint";
 
@@ -282,19 +282,12 @@ export component TranscriptSection inherits KitStack {
                         hug: true;
 
                         Rectangle {
-                            // A wrapping flow has no natural width of its own:
-                            // the paragraph on one line gives it to the bubble.
-                            // Each word is measured alone, so the flow runs a little wider
-                            // than the same text on one line.
-                            preferred-width: one-line.preferred-width + root.unit + block.words.length * 2px;
+                            preferred-width: one-line.preferred-width;
                             preferred-height: bubble-flow.preferred-height;
 
-                            one-line := AppText {
-                                width: 0px;
-                                text: block.text;
+                            one-line := TranscriptNaturalWidth {
+                                words: block.words;
                                 typography: Typography.body;
-                                visible: false;
-                                accessible-role: none;
                             }
 
                             if root.playing(block): Rectangle {
