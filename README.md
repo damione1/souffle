@@ -185,9 +185,9 @@ runs when promoting to `master` or launching it manually; see the [CI policy](do
 
 ## Audio diagnostics
 
-If you need to investigate speaker audio leaking into the microphone, enable **Pre-AEC diagnostic capture** in Settings > Audio > Advanced Audio. Meeting-audio retention must also be enabled in Settings > Data. The setting applies to the next recording.
+To investigate speaker audio leaking into the microphone, start the app from a terminal with `SOUFFLE_AEC_DIAGNOSTIC=1`. This is a developer tool with no setting: the capture only runs for that launch, and only while meeting-audio retention is enabled in Settings > Data.
 
-The extra WAV stores the microphone on the left and system audio on the right. It uses about **1.38 GB per hour**, stops after one hour, and follows your audio-retention setting. Keep it private: it contains the meeting audio.
+The extra WAV stores the microphone on the left and system audio on the right, before echo cancellation. It uses about **1.38 GB per hour**, stops after one hour, and follows your audio-retention setting. Keep it private: it contains the meeting audio. Replay it with `--aec-replay <WAV>`.
 
 ## License
 

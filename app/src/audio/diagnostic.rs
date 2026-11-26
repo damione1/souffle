@@ -1,4 +1,6 @@
-//! Optional pre-AEC capture. Only enabled with meeting-audio retention.
+//! Optional pre-AEC capture for `--aec-replay`. A developer tool: it runs
+//! only when [`ENABLE_ENV`] is set and meeting-audio retention is on, and has
+//! no setting, so nobody keeps recording raw audio without knowing.
 //!
 //! Fixed-size blocks enter a preallocated bounded ring with `try_push`;
 //! callbacks neither allocate nor wait. The independent writer publishes a
@@ -19,9 +21,16 @@ use ringbuf::traits::{Consumer, Producer, Split};
 use super::mixer::{FRAME_SAMPLES, MIX_RATE};
 use super::resampler::Resampler;
 
+/// Set to `1` in the environment of the app to capture the pre-AEC lanes of
+/// the meetings recorded by that run.
+pub const ENABLE_ENV: &str = "SOUFFLE_AEC_DIAGNOSTIC";
+
+pub fn enabled_by_env() -> bool {
+    std::env::var_os(ENABLE_ENV).is_some_and(|value| value == "1")
+}
+
 const QUEUE_BLOCKS: usize = 200; // Two seconds at the mixer clock; ~0.8 MB.
 pub(crate) const MAX_MINUTES: u32 = 60;
-pub(crate) const MEGABYTES_PER_HOUR: u32 = MIX_RATE * 2 * 4 * 3600 / 1_000_000;
 const MAX_FRAMES: u64 = MIX_RATE as u64 * MAX_MINUTES as u64 * 60;
 const MIN_FREE_BYTES: u64 = 256 * 1024 * 1024;
 

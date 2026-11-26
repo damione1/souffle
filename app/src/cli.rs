@@ -63,6 +63,8 @@ struct CliArgs {
     transcribe_file: Option<PathBuf>,
 
     /// Replay a lossless pre-AEC stereo diagnostic WAV (left mic, right tap).
+    /// The app records one per meeting when it is started with
+    /// SOUFFLE_AEC_DIAGNOSTIC=1 and meeting audio retention is on.
     #[arg(long, value_name = "WAV", conflicts_with_all = ["transcribe_file", "list_models", "list_engines"])]
     aec_replay: Option<PathBuf>,
 

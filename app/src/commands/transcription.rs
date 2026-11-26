@@ -209,6 +209,7 @@ async fn launch_meeting(
             &pipeline_state.db,
             &pipeline_state.capture_start,
             pipeline_state.vad_model_path.clone(),
+            pipeline_state.aec_diagnostic,
             session_id,
             PipelineMode::Meeting,
             session_terms,
@@ -395,6 +396,7 @@ fn start_pipeline_blocking(
     db: &Database,
     capture_start: &CaptureStartGate,
     vad_model_path: Option<std::path::PathBuf>,
+    aec_diagnostic: bool,
     session_id: u64,
     mode: PipelineMode,
     session_terms: Vec<String>,
@@ -484,7 +486,7 @@ fn start_pipeline_blocking(
     } else {
         None
     };
-    let diagnostic_start_confirmation = settings.meeting_audio_diagnostic && record_path.is_some();
+    let diagnostic_start_confirmation = aec_diagnostic && record_path.is_some();
 
     // SOU-260: hand the session to the actor, start capture, and only then
     // wait for the engine. The reset (seconds for a diarized Kyutai rebuild,
@@ -506,7 +508,7 @@ fn start_pipeline_blocking(
                     capture_system_audio: actual_capture_system_audio,
                     diarize,
                     record_path,
-                    meeting_audio_diagnostic: settings.meeting_audio_diagnostic,
+                    meeting_audio_diagnostic: aec_diagnostic,
                     meeting_lease: recording_target
                         .as_ref()
                         .and_then(|t| t.write_lease.clone()),
@@ -733,6 +735,7 @@ pub async fn start_transcription(
             &pipeline_state.db,
             &pipeline_state.capture_start,
             pipeline_state.vad_model_path.clone(),
+            pipeline_state.aec_diagnostic,
             session_id,
             PipelineMode::Dictation,
             Vec::new(),
@@ -1938,7 +1941,6 @@ mod tests {
         ] {
             let (db, _dir) = test_db();
             crate::settings::AppSettings {
-                meeting_audio_diagnostic: diagnostic,
                 meeting_audio_retention: crate::settings::MeetingAudioRetention::Keep7d,
                 capture_system_audio: false,
                 ..Default::default()
@@ -1992,6 +1994,7 @@ mod tests {
                         &db,
                         &gate,
                         None,
+                        diagnostic,
                         7,
                         mode,
                         Vec::new(),

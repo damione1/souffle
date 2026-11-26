@@ -176,6 +176,8 @@ pub struct AppState {
     /// Silero model every session gates its audio with. Fixtures feeding
     /// synthetic audio set it to `None` so nothing is gated.
     pub vad_model_path: Option<std::path::PathBuf>,
+    /// Developer pre-AEC capture, read once from the environment.
+    pub aec_diagnostic: bool,
     /// Latest audio RMS level (0.0-1.0), stored as f32 bits in AtomicU32
     pub audio_rms: Arc<AtomicU32>,
     /// Unified state machine — the source of truth for app lifecycle
@@ -227,6 +229,7 @@ impl AppState {
             compression: crate::summary::compress::CompressionService::shared(),
             recordings_root: crate::audio::recorder::recordings_root(),
             vad_model_path: crate::filter::resolve_vad_model_path(),
+            aec_diagnostic: crate::audio::diagnostic::enabled_by_env(),
             audio_rms,
             machine: Mutex::new(AppStateMachine::Idle),
             sleep_paused_meeting_id: Mutex::new(None),

@@ -1,14 +1,12 @@
-import { SettingsOptions, ClosedSettingsPicker } from "settings_options.slint";
 import { FieldSetAppearance, FieldRowAppearance,
-    ChoiceLabelPosition, ControlWidth, FieldAccess, KitFieldRow, KitFieldSet, KitSwitch, KitThemeContext, KitThemes, Ownership
+    ChoiceLabelPosition, ControlWidth, KitFieldRow, KitFieldSet, KitSwitch, KitThemeContext, KitThemes, Ownership
 } from "@kit";
 import { PickerLabels } from "../picker_labels.slint";
 import { CatalogPicker } from "../catalog_picker.slint";
 import { SettingsAdvancedBlock } from "settings_advanced_block.slint";
 import { Theme } from "../../theme.slint";
-import { AudioRetention } from "../../types.slint";
 
-// Rust supplies the duration catalogues and clamshell device identities.
+// Rust supplies the clamshell device identities.
 export component AudioSection inherits KitFieldSet {
     in property <bool> is-laptop;
     in property <[string]> clamshell-device-labels;
@@ -18,17 +16,12 @@ export component AudioSection inherits KitFieldSet {
     in property <string> clamshell-device-label;
     in property <bool> system-audio-supported;
     in property <bool> capture-system-audio;
-    in property <bool> meeting-audio-diagnostic;
-    in property <AudioRetention> meeting-audio-retention;
-    in property <int> diagnostic-max-minutes;
-    in property <int> diagnostic-megabytes-per-hour;
     in property <bool> meeting-autostop-enabled;
     in property <bool> filler-removal;
     in property <bool> dictionary-correction;
 
     callback clamshell-device-changed(string);
     callback capture-system-audio-changed(bool);
-    callback meeting-audio-diagnostic-changed(bool);
     callback meeting-autostop-enabled-changed(bool);
     callback filler-removal-changed(bool);
     callback dictionary-correction-changed(bool);
@@ -142,36 +135,6 @@ export component AudioSection inherits KitFieldSet {
             accessible-label: @tr("Correction par dictionnaire");
             checked: root.dictionary-correction;
             toggled(new) => { root.dictionary-correction-changed(new); }
-        }
-    }
-
-    KitFieldRow {
-        theme: root.theme;
-        modal-layer: 0;
-        orientation: Theme.settings-field-orientation(self.width);
-        appearance: FieldRowAppearance.inset;
-        show-divider: true;
-        focus-requested => { diagnostic-switch.take-focus(); }
-        private property <bool> control-focused: diagnostic-switch.has-focus;
-        changed control-focused => {
-            if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
-        }
-        label: @tr("Capture diagnostique avant AEC");
-        description: root.meeting-audio-retention == AudioRetention.off
-            ? @tr("Activez d'abord la conservation de l'audio dans Données. Aucun diagnostic n'est enregistré sans elle.")
-            : @tr("À partir de la prochaine réunion, conserve les voies brutes séparées : micro à gauche, audio système à droite. WAV sans perte : environ {} Mo/heure, {} minutes maximum. Même conservation que l'audio de réunion.", root.diagnostic-megabytes-per-hour, root.diagnostic-max-minutes);
-
-        diagnostic-switch := KitSwitch {
-            theme: root.theme;
-            modal-layer: 0;
-            label-position: ChoiceLabelPosition.start;
-            padding-inline: 0px;
-            ownership: Ownership.controlled;
-            control-width: ControlWidth.intrinsic;
-            accessible-label: @tr("Capture diagnostique avant AEC");
-            checked: root.meeting-audio-diagnostic;
-            access: root.meeting-audio-retention != AudioRetention.off ? FieldAccess.editable : FieldAccess.disabled;
-            toggled(new) => { root.meeting-audio-diagnostic-changed(new); }
         }
     }
 

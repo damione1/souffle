@@ -77,7 +77,6 @@ impl From<String> for PreparedSettingsSaveError {
 const DICTATION_LEARN_FROM_EDIT_KEY: &str = "dictation_learn_from_edit";
 const DICTIONARY_LEARNING_MODE_KEY: &str = "dictionary_learning_mode";
 const MEETING_AUDIO_RETENTION_KEY: &str = "meeting_audio_retention";
-const MEETING_AUDIO_DIAGNOSTIC_KEY: &str = "meeting_audio_diagnostic";
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
@@ -287,10 +286,6 @@ pub struct AppSettings {
     /// Opt-in recording of meeting audio to compressed files on disk, and
     /// for how long they're kept. Off by default.
     pub meeting_audio_retention: MeetingAudioRetention,
-    /// Optional raw mic/tap capture for AEC replay. Effective only when
-    /// meeting audio retention is enabled; snapshotted at session start.
-    #[serde(default)]
-    pub meeting_audio_diagnostic: bool,
     /// Optional LLM post-processing applied to dictation before paste/history.
     pub dictation_polish_enabled: bool,
     /// Active polish template id (clean, email, bullets, no_fillers).
@@ -327,8 +322,6 @@ pub const MAX_PASTE_DELAY_MS: u64 = 1000;
 /// this is how the UI finds out instead of restating it.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SettingsOptions {
-    pub meeting_diagnostic_max_minutes: u32,
-    pub meeting_diagnostic_megabytes_per_hour: u32,
     pub model_unload_timeout_minutes: Vec<u32>,
     pub paste_delay_ms_min: u64,
     pub paste_delay_ms_max: u64,
@@ -346,8 +339,6 @@ impl SettingsOptions {
     /// Return the settings constraints and defaults exposed through the IPC contract.
     pub fn current() -> Self {
         Self {
-            meeting_diagnostic_max_minutes: crate::audio::diagnostic::MAX_MINUTES,
-            meeting_diagnostic_megabytes_per_hour: crate::audio::diagnostic::MEGABYTES_PER_HOUR,
             model_unload_timeout_minutes: ALLOWED_UNLOAD_TIMEOUT_MINUTES.to_vec(),
             paste_delay_ms_min: MIN_PASTE_DELAY_MS,
             paste_delay_ms_max: MAX_PASTE_DELAY_MS,
@@ -415,7 +406,6 @@ impl Default for AppSettings {
             meeting_autostop_enabled: true,
             autostart_enabled: false,
             meeting_audio_retention: MeetingAudioRetention::default(),
-            meeting_audio_diagnostic: false,
             dictation_polish_enabled: true,
             dictation_polish_template_id: crate::summary::TEMPLATE_CLEAN.to_string(),
             dictation_polish_templates: crate::summary::default_polish_templates(),
@@ -597,9 +587,6 @@ impl AppSettings {
             read_json_setting::<MeetingAudioRetention>(db, MEETING_AUDIO_RETENTION_KEY)?
         {
             settings.meeting_audio_retention = meeting_audio_retention;
-        }
-        if let Some(enabled) = read_json_setting::<bool>(db, MEETING_AUDIO_DIAGNOSTIC_KEY)? {
-            settings.meeting_audio_diagnostic = enabled;
         }
         if let Some(dictation_polish_enabled) =
             read_json_setting::<bool>(db, DICTATION_POLISH_ENABLED_KEY)?
@@ -1090,11 +1077,6 @@ impl AppSettings {
             )?;
             write_json_setting_in_transaction(
                 transaction,
-                MEETING_AUDIO_DIAGNOSTIC_KEY,
-                &normalized.meeting_audio_diagnostic,
-            )?;
-            write_json_setting_in_transaction(
-                transaction,
                 DICTATION_POLISH_ENABLED_KEY,
                 &normalized.dictation_polish_enabled,
             )?;
@@ -1478,7 +1460,6 @@ mod tests {
             meeting_autostop_enabled: false,
             autostart_enabled: true,
             meeting_audio_retention: MeetingAudioRetention::Keep30d,
-            meeting_audio_diagnostic: true,
             dictation_polish_enabled: true,
             dictation_polish_template_id: "email".into(),
             dictation_polish_templates: crate::summary::default_polish_templates(),
@@ -2023,6 +2004,7 @@ mod tests {
             ("meeting_transcription_language", "\"fr\""),
             ("meeting_autostop_minutes", "30"),
             ("meeting_max_duration_minutes", "480"),
+            ("meeting_audio_diagnostic", "true"),
         ];
         for (key, value) in retired {
             db.set_setting(key, value).expect("seed the retired key");
@@ -2370,29 +2352,6 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&MeetingAudioRetention::KeepForever).unwrap(),
             "\"keep_forever\""
-        );
-    }
-
-    #[test]
-    fn meeting_diagnostic_defaults_off_and_never_enables_primary_retention() {
-        let (db, _dir) = test_db();
-        let mut settings = AppSettings::load(&db).unwrap();
-        assert!(!settings.meeting_audio_diagnostic);
-        assert_eq!(settings.meeting_audio_retention, MeetingAudioRetention::Off);
-        settings.meeting_audio_diagnostic = true;
-        settings.save(&db).unwrap();
-        let loaded = AppSettings::load(&db).unwrap();
-        assert!(loaded.meeting_audio_diagnostic);
-        assert_eq!(loaded.meeting_audio_retention, MeetingAudioRetention::Off);
-        let mut old_payload = serde_json::to_value(AppSettings::default()).unwrap();
-        old_payload
-            .as_object_mut()
-            .unwrap()
-            .remove("meeting_audio_diagnostic");
-        assert!(
-            !serde_json::from_value::<AppSettings>(old_payload)
-                .unwrap()
-                .meeting_audio_diagnostic
         );
     }
 
