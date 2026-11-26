@@ -4,11 +4,33 @@
 //! |onboarding-{permissions,microphone,model,shortcut}|detail|meeting|dictation
 //! |permissions|update|whats-new|specimen|hud-{dictation,meeting,polishing}[-compact]
 //! |empty|error|loading|detail-{empty,error,loading}
+//! |alerts|search-empty|detail-{transcript,no-summary,no-provider}|update-{downloading,failed}
 //! |live-editor[-error|-loading]|settings-suggestions[-empty|-error|-loading]
-//! SOU276_LANG=fr|en, SOU276_DARK=0|1, SOU276_WIDTH=680|1040.
+//! SOU276_LANG=fr|en, SOU276_DARK=0|1, SOU276_WIDTH=680|1040, SOU276_HEIGHT=820.
+//! SOU276_SNAPSHOT=<png path> renders the settled window to a file and exits
+//! (see capture_mockup_surfaces.sh; use SLINT_SCALE_FACTOR=1 to match the mockups).
 use souffle_slint::*;
+#[allow(dead_code)]
+#[path = "../src/audio_ui.rs"]
+mod audio_ui;
+#[allow(dead_code)]
+#[path = "../src/ia_ui.rs"]
+mod ia_ui;
+#[allow(dead_code)]
+#[path = "../src/microphone_list.rs"]
+mod microphone_list;
+#[allow(dead_code)]
+#[path = "../src/settings_kit.rs"]
+mod settings_kit;
 #[path = "../src/typography.rs"]
 mod typography;
+// The app rule projection needs the live settings I/O stack.
+mod app_branch_ui {
+    pub(crate) fn populate(_: &super::MainWindow, _: &souffle_lib::settings::AppSettings) {}
+}
+#[path = "typography_qa/mockup.rs"]
+mod mockup;
+use slint::winit_030::WinitWindowAccessor;
 use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
 use std::ffi::CString;
 
@@ -47,6 +69,17 @@ fn remove_fixture_suggestion(window: &MainWindow, id: i32) {
     window.set_settings_dictionary_suggestion_content_height(remaining.len() as f32 * 64.0);
     window.set_settings_dictionary_suggestions(model(remaining));
 }
+fn save_png(window: &MainWindow, path: &std::path::Path) {
+    let frame = window.window().take_snapshot().unwrap();
+    image::save_buffer(
+        path,
+        frame.as_bytes(),
+        frame.width(),
+        frame.height(),
+        image::ExtendedColorType::Rgba8,
+    )
+    .unwrap();
+}
 fn main() {
     let lang = std::env::var("SOU276_LANG").unwrap_or_else(|_| "fr".into());
     let dark = std::env::var("SOU276_DARK").as_deref() != Ok("0");
@@ -55,14 +88,20 @@ fn main() {
         .ok()
         .and_then(|value| value.parse::<f32>().ok())
         .unwrap_or(1040.);
+    let height = std::env::var("SOU276_HEIGHT")
+        .ok()
+        .and_then(|value| value.parse::<f32>().ok())
+        .unwrap_or(820.);
+    let snapshot = std::env::var_os("SOU276_SNAPSHOT").map(std::path::PathBuf::from);
     slint::BackendSelector::new()
         .renderer_name("skia".into())
         .require_metal()
         .select()
         .unwrap();
     souffle_lib::native::appearance::apply_resolved(dark);
-    let window = MainWindow::new().unwrap();
+    let window = settings_kit::new_window().unwrap();
     slint::select_bundled_translation(&lang).unwrap();
+    window.global::<SettingsOptions>().invoke_localize();
     let proof = typography::initialize(&window).unwrap();
     for row in proof {
         println!("Skia {row}");
@@ -80,13 +119,13 @@ fn main() {
     souffle_lib::pill::register_fonts().unwrap();
     assert_eq!(unsafe { pill_typography_verify() }, 0);
     println!(
-        "QA sha={} profile={} surface={surface} locale={lang} dark={dark} size={width}x820 renderer=Skia/Metal no-bootstrap no-DB no-network",
+        "QA sha={} profile={} surface={surface} locale={lang} dark={dark} size={width}x{height} renderer=Skia/Metal no-bootstrap no-DB no-network",
         env!("SOUFFLE_BUILD_GIT_SHA"),
         env!("SOUFFLE_BUILD_PROFILE")
     );
     window
         .window()
-        .set_size(slint::LogicalSize::new(width, 820.));
+        .set_size(slint::LogicalSize::new(width, height));
     window.global::<Theme>().set_dark(dark);
     window.set_settings_theme(if dark {
         AppTheme::Dark
@@ -408,6 +447,9 @@ fn main() {
             ..Default::default()
         }]));
     }
+    if std::env::var("SOU276_MOCKUP").as_deref() == Ok("1") {
+        mockup::apply(&window, &surface);
+    }
     if surface == "specimen" {
         let specimen = TypographySpecimen::new().unwrap();
         specimen.set_foreground(window.global::<Theme>().get_text_primary().into());
@@ -462,6 +504,39 @@ fn main() {
                 pill_panel_set_live_text(live.as_ptr(), 0);
                 pill_panel_set_visible(1);
             }
+        }
+        let unclamp = slint::Timer::default();
+        let capture = slint::Timer::default();
+        if let Some(path) = snapshot {
+            // macOS clamps a shown window to the screen height and the settings
+            // boards are taller. Raising the minimum size lifts that clamp.
+            let weak = window.as_weak();
+            unclamp.start(
+                slint::TimerMode::SingleShot,
+                std::time::Duration::from_millis(300),
+                move || {
+                    let window = weak.unwrap();
+                    window.window().with_winit_window(|winit| {
+                        let size = slint::winit_030::winit::dpi::PhysicalSize::new(
+                            width as u32,
+                            height as u32,
+                        );
+                        winit.set_min_inner_size(Some(size));
+                    });
+                    window
+                        .window()
+                        .set_size(slint::LogicalSize::new(width, height));
+                },
+            );
+            let weak = window.as_weak();
+            capture.start(
+                slint::TimerMode::SingleShot,
+                std::time::Duration::from_millis(1500),
+                move || {
+                    save_png(&weak.unwrap(), &path);
+                    slint::quit_event_loop().unwrap();
+                },
+            );
         }
         window.run().unwrap();
     }

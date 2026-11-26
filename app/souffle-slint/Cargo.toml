@@ -92,6 +92,8 @@ slint-kit-build = { git = "https://github.com/damione1/slint-kit.git", rev = "6d
 [dev-dependencies]
 souffle_lib = { path = "..", package = "souffle", features = ["test-support"] }
 tempfile = "3"
+# PNG export of the comparison fixture (examples/typography_qa.rs).
+image = { version = "0.25", default-features = false, features = ["png"] }
 # SOU-256: element lookup by id + geometry, so a test can assert the live
 # meeting transcript really gets laid out at a usable height. Already in the
 # tree through slint's backend selector; same version as `slint`.
