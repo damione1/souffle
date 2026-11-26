@@ -120,14 +120,12 @@ fn build_harness(mock: MockEngine) -> Harness {
     let db = Arc::new(Database::open(&tmp.path().join("test.db")).expect("open test db"));
 
     // Test-friendly settings: no system-audio capture (keeps the session in
-    // single-stream mode, avoiding the diarized dual-lane path), no VAD/text
+    // single-stream mode, avoiding the diarized dual-lane path), no text
     // filters (so the mock's fixed segment text round-trips unmodified), no
     // auto-stop timers, no feedback sound playback.
     AppSettings {
         capture_system_audio: false,
-        vad_enabled: false,
         filler_removal: false,
-        stutter_collapse: false,
         dictionary_correction: false,
         meeting_autostop_enabled: false,
         feedback_sounds_enabled: false,
@@ -144,6 +142,9 @@ fn build_harness(mock: MockEngine) -> Harness {
 
     let mut state = AppState::new(audio_cmd_tx, Arc::clone(&actor), Arc::clone(&db), audio_rms);
     state.recordings_root = tmp.path().join("recordings");
+    // The synthetic chunks are not speech: without a voice gate they reach
+    // the mock engine.
+    state.vad_model_path = None;
     let state = Arc::new(state);
     bring_to_ready(&state, &actor);
 

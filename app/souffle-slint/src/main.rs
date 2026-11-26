@@ -5764,19 +5764,6 @@ fn wire_callbacks(
     });
 
     let weak = window.as_weak();
-    let settings_io_for_vad = settings_io.clone();
-    window.on_settings_vad_enabled_changed(move |enabled| {
-        save_settings_field(
-            &settings_io_for_vad,
-            souffle_lib::commands::SettingsSaveLane::General,
-            move |settings| settings.vad_enabled = enabled,
-        );
-        if let Some(window) = weak.upgrade() {
-            window.set_settings_vad_enabled(enabled);
-        }
-    });
-
-    let weak = window.as_weak();
     let settings_io_for_filler = settings_io.clone();
     window.on_settings_filler_removal_changed(move |enabled| {
         save_settings_field(
@@ -5786,19 +5773,6 @@ fn wire_callbacks(
         );
         if let Some(window) = weak.upgrade() {
             window.set_settings_filler_removal(enabled);
-        }
-    });
-
-    let weak = window.as_weak();
-    let settings_io_for_stutter = settings_io.clone();
-    window.on_settings_stutter_collapse_changed(move |enabled| {
-        save_settings_field(
-            &settings_io_for_stutter,
-            souffle_lib::commands::SettingsSaveLane::General,
-            move |settings| settings.stutter_collapse = enabled,
-        );
-        if let Some(window) = weak.upgrade() {
-            window.set_settings_stutter_collapse(enabled);
         }
     });
 

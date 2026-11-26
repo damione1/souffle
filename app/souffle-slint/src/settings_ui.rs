@@ -96,9 +96,7 @@ pub fn populate(window: &MainWindow, settings: &AppSettings) {
     window.set_settings_meeting_max_duration_label(
         crate::audio_ui::minute_label(settings.meeting_max_duration_minutes).into(),
     );
-    window.set_settings_vad_enabled(settings.vad_enabled);
     window.set_settings_filler_removal(settings.filler_removal);
-    window.set_settings_stutter_collapse(settings.stutter_collapse);
     window.set_settings_dictionary_correction(settings.dictionary_correction);
 
     crate::compression_ui::populate_settings(window, settings);

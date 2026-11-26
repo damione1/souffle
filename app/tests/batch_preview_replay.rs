@@ -459,10 +459,8 @@ fn production_batch_preview_replay() {
             273,
             SessionConfig {
                 pipeline_config: PipelineConfig {
-                    vad_enabled: true,
                     vad_model_path: Some(vad_path),
                     filler_removal_enabled: true,
-                    stutter_collapse_enabled: true,
                     dictionary_correction_enabled: false,
                 },
                 dictionary_entries: vec![],

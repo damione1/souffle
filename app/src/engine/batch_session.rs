@@ -21,10 +21,8 @@ impl Lane {
         let speech_gate = resolve_vad_model_path().map(|path| {
             build_audio_filters(
                 &PipelineConfig {
-                    vad_enabled: true,
                     vad_model_path: Some(path),
                     filler_removal_enabled: false,
-                    stutter_collapse_enabled: false,
                     dictionary_correction_enabled: false,
                 },
                 SAMPLE_RATE,

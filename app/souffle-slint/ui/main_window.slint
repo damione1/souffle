@@ -285,9 +285,7 @@ export component MainWindow inherits Window {
     in property <string> settings-meeting-autostop-label;
     in property <[string]> settings-meeting-max-duration-labels;
     in property <string> settings-meeting-max-duration-label;
-    in property <bool> settings-vad-enabled;
     in property <bool> settings-filler-removal;
-    in property <bool> settings-stutter-collapse;
     in property <bool> settings-dictionary-correction;
     in property <string> settings-data-stats-line;
     in property <string> settings-data-recordings-line;
@@ -475,9 +473,7 @@ export component MainWindow inherits Window {
     callback settings-meeting-autostop-enabled-changed(bool);
     callback settings-meeting-autostop-changed(string);
     callback settings-meeting-max-duration-changed(string);
-    callback settings-vad-enabled-changed(bool);
     callback settings-filler-removal-changed(bool);
-    callback settings-stutter-collapse-changed(bool);
     callback settings-dictionary-correction-changed(bool);
     callback settings-meeting-audio-retention-changed(AudioRetention);
     callback settings-data-export-requested();
@@ -955,9 +951,7 @@ export component MainWindow inherits Window {
                 meeting-autostop-label: root.settings-meeting-autostop-label;
                 meeting-max-duration-labels: root.settings-meeting-max-duration-labels;
                 meeting-max-duration-label: root.settings-meeting-max-duration-label;
-                vad-enabled: root.settings-vad-enabled;
                 filler-removal: root.settings-filler-removal;
-                stutter-collapse: root.settings-stutter-collapse;
                 dictionary-correction: root.settings-dictionary-correction;
                 data-stats-line: root.settings-data-stats-line;
                 data-recordings-line: root.settings-data-recordings-line;
@@ -1116,9 +1110,7 @@ export component MainWindow inherits Window {
                 meeting-autostop-enabled-changed(value) => { root.settings-meeting-autostop-enabled-changed(value); }
                 meeting-autostop-changed(value) => { root.settings-meeting-autostop-changed(value); }
                 meeting-max-duration-changed(value) => { root.settings-meeting-max-duration-changed(value); }
-                vad-enabled-changed(value) => { root.settings-vad-enabled-changed(value); }
                 filler-removal-changed(value) => { root.settings-filler-removal-changed(value); }
-                stutter-collapse-changed(value) => { root.settings-stutter-collapse-changed(value); }
                 dictionary-correction-changed(value) => { root.settings-dictionary-correction-changed(value); }
                 meeting-audio-retention-changed(value) => { root.settings-meeting-audio-retention-changed(value); }
                 data-export-requested => { root.settings-data-export-requested(); }

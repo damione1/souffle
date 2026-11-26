@@ -5,7 +5,6 @@ pub mod session_terms;
 pub mod soundex;
 mod text_dictionary;
 mod text_filler;
-mod text_stutter;
 mod text_whitespace;
 
 use std::path::{Path, PathBuf};
@@ -24,7 +23,6 @@ pub enum AudioFilterKind {
 #[serde(rename_all = "snake_case")]
 pub enum TextFilterKind {
     FillerRemoval,
-    StutterCollapse,
     WhitespaceNormalization,
     DictionaryCorrection,
 }
@@ -94,10 +92,9 @@ impl TextFilterChain {
 
 #[derive(Debug, Clone)]
 pub struct PipelineConfig {
-    pub vad_enabled: bool,
+    /// Silero model gating the audio; `None` runs without a voice gate.
     pub vad_model_path: Option<PathBuf>,
     pub filler_removal_enabled: bool,
-    pub stutter_collapse_enabled: bool,
     pub dictionary_correction_enabled: bool,
 }
 
@@ -154,30 +151,27 @@ pub fn load_vad_engine(model_path: &Path) -> Result<SharedVadEngine, String> {
 /// Build the session's audio gate. `shared_vad` is an engine already loaded
 /// from `config.vad_model_path` (see [`load_vad_engine`]); when given it is
 /// reset and reused, otherwise a new ONNX session is built for this call.
+/// Without a model path the chain is empty and forwards everything.
 pub fn build_audio_filters(
     config: &PipelineConfig,
     source_sample_rate: u32,
     shared_vad: Option<SharedVadEngine>,
 ) -> AudioFilterChain {
     let mut filters: Vec<Box<dyn AudioFilter>> = Vec::new();
-    if config.vad_enabled {
-        if let Some(engine) = shared_vad {
-            filters.push(Box::new(audio_vad::SileroVadFilter::from_engine(
+    if let Some(engine) = shared_vad {
+        filters.push(Box::new(audio_vad::SileroVadFilter::from_engine(
+            engine,
+            source_sample_rate,
+        )));
+    } else if let Some(model_path) = &config.vad_model_path {
+        match load_vad_engine(model_path) {
+            Ok(engine) => filters.push(Box::new(audio_vad::SileroVadFilter::from_engine(
                 engine,
                 source_sample_rate,
-            )));
-        } else if let Some(model_path) = &config.vad_model_path {
-            match load_vad_engine(model_path) {
-                Ok(engine) => filters.push(Box::new(audio_vad::SileroVadFilter::from_engine(
-                    engine,
-                    source_sample_rate,
-                ))),
-                Err(e) => {
-                    tracing::warn!("Failed to create Silero VAD filter, skipping: {e}");
-                }
+            ))),
+            Err(e) => {
+                tracing::warn!("Failed to create Silero VAD filter, skipping: {e}");
             }
-        } else {
-            tracing::warn!("VAD enabled but no model path configured, skipping");
         }
     }
     AudioFilterChain::new(filters)
@@ -192,9 +186,6 @@ pub fn build_text_filters(
     let mut filters: Vec<Box<dyn TextFilter>> = Vec::new();
     if config.filler_removal_enabled {
         filters.push(Box::new(text_filler::FillerRemovalFilter::new()));
-    }
-    if config.stutter_collapse_enabled {
-        filters.push(Box::new(text_stutter::StutterCollapseFilter::new()));
     }
     if config.dictionary_correction_enabled
         && (!dictionary.is_empty() || !session_terms.is_empty() || !session_corrections.is_empty())
@@ -259,10 +250,8 @@ mod tests {
         crate::ort_runtime::ensure_ort_initialized_for_test();
 
         let config = PipelineConfig {
-            vad_enabled: true,
             vad_model_path: Some(model_path),
             filler_removal_enabled: false,
-            stutter_collapse_enabled: false,
             dictionary_correction_enabled: false,
         };
         let mut chain = build_audio_filters(&config, 16_000, None);
@@ -350,10 +339,8 @@ mod tests {
         crate::ort_runtime::ensure_ort_initialized_for_test();
 
         let config = PipelineConfig {
-            vad_enabled: true,
             vad_model_path: Some(model_path.clone()),
             filler_removal_enabled: false,
-            stutter_collapse_enabled: false,
             dictionary_correction_enabled: false,
         };
 
@@ -415,10 +402,8 @@ mod tests {
     #[test]
     fn build_text_filters_includes_whitespace_always() {
         let config = PipelineConfig {
-            vad_enabled: false,
             vad_model_path: None,
             filler_removal_enabled: false,
-            stutter_collapse_enabled: false,
             dictionary_correction_enabled: false,
         };
         let chain = build_text_filters(&config, vec![], &[], &[]);
@@ -430,10 +415,8 @@ mod tests {
     fn session_corrections_apply_when_dictionary_correction_enabled() {
         use crate::filter::session_terms::SessionCorrection;
         let config = PipelineConfig {
-            vad_enabled: false,
             vad_model_path: None,
             filler_removal_enabled: false,
-            stutter_collapse_enabled: false,
             dictionary_correction_enabled: true,
         };
         let chain = build_text_filters(
@@ -452,10 +435,8 @@ mod tests {
     fn session_corrections_skipped_when_dictionary_correction_disabled() {
         use crate::filter::session_terms::SessionCorrection;
         let config = PipelineConfig {
-            vad_enabled: false,
             vad_model_path: None,
             filler_removal_enabled: false,
-            stutter_collapse_enabled: false,
             dictionary_correction_enabled: false,
         };
         let chain = build_text_filters(

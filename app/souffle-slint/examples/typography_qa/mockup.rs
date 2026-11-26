@@ -987,7 +987,6 @@ fn settings(window: &MainWindow) {
     window.set_settings_meeting_autostop_label("5 min".into());
     window.set_settings_meeting_max_duration_labels(strings(&["3 h", "4 h"]));
     window.set_settings_meeting_max_duration_label("3 h".into());
-    window.set_settings_vad_enabled(true);
     window.set_settings_filler_removal(true);
     window.set_settings_dictionary_correction(true);
 

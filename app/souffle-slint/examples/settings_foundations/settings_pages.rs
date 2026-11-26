@@ -720,9 +720,7 @@ async fn audio_actions(w: &MainWindow, path: &Path) {
     }
     record!(on_settings_capture_system_audio_changed, "system-audio");
     record!(on_settings_meeting_autostop_enabled_changed, "autostop");
-    record!(on_settings_vad_enabled_changed, "vad");
     record!(on_settings_filler_removal_changed, "filler");
-    record!(on_settings_stutter_collapse_changed, "stutter");
     record!(on_settings_dictionary_correction_changed, "dictionary");
 
     let model = Rc::new(slint::VecModel::from(vec![
@@ -868,9 +866,7 @@ async fn audio_actions(w: &MainWindow, path: &Path) {
     for (name, setter) in [
         ("system-audio", "AudioSection::system-audio-switch"),
         ("autostop", "AudioSection::autostop-switch"),
-        ("vad", "AudioSection::vad-switch"),
         ("filler", "AudioSection::filler-switch"),
-        ("stutter", "AudioSection::stutter-switch"),
         ("dictionary", "AudioSection::dictionary-switch"),
     ] {
         let control = reveal(w, &page, setter);

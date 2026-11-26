@@ -28,9 +28,7 @@ export component AudioSection inherits KitFieldSet {
     in property <string> meeting-autostop-label;
     in property <[string]> meeting-max-duration-labels;
     in property <string> meeting-max-duration-label;
-    in property <bool> vad-enabled;
     in property <bool> filler-removal;
-    in property <bool> stutter-collapse;
     in property <bool> dictionary-correction;
 
     callback clamshell-device-changed(string);
@@ -40,9 +38,7 @@ export component AudioSection inherits KitFieldSet {
     callback meeting-autostop-enabled-changed(bool);
     callback meeting-autostop-changed(string);
     callback meeting-max-duration-changed(string);
-    callback vad-enabled-changed(bool);
     callback filler-removal-changed(bool);
-    callback stutter-collapse-changed(bool);
     callback dictionary-correction-changed(bool);
 
     theme: KitThemeContext.current;
@@ -178,33 +174,6 @@ export component AudioSection inherits KitFieldSet {
         orientation: Theme.settings-field-orientation(self.width);
         appearance: FieldRowAppearance.inset;
         show-divider: true;
-        focus-requested => { vad-switch.take-focus(); }
-        private property <bool> control-focused: vad-switch.has-focus;
-        changed control-focused => {
-            if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
-        }
-        label: @tr("Détection de voix (VAD)");
-        description: @tr("Ignorer les silences pour une transcription plus rapide et plus propre.");
-
-        vad-switch := KitSwitch {
-            theme: root.theme;
-            modal-layer: 0;
-            label-position: ChoiceLabelPosition.start;
-            padding-inline: 0px;
-            ownership: Ownership.controlled;
-            control-width: ControlWidth.intrinsic;
-            accessible-label: @tr("Détection de voix");
-            checked: root.vad-enabled;
-            toggled(new) => { root.vad-enabled-changed(new); }
-        }
-    }
-
-    KitFieldRow {
-        theme: root.theme;
-        modal-layer: 0;
-        orientation: Theme.settings-field-orientation(self.width);
-        appearance: FieldRowAppearance.inset;
-        show-divider: true;
         focus-requested => { filler-switch.take-focus(); }
         private property <bool> control-focused: filler-switch.has-focus;
         changed control-focused => {
@@ -223,33 +192,6 @@ export component AudioSection inherits KitFieldSet {
             accessible-label: @tr("Suppression des hésitations");
             checked: root.filler-removal;
             toggled(new) => { root.filler-removal-changed(new); }
-        }
-    }
-
-    KitFieldRow {
-        theme: root.theme;
-        modal-layer: 0;
-        orientation: Theme.settings-field-orientation(self.width);
-        appearance: FieldRowAppearance.inset;
-        show-divider: true;
-        focus-requested => { stutter-switch.take-focus(); }
-        private property <bool> control-focused: stutter-switch.has-focus;
-        changed control-focused => {
-            if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
-        }
-        label: @tr("Réduction des bégaiements");
-        description: @tr("Fusionner les répétitions et faux départs.");
-
-        stutter-switch := KitSwitch {
-            theme: root.theme;
-            modal-layer: 0;
-            label-position: ChoiceLabelPosition.start;
-            padding-inline: 0px;
-            ownership: Ownership.controlled;
-            control-width: ControlWidth.intrinsic;
-            accessible-label: @tr("Réduction des bégaiements");
-            checked: root.stutter-collapse;
-            toggled(new) => { root.stutter-collapse-changed(new); }
         }
     }
 

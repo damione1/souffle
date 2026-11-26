@@ -29,9 +29,7 @@ const INPUT_PRIORITY_KEY: &str = "input_priority";
 const TRANSCRIPTION_ENGINE_ID_KEY: &str = "transcription_engine_id";
 const TRANSCRIPTION_MODEL_ID_KEY: &str = "transcription_model_id";
 const TRANSCRIPTION_BACKEND_ID_KEY: &str = "transcription_backend_id";
-const VAD_ENABLED_KEY: &str = "vad_enabled";
 const FILLER_REMOVAL_KEY: &str = "filler_removal";
-const STUTTER_COLLAPSE_KEY: &str = "stutter_collapse";
 const DICTIONARY_CORRECTION_KEY: &str = "dictionary_correction";
 const CAPTURE_SYSTEM_AUDIO_KEY: &str = "capture_system_audio";
 const CALENDAR_INTEGRATION_ENABLED_KEY: &str = "calendar_integration_enabled";
@@ -80,7 +78,6 @@ impl From<String> for PreparedSettingsSaveError {
 }
 const DICTATION_LEARN_FROM_EDIT_KEY: &str = "dictation_learn_from_edit";
 const DICTIONARY_LEARNING_MODE_KEY: &str = "dictionary_learning_mode";
-const DICTATION_CEILING_SECONDS_KEY: &str = "dictation_ceiling_seconds";
 const MEETING_AUDIO_RETENTION_KEY: &str = "meeting_audio_retention";
 const MEETING_AUDIO_DIAGNOSTIC_KEY: &str = "meeting_audio_diagnostic";
 const MEETING_TRANSCRIPTION_LANGUAGE_KEY: &str = "meeting_transcription_language";
@@ -262,9 +259,7 @@ pub struct AppSettings {
     pub transcription_engine_id: String,
     pub transcription_model_id: String,
     pub transcription_backend_id: String,
-    pub vad_enabled: bool,
     pub filler_removal: bool,
-    pub stutter_collapse: bool,
     pub dictionary_correction: bool,
     /// Meeting mode: capture system audio (other participants) alongside
     /// the microphone via a Core Audio tap.
@@ -329,8 +324,6 @@ pub struct AppSettings {
     /// Ordered app rules. Their position is their persisted priority.
     #[serde(default = "default_app_branches")]
     pub dictation_app_branches: Vec<AppBranchRule>,
-    /// Hard failsafe: stop dictation after this many seconds.
-    pub dictation_ceiling_seconds: u32,
     /// Active default meeting-summary template id: used by the Generate
     /// button when the user doesn't pick another template, and by any
     /// automatic summarization.
@@ -441,9 +434,7 @@ impl Default for AppSettings {
             transcription_engine_id: KYUTAI_ENGINE_ID.to_string(),
             transcription_model_id: KYUTAI_MODEL_ID.to_string(),
             transcription_backend_id: CANDLE_BACKEND_ID.to_string(),
-            vad_enabled: true,
             filler_removal: true,
-            stutter_collapse: false,
             dictionary_correction: true,
             capture_system_audio: true,
             calendar_integration_enabled: false,
@@ -468,7 +459,6 @@ impl Default for AppSettings {
             dictation_polish_templates: crate::summary::default_polish_templates(),
             dictionary_learning_mode: DictionaryLearningMode::Automatic,
             dictation_app_branches: default_app_branches(),
-            dictation_ceiling_seconds: 300,
             default_summary_template_id: crate::summary::TEMPLATE_SUMMARY_DEFAULT.to_string(),
             summary_templates: crate::summary::default_summary_templates(),
             last_seen_version: String::new(),
@@ -477,18 +467,15 @@ impl Default for AppSettings {
 }
 
 impl AppSettings {
-    pub fn pipeline_config(&self) -> crate::filter::PipelineConfig {
-        let vad_model_path = if self.vad_enabled {
-            crate::filter::resolve_vad_model_path()
-        } else {
-            None
-        };
-
+    /// `vad_model_path` is the Silero model the session gates audio with;
+    /// `None` runs the session without a voice gate.
+    pub fn pipeline_config(
+        &self,
+        vad_model_path: Option<std::path::PathBuf>,
+    ) -> crate::filter::PipelineConfig {
         crate::filter::PipelineConfig {
-            vad_enabled: self.vad_enabled,
             vad_model_path,
             filler_removal_enabled: self.filler_removal,
-            stutter_collapse_enabled: self.stutter_collapse,
             dictionary_correction_enabled: self.dictionary_correction,
         }
     }
@@ -576,14 +563,8 @@ impl AppSettings {
         {
             settings.transcription_backend_id = transcription_backend_id;
         }
-        if let Some(vad_enabled) = read_json_setting::<bool>(db, VAD_ENABLED_KEY)? {
-            settings.vad_enabled = vad_enabled;
-        }
         if let Some(filler_removal) = read_json_setting::<bool>(db, FILLER_REMOVAL_KEY)? {
             settings.filler_removal = filler_removal;
-        }
-        if let Some(stutter_collapse) = read_json_setting::<bool>(db, STUTTER_COLLAPSE_KEY)? {
-            settings.stutter_collapse = stutter_collapse;
         }
         if let Some(dictionary_correction) =
             read_json_setting::<bool>(db, DICTIONARY_CORRECTION_KEY)?
@@ -703,11 +684,6 @@ impl AppSettings {
             read_json_setting::<Vec<AppBranchRule>>(db, DICTATION_APP_BRANCHES_KEY)?
         {
             settings.dictation_app_branches = rules;
-        }
-        if let Some(dictation_ceiling_seconds) =
-            read_json_setting::<u32>(db, DICTATION_CEILING_SECONDS_KEY)?
-        {
-            settings.dictation_ceiling_seconds = dictation_ceiling_seconds;
         }
         if let Some(default_summary_template_id) =
             read_json_setting::<String>(db, DEFAULT_SUMMARY_TEMPLATE_ID_KEY)?
@@ -1106,18 +1082,8 @@ impl AppSettings {
             write_json_setting_in_transaction(transaction, LOG_LEVEL_KEY, &normalized.log_level)?;
             write_json_setting_in_transaction(
                 transaction,
-                VAD_ENABLED_KEY,
-                &normalized.vad_enabled,
-            )?;
-            write_json_setting_in_transaction(
-                transaction,
                 FILLER_REMOVAL_KEY,
                 &normalized.filler_removal,
-            )?;
-            write_json_setting_in_transaction(
-                transaction,
-                STUTTER_COLLAPSE_KEY,
-                &normalized.stutter_collapse,
             )?;
             write_json_setting_in_transaction(
                 transaction,
@@ -1238,11 +1204,6 @@ impl AppSettings {
                 transaction,
                 DICTATION_APP_BRANCHES_KEY,
                 &normalized.dictation_app_branches,
-            )?;
-            write_json_setting_in_transaction(
-                transaction,
-                DICTATION_CEILING_SECONDS_KEY,
-                &normalized.dictation_ceiling_seconds,
             )?;
             write_json_setting_in_transaction(
                 transaction,
@@ -1611,9 +1572,7 @@ mod tests {
             transcription_engine_id: "kyutai".into(),
             transcription_model_id: "stt-1b-en_fr".into(),
             transcription_backend_id: "candle".into(),
-            vad_enabled: true,
             filler_removal: true,
-            stutter_collapse: false,
             dictionary_correction: true,
             capture_system_audio: true,
             calendar_integration_enabled: true,
@@ -1637,7 +1596,6 @@ mod tests {
             dictation_polish_templates: crate::summary::default_polish_templates(),
             dictionary_learning_mode: DictionaryLearningMode::Automatic,
             dictation_app_branches: super::default_app_branches(),
-            dictation_ceiling_seconds: 120,
             default_summary_template_id: crate::summary::TEMPLATE_SUMMARY_BRIEF.into(),
             summary_templates: crate::summary::default_summary_templates(),
             last_seen_version: "0.0.9".into(),
@@ -2217,6 +2175,9 @@ mod tests {
         let retired = [
             ("dictionary_interview_done", "true"),
             ("allow_bluetooth_mic", "true"),
+            ("vad_enabled", "false"),
+            ("stutter_collapse", "true"),
+            ("dictation_ceiling_seconds", "120"),
         ];
         for (key, value) in retired {
             db.set_setting(key, value).expect("seed the retired key");

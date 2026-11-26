@@ -202,6 +202,7 @@ async fn launch_meeting(
             &pipeline_state.audio_cmd_sender,
             &pipeline_state.db,
             &pipeline_state.capture_start,
+            pipeline_state.vad_model_path.clone(),
             session_id,
             PipelineMode::Meeting,
             session_terms,
@@ -387,6 +388,7 @@ fn start_pipeline_blocking(
     audio_cmd_sender: &Sender<AudioCommand>,
     db: &Database,
     capture_start: &CaptureStartGate,
+    vad_model_path: Option<std::path::PathBuf>,
     session_id: u64,
     mode: PipelineMode,
     session_terms: Vec<String>,
@@ -460,7 +462,7 @@ fn start_pipeline_blocking(
         });
 
     let config = SessionConfig {
-        pipeline_config: settings.pipeline_config(),
+        pipeline_config: settings.pipeline_config(vad_model_path),
         dictionary_entries: db.list_dictionary_entries()?,
         session_terms,
         session_corrections: vec![],
@@ -731,6 +733,7 @@ pub async fn start_transcription(
             &pipeline_state.audio_cmd_sender,
             &pipeline_state.db,
             &pipeline_state.capture_start,
+            pipeline_state.vad_model_path.clone(),
             session_id,
             PipelineMode::Dictation,
             Vec::new(),
@@ -1989,6 +1992,7 @@ mod tests {
                         &cmd_tx,
                         &db,
                         &gate,
+                        None,
                         7,
                         mode,
                         Vec::new(),

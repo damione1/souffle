@@ -102,9 +102,7 @@ export component SettingsView inherits KitAppShell {
     in property <string> meeting-autostop-label;
     in property <[string]> meeting-max-duration-labels;
     in property <string> meeting-max-duration-label;
-    in property <bool> vad-enabled;
     in property <bool> filler-removal;
-    in property <bool> stutter-collapse;
     in property <bool> dictionary-correction;
     in property <string> data-stats-line;
     in property <string> data-recordings-line;
@@ -259,9 +257,7 @@ export component SettingsView inherits KitAppShell {
     callback meeting-autostop-enabled-changed(bool);
     callback meeting-autostop-changed(string);
     callback meeting-max-duration-changed(string);
-    callback vad-enabled-changed(bool);
     callback filler-removal-changed(bool);
-    callback stutter-collapse-changed(bool);
     callback dictionary-correction-changed(bool);
     callback meeting-audio-retention-changed(AudioRetention);
     callback data-export-requested();
@@ -602,9 +598,7 @@ export component SettingsView inherits KitAppShell {
                                     meeting-autostop-label: root.meeting-autostop-label;
                                     meeting-max-duration-labels: root.meeting-max-duration-labels;
                                     meeting-max-duration-label: root.meeting-max-duration-label;
-                                    vad-enabled: root.vad-enabled;
                                     filler-removal: root.filler-removal;
-                                    stutter-collapse: root.stutter-collapse;
                                     dictionary-correction: root.dictionary-correction;
                                     clamshell-device-changed(value) => { root.clamshell-device-changed(value); }
                                     capture-system-audio-changed(value) => { root.capture-system-audio-changed(value); }
@@ -613,9 +607,7 @@ export component SettingsView inherits KitAppShell {
                                     meeting-autostop-enabled-changed(value) => { root.meeting-autostop-enabled-changed(value); }
                                     meeting-autostop-changed(value) => { root.meeting-autostop-changed(value); }
                                     meeting-max-duration-changed(value) => { root.meeting-max-duration-changed(value); }
-                                    vad-enabled-changed(value) => { root.vad-enabled-changed(value); }
                                     filler-removal-changed(value) => { root.filler-removal-changed(value); }
-                                    stutter-collapse-changed(value) => { root.stutter-collapse-changed(value); }
                                     dictionary-correction-changed(value) => { root.dictionary-correction-changed(value); }
                                 }
                         }

@@ -121,7 +121,7 @@ fn main() {
         let callback_live = live.clone();
         let callback_weak = weak.clone();
         actor.start_session(273, SessionConfig {
-            pipeline_config: PipelineConfig { vad_enabled: true, vad_model_path: Some(resolve_vad_model_path().unwrap()), filler_removal_enabled: true, stutter_collapse_enabled: true, dictionary_correction_enabled: false },
+            pipeline_config: PipelineConfig { vad_model_path: Some(resolve_vad_model_path().unwrap()), filler_removal_enabled: true, dictionary_correction_enabled: false },
             dictionary_entries: vec![], session_terms: vec![], session_corrections: vec![], diarize: dual,
             idle_config: None, meeting_transcription_language: souffle_lib::settings::MeetingTranscriptionLanguage::Auto,
         }, Box::new(move |segment| {

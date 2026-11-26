@@ -676,16 +676,13 @@ impl EngineActor {
 
     /// Silero engine for a single-stream session: the cached one when it was
     /// built for the same model path and sample rate, otherwise a newly
-    /// loaded one that replaces the cache. `None` when VAD is off or the load
+    /// loaded one that replaces the cache. `None` without a model path or when the load
     /// failed (the filter chain then retries and logs on its own).
     fn shared_vad_engine(
         &mut self,
         config: &PipelineConfig,
         sample_rate: u32,
     ) -> Option<SharedVadEngine> {
-        if !config.vad_enabled {
-            return None;
-        }
         let model_path = config.vad_model_path.as_ref()?;
         if let Some((cached_path, cached_rate, engine)) = &self.vad_engine
             && cached_path == model_path
@@ -2224,7 +2221,7 @@ fn emit_filtered(
 ) -> bool {
     // Step 1: engine-specific normalization (strip [_TT_], ▁, etc.)
     segment.text = engine.normalize_text(&segment.text);
-    // Step 2: shared text filter chain (filler, stutter, dictionary, whitespace)
+    // Step 2: shared text filter chain (filler, dictionary, whitespace)
     segment.text = text_filters.borrow().apply(&segment.text);
     if segment.text.is_empty() {
         // An empty revisable hypothesis retracts the previous preview. It
@@ -2304,10 +2301,8 @@ mod tests {
     /// Helper: create a disabled filter config for tests (no VAD, no text filters).
     fn noop_filter_config() -> PipelineConfig {
         PipelineConfig {
-            vad_enabled: false,
             vad_model_path: None,
             filler_removal_enabled: false,
-            stutter_collapse_enabled: false,
             dictionary_correction_enabled: false,
         }
     }

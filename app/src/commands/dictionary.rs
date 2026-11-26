@@ -438,10 +438,8 @@ mod learn_from_edit {
         persist_learned_corrections(&db, "on passe par Pierre", "on passe pour Pierre").unwrap();
         let chain = build_text_filters(
             &PipelineConfig {
-                vad_enabled: false,
                 vad_model_path: None,
                 filler_removal_enabled: false,
-                stutter_collapse_enabled: false,
                 dictionary_correction_enabled: true,
             },
             db.list_dictionary_entries().unwrap(),

@@ -574,7 +574,7 @@ fn run_transcription(
     })
 }
 
-/// Engine-specific token normalization only (no filler/stutter/dictionary
+/// Engine-specific token normalization only (no filler/dictionary
 /// filter chain — that's pipeline post-processing, not part of the engine's
 /// own output contract).
 fn join_segments(engine: &dyn TranscriptionEngine, segments: &[TranscriptionSegment]) -> String {
