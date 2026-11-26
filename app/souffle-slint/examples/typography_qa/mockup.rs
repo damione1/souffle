@@ -1,7 +1,7 @@
 //! Data reproducing the states drawn on the design boards, applied on top of the
 //! typography fixture when SOU276_MOCKUP=1. French only, no live services.
 use super::{
-    audio_ui, ia_ui, lists_ui, live_view, microphone_list, model, scroll_bench, strings,
+    audio_ui, ia_ui, lists_ui, live_view, microphone_list, model, scroll_bench, strings, timeline,
     transcript, transcript_window,
 };
 use slint::{ComponentHandle, Model, SharedString};
@@ -201,51 +201,69 @@ fn home(window: &MainWindow, surface: &str) {
 fn long_history(window: &MainWindow, days: i32) {
     use TimelineKind::{Dictation, Meeting};
     const ENTRIES_PER_DAY: i32 = 6;
-    let groups = (0..days)
-        .map(|day| TimelineDayGroup {
-            day: TimelineDay::Earlier,
-            weekday: day % 7,
-            day_of_month: 1 + day % 28,
-            month: (day / 28) % 12,
-            entries: model(
-                (0..ENTRIES_PER_DAY)
-                    .map(|index| {
-                        let id = format!("history-{day}-{index}");
-                        if index % 2 == 0 {
-                            entry(
-                                Meeting,
-                                &id,
-                                &format!("Point d'équipe {day}.{index}"),
-                                "28:05",
-                                "09:00",
-                                index % 4 == 0,
-                            )
-                        } else {
-                            entry(
-                                Dictation,
-                                &id,
-                                "Penser à relancer le fournisseur pour la facture de mars",
-                                "0:32",
-                                "09:48",
-                                false,
-                            )
-                        }
-                    })
-                    .collect(),
-            ),
-        })
-        .collect::<Vec<_>>();
-    window.set_timeline_groups(model(groups.clone()));
+    // Fresh models on every call, as `timeline::build_groups` returns them.
+    // `keep` is the search: which entries of a day match.
+    let groups = move |keep: fn(i32) -> bool| -> Vec<TimelineDayGroup> {
+        (0..days)
+            .map(|day| TimelineDayGroup {
+                day: TimelineDay::Earlier,
+                weekday: day % 7,
+                day_of_month: 1 + day % 28,
+                month: (day / 28) % 12,
+                entries: model(
+                    (0..ENTRIES_PER_DAY)
+                        .filter(|index| keep(*index))
+                        .map(|index| {
+                            let id = format!("history-{day}-{index}");
+                            if index % 2 == 0 {
+                                entry(
+                                    Meeting,
+                                    &id,
+                                    &format!("Point d'équipe {day}.{index}"),
+                                    "28:05",
+                                    "09:00",
+                                    index % 4 == 0,
+                                )
+                            } else {
+                                entry(
+                                    Dictation,
+                                    &id,
+                                    "Penser à relancer le fournisseur pour la facture de mars",
+                                    "0:32",
+                                    "09:48",
+                                    false,
+                                )
+                            }
+                        })
+                        .collect(),
+                ),
+            })
+            .collect()
+    };
+    window.set_timeline_groups(model(groups(|_| true)));
     if !scroll_bench::enabled() {
         return;
     }
     let label = format!("history {} entries", days * ENTRIES_PER_DAY);
     if std::env::var("SOU276_HISTORY_REFRESH").as_deref() == Ok("1") {
-        // What `refresh_timeline` does after a search key, a filter or a
-        // finished recording: a new model of the same entries.
-        scroll_bench::start_growth(window, format!("{label} replaced"), 40, move |window, _| {
-            window.set_timeline_groups(model(groups.clone()));
-        });
+        // What `refresh_timeline` does after a finished recording (the same
+        // entries again) and, with `search`, after each key of a search that
+        // keeps one entry in three and is then cleared.
+        let search = std::env::var("SOU276_HISTORY_REFRESH_SEARCH").as_deref() == Ok("1");
+        let name = if search { "searched" } else { "refreshed" };
+        scroll_bench::start_growth(
+            window,
+            format!("{label} {name}"),
+            40,
+            move |window, step| {
+                let shown = if search && step % 2 == 0 {
+                    groups(|index| index % 3 == 0)
+                } else {
+                    groups(|_| true)
+                };
+                timeline::show_groups(window, shown);
+            },
+        );
         return;
     }
     // A day is a heading, a card of rows and the gap to the next one.

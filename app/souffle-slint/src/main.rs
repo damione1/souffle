@@ -398,7 +398,7 @@ fn refresh_timeline(window: &MainWindow, tauri_handle: &AppHandle) {
     let is_empty = dictations.is_empty() && meetings.is_empty();
     let groups = timeline::build_groups(&dictations, &meetings, kind_filter, &search_query);
     window.set_timeline_has_matches(!groups.is_empty());
-    window.set_timeline_groups(std::rc::Rc::new(slint::VecModel::from(groups)).into());
+    timeline::show_groups(window, groups);
     window.set_timeline_is_empty(is_empty);
 }
 
@@ -8747,6 +8747,8 @@ mod tests {
                     .downcast_ref::<slint::VecModel<TimelineDayGroup>>()
                     .unwrap()
             ));
+            // A refresh keeps the model and changes its rows.
+            assert_eq!(model.row_count(), 1);
             assert!(timer.borrow().is_some());
             assert!(transcript.borrow().is_some());
         }

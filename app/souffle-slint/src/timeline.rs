@@ -142,6 +142,86 @@ pub fn build_groups(
         .collect()
 }
 
+/// Shows `groups` in the history, changing only what differs from what is
+/// already there. A search key, a filter or a finished recording refreshes
+/// the whole history: installing a new model each time would rebuild every
+/// row, where most of them are the same entries as before.
+pub fn show_groups(window: &crate::MainWindow, groups: Vec<TimelineDayGroup>) {
+    use slint::Model;
+    let current = window.get_timeline_groups();
+    match current
+        .as_any()
+        .downcast_ref::<slint::VecModel<TimelineDayGroup>>()
+    {
+        Some(model) => sync_groups(model, groups),
+        None => window.set_timeline_groups(std::rc::Rc::new(slint::VecModel::from(groups)).into()),
+    }
+}
+
+/// Brings `model` to `target` with row-level changes: rows whose `key` is
+/// already there stay (and are passed to `update`), the others are inserted
+/// or removed. Both lists are in the same order, newest first.
+fn sync_rows<T: Clone + 'static, K: PartialEq>(
+    model: &slint::VecModel<T>,
+    target: Vec<T>,
+    key: impl Fn(&T) -> K,
+    update: impl Fn(usize, &T, T),
+) {
+    use slint::Model;
+    let count = target.len();
+    for (index, row) in target.into_iter().enumerate() {
+        let wanted = key(&row);
+        let found = (index..model.row_count()).find(|at| {
+            model
+                .row_data(*at)
+                .is_some_and(|current| key(&current) == wanted)
+        });
+        match found {
+            Some(at) => {
+                // The rows before it are gone from the target.
+                for _ in index..at {
+                    model.remove(index);
+                }
+                let current = model.row_data(index).expect("the row just found");
+                update(index, &current, row);
+            }
+            None => model.insert(index, row),
+        }
+    }
+    while model.row_count() > count {
+        model.remove(model.row_count() - 1);
+    }
+}
+
+fn sync_groups(model: &slint::VecModel<TimelineDayGroup>, groups: Vec<TimelineDayGroup>) {
+    use slint::Model;
+    sync_rows(
+        model,
+        groups,
+        |group| (group.day, group.weekday, group.day_of_month, group.month),
+        |index, current, group| {
+            // The day keeps its entry model, so its rows are not rebuilt.
+            match current
+                .entries
+                .as_any()
+                .downcast_ref::<slint::VecModel<HistoryEntry>>()
+            {
+                Some(entries) => sync_rows(
+                    entries,
+                    group.entries.iter().collect(),
+                    |entry| (entry.kind, entry.id.clone()),
+                    |at, shown, entry| {
+                        if *shown != entry {
+                            entries.set_row_data(at, entry);
+                        }
+                    },
+                ),
+                None => model.set_row_data(index, group),
+            }
+        },
+    );
+}
+
 pub fn occurrence_key(event: &CalendarEvent) -> String {
     format!("{}-{}", event.id, event.start.to_rfc3339())
 }
@@ -372,6 +452,107 @@ mod tests {
         settle();
         assert_eq!(removed.get(), 0);
         assert_eq!(window.get_active_meeting_id(), "meeting-0");
+    }
+
+    fn history_entry(id: &str, title: &str) -> HistoryEntry {
+        HistoryEntry {
+            kind: TimelineKind::Meeting,
+            id: id.into(),
+            title: title.into(),
+            ..Default::default()
+        }
+    }
+
+    fn history_day(day_of_month: i32, entries: &[(&str, &str)]) -> TimelineDayGroup {
+        TimelineDayGroup {
+            day: TimelineDay::Earlier,
+            day_of_month,
+            entries: slint::ModelRc::new(slint::VecModel::from(
+                entries
+                    .iter()
+                    .map(|(id, title)| history_entry(id, title))
+                    .collect::<Vec<_>>(),
+            )),
+            ..Default::default()
+        }
+    }
+
+    fn shown(model: &slint::VecModel<TimelineDayGroup>) -> Vec<(i32, Vec<String>)> {
+        use slint::Model;
+        model
+            .iter()
+            .map(|group| {
+                (
+                    group.day_of_month,
+                    group
+                        .entries
+                        .iter()
+                        .map(|entry| format!("{}:{}", entry.id, entry.title))
+                        .collect(),
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_refresh_changes_the_history_in_place_and_keeps_the_days_that_remain() {
+        use slint::Model;
+        let full = || {
+            vec![
+                history_day(9, &[("a", "Alpha"), ("b", "Beta"), ("c", "Gamma")]),
+                history_day(8, &[("d", "Delta")]),
+                history_day(7, &[("e", "Epsilon"), ("f", "Zeta")]),
+            ]
+        };
+        let model = slint::VecModel::from(full());
+        let day_nine = model.row_data(0).unwrap().entries;
+        let day_seven = model.row_data(2).unwrap().entries;
+
+        // The same entries: nothing is replaced.
+        sync_groups(&model, full());
+        assert!(model.row_data(0).unwrap().entries == day_nine);
+
+        // A search narrows two days and drops one.
+        let narrowed = vec![
+            history_day(9, &[("b", "Beta")]),
+            history_day(7, &[("f", "Zeta")]),
+        ];
+        sync_groups(&model, narrowed);
+        assert_eq!(
+            shown(&model),
+            [
+                (9, vec!["b:Beta".to_string()]),
+                (7, vec!["f:Zeta".to_string()])
+            ]
+        );
+        assert!(model.row_data(0).unwrap().entries == day_nine);
+        assert!(model.row_data(1).unwrap().entries == day_seven);
+
+        // Clearing it restores everything in order, a renamed entry included.
+        let mut restored = full();
+        restored[0] = history_day(9, &[("a", "Alpha"), ("b", "Beta renamed"), ("c", "Gamma")]);
+        restored.insert(0, history_day(10, &[("g", "Eta")]));
+        sync_groups(&model, restored);
+        assert_eq!(
+            shown(&model),
+            [
+                (10, vec!["g:Eta".to_string()]),
+                (
+                    9,
+                    vec![
+                        "a:Alpha".to_string(),
+                        "b:Beta renamed".to_string(),
+                        "c:Gamma".to_string()
+                    ]
+                ),
+                (8, vec!["d:Delta".to_string()]),
+                (7, vec!["e:Epsilon".to_string(), "f:Zeta".to_string()]),
+            ]
+        );
+        assert!(model.row_data(1).unwrap().entries == day_nine);
+
+        sync_groups(&model, Vec::new());
+        assert_eq!(model.row_count(), 0);
     }
 
     #[test]
