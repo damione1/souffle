@@ -222,8 +222,7 @@ fn interrupt_split_index<S: SegmentLike>(
 
     let hold_at = interrupter.start + interrupt_hold_s;
     let apply_hold = turn.last_end - turn.start >= monologue_min_s;
-    for i in spoken_before..turn.segments.len() {
-        let seg = turn.segments[i];
+    for (i, &seg) in turn.segments.iter().enumerate().skip(spoken_before) {
         if apply_hold && seg.start_time() >= hold_at {
             return Some(i);
         }
