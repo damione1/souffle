@@ -37,11 +37,8 @@ fn main() {
     let out_dir = PathBuf::from(std::env::var_os("OUT_DIR").expect("OUT_DIR"));
     let typography = out_dir.join("typography.slint");
     let projection = souffle_typography::slint_projection();
-    // Rewriting identical bytes would give the projection a newer timestamp
-    // than the script run and rebuild the whole UI on every invocation.
-    if std::fs::read_to_string(&typography).map_or(true, |existing| existing != projection) {
-        std::fs::write(&typography, projection).expect("Typography projection failed");
-    }
+    slint_kit_pro_build::write_generated(&typography, &projection, &ui.join("main_window.slint"))
+        .expect("Typography projection failed");
     let pro = slint_kit_pro_build::ui_directory().join("kit-pro.slint");
     let library = HashMap::from([
         ("typography".to_string(), typography),
