@@ -100,6 +100,8 @@ pub(super) fn apply(window: &MainWindow, surface: &str) {
     window.set_onboarding_model_phase(ModelPhase::Pick);
     window.set_onboarding_toggle_shortcut_label(shortcut_label(window).into());
     window.set_onboarding_accessibility_granted(false);
+    window.set_onboarding_autostart_enabled(false);
+    window.set_onboarding_autostart_failed(false);
 
     let downloading = || {
         window.set_onboarding_model_phase(ModelPhase::Downloading);
@@ -177,6 +179,10 @@ pub(super) fn apply(window: &MainWindow, surface: &str) {
             window.set_onboarding_step_count(1);
         }
         (OnboardingStep::Shortcut, "granted") => window.set_onboarding_accessibility_granted(true),
+        (OnboardingStep::Shortcut, "autostart-failed") => {
+            window.set_onboarding_shortcut_notice(ShortcutNotice::TypesCharacter);
+            window.set_onboarding_autostart_failed(true);
+        }
         (OnboardingStep::Shortcut, "recording") => window.set_onboarding_shortcut_recording(true),
         (OnboardingStep::Shortcut, "unset") => {
             window.set_onboarding_toggle_shortcut_label("".into())
@@ -310,6 +316,10 @@ pub(super) fn interactive(window: &MainWindow) -> Interactive {
         let window = weak.unwrap();
         window.set_onboarding_toggle_shortcut_label("".into());
         window.set_onboarding_shortcut_recording(false);
+    });
+    let weak = window.as_weak();
+    window.on_onboarding_autostart_changed(move |enabled| {
+        weak.unwrap().set_onboarding_autostart_enabled(enabled)
     });
     let weak = window.as_weak();
     window.on_onboarding_review_accessibility_requested(move || {

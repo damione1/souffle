@@ -548,6 +548,8 @@ export component MainWindow inherits Window {
     in-out property <string> onboarding-shortcut-error: "";
     in-out property <ShortcutNotice> onboarding-shortcut-notice: ShortcutNotice.none;
     in property <bool> onboarding-accessibility-granted;
+    in property <bool> onboarding-autostart-enabled;
+    in property <bool> onboarding-autostart-failed;
     in property <bool> onboarding-busy;
     in property <bool> onboarding-continue-enabled: true;
 
@@ -564,6 +566,7 @@ export component MainWindow inherits Window {
     callback onboarding-shortcut-cleared();
     callback onboarding-shortcut-cancelled();
     callback onboarding-review-accessibility-requested();
+    callback onboarding-autostart-changed(bool);
     callback onboarding-back-requested();
     callback onboarding-continue-requested();
 
@@ -1094,6 +1097,8 @@ export component MainWindow inherits Window {
         shortcut-error: root.onboarding-shortcut-error;
         shortcut-notice: root.onboarding-shortcut-notice;
         accessibility-granted: root.onboarding-accessibility-granted;
+        autostart-enabled: root.onboarding-autostart-enabled;
+        autostart-failed: root.onboarding-autostart-failed;
         busy: root.onboarding-busy;
         continue-enabled: root.onboarding-continue-enabled;
         locale-changed(value) => { root.onboarding-locale-changed(value); }
@@ -1109,6 +1114,7 @@ export component MainWindow inherits Window {
         shortcut-cleared => { root.onboarding-shortcut-cleared(); }
         shortcut-cancelled => { root.onboarding-shortcut-cancelled(); }
         review-accessibility-requested => { root.onboarding-review-accessibility-requested(); }
+        autostart-changed(value) => { root.onboarding-autostart-changed(value); }
         back-requested => { root.onboarding-back-requested(); }
         continue-requested => { root.onboarding-continue-requested(); }
     }

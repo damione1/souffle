@@ -516,10 +516,10 @@
         "h": "Premier lancement",
         "blocks": [
           {
-            "p": "Un assistant couvre les permissions dont Soufflé a besoin, le micro à utiliser, le modèle de transcription à télécharger, et le raccourci de dictée. Le raccourci par défaut est <kbd>⌘⇧Espace</kbd>."
+            "p": "Un assistant couvre les permissions dont Soufflé a besoin, le micro à utiliser (votre choix passe en tête de l'ordre de préférence), le modèle de transcription à télécharger, et le raccourci de dictée. Le raccourci par défaut est <kbd>⌘⇧Espace</kbd>."
           },
           {
-            "p": "L'étape du raccourci propose aussi le collage automatique, inactif tant que vous ne le cochez pas : une fois actif, quand vous arrêtez de dicter, le texte part directement dans l'app où vous étiez. Laissé inactif, le texte atterrit dans le presse-papiers. Une installation neuve termine avec Lancer à l'ouverture de session activé ; changez-le plus tard dans Paramètres → Système. Tout cela se change plus tard dans les Paramètres."
+            "p": "À la fin d'une première configuration, le collage automatique est actif si l'Accessibilité est accordée : quand vous arrêtez de dicter, le texte part directement dans l'app où vous étiez. Sans elle, il reste inactif. L'étape du raccourci propose aussi un interrupteur Lancer à l'ouverture de session, désactivé par défaut. Tout cela se change plus tard dans les Paramètres."
           }
         ]
       },
@@ -746,7 +746,7 @@
               ],
               [
                 "Lancer à l'ouverture de session<br><span class=\"docs-tab\">Système</span>",
-                "Ouvre Soufflé automatiquement au démarrage du Mac. Actif par défaut après l'assistant d'une installation neuve."
+                "Ouvre Soufflé automatiquement au démarrage du Mac. Désactivé par défaut ; la dernière étape de l'assistant propose le même interrupteur."
               ],
               [
                 "Audio des réunions<br><span class=\"docs-tab\">Système</span>",

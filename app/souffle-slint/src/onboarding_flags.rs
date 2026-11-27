@@ -65,8 +65,7 @@ fn legacy_webview_dir() -> Option<PathBuf> {
 
 /// SOU-310: the Tauri app kept both wizard flags in its webview
 /// `localStorage`, which the native app cannot read, so an upgraded install
-/// had no markers and replayed the whole first setup (forcing autostart on
-/// along the way). A database that predates the first native launch, next
+/// had no markers and replayed the whole first setup. A database that predates the first native launch, next
 /// to a Tauri webview folder, is an install that already went through it.
 pub fn decide_adopt_pre_slint_install(
     sentinel_present: bool,
@@ -113,15 +112,6 @@ pub fn decide_show_setup_wizard(phase: TranscriptionRuntimePhase, flags: SetupFl
         | TranscriptionRuntimePhase::Unloading
         | TranscriptionRuntimePhase::AudioFailed => !flags.permissions_done,
     }
-}
-
-/// SOU-036: what `autostart_enabled` should be once the wizard finishes. A
-/// fresh install leaves the wizard with the login item registered; a
-/// recovery run (model re-download on an already set-up install) keeps
-/// whatever is stored, because an absent key on an existing install must
-/// not turn into "on" without a gesture from the user.
-pub fn decide_autostart_on_finish(recovery_only: bool, current: bool) -> bool {
-    if recovery_only { current } else { true }
 }
 
 /// Auto-paste is what Soufflé is for, so a first setup turns it on, but only
@@ -290,17 +280,6 @@ mod tests {
             false,
             SetupFlags::default(),
         ));
-    }
-
-    #[test]
-    fn autostart_on_finish_forces_on_for_a_fresh_install() {
-        assert!(decide_autostart_on_finish(false, false));
-    }
-
-    #[test]
-    fn autostart_on_finish_keeps_current_value_during_recovery() {
-        assert!(!decide_autostart_on_finish(true, false));
-        assert!(decide_autostart_on_finish(true, true));
     }
 
     #[test]

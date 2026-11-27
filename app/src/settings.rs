@@ -1552,6 +1552,26 @@ mod tests {
     }
 
     #[test]
+    fn the_microphone_chosen_in_the_wizard_is_saved_on_top_of_the_order() {
+        for ranked in [&[][..], &["builtin-uid", "usb-uid"][..]] {
+            let (db, _dir) = test_db();
+            seed_priorities(&db, ranked);
+            let mut settings = AppSettings::load(&db).expect("load");
+
+            settings.input_priority.promote("usb-uid");
+            settings
+                .prepare_for_save()
+                .expect("prepare")
+                .save(&db)
+                .expect("save");
+
+            let loaded = AppSettings::load(&db).expect("reload");
+            assert_eq!(loaded.input_priority.priorities.first().unwrap(), "usb-uid");
+            assert_eq!(loaded.input_priority.priorities.len(), ranked.len().max(1));
+        }
+    }
+
+    #[test]
     fn a_pinned_microphone_becomes_the_top_of_the_preference_order() {
         let (db, _dir) = test_db();
         seed_pin(&db, "usb-uid", &["builtin-uid"]);

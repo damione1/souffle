@@ -296,3 +296,44 @@ fn the_permissions_step_needs_no_scrolling_in_an_860px_window() {
         assert!(overflow <= 0.5, "{name} overflows by {overflow}px");
     }
 }
+
+#[test]
+fn the_last_wizard_step_needs_no_scrolling_in_an_860px_window() {
+    use crate::{OnboardingStep, ShortcutNotice};
+    let window = main_window();
+    window
+        .window()
+        .set_size(slint::PhysicalSize::new(WIDTH, 860));
+    window.set_onboarding_open(true);
+    window.set_onboarding_step(OnboardingStep::Shortcut);
+    window.set_onboarding_step_count(4);
+    window.set_onboarding_step_index(3);
+    window.set_onboarding_toggle_shortcut_label("⌘ ⇧ Space".into());
+    for locale in ["fr", "en"] {
+        slint::select_bundled_translation(locale).expect("bundled translation");
+        // The tallest state: no Accessibility, a shortcut notice and a refused
+        // launch at login.
+        for (granted, notice, failed) in [
+            (true, ShortcutNotice::None, false),
+            (false, ShortcutNotice::None, false),
+            (false, ShortcutNotice::TypesCharacter, true),
+        ] {
+            window.set_onboarding_accessibility_granted(granted);
+            window.set_onboarding_shortcut_notice(notice);
+            window.set_onboarding_autostart_failed(failed);
+            settle();
+            let height = |id: &str| {
+                ElementHandle::find_by_element_id(&window, id)
+                    .next()
+                    .unwrap_or_else(|| panic!("{id}"))
+                    .size()
+                    .height
+            };
+            let overflow = height("OnboardingView::content") - height("OnboardingView::viewport");
+            assert!(
+                overflow <= 0.5,
+                "{locale}, granted {granted}, failed {failed}: overflows by {overflow}px"
+            );
+        }
+    }
+}

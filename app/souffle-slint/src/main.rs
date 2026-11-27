@@ -2742,6 +2742,8 @@ struct StartupRuntimeSnapshot {
     setup_flags: onboarding_flags::SetupFlags,
     devices: Vec<AudioInputDevice>,
     shortcuts: ShortcutSettings,
+    /// The login item as macOS reports it, read only for the wizard's switch.
+    login_item_enabled: bool,
 }
 
 fn load_startup_runtime_snapshot(
@@ -2757,6 +2759,9 @@ fn load_startup_runtime_snapshot(
     .unwrap_or(TranscriptionRuntimePhase::DownloadRequired);
     let setup_flags = onboarding_flags::read_setup_flags();
     let should_show = onboarding_flags::decide_show_setup_wizard(model_phase, setup_flags);
+    let login_item_enabled = should_show
+        && souffle_lib::commands::get_settings(handle.clone())
+            .is_ok_and(|settings| settings.autostart_enabled);
     let shortcuts = souffle_lib::commands::get_shortcuts(handle).unwrap_or_default();
     let devices = if should_show {
         souffle_lib::commands::list_audio_devices().unwrap_or_default()
@@ -2770,6 +2775,7 @@ fn load_startup_runtime_snapshot(
         setup_flags,
         devices,
         shortcuts,
+        login_item_enabled,
     })
 }
 
@@ -2799,6 +2805,7 @@ fn initialize_onboarding(
     guard.toggle_shortcut = startup.shortcuts.toggle.clone();
     drop(guard);
 
+    window.set_onboarding_autostart_enabled(startup.login_item_enabled);
     window.set_onboarding_open(true);
     show_onboarding_step(window, handle, ob, permissions);
     permissions.sync_activity();
@@ -2844,6 +2851,7 @@ fn show_onboarding_step(
     // Otherwise an error from a previous step (e.g. a failed download)
     // stays pinned to the banner forever, since nothing else clears it.
     window.set_onboarding_status_message("".into());
+    window.set_onboarding_autostart_failed(false);
 
     match step {
         OnboardingStep::Permissions => {
@@ -3159,6 +3167,14 @@ fn wire_onboarding_callbacks(
         }
     });
 
+    let weak = window.as_weak();
+    let settings_io_for_autostart = settings_io.clone();
+    window.on_onboarding_autostart_changed(move |enabled| {
+        if let Some(window) = weak.upgrade() {
+            submit_onboarding_autostart(&window, &settings_io_for_autostart, enabled);
+        }
+    });
+
     let permissions_for_accessibility_review = permissions.clone();
     window.on_onboarding_review_accessibility_requested(move || {
         permissions_for_accessibility_review.open_settings(DomainPermissionKind::Accessibility);
@@ -3320,16 +3336,12 @@ fn wire_onboarding_callbacks(
                 let completion_weak = weak.clone();
                 let completion_permissions = permissions_for_continue.clone();
                 settings_io_for_continue.submit(
-                    souffle_lib::commands::SettingsSaveLane::Autostart,
+                    souffle_lib::commands::SettingsSaveLane::General,
                     move |settings| {
                         settings.auto_paste = onboarding_flags::decide_auto_paste_on_finish(
                             recovery_only,
                             settings.auto_paste,
                             souffle_lib::permissions::accessibility_granted(),
-                        );
-                        settings.autostart_enabled = onboarding_flags::decide_autostart_on_finish(
-                            recovery_only,
-                            settings.autostart_enabled,
                         );
                     },
                     move |_, outcome| {
@@ -3360,6 +3372,40 @@ fn wire_onboarding_callbacks(
     });
 
     ob
+}
+
+/// Applies the wizard's launch-at-login switch through the same lane as the
+/// Settings switch. The wizard stays busy until macOS has answered, and the
+/// switch then shows the real state, so a refusal cannot pass unnoticed.
+fn submit_onboarding_autostart(
+    window: &MainWindow,
+    settings_io: &Rc<settings_io::SettingsIoCoordinator>,
+    enabled: bool,
+) {
+    window.set_onboarding_autostart_enabled(enabled);
+    window.set_onboarding_autostart_failed(false);
+    window.set_onboarding_busy(true);
+    window.set_onboarding_continue_enabled(false);
+    let weak = window.as_weak();
+    settings_io.submit(
+        souffle_lib::commands::SettingsSaveLane::Autostart,
+        move |settings| settings.autostart_enabled = enabled,
+        move |_, outcome| {
+            log_settings_save_outcome("onboarding launch at login", outcome);
+            let Some(window) = weak.upgrade() else {
+                return;
+            };
+            let applied = match outcome {
+                SettingsSaveOutcome::Observed { settings, .. } => settings.autostart_enabled,
+                SettingsSaveOutcome::Unavailable { result: Ok(()), .. } => enabled,
+                SettingsSaveOutcome::Unavailable { result: Err(_), .. } => !enabled,
+            };
+            window.set_onboarding_autostart_enabled(applied);
+            window.set_onboarding_autostart_failed(applied != enabled);
+            window.set_onboarding_busy(false);
+            window.set_onboarding_continue_enabled(true);
+        },
+    );
 }
 
 /// Advances to the next step, stopping/starting the permissions poll timer
@@ -8792,6 +8838,68 @@ mod tests {
         );
         assert!(committed.get());
         assert!(!retained.get());
+    }
+
+    #[test]
+    fn the_onboarding_launch_at_login_switch_shows_what_macos_applied() {
+        let window = test_window();
+        let cache = SettingsCache::with_observed(&window, AppSettings::default());
+        // macOS accepts the first request, refuses the second (the login item
+        // stays registered) and leaves the third waiting for approval.
+        let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let requested = std::sync::Arc::new(Mutex::new(Vec::new()));
+        let requested_worker = requested.clone();
+        let io = SettingsIoCoordinator::with_functions(
+            cache,
+            || Ok(AppSettings::default()),
+            || Ok(AppSettings::default()),
+            |_| panic!("launch at login must use the autostart lane"),
+            move |mut settings| {
+                requested_worker
+                    .lock()
+                    .unwrap()
+                    .push(settings.autostart_enabled);
+                let (registered, result) = match calls.fetch_add(1, Ordering::SeqCst) {
+                    0 => (true, Ok(())),
+                    1 => (
+                        true,
+                        Err(SettingsSaveError::EffectFailedAfterCommit {
+                            cause: souffle_lib::commands::SettingsEffectFailure::Autostart {
+                                message: "injected ServiceManagement failure".into(),
+                            },
+                        }),
+                    ),
+                    _ => (false, Ok(())),
+                };
+                settings.autostart_enabled = registered;
+                SettingsSaveOutcome::Observed {
+                    settings: Box::new(settings),
+                    result,
+                }
+            },
+        );
+        assert!(!window.get_onboarding_autostart_enabled());
+
+        for (enabled, shown, failed) in [
+            (true, true, false),
+            (false, true, true),
+            (true, false, true),
+        ] {
+            crate::submit_onboarding_autostart(&window, &io, enabled);
+            assert!(window.get_onboarding_busy());
+            assert!(!window.get_onboarding_continue_enabled());
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            while !io.is_idle_for_test() {
+                assert!(std::time::Instant::now() < deadline, "save timed out");
+                io.drain_one_for_test();
+                std::thread::yield_now();
+            }
+            assert_eq!(window.get_onboarding_autostart_enabled(), shown);
+            assert_eq!(window.get_onboarding_autostart_failed(), failed);
+            assert!(!window.get_onboarding_busy());
+            assert!(window.get_onboarding_continue_enabled());
+        }
+        assert_eq!(*requested.lock().unwrap(), [true, false, true]);
     }
 
     #[test]

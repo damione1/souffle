@@ -630,6 +630,26 @@ msgctxt "OnboardingView"
 msgid "Vérifier les permissions"
 msgstr ""
 
+#: ui/onboarding_view.slint:490
+msgctxt "OnboardingView"
+msgid "Lancer à l'ouverture de session"
+msgstr ""
+
+#: ui/onboarding_view.slint:491
+msgctxt "OnboardingView"
+msgid "Ouvrir Soufflé automatiquement au démarrage du Mac."
+msgstr ""
+
+#: ui/onboarding_view.slint:501
+msgctxt "OnboardingView"
+msgid "Lancer Soufflé à l'ouverture de session"
+msgstr ""
+
+#: ui/onboarding_view.slint:511
+msgctxt "OnboardingView"
+msgid "macOS n'a pas appliqué ce choix. L'interrupteur montre l'état actuel."
+msgstr ""
+
 #: ui/onboarding_view.slint:454
 msgctxt "OnboardingView"
 msgid "Retour"

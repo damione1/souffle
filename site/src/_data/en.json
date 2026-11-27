@@ -516,10 +516,10 @@
         "h": "First run",
         "blocks": [
           {
-            "p": "A setup wizard covers the permissions Soufflé needs, which microphone to use, the speech model to download, and the dictation shortcut. The default shortcut is <kbd>⌘⇧Space</kbd>."
+            "p": "A setup wizard covers the permissions Soufflé needs, which microphone to use (your pick goes to the top of the preference order), the speech model to download, and the dictation shortcut. The default shortcut is <kbd>⌘⇧Space</kbd>."
           },
           {
-            "p": "The shortcut step also offers auto-paste, off until you tick it: when it is on and you stop dictating, the text goes straight into the app you were in. Left off, the text is put on the clipboard instead. A fresh install finishes with Launch at login on; change that later in Settings → System. Everything here can be changed later in Settings."
+            "p": "When a first setup finishes, auto-paste is on if Accessibility is granted: when you stop dictating, the text goes straight into the app you were in. Without it, auto-paste stays off. The shortcut step also has a Launch at login switch, off by default. Everything here can be changed later in Settings."
           }
         ]
       },
@@ -746,7 +746,7 @@
               ],
               [
                 "Launch at login<br><span class=\"docs-tab\">System</span>",
-                "Open Soufflé automatically when you start your Mac. On by default after a fresh setup wizard."
+                "Open Soufflé automatically when you start your Mac. Off by default; the last step of the setup wizard has the same switch."
               ],
               [
                 "Meeting audio<br><span class=\"docs-tab\">System</span>",

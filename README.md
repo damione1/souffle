@@ -90,7 +90,7 @@ Meetings and dictations land on one timeline, with today's calendar above it, se
 - 🔒 **Local by default.** Transcription and storage stay on your Mac. Text processing stays local with Apple Intelligence or localhost Ollama; remote Ollama and external cloud MCP clients are choices you make. Export or delete your local database whenever you like; to wipe it, quit and delete `~/Library/Application Support/com.souffle.desktop/`.
 - ✈️ **Works offline.** Once the speech model is on disk, transcription keeps working with the Wi-Fi off.
 - 🙅 **No account, ever.** No sign-up, no subscription, no API key to paste in. Every outbound connection the app makes is listed [below](#what-touches-the-network).
-- 🚀 **Launch at login** (optional): open Soufflé automatically when you start your Mac. On by default after a fresh setup wizard.
+- 🚀 **Launch at login** (optional): open Soufflé automatically when you start your Mac. Off by default; the last step of the setup wizard has a switch for it, as does Settings > System.
 
 ## Own your data
 

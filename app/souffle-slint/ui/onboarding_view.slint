@@ -1,5 +1,5 @@
 import { AppText, AppTextInput, Typography, TypographyStyle } from "@typography";
-import { ElevationLevel, AlertSeverity, AvatarShape, ButtonIntent, ControlSize, KitAlert, KitAvatar, KitBadge, KitButton, KitCard, KitIcon, KitImage, KitInline, KitLayoutMetrics, KitThemeContext, KitProgress, KitScrollArea, KitStack, KitSurface, KitText, LayoutSpace, ProgressMode, SurfaceBorder, SurfaceLevel, Tone } from "@kit";
+import { ChoiceLabelPosition, ControlWidth, ElevationLevel, FieldAccess, KitFieldRow, KitSwitch, KitThemes, Ownership, AlertSeverity, AvatarShape, ButtonIntent, ControlSize, KitAlert, KitAvatar, KitBadge, KitButton, KitCard, KitIcon, KitImage, KitInline, KitLayoutMetrics, KitThemeContext, KitProgress, KitScrollArea, KitStack, KitSurface, KitText, LayoutSpace, ProgressMode, SurfaceBorder, SurfaceLevel, Tone } from "@kit";
 import { LucideArrows } from "@kit-icons/arrows.slint";
 import { ProLevelMeter, ProPager } from "@kit-pro";
 import { LucideDevelopment } from "@kit-icons/development.slint";
@@ -50,6 +50,8 @@ export component OnboardingView inherits Rectangle {
     in property <string> shortcut-error;
     in property <ShortcutNotice> shortcut-notice;
     in property <bool> accessibility-granted;
+    in property <bool> autostart-enabled;
+    in property <bool> autostart-failed;
 
     in property <bool> busy;
     in property <bool> continue-enabled: true;
@@ -67,6 +69,7 @@ export component OnboardingView inherits Rectangle {
     callback shortcut-cleared();
     callback shortcut-cancelled();
     callback review-accessibility-requested();
+    callback autostart-changed(bool);
     callback back-requested();
     callback continue-requested();
 
@@ -474,6 +477,38 @@ export component OnboardingView inherits Rectangle {
                                         control-size: ControlSize.compact;
                                         activated => { root.review-accessibility-requested(); }
                                     }
+                                }
+
+                                KitFieldRow {
+                                    theme: KitThemeContext.current;
+                                    modal-layer: 0;
+                                    focus-requested => { autostart-switch.take-focus(); }
+                                    private property <bool> control-focused: autostart-switch.has-focus;
+                                    changed control-focused => {
+                                        if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
+                                    }
+                                    label: @tr("Lancer à l'ouverture de session");
+                                    description: @tr("Ouvrir Soufflé automatiquement au démarrage du Mac.");
+
+                                    autostart-switch := KitSwitch {
+                                        theme: KitThemeContext.current;
+                                        modal-layer: 0;
+                                        label-position: ChoiceLabelPosition.start;
+                                        padding-inline: 0px;
+                                        ownership: Ownership.controlled;
+                                        control-width: ControlWidth.intrinsic;
+                                        access: root.busy ? FieldAccess.disabled : FieldAccess.editable;
+                                        accessible-label: @tr("Lancer Soufflé à l'ouverture de session");
+                                        checked: root.autostart-enabled;
+                                        toggled(new) => { root.autostart-changed(new); }
+                                    }
+                                }
+
+                                if root.autostart-failed: KitAlert { bordered: false;
+                                    inset: 12px;
+                                    corner-radius: 12px;
+                                    severity: AlertSeverity.error;
+                                    message: @tr("macOS n'a pas appliqué ce choix. L'interrupteur montre l'état actuel.");
                                 }
                             }
                         }
