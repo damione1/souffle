@@ -225,36 +225,43 @@ fn visit_tabs(w: &MainWindow) {
             }
         }
     }
+    // Model deletion sits in the transcription model card.
+    w.set_settings_tab(SettingsTab::Transcription);
+    w.set_settings_model_files_deletable(true);
+    w.set_settings_backend_capture_busy(true);
+    settle(w);
     let group = || {
         ElementQuery::from_root(w)
             .match_inherits("KitFieldSet")
-            .match_accessible_label("STOCKAGE DU MODÈLE")
+            .match_accessible_label("MODÈLE DE TRANSCRIPTION")
             .find_first()
     };
-    let page = ElementHandle::find_by_element_id(w, "SettingsView::system-page")
+    let page = ElementHandle::find_by_element_id(w, "SettingsView::trans-page")
         .next()
         .unwrap();
+    let action = |label: &str| {
+        group()
+            .expect("model fieldset")
+            .query_descendants()
+            .match_accessible_role(AccessibleRole::Button)
+            .match_accessible_label(label)
+            .find_first()
+            .expect("model deletion action")
+    };
     for _ in 0..32 {
-        if group().is_some_and(|g| g.absolute_position().y < 650.) {
+        let delete = action("Supprimer");
+        if delete.absolute_position().y + delete.size().height < 700. {
             break;
         }
         page.scroll(0., -260.);
         settle(w);
     }
-    let action = |label: &str| {
-        group()
-            .expect("storage fieldset revealed")
-            .query_descendants()
-            .match_accessible_role(AccessibleRole::Button)
-            .match_accessible_label(label)
-            .find_first()
-            .expect("storage action")
-    };
     let delete = action("Supprimer");
     assert_eq!(delete.accessible_enabled(), Some(false));
     delete.invoke_accessible_default_action();
     assert!(delete.is_valid());
-    w.set_model_runtime_phase(TranscriptionPhase::LoadRequired);
+    // A loaded model that is idle can be deleted: it is unloaded first.
+    w.set_settings_backend_capture_busy(false);
     settle(w);
     assert_eq!(delete.accessible_enabled(), Some(true));
     delete.invoke_accessible_default_action();
@@ -262,10 +269,10 @@ fn visit_tabs(w: &MainWindow) {
     let confirm = action("Confirmer");
     let cancel = action("Annuler");
     assert!(
-        confirm.absolute_position().x + confirm.size().width <= cancel.absolute_position().x + 1.
+        cancel.absolute_position().x + cancel.size().width <= confirm.absolute_position().x + 1.
     );
     assert!(
-        cancel.absolute_position().x + cancel.size().width
+        confirm.absolute_position().x + confirm.size().width
             <= w.window().size().width as f32 / w.window().scale_factor() + 1.
     );
     cancel.invoke_accessible_default_action();

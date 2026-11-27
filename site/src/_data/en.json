@@ -742,7 +742,7 @@
               ],
               [
                 "Summarization — experimental<br><span class=\"docs-tab\">AI</span>",
-                "Off by default. Enables provider and Ollama model selection, summary prompt templates and compaction options. Dictation polish remains independent."
+                "Off by default. Enables summary prompt templates, the compression switch and meeting actions. The AI engine card, shared with dictation polish, appears when either is on and shows only the engine in use: Apple Intelligence, or Ollama with its URL and model. Dictation polish remains independent."
               ],
               [
                 "Launch at login<br><span class=\"docs-tab\">System</span>",
@@ -753,8 +753,8 @@
                 "Off, keep 7 days, keep 30 days, or keep until you delete it."
               ],
               [
-                "Model storage<br><span class=\"docs-tab\">System</span>",
-                "Deletes the selected speech model from disk, once it is downloaded and not loaded."
+                "Delete downloaded model<br><span class=\"docs-tab\">Transcription</span>",
+                "Deletes the selected speech model from disk. A loaded model is unloaded first; not available while recording. While that model stays selected, Soufflé downloads it again at next launch."
               ],
               [
                 "Update check<br><span class=\"docs-tab\">System</span>",
@@ -978,7 +978,7 @@
             "p": "Either way your data stays. To remove it too, quit Soufflé and delete <code>~/Library/Application&nbsp;Support/com.souffle.desktop/</code>: meetings, dictations, recorded audio and models all live there."
           },
           {
-            "p": "To reclaim disk without uninstalling, select a speech model you no longer use and delete it under Settings → System → Model storage. It has to be downloaded and not loaded."
+            "p": "To reclaim disk without uninstalling, select a speech model you no longer use and delete it under Settings → Transcription → Delete downloaded model, then select the model you want to keep: a deleted model that stays selected is downloaded again at next launch."
           }
         ]
       },

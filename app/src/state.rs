@@ -275,24 +275,45 @@ impl AppState {
     /// just the transition itself, and the sync calls run after it is
     /// released.
     pub fn apply_transition(&self, action: StateAction) -> Result<AppStateMachine, String> {
-        let new_state = {
-            let mut machine = self.machine.acquire()?;
-            let new_state = machine.clone().transition(action)?;
-            debug!(
-                from = machine.variant_name(),
-                to = new_state.variant_name(),
-                "State transition"
-            );
-            *machine = new_state.clone();
-            new_state
-        };
+        self.apply_guarded_transition(|_| Ok(action))
+    }
 
-        crate::native::bridge::dispatch(crate::native::bridge::NativeAction::RefreshRuntime);
-        crate::pill::sync(self, &new_state);
-        crate::tray::sync(self, &new_state);
-        crate::dictation_cancel::sync(self, &new_state);
-
+    /// Runs `guard` under the machine lock and applies the action it returns,
+    /// so a check, its effect and the state change cannot be interleaved with
+    /// another transition. `guard` must not wait on the engine or touch
+    /// windows: the lock is held while it runs.
+    pub fn apply_guarded_transition<E: From<String>>(
+        &self,
+        guard: impl FnOnce(&AppStateMachine) -> Result<StateAction, E>,
+    ) -> Result<AppStateMachine, E> {
+        let new_state = self.transition_unsynced(guard)?;
+        self.sync_transition(&new_state);
         Ok(new_state)
+    }
+
+    /// The state change alone, for a caller that still holds another AppState
+    /// lock. It owes `sync_transition` once that lock is released.
+    pub(crate) fn transition_unsynced<E: From<String>>(
+        &self,
+        guard: impl FnOnce(&AppStateMachine) -> Result<StateAction, E>,
+    ) -> Result<AppStateMachine, E> {
+        let mut machine = self.machine.acquire()?;
+        let action = guard(&machine)?;
+        let new_state = machine.clone().transition(action)?;
+        debug!(
+            from = machine.variant_name(),
+            to = new_state.variant_name(),
+            "State transition"
+        );
+        *machine = new_state.clone();
+        Ok(new_state)
+    }
+
+    pub(crate) fn sync_transition(&self, new_state: &AppStateMachine) {
+        crate::native::bridge::dispatch(crate::native::bridge::NativeAction::RefreshRuntime);
+        crate::pill::sync(self, new_state);
+        crate::tray::sync(self, new_state);
+        crate::dictation_cancel::sync(self, new_state);
     }
 
     /// Get a clone of the current machine state.

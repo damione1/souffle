@@ -96,6 +96,10 @@ pub enum StateAction {
         message: String,
     },
     Recover,
+    /// The files of `profile` were removed from disk.
+    ModelDeleted {
+        profile: TranscriptionProfile,
+    },
 }
 
 impl AppStateMachine {
@@ -249,6 +253,26 @@ impl AppStateMachine {
                 },
                 Recover,
             ) => Ok(Ready { profile }),
+
+            // --- Model files removed from disk ---
+            // A state that still names the deleted profile as downloaded would
+            // treat its next download as already done and never start it.
+            (Downloaded { profile: current }, ModelDeleted { profile }) if current == profile => {
+                Ok(Idle)
+            }
+            (
+                Error {
+                    source,
+                    message,
+                    recovery: ErrorRecovery::RetryFromDownloaded { profile: current },
+                },
+                ModelDeleted { profile },
+            ) if current == profile => Ok(Error {
+                source,
+                message,
+                recovery: ErrorRecovery::RetryFromIdle,
+            }),
+            (state, ModelDeleted { .. }) => Ok(state),
 
             // --- Already in target state (idempotent) ---
             (
@@ -501,6 +525,81 @@ mod tests {
         assert!(matches!(state, AppStateMachine::Loading { .. }));
         let state = state.transition(StateAction::LoadComplete).unwrap();
         assert!(matches!(state, AppStateMachine::Ready { .. }));
+    }
+
+    #[test]
+    fn deleted_model_is_no_longer_downloaded() {
+        let state = AppStateMachine::Downloaded {
+            profile: test_profile(),
+        }
+        .transition(StateAction::ModelDeleted {
+            profile: test_profile(),
+        })
+        .unwrap();
+        assert!(matches!(state, AppStateMachine::Idle));
+        let state = state
+            .transition(StateAction::StartDownload {
+                profile: test_profile(),
+            })
+            .unwrap();
+        assert!(matches!(state, AppStateMachine::Downloading { .. }));
+    }
+
+    #[test]
+    fn deleted_model_turns_a_failed_load_into_a_retry_from_idle() {
+        let failed = AppStateMachine::Loading {
+            profile: test_profile(),
+        }
+        .transition(StateAction::Fail {
+            source: FailureSource::Model,
+            message: "load failed".into(),
+        })
+        .unwrap();
+        let state = failed
+            .transition(StateAction::ModelDeleted {
+                profile: test_profile(),
+            })
+            .unwrap();
+        match &state {
+            AppStateMachine::Error {
+                message,
+                recovery: ErrorRecovery::RetryFromIdle,
+                ..
+            } => assert_eq!(message, "load failed"),
+            other => panic!("expected a retry from idle, got {other:?}"),
+        }
+        assert!(matches!(
+            state.transition(StateAction::Recover).unwrap(),
+            AppStateMachine::Idle
+        ));
+    }
+
+    #[test]
+    fn deleting_another_model_changes_nothing() {
+        for state in [
+            AppStateMachine::Idle,
+            AppStateMachine::Downloaded {
+                profile: test_profile(),
+            },
+            AppStateMachine::Ready {
+                profile: test_profile(),
+            },
+            AppStateMachine::RecordingDictation {
+                profile: test_profile(),
+                session_id: 1,
+            },
+        ] {
+            let name = state.variant_name();
+            let after = state
+                .transition(StateAction::ModelDeleted {
+                    profile: other_profile(),
+                })
+                .unwrap();
+            assert_eq!(after.variant_name(), name);
+            if name != "idle" {
+                assert_eq!(after.active_profile(), Some(&test_profile()));
+            }
+        }
     }
 
     #[test]

@@ -2411,75 +2411,6 @@ msgctxt "MicrophoneSection"
 msgid "Le microphone est réglé sur {}. Cette fréquence élevée peut perturber les appels en visioconférence pendant l'enregistrement."
 msgstr "The microphone is set to {}. This high rate can disrupt video calls while recording."
 
-#: ui/components/settings/model_delete_section.slint:32
-msgctxt "ModelDeleteSection"
-msgid "STOCKAGE DU MODÈLE"
-msgstr "MODEL STORAGE"
-
-#: ui/components/settings/model_delete_section.slint:41
-msgctxt "ModelDeleteSection"
-msgid "Supprimer le modèle téléchargé"
-msgstr "Delete the downloaded model"
-
-#: ui/components/settings/model_delete_section.slint:43
-msgctxt "ModelDeleteSection"
-msgid ""
-"Les assets Apple Speech sont gérés par macOS. Soufflé ne les supprime pas."
-msgstr ""
-"Apple Speech assets are managed by macOS. Soufflé does not delete them."
-
-#: ui/components/settings/model_delete_section.slint:45
-msgctxt "ModelDeleteSection"
-msgid ""
-"Supprime les fichiers de {} du disque. Il faudra le télécharger à nouveau "
-"pour l'utiliser."
-msgstr ""
-"Deletes {}'s files from disk. You will need to download it again to use it."
-
-#: ui/components/settings/model_delete_section.slint:46
-msgctxt "ModelDeleteSection"
-msgid ""
-"Le modèle doit être téléchargé et déchargé (pas en cours d'utilisation) pour "
-"être supprimé."
-msgstr ""
-"The model must be downloaded and unloaded (not currently in use) to be "
-"deleted."
-
-#: ui/components/settings/model_delete_section.slint:53
-msgctxt "ModelDeleteSection"
-msgid "Supprimer"
-msgstr "Delete"
-
-#: ui/components/settings/model_delete_section.slint:61
-msgctxt "ModelDeleteSection"
-msgid "Annuler"
-msgstr "Cancel"
-
-#: ui/components/settings/model_delete_section.slint:68
-msgctxt "ModelDeleteSection"
-msgid "Confirmer"
-msgstr "Confirm"
-
-#: ui/components/settings/model_delete_section.slint:85
-msgctxt "ModelDeleteSection"
-msgid ""
-"Les ressources Apple Speech sont gérées par macOS et ne peuvent pas être "
-"supprimées par Soufflé."
-msgstr ""
-"Apple Speech assets are managed by macOS and cannot be deleted by Soufflé."
-
-#: ui/components/settings/model_delete_section.slint:86
-msgctxt "ModelDeleteSection"
-msgid "Attendez la fin de l'opération sur le modèle avant de le supprimer."
-msgstr "Wait for the model operation to finish before deleting it."
-
-#: ui/components/settings/model_delete_section.slint:87
-msgctxt "ModelDeleteSection"
-msgid ""
-"Déchargez le modèle actif ou choisissez un autre modèle avant de le "
-"supprimer."
-msgstr "Unload the active model or select another model before deleting it."
-
 #: ui/components/settings/calendar_section.slint:36
 msgctxt "CalendarSection"
 msgid "CALENDRIER"
@@ -3330,22 +3261,23 @@ msgctxt "DataSection"
 msgid "Test en cours…"
 msgstr "Testing..."
 
-#: ui/components/settings/model_section.slint:33
+#: ui/components/settings/model_section.slint:40
 msgctxt "ModelSection"
 msgid "MODÈLE DE TRANSCRIPTION"
 msgstr "TRANSCRIPTION MODEL"
 
-#: ui/components/settings/model_section.slint:47
+#: ui/components/settings/model_section.slint:54
+#: ui/components/settings/model_section.slint:54
 msgctxt "ModelSection"
 msgid "Modèle de transcription"
 msgstr "Transcription model"
 
-#: ui/components/settings/model_section.slint:49
+#: ui/components/settings/model_section.slint:56
 msgctxt "ModelSection"
 msgid "Terminez l'enregistrement avant de changer de modèle."
 msgstr "Finish the recording before changing models."
 
-#: ui/components/settings/model_section.slint:50
+#: ui/components/settings/model_section.slint:57
 msgctxt "ModelSection"
 msgid ""
 "Choisissez un modèle : il se télécharge et se charge tout seul. Tout tourne "
@@ -3354,47 +3286,47 @@ msgstr ""
 "Choose a model: it downloads and loads on its own. Everything runs on this "
 "Mac."
 
-#: ui/components/settings/model_section.slint:60
+#: ui/components/settings/model_section.slint:67
 msgctxt "ModelSection"
 msgid "Téléchargement requis"
 msgstr "Download required"
 
-#: ui/components/settings/model_section.slint:61
+#: ui/components/settings/model_section.slint:68
 msgctxt "ModelSection"
 msgid "Téléchargement…"
 msgstr "Downloading..."
 
-#: ui/components/settings/model_section.slint:62
+#: ui/components/settings/model_section.slint:69
 msgctxt "ModelSection"
 msgid "Chargement requis"
 msgstr "Load required"
 
-#: ui/components/settings/model_section.slint:63
+#: ui/components/settings/model_section.slint:70
 msgctxt "ModelSection"
 msgid "Chargement…"
 msgstr "Loading..."
 
-#: ui/components/settings/model_section.slint:64
+#: ui/components/settings/model_section.slint:71
 msgctxt "ModelSection"
 msgid "Prêt"
 msgstr "Ready"
 
-#: ui/components/settings/model_section.slint:65
+#: ui/components/settings/model_section.slint:72
 msgctxt "ModelSection"
 msgid "Déchargement…"
 msgstr "Unloading..."
 
-#: ui/components/settings/model_section.slint:66
+#: ui/components/settings/model_section.slint:73
 msgctxt "ModelSection"
 msgid "Erreur du modèle"
 msgstr "Model error"
 
-#: ui/components/settings/model_section.slint:67
+#: ui/components/settings/model_section.slint:74
 msgctxt "ModelSection"
 msgid "Erreur de capture audio"
 msgstr "Audio capture error"
 
-#: ui/components/settings/model_section.slint:92
+#: ui/components/settings/model_section.slint:100
 msgctxt "ModelSection"
 msgid ""
 "La langue affichée est celle prise en charge par Apple Speech pour la langue "
@@ -3405,7 +3337,7 @@ msgstr ""
 "and region. To change it, open System Settings > General > Language & "
 "Region, then reopen Soufflé."
 
-#: ui/components/settings/model_section.slint:92
+#: ui/components/settings/model_section.slint:100
 msgctxt "ModelSection"
 msgid ""
 "La transcription fonctionne sans activer Siri ou Apple Intelligence. macOS "
@@ -3414,17 +3346,18 @@ msgstr ""
 "Transcription works without enabling Siri or Apple Intelligence. macOS "
 "manages the model."
 
-#: ui/components/settings/model_section.slint:96
+#: ui/components/settings/model_section.slint:104
+#: ui/components/settings/model_section.slint:104
 msgctxt "ModelSection"
 msgid "Ouvrir Langue et région"
 msgstr "Open Language & Region"
 
-#: ui/components/settings/model_section.slint:107
+#: ui/components/settings/model_section.slint:115
 msgctxt "ModelSection"
 msgid "Apple Speech indisponible"
 msgstr "Apple Speech unavailable"
 
-#: ui/components/settings/model_section.slint:109
+#: ui/components/settings/model_section.slint:117
 msgctxt "ModelSection"
 msgid ""
 "Apple Speech nécessite macOS 26 ou une version ultérieure. Vérifiez les "
@@ -3433,7 +3366,7 @@ msgstr ""
 "Apple Speech requires macOS 26 or later. Check for macOS updates or choose "
 "another model."
 
-#: ui/components/settings/model_section.slint:111
+#: ui/components/settings/model_section.slint:119
 msgctxt "ModelSection"
 msgid ""
 "Apple Speech n'est pas pris en charge sur ce Mac. Choisissez un autre modèle "
@@ -3442,7 +3375,7 @@ msgstr ""
 "Apple Speech is not supported on this Mac. Choose another transcription "
 "model."
 
-#: ui/components/settings/model_section.slint:113
+#: ui/components/settings/model_section.slint:121
 msgctxt "ModelSection"
 msgid ""
 "Cette version de Soufflé n'inclut pas Apple Speech. Installez une version "
@@ -3451,7 +3384,7 @@ msgstr ""
 "This version of Soufflé does not include Apple Speech. Install a compatible "
 "version or choose another model."
 
-#: ui/components/settings/model_section.slint:115
+#: ui/components/settings/model_section.slint:123
 msgctxt "ModelSection"
 msgid ""
 "La langue et la région actuelles de ce Mac ne sont pas prises en charge par "
@@ -3462,7 +3395,7 @@ msgstr ""
 "them in System Settings > General > Language & Region, then reopen Soufflé, "
 "or choose another model."
 
-#: ui/components/settings/model_section.slint:117
+#: ui/components/settings/model_section.slint:125
 msgctxt "ModelSection"
 msgid ""
 "Les ressources Apple Speech ne sont pas disponibles pour la langue de ce "
@@ -3473,7 +3406,7 @@ msgstr ""
 "another language in Language & Region, then reopen Soufflé, or use another "
 "model."
 
-#: ui/components/settings/model_section.slint:119
+#: ui/components/settings/model_section.slint:127
 msgctxt "ModelSection"
 msgid ""
 "Impossible de vérifier la disponibilité d'Apple Speech. Relancez Soufflé "
@@ -3482,17 +3415,18 @@ msgstr ""
 "Apple Speech availability could not be checked. Reopen Soufflé to try again "
 "or choose another model."
 
-#: ui/components/settings/model_section.slint:132
+#: ui/components/settings/model_section.slint:140
 msgctxt "ModelSection"
 msgid "Ouvrir Mise à jour de logiciels"
 msgstr "Open Software Update"
 
-#: ui/components/settings/model_section.slint:167
+#: ui/components/settings/model_section.slint:175
+#: ui/components/settings/model_section.slint:175
 msgctxt "ModelSection"
 msgid "Délai avant déchargement"
 msgstr "Unload delay"
 
-#: ui/components/settings/model_section.slint:168
+#: ui/components/settings/model_section.slint:176
 msgctxt "ModelSection"
 msgid "Décharger le modèle de la mémoire après une période d'inactivité."
 msgstr "Unload model from memory after a period of inactivity."
@@ -3730,3 +3664,54 @@ msgstr "Page {} of {} · {} items"
 msgctxt "SettingsAdvancedBlock"
 msgid "Avancé"
 msgstr "Advanced"
+
+#: ui/components/settings/model_delete_row.slint:37
+msgctxt "ModelDeleteRow"
+msgid "Supprimer le modèle téléchargé"
+msgstr "Delete downloaded model"
+
+#: ui/components/settings/model_delete_row.slint:38
+msgctxt "ModelDeleteRow"
+msgid "Suppression de {}…"
+msgstr "Deleting {}…"
+
+#: ui/components/settings/model_delete_row.slint:39
+#: ui/components/settings/model_delete_row.slint:39
+msgctxt "ModelDeleteRow"
+msgid "Terminez l'enregistrement avant de supprimer le modèle."
+msgstr "Finish recording before deleting the model."
+
+#: ui/components/settings/model_delete_row.slint:40
+msgctxt "ModelDeleteRow"
+msgid "Le modèle doit être téléchargé, sans opération en cours, pour être supprimé."
+msgstr "The model must be downloaded, with no operation in progress, to be deleted."
+
+#: ui/components/settings/model_delete_row.slint:41
+msgctxt "ModelDeleteRow"
+msgid "Supprimer les fichiers de {} ? Tant que ce modèle reste sélectionné, Soufflé le téléchargera à nouveau au prochain lancement."
+msgstr "Delete the files of {}? As long as this model stays selected, Soufflé will download it again at next launch."
+
+#: ui/components/settings/model_delete_row.slint:42
+msgctxt "ModelDeleteRow"
+msgid "Supprime les fichiers de {} du disque. S'il est chargé, il est d'abord déchargé."
+msgstr "Deletes the files of {} from disk. If it is loaded, it is unloaded first."
+
+#: ui/components/settings/model_delete_row.slint:51
+msgctxt "ModelDeleteRow"
+msgid "Supprimer"
+msgstr "Delete"
+
+#: ui/components/settings/model_delete_row.slint:61
+msgctxt "ModelDeleteRow"
+msgid "Annuler"
+msgstr "Cancel"
+
+#: ui/components/settings/model_delete_row.slint:70
+msgctxt "ModelDeleteRow"
+msgid "Confirmer"
+msgstr "Confirm"
+
+#: ui/components/settings/model_delete_row.slint:87
+msgctxt "ModelDeleteRow"
+msgid "Attendez la fin de l'opération sur le modèle avant de le supprimer."
+msgstr "Wait for the model operation to finish before deleting it."

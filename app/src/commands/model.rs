@@ -1,6 +1,6 @@
 use std::sync::{Arc, Mutex};
 
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::progress::ProgressChannel;
 
@@ -8,7 +8,6 @@ use crate::engine::{
     TranscriptionCatalog, TranscriptionProfile, TranscriptionProfileSelection,
     TranscriptionRuntimeStatus, resolve_transcription_selection, transcription_engine_catalog,
 };
-use crate::lock_ext::MutexExt;
 use crate::models;
 use crate::settings::AppSettings;
 use crate::state::AppState;
@@ -21,6 +20,11 @@ fn unload_loaded_model(
     next_profile: Option<TranscriptionProfile>,
 ) -> Result<(), String> {
     state.apply_transition(StateAction::Unload { next_profile })?;
+    finish_unload(state)
+}
+
+/// Second half of an unload whose `Unload` transition is already applied.
+fn finish_unload(state: &AppState) -> Result<(), String> {
     if let Err(e) = state.engine_actor.unload_model() {
         state.apply_transition(StateAction::Fail {
             source: crate::state_machine::FailureSource::Model,
@@ -311,7 +315,7 @@ impl std::fmt::Display for ModelDeletionError {
         match self {
             Self::ManagedAsset => formatter.write_str("Apple Speech assets are managed by macOS and cannot be deleted by Soufflé."),
             Self::TransitionBusy => formatter.write_str("Cannot delete a model while it is downloading, loading, unloading, or recovering from a failed unload."),
-            Self::ActiveModel => formatter.write_str("Cannot delete the currently loaded model. Unload it first or switch to a different model."),
+            Self::ActiveModel => formatter.write_str("Cannot delete a model while it is recording or a recording is starting."),
             Self::OperationFailed { message } => formatter.write_str(message),
         }
     }
@@ -325,7 +329,8 @@ impl From<String> for ModelDeletionError {
     }
 }
 
-/// Delete a downloaded model from disk.
+/// Delete a downloaded model from disk. A model that is loaded and idle is
+/// unloaded first. Blocks on the engine actor: call it off the UI thread.
 pub fn delete_model(
     state: Arc<AppState>,
     selection: TranscriptionProfileSelection,
@@ -336,12 +341,29 @@ pub fn delete_model(
         return Err(ModelDeletionError::ManagedAsset);
     }
 
-    let machine = state.machine.acquire()?;
-    validate_model_deletion(&machine, &profile)?;
+    delete_model_in(&state, &profile, &models::model_dir(&profile))
+}
 
-    let model_dir = models::model_dir(&profile);
-    models::download::delete_model_files(&model_dir)?;
-    drop(machine);
+fn delete_model_in(
+    state: &AppState,
+    profile: &TranscriptionProfile,
+    model_dir: &std::path::Path,
+) -> Result<(), ModelDeletionError> {
+    let machine = state.current_machine_state()?;
+    validate_model_deletion(&machine, profile)?;
+    if is_loaded_idle(&machine, profile) {
+        unload_for_deletion(state)?;
+    }
+
+    // The unload ran without the machine lock, so anything may have moved
+    // since: check again under the lock that also covers the removal.
+    state.apply_guarded_transition(|machine| {
+        validate_file_removal(machine, profile)?;
+        models::download::delete_model_files(model_dir)?;
+        Ok::<_, ModelDeletionError>(StateAction::ModelDeleted {
+            profile: profile.clone(),
+        })
+    })?;
 
     info!(
         engine = %profile.engine_id,
@@ -352,6 +374,35 @@ pub fn delete_model(
     Ok(())
 }
 
+fn is_loaded_idle(machine: &AppStateMachine, profile: &TranscriptionProfile) -> bool {
+    matches!(machine, AppStateMachine::Ready { profile: loaded } if loaded == profile)
+}
+
+/// Unload the idle model so its files can go. The `Unload` transition is
+/// taken inside the capture start boundary: a recording that is starting
+/// wins, and none can start once the machine has left Ready. No window work
+/// is allowed inside the boundary, so the sync follows it.
+fn unload_for_deletion(state: &AppState) -> Result<(), ModelDeletionError> {
+    use super::settings_guard::{SettingsCaptureError, with_capture_idle};
+    let unloading = with_capture_idle(&state.capture_start, &state.machine, || {
+        state.transition_unsynced(|_| Ok(StateAction::Unload { next_profile: None }))
+    });
+    match unloading {
+        Ok(unloading) => {
+            state.sync_transition(&unloading);
+            Ok(finish_unload(state)?)
+        }
+        Err(SettingsCaptureError::CaptureBusy) => Err(ModelDeletionError::ActiveModel),
+        Err(SettingsCaptureError::RuntimeBusy) => Err(ModelDeletionError::TransitionBusy),
+        // The machine left Ready on its own (the idle timer unloads too).
+        // The check made under the lock decides what that means.
+        Err(SettingsCaptureError::OperationFailed { message }) => {
+            warn!("Model deletion: unload skipped: {message}");
+            Ok(())
+        }
+    }
+}
+
 /// Settings checks the same permission before invoking the destructive command.
 pub fn can_delete_model(
     state: &AppState,
@@ -360,6 +411,10 @@ pub fn can_delete_model(
     let profile = resolve_transcription_selection(selection)?;
     if !models::can_delete_model_files(&profile) {
         return Err(ModelDeletionError::ManagedAsset);
+    }
+    // The machine alone is still Ready while a recording starts.
+    if state.capture_start.start_in_flight_or_locked() {
+        return Err(ModelDeletionError::ActiveModel);
     }
     let machine = match state.machine.try_lock() {
         Ok(machine) => machine,
@@ -373,7 +428,24 @@ pub fn can_delete_model(
     validate_model_deletion(&machine, &profile)
 }
 
+/// Whether deletion may be requested. A loaded model that is idle may: the
+/// command unloads it first.
 fn validate_model_deletion(
+    machine: &AppStateMachine,
+    profile: &TranscriptionProfile,
+) -> Result<(), ModelDeletionError> {
+    if model_delete_blocked_by_transition(machine) {
+        return Err(ModelDeletionError::TransitionBusy);
+    }
+    if machine.is_recording() && machine.active_profile() == Some(profile) {
+        return Err(ModelDeletionError::ActiveModel);
+    }
+
+    Ok(())
+}
+
+/// Whether the files may be removed right now: never while the model is loaded.
+fn validate_file_removal(
     machine: &AppStateMachine,
     profile: &TranscriptionProfile,
 ) -> Result<(), ModelDeletionError> {
@@ -522,16 +594,22 @@ mod tests {
     }
 
     #[test]
-    fn deletion_permission_rejects_transitions_and_active_profile_only() {
+    fn deletion_may_be_requested_for_a_loaded_idle_model_but_files_go_only_once_unloaded() {
         let active = profile();
         let other = TranscriptionProfile {
             model_id: "different-fixture-model".into(),
             ..active.clone()
         };
+        let ready = AppStateMachine::Ready {
+            profile: active.clone(),
+        };
+        assert_eq!(validate_model_deletion(&ready, &active), Ok(()));
+        assert_eq!(
+            validate_file_removal(&ready, &active),
+            Err(ModelDeletionError::ActiveModel)
+        );
+        assert_eq!(validate_file_removal(&ready, &other), Ok(()));
         for machine in [
-            AppStateMachine::Ready {
-                profile: active.clone(),
-            },
             AppStateMachine::RecordingDictation {
                 profile: active.clone(),
                 session_id: 1,
@@ -546,8 +624,13 @@ mod tests {
                 was_recording: crate::state_machine::RecordingKind::Dictation,
             },
         ] {
-            assert!(super::validate_model_deletion(&machine, &active).is_err());
-            assert_eq!(super::validate_model_deletion(&machine, &other), Ok(()));
+            for validate in [validate_model_deletion, validate_file_removal] {
+                assert_eq!(
+                    validate(&machine, &active),
+                    Err(ModelDeletionError::ActiveModel)
+                );
+                assert_eq!(validate(&machine, &other), Ok(()));
+            }
         }
         for machine in [
             AppStateMachine::Downloading {
@@ -561,13 +644,129 @@ mod tests {
                 next_profile: None,
             },
         ] {
-            assert!(super::validate_model_deletion(&machine, &active).is_err());
-            assert!(super::validate_model_deletion(&machine, &other).is_err());
+            for validate in [validate_model_deletion, validate_file_removal] {
+                for target in [&active, &other] {
+                    assert_eq!(
+                        validate(&machine, target),
+                        Err(ModelDeletionError::TransitionBusy)
+                    );
+                }
+            }
         }
-        assert_eq!(
-            super::validate_model_deletion(&AppStateMachine::Idle, &active),
-            Ok(())
+        for machine in [
+            AppStateMachine::Idle,
+            AppStateMachine::Downloaded {
+                profile: active.clone(),
+            },
+        ] {
+            assert_eq!(validate_model_deletion(&machine, &active), Ok(()));
+            assert_eq!(validate_file_removal(&machine, &active), Ok(()));
+        }
+    }
+
+    /// An isolated state plus a stand-in model directory. Deletion tests go
+    /// through `delete_model_in` with this directory only: `delete_model`
+    /// resolves the real model directory and must never run in a test.
+    fn deletion_fixture(machine: AppStateMachine) -> (Arc<AppState>, tempfile::TempDir) {
+        let (db, dir) = crate::test_helpers::fixtures::test_db();
+        let (_audio, rx) = crossbeam_channel::unbounded();
+        let actor = crate::pipeline::EngineActorHandle::spawn(
+            rx,
+            Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            Arc::new(Mutex::new(None)),
+            Box::new(|_| Err("No engine in the deletion fixture".into())),
+        )
+        .unwrap();
+        let (tx, _commands) = crossbeam_channel::unbounded();
+        let state = AppState::new(
+            tx,
+            Arc::new(actor),
+            Arc::new(db),
+            Arc::new(std::sync::atomic::AtomicU32::new(0)),
         );
+        *state.machine.lock().unwrap() = machine;
+        let model_dir = dir.path().join("fixture-model");
+        std::fs::create_dir_all(&model_dir).unwrap();
+        std::fs::write(model_dir.join("weights.bin"), b"fixture").unwrap();
+        (Arc::new(state), dir)
+    }
+
+    fn fixture_model_dir(dir: &tempfile::TempDir) -> std::path::PathBuf {
+        dir.path().join("fixture-model")
+    }
+
+    #[test]
+    fn deleting_a_loaded_idle_model_unloads_it_first() {
+        let (state, dir) = deletion_fixture(AppStateMachine::Ready { profile: profile() });
+        let model_dir = fixture_model_dir(&dir);
+
+        assert_eq!(delete_model_in(&state, &profile(), &model_dir), Ok(()));
+
+        assert!(!model_dir.exists());
+        assert!(matches!(
+            state.current_machine_state().unwrap(),
+            AppStateMachine::Idle
+        ));
+    }
+
+    #[test]
+    fn a_deleted_model_can_be_downloaded_again() {
+        let (state, dir) = deletion_fixture(AppStateMachine::Downloaded { profile: profile() });
+        let model_dir = fixture_model_dir(&dir);
+
+        assert_eq!(delete_model_in(&state, &profile(), &model_dir), Ok(()));
+
+        assert!(!model_dir.exists());
+        let restarted = state
+            .apply_transition(StateAction::StartDownload { profile: profile() })
+            .unwrap();
+        assert!(matches!(restarted, AppStateMachine::Downloading { .. }));
+    }
+
+    #[test]
+    fn deletion_leaves_the_files_of_a_recording_or_starting_model_alone() {
+        let (state, dir) = deletion_fixture(AppStateMachine::RecordingDictation {
+            profile: profile(),
+            session_id: 1,
+        });
+        let model_dir = fixture_model_dir(&dir);
+        assert_eq!(
+            delete_model_in(&state, &profile(), &model_dir),
+            Err(ModelDeletionError::ActiveModel)
+        );
+        assert!(model_dir.join("weights.bin").exists());
+        assert!(state.current_machine_state().unwrap().is_recording());
+
+        let (state, dir) = deletion_fixture(AppStateMachine::Ready { profile: profile() });
+        let model_dir = fixture_model_dir(&dir);
+        state.capture_start.begin(1);
+        assert_eq!(
+            delete_model_in(&state, &profile(), &model_dir),
+            Err(ModelDeletionError::ActiveModel)
+        );
+        assert!(model_dir.join("weights.bin").exists());
+        assert!(matches!(
+            state.current_machine_state().unwrap(),
+            AppStateMachine::Ready { .. }
+        ));
+    }
+
+    #[test]
+    fn deleting_another_model_keeps_the_loaded_one() {
+        let (state, dir) = deletion_fixture(AppStateMachine::Ready { profile: profile() });
+        let model_dir = fixture_model_dir(&dir);
+        let other = TranscriptionProfile {
+            model_id: "different-fixture-model".into(),
+            ..profile()
+        };
+
+        assert_eq!(delete_model_in(&state, &other, &model_dir), Ok(()));
+
+        assert!(!model_dir.exists());
+        assert!(matches!(
+            state.current_machine_state().unwrap(),
+            AppStateMachine::Ready { .. }
+        ));
     }
 
     #[test]

@@ -1,8 +1,9 @@
 import { FieldSetAppearance, FieldRowAppearance, AlertActions, AlertSeverity, KitAlert, KitBadge, KitButton, KitFieldRow, KitFieldSet, KitProgress, KitThemeContext, KitThemes, ProgressIntent, Tone, ControlSize } from "@kit";
 import { CatalogPicker } from "../catalog_picker.slint";
 import { SettingsNoticeRow } from "settings_notice_row.slint";
+import { ModelDeleteRow } from "model_delete_row.slint";
 import { Theme } from "../../theme.slint";
-import { TranscriptionPhase, TranscriptionUnavailableReason, SystemSettingsPane } from "../../types.slint";
+import { ModelDeletionError, TranscriptionPhase, TranscriptionUnavailableReason, SystemSettingsPane } from "../../types.slint";
 
 // The download/switch state machine lives in Rust (`model_ui.rs`); this
 // component only displays the pushed state and forwards the chosen value.
@@ -25,9 +26,15 @@ export component ModelSection inherits KitFieldSet {
     in property <[string]> unload-timeout-labels;
     in property <string> unload-timeout-label;
     in property <string> error-message;
+    // False for models whose assets macOS manages (Apple Speech).
+    in property <bool> files-deletable;
+    in property <bool> deleting;
+    in property <string> delete-error;
+    in property <ModelDeletionError> delete-error-kind: ModelDeletionError.operation-failed;
 
     callback model-changed(string);
     callback unload-timeout-changed(string);
+    callback delete-requested();
 
     theme: KitThemeContext.current;
     legend: @tr("MODÈLE DE TRANSCRIPTION");
@@ -176,5 +183,15 @@ export component ModelSection inherits KitFieldSet {
             current-value: root.unload-timeout-label;
             value-chosen(value) => { root.unload-timeout-changed(value); }
         }
+    }
+
+    if root.files-deletable: ModelDeleteRow {
+        model-phase: root.model-phase;
+        model-label: root.selected-model-label;
+        capture-busy: root.capture-busy;
+        deleting: root.deleting;
+        delete-error: root.delete-error;
+        delete-error-kind: root.delete-error-kind;
+        delete-requested => { root.delete-requested(); }
     }
 }

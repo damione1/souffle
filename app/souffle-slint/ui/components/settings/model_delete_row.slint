@@ -1,0 +1,95 @@
+import { AppText, Typography } from "@typography";
+import { FieldRowAppearance, ButtonIntent, ControlSize, KitButton, KitThemeContext, KitFieldRow } from "@kit";
+import { Theme } from "../../theme.slint";
+import { TranscriptionPhase, ModelDeletionError } from "../../types.slint";
+
+// Destructive "delete the downloaded model" row of the transcription model
+// card. Two-step inline confirm, no modal: the confirmation states that the
+// selected model is downloaded again at the next launch.
+//
+// Whether deletion is legal is not decided here: `commands::model::delete_model`
+// in Rust is the single source of truth. It unloads a loaded idle model first
+// and refuses a recording or mid-transition one with a typed refusal that is
+// localized here; operational failures keep their detail. `can-delete` only
+// decides whether to invite the click.
+export component ModelDeleteRow inherits VerticalLayout {
+    in property <TranscriptionPhase> model-phase;
+    in property <string> model-label;
+    in property <bool> capture-busy;
+    in property <bool> deleting;
+    in property <string> delete-error;
+    in property <ModelDeletionError> delete-error-kind: ModelDeletionError.operation-failed;
+
+    callback delete-requested();
+
+    property <bool> confirming: false;
+    property <bool> can-delete: !root.capture-busy && !root.deleting
+        && (root.model-phase == TranscriptionPhase.ready || root.model-phase == TranscriptionPhase.load-required);
+
+    vertical-stretch: 0;
+
+    KitFieldRow {
+        theme: KitThemeContext.current;
+        modal-layer: 0;
+        orientation: Theme.settings-field-orientation(self.width);
+        appearance: FieldRowAppearance.inset;
+        show-divider: true;
+        label: @tr("Supprimer le modèle téléchargé");
+        description: root.deleting ? @tr("Suppression de {}…", root.model-label)
+            : root.capture-busy ? @tr("Terminez l'enregistrement avant de supprimer le modèle.")
+            : !root.can-delete ? @tr("Le modèle doit être téléchargé, sans opération en cours, pour être supprimé.")
+            : root.confirming ? @tr("Supprimer les fichiers de {} ? Tant que ce modèle reste sélectionné, Soufflé le téléchargera à nouveau au prochain lancement.", root.model-label)
+            : @tr("Supprime les fichiers de {} du disque. S'il est chargé, il est d'abord déchargé.", root.model-label);
+
+        HorizontalLayout {
+            spacing: 8px;
+            horizontal-stretch: 0;
+
+            if !root.confirming: KitButton {
+                theme: KitThemeContext.current;
+                modal-layer: 0;
+                text: @tr("Supprimer");
+                control-size: ControlSize.compact;
+                intent: ButtonIntent.destructive;
+                disabled: !root.can-delete;
+                activated => { root.confirming = true; }
+            }
+
+            if root.confirming: KitButton {
+                theme: KitThemeContext.current;
+                modal-layer: 0;
+                text: @tr("Annuler");
+                control-size: ControlSize.compact;
+                intent: ButtonIntent.quiet;
+                activated => { root.confirming = false; }
+            }
+
+            if root.confirming: KitButton {
+                theme: KitThemeContext.current;
+                modal-layer: 0;
+                text: @tr("Confirmer");
+                control-size: ControlSize.compact;
+                intent: ButtonIntent.destructive;
+                disabled: !root.can-delete;
+                activated => {
+                    root.confirming = false;
+                    root.delete-requested();
+                }
+            }
+        }
+    }
+
+    if root.delete-error != "": VerticalLayout {
+        padding-left: 20px;
+        padding-right: 20px;
+        padding-bottom: 12px;
+        AppText {
+            text: root.delete-error-kind == ModelDeletionError.transition-busy ? @tr("Attendez la fin de l'opération sur le modèle avant de le supprimer.")
+                : root.delete-error-kind == ModelDeletionError.active-model ? @tr("Terminez l'enregistrement avant de supprimer le modèle.")
+                : root.delete-error;
+            color: Theme.danger;
+            typography: Typography.small;
+            wrap: word-wrap;
+        }
+    }
+}

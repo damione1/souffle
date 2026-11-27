@@ -6285,18 +6285,22 @@ fn wire_callbacks(
         );
     });
 
-    // Delete-model "danger zone" (SOU-195-slice, Système tab). Synchronous
-    // and main-thread-only like `rename_meeting` - a filesystem removal, no
-    // save panel involved, so no `run_on_main_thread` needed here.
+    // Delete the selected model's files. The permission check stays on this
+    // thread so a refusal is immediate; the command itself unloads a loaded
+    // model through the engine actor, so it runs on a worker.
     // `commands::model::delete_model` is the sole guard against deleting a
-    // loaded or mid-transition model; a refusal surfaces its error text
-    // verbatim rather than re-deciding the state machine in the UI.
+    // recording or mid-transition model; a refusal is projected as received
+    // rather than re-deciding the state machine in the UI.
     let weak_delete_model = window.as_weak();
     let handle_delete_model = tauri_handle.clone();
+    let deleting_model = Rc::new(Cell::new(false));
     window.on_settings_delete_model_requested(move || {
         let Some(window) = weak_delete_model.upgrade() else {
             return;
         };
+        if deleting_model.get() {
+            return;
+        }
         let handle = handle_delete_model.clone();
         let catalog = match souffle_lib::commands::get_transcription_catalog(handle.clone()) {
             Ok(catalog) => catalog,
@@ -6310,13 +6314,31 @@ fn wire_callbacks(
             settings_ui::project_model_deletion_error(&window, &error);
             return;
         }
-        match souffle_lib::commands::delete_model(handle.clone(), selection) {
-            Ok(()) => {
-                window.set_settings_model_delete_error("".into());
-                refresh_model_runtime(weak_delete_model.clone(), handle);
+        deleting_model.set(true);
+        window.set_settings_model_deleting(true);
+        window.set_settings_model_delete_error("".into());
+        let worker_handle = handle.clone();
+        let worker = souffle_lib::async_runtime::spawn_blocking(move || {
+            souffle_lib::commands::delete_model(worker_handle, selection)
+        });
+        let weak = weak_delete_model.clone();
+        let deleting = deleting_model.clone();
+        slint::spawn_local(async move {
+            let result = worker
+                .await
+                .map_err(|error| format!("Join model deletion task: {error}").into())
+                .and_then(|result| result);
+            deleting.set(false);
+            let Some(window) = weak.upgrade() else {
+                return;
+            };
+            window.set_settings_model_deleting(false);
+            if let Err(error) = result {
+                settings_ui::project_model_deletion_error(&window, &error);
             }
-            Err(e) => settings_ui::project_model_deletion_error(&window, &e),
-        }
+            refresh_model_runtime(weak, handle);
+        })
+        .expect("slint event loop not running");
     });
 
     let weak = window.as_weak();
@@ -7918,6 +7940,9 @@ mod tests {
                 window.get_settings_model_delete_error_kind(),
                 super::ModelDeletionError::ActiveModel
             );
+            // A refusal comes before the command, which would resolve the
+            // real model directory: no state of this fixture may reach it.
+            assert!(!window.get_settings_model_deleting());
             assert_eq!(window.get_settings_recording_field(), ShortcutField::Toggle);
             assert_eq!(window.get_settings_shortcut_error(), "retained error");
             assert_eq!(
@@ -7957,6 +7982,7 @@ mod tests {
                 window.get_settings_model_delete_error_kind(),
                 super::ModelDeletionError::TransitionBusy
             );
+            assert!(!window.get_settings_model_deleting());
             assert_eq!(db.get_all_settings().unwrap(), before);
         }
 
@@ -8003,6 +8029,7 @@ mod tests {
             window.get_settings_model_delete_error_kind(),
             super::ModelDeletionError::TransitionBusy
         );
+        assert!(!window.get_settings_model_deleting());
         assert!(!window.get_settings_resetting_sample_rate());
         assert!(io.is_idle_for_test());
         assert_eq!(db.get_all_settings().unwrap(), before);

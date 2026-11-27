@@ -348,6 +348,7 @@ export component MainWindow inherits Window {
     in property <string> settings-model-delete-error;
     in property <ModelDeletionError> settings-model-delete-error-kind: ModelDeletionError.operation-failed;
     in property <bool> settings-model-files-deletable;
+    in property <bool> settings-model-deleting;
 
     in property <DictionaryLearningMode> settings-dictionary-learning-mode;
     in property <[DictionaryLearningOption]> settings-dictionary-learning-options;
@@ -972,6 +973,7 @@ export component MainWindow inherits Window {
                 model-delete-error: root.settings-model-delete-error;
                 model-delete-error-kind: root.settings-model-delete-error-kind;
                 model-files-deletable: root.settings-model-files-deletable;
+                model-deleting: root.settings-model-deleting;
 
                 dictionary-learning-mode: root.settings-dictionary-learning-mode;
                 dictionary-learning-options: root.settings-dictionary-learning-options;

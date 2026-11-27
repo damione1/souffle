@@ -17,7 +17,6 @@ import { DictationPolishSection } from "components/settings/dictation_polish_sec
 import { AppBranchesSection, AppBranchRow } from "components/settings/app_branches_section.slint";
 import { SummaryTemplatesSection } from "components/settings/summary_templates_section.slint";
 import { ModelSection } from "components/settings/model_section.slint";
-import { ModelDeleteSection } from "components/settings/model_delete_section.slint";
 import { DictionarySection, DictionaryRow, DictionarySuggestionRow, DictionaryLearningOption } from "components/settings/dictionary_section.slint";
 import { SnippetsSection, SnippetRow } from "components/settings/snippets_section.slint";
 import { Theme } from "theme.slint";
@@ -165,6 +164,7 @@ export component SettingsView inherits KitAppShell {
     in property <string> model-delete-error;
     in property <ModelDeletionError> model-delete-error-kind: ModelDeletionError.operation-failed;
     in property <bool> model-files-deletable;
+    in property <bool> model-deleting;
     in property <DictionaryLearningMode> dictionary-learning-mode;
     in property <[DictionaryLearningOption]> dictionary-learning-options;
     in property <[DictionarySuggestionRow]> dictionary-suggestions;
@@ -366,8 +366,13 @@ export component SettingsView inherits KitAppShell {
                                     unload-timeout-labels: root.unload-timeout-labels;
                                     unload-timeout-label: root.unload-timeout-label;
                                     error-message: root.model-error-message;
+                                    files-deletable: root.model-files-deletable;
+                                    deleting: root.model-deleting;
+                                    delete-error: root.model-delete-error;
+                                    delete-error-kind: root.model-delete-error-kind;
                                     model-changed(value) => { root.model-changed(value); }
                                     unload-timeout-changed(value) => { root.unload-timeout-changed(value); }
+                                    delete-requested => { root.delete-model-requested(); }
                                 }
 
                                 if trans-page.mounted: DictionarySection {
@@ -644,15 +649,6 @@ export component SettingsView inherits KitAppShell {
                                     copy-desktop-snippet-requested => { root.mcp-copy-desktop-snippet-requested(); }
                                     copy-code-command-requested => { root.mcp-copy-code-command-requested(); }
                                     test-mcp-requested => { root.mcp-test-requested(); }
-                                }
-
-                                if system-page.mounted: ModelDeleteSection {
-                                    files-deletable: root.model-files-deletable;
-                                    model-phase: root.model-phase;
-                                    model-label: root.selected-model-label;
-                                    delete-error: root.model-delete-error;
-                                    delete-error-kind: root.model-delete-error-kind;
-                                    delete-requested => { root.delete-model-requested(); }
                                 }
 
                                 if system-page.mounted: AboutSection {

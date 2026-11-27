@@ -742,7 +742,7 @@
               ],
               [
                 "Résumés de réunion — expérimental<br><span class=\"docs-tab\">IA</span>",
-                "Interrupteur désactivé par défaut. Affiche le fournisseur, le modèle Ollama, les consignes de résumé et les options de compaction. La reformulation des dictées reste indépendante."
+                "Interrupteur désactivé par défaut. Affiche les consignes de résumé, l'interrupteur de compression et les actions des réunions. La carte Moteur IA, partagée avec la reformulation des dictées, apparaît dès que l'un des deux est actif et ne montre que le moteur utilisé : Apple Intelligence, ou Ollama avec son URL et son modèle. La reformulation des dictées reste indépendante."
               ],
               [
                 "Lancer à l'ouverture de session<br><span class=\"docs-tab\">Système</span>",
@@ -753,8 +753,8 @@
                 "Inactif, conservé 7 jours, 30 jours, ou jusqu'à suppression."
               ],
               [
-                "Stockage du modèle<br><span class=\"docs-tab\">Système</span>",
-                "Supprime du disque le modèle de transcription sélectionné, une fois téléchargé et déchargé."
+                "Supprimer le modèle téléchargé<br><span class=\"docs-tab\">Transcription</span>",
+                "Supprime du disque le modèle de transcription sélectionné. Un modèle chargé est d'abord déchargé ; indisponible pendant un enregistrement. Tant que ce modèle reste sélectionné, Soufflé le télécharge à nouveau au prochain lancement."
               ],
               [
                 "Vérification des mises à jour<br><span class=\"docs-tab\">Système</span>",
@@ -978,7 +978,7 @@
             "p": "Dans les deux cas vos données restent. Pour les retirer aussi, quittez Soufflé et supprimez <code>~/Library/Application&nbsp;Support/com.souffle.desktop/</code> : réunions, dictées, audio enregistré et modèles y sont tous."
           },
           {
-            "p": "Pour récupérer du disque sans désinstaller, sélectionnez un modèle dont vous ne vous servez plus et supprimez-le sous Paramètres → Système → Stockage du modèle. Il doit être téléchargé et déchargé."
+            "p": "Pour récupérer du disque sans désinstaller, sélectionnez un modèle dont vous ne vous servez plus et supprimez-le sous Paramètres → Transcription → Supprimer le modèle téléchargé, puis sélectionnez le modèle à garder : un modèle supprimé qui reste sélectionné est téléchargé à nouveau au prochain lancement."
           }
         ]
       },
