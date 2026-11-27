@@ -494,7 +494,7 @@
               ],
               [
                 "Accessibilité",
-                "Insère le texte dans l'app que vous utilisiez, relit vos corrections quand « apprendre de mes corrections » est actif, et installe le tap d'événements natif qui permet d'assigner un raccourci de dictée à une seule touche (un modificateur seul, ou F5–F12)."
+                "Insère le texte dans l'app que vous utilisiez, relit vos corrections après un collage quand « Apprentissage depuis les corrections » est actif, et installe le tap d'événements natif qui permet d'assigner un raccourci de dictée à une seule touche (un modificateur seul, ou F5–F12)."
               ],
               [
                 "Calendrier",
@@ -534,7 +534,7 @@
             "p": "Les apps qui refusent un collage synthétique (terminaux, champs sécurisés) peuvent recevoir des frappes simulées à la place. Quand le collage automatique est actif, Paramètres → Interface → Avancé propose trois méthodes de collage : le presse-papiers avec ⌘V, la frappe simulée, ou une écriture directe dans le champ focalisé via l'Accessibilité."
           },
           {
-            "p": "Deux passages tournent à la sortie, et chacun se désactive. Le <strong>polish de la dictée</strong>, actif par défaut quand un fournisseur est disponible, fait passer la transcription brute dans un LLM local, avec un gabarit de prompt que vous pouvez modifier (nettoyage, courriel professionnel, liste à puces, retrait des hésitations) ; il demande Apple Intelligence ou Ollama. L'<strong>apprentissage des corrections</strong>, actif par défaut, surveille le champ juste après l'insertion : corrigez un nom mal entendu une fois à la main, et Soufflé garde cette orthographe pour la suite, dans le dictionnaire personnalisé sous Paramètres → Transcription."
+            "p": "Deux passages tournent à la sortie, et chacun se désactive. Le <strong>polish de la dictée</strong>, actif par défaut quand un fournisseur est disponible, fait passer la transcription brute dans un LLM local, avec un gabarit de prompt que vous pouvez modifier (nettoyage, courriel professionnel, liste à puces, retrait des hésitations) ; il demande Apple Intelligence ou Ollama. L'<strong>apprentissage depuis les corrections</strong>, réglé sur Automatique par défaut, surveille le champ juste après un collage : corrigez à la main un nom mal entendu, et Soufflé garde cette orthographe pour la suite, dans le dictionnaire personnalisé sous Paramètres → Transcription. Il faut que le collage automatique soit activé et que le collage réussisse. Le mode Suggestions demande avant d'ajouter, et propose aussi des corrections pendant une réunion."
           },
           {
             "p": "Les <strong>extraits vocaux</strong> vivent sous Paramètres → Transcription : dites une phrase déclencheur en début de dictée et Soufflé colle l'expansion à la place, sans tenir compte de la casse ni des accents, et sans polish IA sur cette prise. Le menu de la barre des menus propose aussi <em>Copier la dernière transcription</em> quand vous en avez besoin, et <em>Pause raccourci (1 h)</em> quand la touche doit servir à autre chose."
@@ -595,7 +595,7 @@
             "p": "Le cycle de vie est pensé pour ne rien demander : l'app vous notifie au début d'une réunion du calendrier, et les événements du jour ont un bouton Démarrer sur l'accueil. Elle détecte que la réunion semble terminée et s'arrête d'elle-même après vous avoir prévenu, et récupère ou sauve la session si le moteur cale ou si le micro disparaît. Quand le Mac se met en veille, l'enregistrement est fermé proprement, et Soufflé propose de le reprendre au réveil. Une réunion arrêtée peut aussi être reprise à la main avec <em>Reprendre l'enregistrement</em>, qui ajoute une session à la même réunion. Si un micro ne répond plus, un bandeau le signale et propose <em>Redémarrer Soufflé</em>."
           },
           {
-            "p": "Une réunion s'arrête seule après 10 minutes sans parole, avec un garde-fou à 4 heures derrière. Un interrupteur dans Paramètres → Audio désactive les deux, à côté du micro que Soufflé doit privilégier."
+            "p": "Après 10 minutes sans parole, une réunion vous prévient puis s'arrête 2 minutes plus tard sauf annulation, avec un garde-fou à 4 heures derrière. Un interrupteur dans Paramètres → Audio désactive les deux, à côté du micro que Soufflé doit privilégier."
           },
           {
             "p": "L'enregistrement audio est inactif par défaut. Activez-le dans Paramètres → Système → Données et le son de la réunion est conservé en fichiers Opus compacts, pendant 7 jours, 30 jours ou jusqu'à ce que vous les effaciez, rejouables en cliquant n'importe quelle ligne de la transcription. Avec l'audio système, le fichier est en stéréo, vous à gauche et les autres à droite, pour environ 1,5 fois le disque d'un fichier mono."
@@ -622,7 +622,7 @@
             "p": "Le modèle local d'Apple Intelligence dispose d'une <a href=\"https://developer.apple.com/documentation/foundationmodels/managing-the-context-window\">fenêtre de 4 096 tokens par session</a>, partagée entre les instructions, l'entrée et la réponse. On ne peut donc pas lui confier une longue transcription entière en une seule passe. Les modèles autour de 7–8B accessibles sur davantage de Mac ont des fenêtres variables : le nombre de paramètres ne fixe pas à lui seul le contexte. Même avec une grande fenêtre annoncée, la mémoire, le temps de calcul et la fidélité sur un long texte restent des contraintes. Soufflé utilise des étapes intermédiaires pour les longues sources, mais ce découpage peut lui aussi perdre de l'information."
           },
           {
-            "p": "<strong>Expérimentation LLMLingua-2.</strong> Le modèle Microsoft <code>llmlingua-2-bert-base-multilingual-cased-meetingbank</code> classe les mots pour retenir des fragments de la transcription originale. Il raccourcit l'entrée ; il ne produit pas lui-même un résumé rédigé et n'augmente pas la fenêtre physique du modèle de résumé. Le réglage par défaut conserve une cible de <strong>65 % du texte</strong>, soit environ un tiers de mots en moins. Des éléments protégés peuvent faire dépasser cette cible. Sous 65 %, l'interface affiche « Une valeur basse omet des mots. ». Une compaction peut néanmoins perdre des détails ou des relations : gardez la transcription comme référence."
+            "p": "<strong>Expérimentation LLMLingua-2.</strong> Le modèle Microsoft <code>llmlingua-2-bert-base-multilingual-cased-meetingbank</code> classe les mots pour retenir des fragments de la transcription originale. Il raccourcit l'entrée ; il ne produit pas lui-même un résumé rédigé et n'augmente pas la fenêtre physique du modèle de résumé. La cible est fixe : elle conserve <strong>65 % du texte</strong>, soit environ un tiers de mots en moins. Des éléments protégés peuvent faire dépasser cette cible. Un compact enregistré auparavant sous 65 % affiche « Une valeur basse omet des mots. » dans son aperçu jusqu'à sa régénération. Une compaction peut néanmoins perdre des détails ou des relations : gardez la transcription comme référence."
           },
           {
             "p": "Un seul interrupteur, <strong>compresser les longues transcriptions avant le résumé</strong>, réduit l'entrée des étapes intermédiaires et conserve le texte compact consultable à côté de la source. Il garde 65 % du texte, sans réglage. Les résumés courts utilisent le texte original et ne créent pas de version compacte. Vous pouvez aussi générer ou régénérer la version compacte depuis une réunion, sans lancer de résumé. Le premier téléchargement représente environ 713 Mo, puis les poids sont préparés localement en fp16 d'environ 355 Mo. Après installation, ce traitement est local et hors ligne. Modifier la source marque le compact comme obsolète. Paramètres → IA permet aussi de supprimer le modèle de compression, même si les résumés sont désactivés. Les compacts et les préférences sont conservés ; la suppression est refusée si le modèle est occupé."
@@ -758,7 +758,7 @@
               ],
               [
                 "Vérification des mises à jour<br><span class=\"docs-tab\">Système</span>",
-                "Demande une fois par jour à GitHub s'il existe une version plus récente. Se désactive dans À propos. Une mise à jour n'est téléchargée que si vous appuyez sur <em>Télécharger la mise à jour</em>, et s'installe avec <em>Installer et redémarrer</em>, qui vous demande d'abord d'arrêter une réunion en cours."
+                "Demande à GitHub, au lancement puis environ une fois par jour, s'il existe une version plus récente. Se désactive dans À propos. Une mise à jour n'est téléchargée que si vous appuyez sur <em>Télécharger la mise à jour</em>, et s'installe avec <em>Installer et redémarrer</em>, qui vous demande d'abord d'arrêter une réunion en cours."
               ]
             ]
           }
@@ -779,7 +779,7 @@
               ],
               [
                 "api.github.com",
-                "Une fois par jour, et chaque fois que vous appuyez sur <em>Vérifier les mises à jour</em>, demande s'il existe une version plus récente, et récupère les notes de version pour Nouveautés. N'envoie rien d'autre que la requête : aucun identifiant, aucun compte, aucune donnée d'usage. La vérification quotidienne se désactive dans Paramètres → Système → À propos."
+                "Au lancement, environ une fois par jour, et chaque fois que vous appuyez sur <em>Vérifier les mises à jour</em>, demande s'il existe une version plus récente, et récupère les notes de version pour Nouveautés. N'envoie rien d'autre que la requête : aucun identifiant, aucun compte, aucune donnée d'usage. Les vérifications automatiques se désactivent dans Paramètres → Système → À propos."
               ],
               [
                 "github.com",
@@ -811,7 +811,7 @@
               ],
               [
                 "<code>models/</code>",
-                "Les modèles de transcription téléchargés, classés par moteur et par backend. En supprimer un libère le disque ; il sera retéléchargé si vous resélectionnez ce modèle."
+                "Les modèles de transcription téléchargés, classés par moteur et par backend. En supprimer un libère le disque ; il sera retéléchargé si vous resélectionnez ce modèle, ou au prochain lancement s'il reste sélectionné."
               ],
               [
                 "<code>recordings/</code>",
@@ -845,28 +845,128 @@
         "h": "Serveur MCP",
         "blocks": [
           {
-            "p": "Le sidecar <code>souffle-mcp</code>, fourni avec l'app, permet à Claude Desktop, Claude Code ou n'importe quel client MCP de chercher et lire vos transcriptions. En lecture seule, entièrement local, et fonctionne même quand l'app est fermée."
+            "p": "Le sidecar <code>souffle-mcp</code>, fourni avec l'app, permet à Claude Desktop, Claude Code ou n'importe quel client MCP de chercher et lire vos réunions et votre historique de dictées. Il communique par stdio, ouvre la base en lecture seule et fonctionne même quand l'app est fermée. Le serveur n'ouvre lui-même aucune connexion réseau, mais le client que vous connectez peut envoyer ce qu'il lit à son propre fournisseur d'IA, selon les réglages de confidentialité de ce client. Il ne prend aucun argument. Paramètres → Système → Serveur MCP affiche les deux extraits de configuration avec le chemin de votre installation."
           },
           {
-            "p": "Pour Claude Code :"
+            "p": "<strong>Claude Code.</strong> La première commande enregistre le serveur pour vous, dans le projet courant seulement. La seconde l'enregistre pour tous vos projets. Vérifiez avec <code>claude mcp list</code> ou <code>/mcp</code> ; retirez-le avec <code>claude mcp remove souffle</code>."
           },
           {
-            "code": "claude mcp add souffle \"/Applications/Soufflé.app/Contents/MacOS/souffle-mcp\""
+            "code": "claude mcp add souffle '/Applications/Soufflé.app/Contents/MacOS/souffle-mcp'\n\n# Ou, pour tous vos projets\nclaude mcp add --scope user souffle -- '/Applications/Soufflé.app/Contents/MacOS/souffle-mcp'"
           },
           {
-            "p": "Pour Claude Desktop, dans <code>claude_desktop_config.json</code> :"
+            "p": "<strong>Claude Desktop.</strong> Dans le menu Claude de la barre des menus de macOS, ouvrez Settings…, puis Developer → Edit Config. Le fichier est <code>~/Library/Application Support/Claude/claude_desktop_config.json</code>. Ajoutez l'entrée ci-dessous ; si le fichier contient déjà un objet <code>mcpServers</code>, n'y ajoutez que <code>souffle</code>. Quittez ensuite complètement Claude Desktop et rouvrez-le. Si le serveur n'apparaît pas, consultez <code>mcp.log</code> et <code>mcp-server-souffle.log</code> dans <code>~/Library/Logs/Claude</code>."
           },
           {
             "code": "{\n  \"mcpServers\": {\n    \"souffle\": {\n      \"command\": \"/Applications/Soufflé.app/Contents/MacOS/souffle-mcp\"\n    }\n  }\n}"
           },
           {
-            "p": "Cinq outils sont exposés : <code>list_meetings</code>, <code>get_meeting</code>, <code>search_meetings</code>, <code>get_latest_meeting</code> et <code>list_dictations</code>. Paramètres → Système → Données reprend les mêmes extraits avec le chemin déjà rempli."
+            "p": "<strong>Base de données.</strong> Le serveur lit <code>~/Library/Application Support/com.souffle.desktop/souffle.db</code> ; le sidecar du bundle Soufflé Nightly lit la base de Nightly. La variable d'environnement <code>SOUFFLE_DB</code> remplace les deux : placez-la dans un objet <code>env</code> à côté de <code>command</code> pour Claude Desktop, ou avec Claude Code :"
           },
           {
-            "p": "Le serveur MCP de Soufflé est local et en lecture seule. Le client que vous y connectez peut ensuite utiliser les transcriptions avec son propre fournisseur d'IA : ses réglages de confidentialité s'appliquent à cette utilisation."
+            "code": "claude mcp add --env SOUFFLE_DB=/path/to/souffle.db --transport stdio souffle -- '/Applications/Soufflé.app/Contents/MacOS/souffle-mcp'"
           },
           {
-            "p": "Utilisez <code>include: [\"compact\"]</code> avec <code>get_meeting</code> ou <code>get_latest_meeting</code> pour une première lecture économique avec perte. La réponse indique la fraîcheur, la provenance du modèle et une estimation des jetons ; <code>list_meetings</code> expose <code>has_compact</code>. Utilisez la transcription pour les citations exactes."
+            "p": "<strong>Outils.</strong> Il y en a cinq. <code>limit</code> vaut 20 par défaut et reste compris entre 1 et 200. Il n'y a pas de pagination."
+          },
+          {
+            "table": [
+              [
+                "<code>list_meetings</code>",
+                "Les réunions, de la plus récente à la plus ancienne. Paramètres, tous facultatifs : <code>query</code>, <code>from</code>, <code>to</code>, <code>limit</code>. Renvoie <code>meetings</code>, chacune avec <code>id</code>, <code>title</code>, <code>started_at</code>, <code>ended_at</code>, <code>is_ongoing</code>, <code>duration_seconds</code>, <code>participants</code> (noms), <code>has_summary</code>, <code>has_compact</code> et <code>has_notes</code>."
+              ],
+              [
+                "<code>get_meeting</code>",
+                "Une réunion. <code>id</code> est obligatoire, <code>include</code> facultatif. Renvoie les champs de la réunion et les sections demandées, décrites plus bas."
+              ],
+              [
+                "<code>search_meetings</code>",
+                "Recherche plein texte dans les seules transcriptions de réunion. <code>query</code> est obligatoire, <code>limit</code> facultatif ; une requête vide ne renvoie rien. Renvoie <code>results</code>, classés par pertinence, chacun avec <code>id</code>, <code>title</code>, <code>started_at</code> et un <code>snippet</code> où les correspondances sont entourées de <code>**</code> et les coupures marquées <code>...</code>."
+              ],
+              [
+                "<code>get_latest_meeting</code>",
+                "La réunion commencée le plus récemment. Accepte <code>include</code>, facultatif, et renvoie les mêmes champs que <code>get_meeting</code>."
+              ],
+              [
+                "<code>list_dictations</code>",
+                "L'historique des dictées, de la plus récente à la plus ancienne. <code>limit</code> facultatif. Renvoie <code>entries</code> avec <code>id</code>, <code>text</code> et <code>timestamp</code>. Ni recherche ni filtre de date."
+              ]
+            ]
+          },
+          {
+            "p": "<strong>Paramètres de recherche et de date.</strong>"
+          },
+          {
+            "table": [
+              [
+                "<code>query</code>",
+                "<a href=\"https://www.sqlite.org/fts5.html#full_text_query_syntax\">Syntaxe FTS5</a>, appliquée au seul texte des transcriptions : titres, notes, résumés et dictées ne sont pas fouillés. Mettez entre guillemets une expression ou un mot à trait d'union, par exemple <code>\"follow-up\"</code>. Dans <code>list_meetings</code>, une valeur vide ne filtre rien."
+              ],
+              [
+                "<code>from</code>",
+                "Début au plus tôt, inclus : date ou date-heure ISO 8601, lue en UTC sans décalage indiqué."
+              ],
+              [
+                "<code>to</code>",
+                "Début au plus tard, inclus. Une date seule désigne minuit au début de ce jour : les réunions de la journée sont donc écartées, indiquez le lendemain. Une date illisible ne correspond à rien."
+              ],
+              [
+                "<code>include</code>",
+                "Parmi <code>transcript</code>, <code>summary</code>, <code>notes</code>, <code>metadata</code>, <code>compact</code>. Absent ou vide : tout. Une valeur inconnue est refusée."
+              ]
+            ]
+          },
+          {
+            "p": "<strong>Sections d'une réunion.</strong> <code>get_meeting</code> renvoie toujours <code>id</code>, <code>title</code>, <code>started_at</code>, <code>ended_at</code>, <code>is_ongoing</code> et <code>duration_seconds</code>. Les champs ci-dessous valent <code>null</code> s'ils ne sont pas demandés ou n'existent pas. Prenez le résumé pour une vue d'ensemble, le compact pour une première lecture économique mais avec perte (vérifiez <code>is_stale</code>), et la transcription pour les citations exactes. <code>list_meetings</code> expose <code>has_compact</code>."
+          },
+          {
+            "table": [
+              [
+                "<code>transcript</code>",
+                "La transcription modifiée si vous l'avez éditée, sinon des paragraphes préfixés par <code>Me:</code> ou <code>Them:</code> quand la voie est connue, sans horodatage."
+              ],
+              [
+                "<code>summary</code>, <code>structured_summary</code>",
+                "Tous deux sélectionnés par <code>summary</code>. La version structurée contient <code>decisions</code>, <code>action_items</code> (<code>text</code>, <code>owner</code>) et <code>open_questions</code>."
+              ],
+              [
+                "<code>notes</code>",
+                "Vos notes de réunion."
+              ],
+              [
+                "<code>metadata</code>",
+                "<code>calendar_event_id</code>, <code>participants</code> (<code>name</code>, <code>email</code>, <code>is_organizer</code>), <code>summary_model</code>, <code>summary_generated_at</code>, <code>segment_count</code>."
+              ],
+              [
+                "<code>compact_transcript</code>",
+                "Sélectionné par <code>compact</code> : <code>text</code>, <code>model</code>, <code>rate</code> (part du texte qu'il visait à garder), <code>generated_at</code>, <code>is_stale</code>, <code>source_sha256</code>, <code>approx_tokens</code> (une estimation)."
+              ]
+            ]
+          },
+          {
+            "p": "<strong>Ressource réunion.</strong> Chaque réunion est aussi une ressource, <code>souffle://meeting/{id}</code>. La liste renvoie les 200 réunions les plus récentes, nommées par leur titre, sans page suivante ; tout identifiant de réunion peut être lu. La lecture renvoie du Markdown : titre, heure de début, résumé, décisions, actions, questions ouvertes (chaque section seulement si elle existe) et transcription. Les notes et le compact n'y figurent pas : utilisez <code>get_meeting</code>. Aucun modèle de ressource n'est annoncé."
+          },
+          {
+            "p": "<strong>Les réunions en cours</strong> sont lisibles en direct : <code>ended_at</code> vaut <code>null</code> et <code>is_ongoing</code> <code>true</code>. Les segments sont enregistrés par lots : les derniers (jusqu'à environ 15) peuvent manquer, et le texte tout juste enregistré n'est en général pas cherchable avant la fin de la session."
+          },
+          {
+            "table": [
+              [
+                "Le serveur s'arrête au démarrage : <em>Souffle database not found</em>",
+                "Lancez Soufflé au moins une fois, ou corrigez <code>SOUFFLE_DB</code>."
+              ],
+              [
+                "Chaque appel signale une version de schéma plus récente",
+                "Un Soufflé plus récent a écrit la base. Mettez l'app à jour et redémarrez le client MCP."
+              ],
+              [
+                "<em>Query failed</em> lors d'une recherche",
+                "Syntaxe FTS5 invalide : mettez les termes entre guillemets."
+              ],
+              [
+                "<em>Meeting not found</em>, <em>No meetings found</em>",
+                "Identifiant inconnu, ou aucune réunion enregistrée."
+              ]
+            ]
           }
         ]
       },
@@ -875,44 +975,124 @@
         "h": "Ligne de commande",
         "blocks": [
           {
-            "p": "Le binaire <code>souffle</code> transcrit un fichier sans lancer l'app. Il est livré à l'intérieur du bundle et n'est pas ajouté à votre <code>PATH</code> : appelez-le par son chemin complet, ou faites-en un lien symbolique une bonne fois."
+            "p": "Le binaire <code>souffle</code> peut transcrire un fichier, mesurer les performances d'un modèle, et résumer ou compacter une réunion enregistrée sans ouvrir l'app. Il est livré à l'intérieur du bundle et n'est pas ajouté à votre <code>PATH</code> : appelez-le par son chemin complet, ou faites-en un lien symbolique une bonne fois."
           },
           {
-            "code": "# Appel direct\n\"/Applications/Soufflé.app/Contents/MacOS/souffle\" --list-engines\n\n# Ou en faire une commande `souffle`\nln -s \"/Applications/Soufflé.app/Contents/MacOS/souffle\" /usr/local/bin/souffle\n\n# Transcrire un fichier, JSON sur stdout\nsouffle --transcribe-file audio.wav --json"
+            "code": "# Appel direct\n\"/Applications/Soufflé.app/Contents/MacOS/souffle\" --list-engines\n\n# Ou en faire une commande `souffle`\nln -s \"/Applications/Soufflé.app/Contents/MacOS/souffle\" /usr/local/bin/souffle"
+          },
+          {
+            "p": "Il ne s'exécute sans interface que si la ligne de commande contient l'une des six actions ci-dessous. Tout le reste <strong>ouvre l'app</strong>, y compris <code>souffle --help</code> seul ou une option inconnue isolée. Pour afficher l'aide, ajoutez une action : <code>souffle --list-engines --help</code>. Il n'y a ni sous-commandes ni <code>--version</code>."
           },
           {
             "table": [
               [
-                "<code>--transcribe-file &lt;WAV&gt;</code>",
-                "Transcrit un fichier WAV puis quitte."
-              ],
-              [
-                "<code>--json</code>",
-                "Sort un seul objet JSON exploitable par une machine, au lieu du texte."
-              ],
-              [
-                "<code>--repeat N</code>",
-                "Rejoue le même fichier N fois. Le modèle n'est chargé qu'une fois : ça sert donc aussi de banc d'essai pour comparer les modèles sur votre machine."
-              ],
-              [
                 "<code>--list-engines</code>",
-                "Liste les moteurs disponibles."
+                "Liste les identifiants et noms des moteurs."
               ],
               [
                 "<code>--list-models</code>",
                 "Liste chaque combinaison moteur / modèle / backend et son état d'installation."
               ],
               [
-                "<code>--engine, --model, --backend</code>",
-                "Remplacent, le temps de l'appel, ce qui est enregistré dans les Paramètres."
+                "<code>--transcribe-file &lt;WAV&gt;</code>",
+                "Transcrit un fichier WAV et affiche le texte."
+              ],
+              [
+                "<code>--summarize-meeting &lt;ID&gt;</code>",
+                "Résume une réunion enregistrée, enregistre le résumé avec elle et affiche la réunion."
+              ],
+              [
+                "<code>--compact-meeting &lt;ID&gt;</code>",
+                "Enregistre et affiche la version compacte d'une réunion arrêtée (expérimental)."
+              ],
+              [
+                "<code>--aec-replay &lt;WAV&gt;</code>",
+                "Outil de développement pour l'annulation d'écho. Rejoue un enregistrement stéréo float32 48 kHz sans perte (micro à gauche, audio système à droite) et affiche toujours des mesures en JSON. L'app n'écrit un tel fichier que lancée avec <code>SOUFFLE_AEC_DIAGNOSTIC=1</code>, conservation audio des réunions activée."
               ]
             ]
           },
           {
-            "p": "La commande lit la même base et les mêmes modèles téléchargés que l'app : ce qui est déjà installé est réutilisé."
+            "p": "<code>--compact-meeting</code> et <code>--summarize-meeting</code> ne se combinent ni entre eux ni avec une autre action. <code>--aec-replay</code> ne se combine pas avec <code>--transcribe-file</code> ni avec une liste. Si les deux listes sont demandées, <code>--list-engines</code> l'emporte, et une liste passe avant <code>--transcribe-file</code>. Une option sans objet pour l'action est ignorée."
           },
           {
-            "code": "souffle --compact-meeting MEETING_ID --json\nsouffle --summarize-meeting MEETING_ID --summary-compression on --summary-model qwen2.5:7b --json\n# --database /path/to/fixture.db"
+            "p": "<strong>Transcription.</strong> Le WAV doit être mono, en PCM 16 bits ou flottant 32 bits ; toute fréquence est rééchantillonnée. Convertissez les autres sources au préalable, par exemple avec <code>ffmpeg -i input.m4a -ac 1 output.wav</code>. Le modèle vocal doit déjà être téléchargé. Le texte est la sortie du moteur, sans le dictionnaire ni le filtre d'hésitations de l'app."
+          },
+          {
+            "code": "souffle --list-models --json\nsouffle --transcribe-file audio.wav\nsouffle --transcribe-file audio.wav --json\nsouffle --transcribe-file audio.wav --engine whisper --repeat 5"
+          },
+          {
+            "table": [
+              [
+                "<code>--engine, --model, --backend</code>",
+                "Identifiants donnés par <code>--list-engines</code> et <code>--list-models</code>. Sans aucune de ces options, le modèle choisi dans l'app est utilisé (le modèle par défaut, avec un avertissement, si les réglages sont illisibles). Dès que l'une est donnée, le choix enregistré est ignoré : le moteur vaut <code>kyutai</code> par défaut, le modèle le premier du moteur, le backend celui recommandé."
+              ],
+              [
+                "<code>--repeat N</code>",
+                "Transcrit le fichier N fois (1 par défaut, 0 vaut 1). Le modèle n'est chargé qu'une fois et l'état du moteur est réinitialisé entre les passes : c'est un banc d'essai."
+              ],
+              [
+                "<code>--json</code>",
+                "Sort du JSON au lieu du texte et ne journalise que les avertissements."
+              ]
+            ]
+          },
+          {
+            "p": "La transcription lit toujours la base de l'app : <code>--database</code> et <code>SOUFFLE_DB</code> ne s'y appliquent pas. Avec <code>--json</code>, elle écrit un seul objet sur une ligne (replié ici). <code>profile_source</code> vaut <code>flags</code>, <code>persisted_settings</code> ou <code>default</code> ; <code>rtf</code> est la durée audio divisée par le temps de traitement, donc plus il est grand, plus c'est rapide ; avec plusieurs passes, <code>text</code> vient de la dernière."
+          },
+          {
+            "code": "{\"text\":\"…\",\"audio_seconds\":12.5,\"engine\":\"…\",\"model\":\"…\",\"backend\":\"…\",\n \"profile_source\":\"persisted_settings\",\"runs\":[{\"wall_ms\":900.0,\"rtf\":13.9}]}"
+          },
+          {
+            "p": "<strong>Actions sur une réunion.</strong> Les identifiants viennent de l'outil MCP <code>list_meetings</code>. Les deux actions sont expérimentales et fonctionnent que les résumés de réunion soient activés ou non dans l'app. Les remplacements valent pour un seul appel et ne sont pas enregistrés."
+          },
+          {
+            "code": "souffle --summarize-meeting MEETING_ID\nsouffle --summarize-meeting MEETING_ID --summary-provider ollama --json\nsouffle --summarize-meeting MEETING_ID --summary-model qwen2.5:7b --summary-compression on\nsouffle --compact-meeting MEETING_ID --json\nsouffle --summarize-meeting MEETING_ID --database /path/to/copy.db"
+          },
+          {
+            "table": [
+              [
+                "<code>--summary-provider auto|apple-intelligence|ollama</code>",
+                "Choisit le modèle quand <code>--summary-model</code> est absent. <code>auto</code> préfère Apple Intelligence, puis Ollama. Pour Ollama, le modèle enregistré s'il est disponible, sinon le premier de la liste. Par défaut, le choix enregistré."
+              ],
+              [
+                "<code>--summary-model &lt;ID&gt;</code>",
+                "<code>apple-intelligence</code> ou un nom de modèle Ollama ; l'identifiant détermine alors le fournisseur."
+              ],
+              [
+                "<code>--summary-compression on|off</code>",
+                "Remplace l'interrupteur qui compresse les longues transcriptions avant le résumé. Il ne joue que si la transcription demande des étapes intermédiaires. Un résumé ne télécharge jamais le modèle de compression : sans compact à jour ni modèle installé, c'est l'original qui est résumé."
+              ],
+              [
+                "<code>--database &lt;PATH&gt;</code>",
+                "Actions sur une réunion seulement. Sans elle, <code>SOUFFLE_DB</code> est utilisé, puis la base de l'app. Les réglages, comme l'adresse d'Ollama et le gabarit de résumé par défaut, viennent de cette base. Elle est ouverte en écriture : un fichier absent est créé et un plus ancien est migré, utilisez donc une copie si elle ne doit pas changer."
+              ],
+              [
+                "<code>--json</code>",
+                "Écrit le résultat sur une ligne et ne journalise que les avertissements."
+              ]
+            ]
+          },
+          {
+            "p": "<code>--summarize-meeting</code> affiche la réunion enregistrée en JSON (indenté sans <code>--json</code>). <code>--compact-meeting</code> demande une réunion arrêtée. Il renvoie le compact à jour s'il existe, sinon il le génère, en téléchargeant d'abord le modèle de compression s'il manque (environ 713 Mo). Il affiche le texte compact, ou avec <code>--json</code> un objet avec <code>text</code>, <code>model</code>, <code>rate</code>, <code>generated_at</code>, <code>is_stale</code>, <code>source_sha256</code> et <code>approx_tokens</code>."
+          },
+          {
+            "p": "<strong>Journaux et codes de sortie.</strong> Les résultats vont sur stdout, les journaux sur stderr. <code>SOUFFLE_LOG</code> règle le filtre des journaux ; par défaut <code>souffle=info,warn</code>, ou <code>souffle=warn,warn</code> avec <code>--json</code>."
+          },
+          {
+            "table": [
+              [
+                "<code>0</code>",
+                "Réussite, ou aide affichée."
+              ],
+              [
+                "<code>1</code>",
+                "Arguments invalides, problème de préparation (profil inconnu, modèle non téléchargé, WAV illisible, échec de chargement), ou échec d'une action sur une réunion ou du rejeu."
+              ],
+              [
+                "<code>2</code>",
+                "La transcription elle-même a échoué."
+              ]
+            ]
           }
         ]
       },
@@ -1024,7 +1204,7 @@
     "quickStart": "Pour commencer",
     "nextSteps": "Pour aller plus loin",
     "updated": "Mis à jour le",
-    "updatedDate": "6 novembre 2026",
+    "updatedDate": "26 novembre 2026",
     "readGuide": "Guide :"
   },
   "privacy": {

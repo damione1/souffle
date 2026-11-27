@@ -3,7 +3,7 @@
 Meeting summarization and compaction are experimental, **off by default**, and
 enabled with **Settings → AI → Summarization** (French: **Résumés de réunion**).
 `AppSettings.meeting_summaries_enabled` persists the opt-in. It gates the summary
-provider/model/template settings, compaction settings, and meeting generation
+provider/model/template settings, the compaction switch, and meeting generation
 UI. The shared AI provider remains configurable for independently enabled
 dictation polish. Disabling the feature preserves its subordinate preferences,
 saved summaries and compacts, and cancels a pending compression-model download.
@@ -52,8 +52,8 @@ even if the later summary fails.
 
 The compact is **lossy extraction**, not a summary or a verbatim citation source.
 The target is fixed: every new compact retains **65%** of the text. A compact
-saved earlier at another rate is regenerated on its next use; until then its
-preview shows “A low value omits words” when its own rate is below 65%.
+saved earlier at another rate is regenerated on its next use; until then, if its
+own rate is below 65%, its preview shows “A low value omits words.”
 The retained percentage is a target: protected participant names, numbers and
 French negations may increase it. Edited transcript text takes precedence over
 segments, including plain edited prose. Original timestamp/speaker prefixes and
@@ -127,13 +127,20 @@ souffle --summarize-meeting MEETING_ID --summary-compression on \
 # Use --database /path/to/fixture.db (or SOUFFLE_DB) for an alternate database.
 ```
 
-CLI overrides apply to this invocation, not saved preferences. `--model` still
-selects the transcription model; summaries use `--summary-model`.
+CLI overrides apply to this invocation, not saved preferences.
+`--summary-compression on|off` overrides the compression switch. A summary run
+never downloads the compression model; `--compact-meeting` does when it needs
+it, and it requires a stopped meeting. `--summary-provider` only picks the model
+when `--summary-model` is absent. `--model` still selects the transcription
+model; summaries use `--summary-model`. See the full
+[command line reference](../../README.md#command-line) and
+[MCP reference](../../README.md#mcp-server).
 
 MCP `get_meeting` and `get_latest_meeting` accept `include: ["compact"]`.
 Omitted/empty include returns all sections. `compact_transcript` is null when
-absent and includes `is_stale`, `source_sha256`, provenance and `approx_tokens`
-when present. `list_meetings` exposes `has_compact` without reading compact text.
+absent or not requested. When present it has `text`, `model`, `rate`,
+`generated_at`, `is_stale`, `source_sha256` and `approx_tokens` (an estimate).
+`list_meetings` exposes `has_compact` without reading compact text.
 Use summary for an overview, compact for an economical first pass, and transcript
 for exact citations. The sidecar remains read-only and can read genuine pre-v18
 databases without referencing missing compact columns.
