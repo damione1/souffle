@@ -32,8 +32,6 @@ import { MicrophoneRow } from "components/settings/microphone_section.slint";
 import { DictionaryRow, DictionarySuggestionRow, DictionaryLearningOption } from "components/settings/dictionary_section.slint";
 import { SnippetRow } from "components/settings/snippets_section.slint";
 import { AppBranchRow } from "components/settings/app_branches_section.slint";
-import { AppBranchFallback, AppBranchTestPhase } from "types.slint";
-export { AppBranchFallback, AppBranchTestPhase }
 import { TimelineDayGroup, UpcomingEvent } from "components/timeline_section.slint";
 import { TranscriptBlock, TranscriptLayout } from "components/transcript_section.slint";
 import { TranscriptWord } from "components/transcript_words.slint";
@@ -315,13 +313,6 @@ export component MainWindow inherits Window {
     in-out property <string> settings-active-dictation-polish-prompt;
     in property <[AppBranchRow]> settings-app-branch-rules;
     in property <[string]> settings-app-branch-target-labels;
-    in property <AppBranchTestPhase> settings-app-branch-test-phase;
-    in property <int> settings-app-branch-test-delay-seconds;
-    in property <bool> settings-app-branch-preview-matched;
-    in property <AppBranchFallback> settings-app-branch-preview-fallback;
-    in property <string> settings-app-branch-preview-app;
-    in property <string> settings-app-branch-preview-pattern;
-    in property <string> settings-app-branch-preview-template;
     in property <[string]> settings-summary-template-ids;
     in property <[string]> settings-summary-template-labels;
     in property <string> settings-default-summary-template-id;
@@ -466,7 +457,6 @@ export component MainWindow inherits Window {
     callback settings-app-branch-pattern-changed(string, string);
     callback settings-app-branch-target-changed(string, int);
     callback settings-app-branch-moved(string, int);
-    callback settings-app-branch-test-requested();
     callback settings-summary-template-default-changed(string);
     callback settings-summary-template-edit-target-changed(string);
     callback settings-summary-template-delete-requested();
@@ -956,13 +946,6 @@ export component MainWindow inherits Window {
                 active-dictation-polish-prompt <=> root.settings-active-dictation-polish-prompt;
                 app-branch-rules: root.settings-app-branch-rules;
                 app-branch-target-labels: root.settings-app-branch-target-labels;
-                app-branch-test-phase: root.settings-app-branch-test-phase;
-                app-branch-test-delay-seconds: root.settings-app-branch-test-delay-seconds;
-                app-branch-preview-matched: root.settings-app-branch-preview-matched;
-                app-branch-preview-fallback: root.settings-app-branch-preview-fallback;
-                app-branch-preview-app: root.settings-app-branch-preview-app;
-                app-branch-preview-pattern: root.settings-app-branch-preview-pattern;
-                app-branch-preview-template: root.settings-app-branch-preview-template;
                 summary-template-ids: root.settings-summary-template-ids;
                 summary-template-labels: root.settings-summary-template-labels;
                 default-summary-template-id: root.settings-default-summary-template-id;
@@ -1066,7 +1049,6 @@ export component MainWindow inherits Window {
                 data-reveal-requested => { root.settings-data-reveal-requested(); }
                 mcp-copy-desktop-snippet-requested => { root.settings-mcp-copy-desktop-snippet-requested(); }
                 mcp-copy-code-command-requested => { root.settings-mcp-copy-code-command-requested(); }
-                mcp-test-requested => { root.settings-mcp-test-requested(); }
                 update-action-requested => { root.settings-update-action-requested(); }
                 auto-update-check-changed(value) => { root.settings-auto-update-check-changed(value); }
                 summary-provider-changed(value) => { root.settings-summary-provider-changed(value); }
@@ -1084,7 +1066,6 @@ export component MainWindow inherits Window {
                 app-branch-pattern-changed(id, value) => { root.settings-app-branch-pattern-changed(id, value); }
                 app-branch-target-changed(id, target) => { root.settings-app-branch-target-changed(id, target); }
                 app-branch-moved(id, index) => { root.settings-app-branch-moved(id, index); }
-                app-branch-test-requested => { root.settings-app-branch-test-requested(); }
                 summary-template-default-changed(value) => { root.settings-summary-template-default-changed(value); }
                 summary-template-edit-target-changed(value) => { root.settings-summary-template-edit-target-changed(value); }
                 summary-template-delete-requested => { root.settings-summary-template-delete-requested(); }

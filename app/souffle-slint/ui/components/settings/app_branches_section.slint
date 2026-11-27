@@ -1,7 +1,5 @@
-import { FieldSetAppearance, FieldRowAppearance, AlertActions, AlertSeverity, ButtonIntent, ChoiceLabelPosition, ControlSize, ControlWidth, KitAlert, KitButton, KitFieldRow, KitFieldSeparator, KitFieldSet, KitSwitch, KitText, KitTextField, KitThemeContext, Ownership, TypographyRole } from "@kit";
+import { FieldSetAppearance, FieldRowAppearance, ButtonIntent, ChoiceLabelPosition, ControlSize, ControlWidth, KitButton, KitFieldRow, KitFieldSeparator, KitFieldSet, KitSwitch, KitTextField, KitThemeContext, Ownership } from "@kit";
 import { Theme } from "../../theme.slint";
-import { AppText, Typography } from "@typography";
-import { AppBranchFallback, AppBranchTestPhase } from "../../types.slint";
 import { CatalogPicker } from "../catalog_picker.slint";
 
 export struct AppBranchRow {
@@ -15,13 +13,6 @@ export struct AppBranchRow {
 export component AppBranchesSection inherits VerticalLayout {
     in property <[AppBranchRow]> rules;
     in property <[string]> target-labels;
-    in property <AppBranchTestPhase> test-phase;
-    in property <int> test-delay-seconds;
-    in property <bool> preview-matched;
-    in property <AppBranchFallback> preview-fallback;
-    in property <string> preview-app;
-    in property <string> preview-pattern;
-    in property <string> preview-template;
     private property <int> new-target-index: 0;
     private property <string> new-pattern;
 
@@ -31,7 +22,6 @@ export component AppBranchesSection inherits VerticalLayout {
     callback rule-pattern-changed(string, string);
     callback rule-target-changed(string, int);
     callback rule-moved(string, int);
-    callback test-requested();
 
     spacing: 20px;
     alignment: start;
@@ -147,61 +137,6 @@ export component AppBranchesSection inherits VerticalLayout {
                         intent: ButtonIntent.quiet;
                         text: @tr("Supprimer");
                         activated => { root.rule-deleted(rule.id); }
-                    }
-                }
-            }
-        }
-
-        KitFieldSeparator { }
-        VerticalLayout {
-            padding-left: 20px;
-            padding-right: 20px;
-            padding-top: 14px;
-            padding-bottom: 14px;
-            spacing: 12px;
-            HorizontalLayout {
-                alignment: start;
-                KitButton {
-                    modal-layer: 0;
-                    control-size: ControlSize.compact;
-                    text: @tr("Tester l'application actuelle");
-                    activated => { root.test-requested(); }
-                }
-            }
-            if root.test-phase == AppBranchTestPhase.waiting: KitAlert { bordered: false; corner-radius: 12px; inset: 12px; actions-placement: AlertActions.trailing;
-                severity: AlertSeverity.information;
-                message: @tr("Passez à l'application à tester. Capture dans {} secondes.", root.test-delay-seconds);
-            }
-            if root.test-phase == AppBranchTestPhase.resolving: KitAlert { bordered: false; corner-radius: 12px; inset: 12px; actions-placement: AlertActions.trailing;
-                severity: AlertSeverity.information;
-                message: @tr("Recherche de la règle pour l'application capturée…");
-            }
-            if root.test-phase == AppBranchTestPhase.result: VerticalLayout {
-                spacing: 8px;
-                KitAlert { bordered: false; corner-radius: 12px; inset: 12px; actions-placement: AlertActions.trailing;
-                    severity: AlertSeverity.information;
-                    title: @tr("Application actuelle : {}", root.preview-app);
-                    message: root.preview-matched ? @tr("Règle gagnante : {}", root.preview-pattern)
-                        : root.preview-fallback == AppBranchFallback.polish-disabled ? @tr("Retouche désactivée : les règles sont sans effet.")
-                        : root.preview-fallback == AppBranchFallback.app-unavailable ? @tr("Application inconnue : modèle global.")
-                        : root.preview-fallback == AppBranchFallback.no-match ? @tr("Aucune règle active correspondante : modèle global.")
-                        : root.preview-fallback == AppBranchFallback.invalid-pattern ? @tr("Motif vide ignoré : modèle global.")
-                        : @tr("Modèle de règle introuvable : modèle global.");
-                }
-                HorizontalLayout {
-                    spacing: 12px;
-                    KitText {
-                        text: @tr("Modèle résolu");
-                        role: TypographyRole.caption;
-                        vertical-alignment: center;
-                        horizontal-stretch: 1;
-                    }
-                    CatalogPicker {
-                        modal-layer: 0;
-                        control-label: @tr("Modèle résolu");
-                        model: [root.preview-template];
-                        current-value: root.preview-template;
-                        enabled: false;
                     }
                 }
             }

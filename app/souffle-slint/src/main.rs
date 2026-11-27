@@ -5007,7 +5007,6 @@ fn wire_callbacks(
     let settings_values_for_open = settings_values.clone();
     let permissions_for_open = permissions.clone();
     let lists_models_for_open = lists_models.clone();
-    let app_branches_for_open = app_branches.clone();
     window.on_settings_requested(move || {
         settings_instrumentation::handler(settings_instrumentation::SettingsScenario::Open);
         let Some(window) = weak.upgrade() else {
@@ -5016,7 +5015,6 @@ fn wire_callbacks(
         reset_stale_save_error(&window);
         summary_refresh_state_for_open.begin_session();
         let token = settings_io_for_open.begin_open();
-        app_branches_for_open.cancel_test();
         if let Some(settings) = settings_state_for_open.known_snapshot() {
             summary_refresh_state_for_open.project_url_if_pristine(&window, &settings.ollama_url);
             settings_ui::populate(&window, &settings);
@@ -5197,9 +5195,7 @@ fn wire_callbacks(
     let handle_for_close = tauri_handle.clone();
     let settings_io_for_close = settings_io.clone();
     let permissions_for_close = permissions.clone();
-    let app_branches_for_close = app_branches.clone();
     window.on_settings_closed(move || {
-        app_branches_for_close.cancel_test();
         permissions_for_close.sync_activity();
         let close_token = settings_io_for_close.close();
         let weak = weak.clone();

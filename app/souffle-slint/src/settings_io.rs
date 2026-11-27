@@ -338,11 +338,6 @@ impl SettingsIoCoordinator {
         self.sequence.borrow().latest_submitted
     }
 
-    #[cfg(test)]
-    pub(crate) fn current_open_snapshot_request_for_test(&self) -> u64 {
-        self.current_open_snapshot.get()
-    }
-
     pub(crate) fn set_save_projection(
         &self,
         projection: impl Fn(SettingsResponseOrder, &SettingsSaveOutcome) + 'static,

@@ -18,17 +18,6 @@ pub const TEMPLATE_NO_FILLERS: &str = "no_fillers";
 pub const TEMPLATE_CHAT: &str = "chat";
 pub const TEMPLATE_CODE: &str = "code";
 
-/// Time to bring the intended app forward after pressing Tester in Settings.
-pub const APP_BRANCH_TEST_DELAY: std::time::Duration = std::time::Duration::from_secs(3);
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AppBranchTestPhase {
-    Idle,
-    Waiting,
-    Resolving,
-    Result,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DictationPolishResult {
     pub text: String,

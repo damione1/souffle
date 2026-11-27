@@ -1761,17 +1761,17 @@ msgctxt "AudioSection"
 msgid "Appliquer automatiquement les corrections du dictionnaire personnel."
 msgstr "Appliquer automatiquement les corrections du dictionnaire personnel."
 
-#: ui/components/settings/app_branches_section.slint:42
+#: ui/components/settings/app_branches_section.slint:32
 msgctxt "AppBranchesSection"
 msgid "RETOUCHE PAR APPLICATION"
 msgstr "RETOUCHE PAR APPLICATION"
 
-#: ui/components/settings/app_branches_section.slint:51
+#: ui/components/settings/app_branches_section.slint:41
 msgctxt "AppBranchesSection"
 msgid "Règles par application"
 msgstr "Règles par application"
 
-#: ui/components/settings/app_branches_section.slint:52
+#: ui/components/settings/app_branches_section.slint:42
 msgctxt "AppBranchesSection"
 msgid ""
 "La première règle active valide gagne. Le nom de l'application contient le "
@@ -1782,110 +1782,55 @@ msgstr ""
 "motif, sans tenir compte de la casse. Par défaut suit le modèle global ; les "
 "instructions sont partagées."
 
-#: ui/components/settings/app_branches_section.slint:63
+#: ui/components/settings/app_branches_section.slint:53
 msgctxt "AppBranchesSection"
 msgid "Nom d'application"
 msgstr "Nom d'application"
 
-#: ui/components/settings/app_branches_section.slint:64
+#: ui/components/settings/app_branches_section.slint:54
 msgctxt "AppBranchesSection"
 msgid "Nouvelle règle d'application"
 msgstr "Nouvelle règle d'application"
 
-#: ui/components/settings/app_branches_section.slint:69
+#: ui/components/settings/app_branches_section.slint:59
 msgctxt "AppBranchesSection"
 msgid "Modèle de la nouvelle règle"
 msgstr "Modèle de la nouvelle règle"
 
-#: ui/components/settings/app_branches_section.slint:76
+#: ui/components/settings/app_branches_section.slint:66
 msgctxt "AppBranchesSection"
 msgid "Ajouter"
 msgstr "Ajouter"
 
-#: ui/components/settings/app_branches_section.slint:106
+#: ui/components/settings/app_branches_section.slint:96
 msgctxt "AppBranchesSection"
 msgid "Activer la règle {}"
 msgstr "Activer la règle {}"
 
-#: ui/components/settings/app_branches_section.slint:113
+#: ui/components/settings/app_branches_section.slint:103
 msgctxt "AppBranchesSection"
 msgid "Motif de la règle"
 msgstr "Motif de la règle"
 
-#: ui/components/settings/app_branches_section.slint:119
+#: ui/components/settings/app_branches_section.slint:109
 msgctxt "AppBranchesSection"
 msgid "Modèle partagé de la règle"
 msgstr "Modèle partagé de la règle"
 
-#: ui/components/settings/app_branches_section.slint:132
+#: ui/components/settings/app_branches_section.slint:122
 msgctxt "AppBranchesSection"
 msgid "Monter"
 msgstr "Monter"
 
-#: ui/components/settings/app_branches_section.slint:140
+#: ui/components/settings/app_branches_section.slint:130
 msgctxt "AppBranchesSection"
 msgid "Descendre"
 msgstr "Descendre"
 
-#: ui/components/settings/app_branches_section.slint:148
+#: ui/components/settings/app_branches_section.slint:138
 msgctxt "AppBranchesSection"
 msgid "Supprimer"
 msgstr "Supprimer"
-
-#: ui/components/settings/app_branches_section.slint:167
-msgctxt "AppBranchesSection"
-msgid "Tester l'application actuelle"
-msgstr "Tester l'application actuelle"
-
-#: ui/components/settings/app_branches_section.slint:173
-msgctxt "AppBranchesSection"
-msgid "Passez à l'application à tester. Capture dans {} secondes."
-msgstr "Passez à l'application à tester. Capture dans {} secondes."
-
-#: ui/components/settings/app_branches_section.slint:177
-msgctxt "AppBranchesSection"
-msgid "Recherche de la règle pour l'application capturée…"
-msgstr "Recherche de la règle pour l'application capturée…"
-
-#: ui/components/settings/app_branches_section.slint:183
-msgctxt "AppBranchesSection"
-msgid "Application actuelle : {}"
-msgstr "Application actuelle : {}"
-
-#: ui/components/settings/app_branches_section.slint:184
-msgctxt "AppBranchesSection"
-msgid "Règle gagnante : {}"
-msgstr "Règle gagnante : {}"
-
-#: ui/components/settings/app_branches_section.slint:185
-msgctxt "AppBranchesSection"
-msgid "Retouche désactivée : les règles sont sans effet."
-msgstr "Retouche désactivée : les règles sont sans effet."
-
-#: ui/components/settings/app_branches_section.slint:186
-msgctxt "AppBranchesSection"
-msgid "Application inconnue : modèle global."
-msgstr "Application inconnue : modèle global."
-
-#: ui/components/settings/app_branches_section.slint:187
-msgctxt "AppBranchesSection"
-msgid "Aucune règle active correspondante : modèle global."
-msgstr "Aucune règle active correspondante : modèle global."
-
-#: ui/components/settings/app_branches_section.slint:188
-msgctxt "AppBranchesSection"
-msgid "Motif vide ignoré : modèle global."
-msgstr "Motif vide ignoré : modèle global."
-
-#: ui/components/settings/app_branches_section.slint:189
-msgctxt "AppBranchesSection"
-msgid "Modèle de règle introuvable : modèle global."
-msgstr "Modèle de règle introuvable : modèle global."
-
-#: ui/components/settings/app_branches_section.slint:194
-msgctxt "AppBranchesSection"
-msgid "Modèle résolu"
-msgstr "Modèle résolu"
 
 #: ui/components/settings/summary_templates_section.slint:28
 msgctxt "SummaryTemplatesSection"
