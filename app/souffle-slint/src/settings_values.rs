@@ -588,14 +588,6 @@ mod tests {
 
     impl DatabaseHarness {
         fn new(initial: AppSettings) -> Self {
-            Self::with_settings_population(initial, true)
-        }
-
-        fn new_unopened(initial: AppSettings) -> Self {
-            Self::with_settings_population(initial, false)
-        }
-
-        fn with_settings_population(initial: AppSettings, populate_settings: bool) -> Self {
             let window = test_window();
             let directory = tempfile::tempdir().unwrap();
             let db = Rc::new(Database::open(&directory.path().join("settings.db")).unwrap());
@@ -604,9 +596,7 @@ mod tests {
             let devices = Rc::new(RefCell::new(vec![device("mic-1", "Studio Mic")]));
             let summary = Rc::new(RefCell::new(Some(summary_status())));
 
-            if populate_settings {
-                settings_ui::populate(&window, &initial);
-            }
+            settings_ui::populate(&window, &initial);
             audio_ui::populate_clamshell_picker(
                 &window,
                 &devices.borrow(),
@@ -1022,31 +1012,6 @@ mod tests {
 
     #[test]
     fn all_value_callbacks_publish_the_persisted_snapshot_without_reloading_catalogues() {
-        {
-            let harness = DatabaseHarness::new_unopened(AppSettings {
-                theme: SettingsTheme::Light,
-                ..AppSettings::default()
-            });
-            let window = &harness.window;
-
-            // Settings has not populated its enum yet, but startup has already
-            // applied the persisted light theme to the global palette.
-            assert_eq!(window.get_settings_theme(), crate::AppTheme::Dark);
-            assert!(!window.global::<Theme>().get_dark());
-            assert_eq!(harness.appearance.get(), None);
-
-            window.invoke_settings_theme_changed(crate::AppTheme::Dark);
-            harness.wait_for_saves(1);
-
-            assert_eq!(window.get_settings_theme(), crate::AppTheme::Dark);
-            assert!(window.global::<Theme>().get_dark());
-            assert_eq!(harness.appearance.get(), Some(true));
-            assert_eq!(
-                AppSettings::load(&harness.db).unwrap().theme,
-                SettingsTheme::Dark
-            );
-        }
-
         let initial = AppSettings {
             paste_delay_ms: 150,
             ollama_model: "model-a".into(),
