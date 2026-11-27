@@ -3331,6 +3331,7 @@ fn wire_onboarding_callbacks(
             }
             OnboardingStep::Shortcut => {
                 let recovery_only = ob_for_continue.borrow().recovery_only;
+                window.set_onboarding_autostart_failed(false);
                 window.set_onboarding_busy(true);
                 window.set_onboarding_continue_enabled(false);
                 let completion_weak = weak.clone();

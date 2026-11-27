@@ -1467,7 +1467,7 @@ mod tests {
 
     // SOU-036: an install that never saw the setting has no key at all. That
     // must load as "off" — the login item is only ever registered after a
-    // deliberate gesture (toggle or fresh-install wizard), never by default.
+    // deliberate gesture (the Settings or wizard switch), never by default.
     #[test]
     fn autostart_absent_key_loads_as_disabled() {
         let (db, _dir) = test_db();
