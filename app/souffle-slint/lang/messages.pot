@@ -539,22 +539,12 @@ msgstr ""
 
 #: ui/onboarding_view.slint:158
 msgctxt "OnboardingView"
-msgid "Transcription vocale locale pour la dictée et les meetings."
+msgid "Transcription vocale locale pour la dictée et les réunions."
 msgstr ""
 
 #: ui/onboarding_view.slint:168
 msgctxt "OnboardingView"
 msgid "Votre audio est transcrit sur ce Mac. Pas de compte."
-msgstr ""
-
-#: ui/onboarding_view.slint:182
-msgctxt "OnboardingView"
-msgid "English"
-msgstr ""
-
-#: ui/onboarding_view.slint:188
-msgctxt "OnboardingView"
-msgid "Français"
 msgstr ""
 
 #: ui/onboarding_view.slint:200 ui/onboarding_view.slint:219
@@ -589,7 +579,7 @@ msgstr ""
 
 #: ui/onboarding_view.slint:322
 msgctxt "OnboardingView"
-msgid "Aucun microphone détecté ? Branchez-en un puis actualisez."
+msgid "Aucun microphone détecté. Branchez-en un puis actualisez."
 msgstr ""
 
 #: ui/onboarding_view.slint:333
@@ -1098,7 +1088,7 @@ msgstr ""
 
 #: ui/components/timeline_section.slint:279
 msgctxt "TimelineSection"
-msgid "Vos dictées et meetings apparaîtront ici, du plus récent au plus ancien."
+msgid "Vos dictées et réunions apparaîtront ici, du plus récent au plus ancien."
 msgstr ""
 
 #: ui/components/timeline_section.slint:295
@@ -3611,4 +3601,9 @@ msgstr ""
 #: ui/components/settings/model_delete_row.slint:87
 msgctxt "ModelDeleteRow"
 msgid "Attendez la fin de l'opération sur le modèle avant de le supprimer."
+msgstr ""
+
+#: ui/onboarding_view.slint
+msgctxt "OnboardingView"
+msgid "Le modèle est en erreur."
 msgstr ""

@@ -541,23 +541,13 @@ msgstr "Soufflé"
 
 #: ui/onboarding_view.slint:158
 msgctxt "OnboardingView"
-msgid "Transcription vocale locale pour la dictée et les meetings."
-msgstr "Transcription vocale locale pour la dictée et les meetings."
+msgid "Transcription vocale locale pour la dictée et les réunions."
+msgstr "Transcription vocale locale pour la dictée et les réunions."
 
 #: ui/onboarding_view.slint:168
 msgctxt "OnboardingView"
 msgid "Votre audio est transcrit sur ce Mac. Pas de compte."
 msgstr "Votre audio est transcrit sur ce Mac. Pas de compte."
-
-#: ui/onboarding_view.slint:182
-msgctxt "OnboardingView"
-msgid "English"
-msgstr "English"
-
-#: ui/onboarding_view.slint:188
-msgctxt "OnboardingView"
-msgid "Français"
-msgstr "Français"
 
 #: ui/onboarding_view.slint:200 ui/onboarding_view.slint:219
 msgctxt "OnboardingView"
@@ -591,8 +581,8 @@ msgstr "Parlez pour vérifier que le micro capte votre voix."
 
 #: ui/onboarding_view.slint:322
 msgctxt "OnboardingView"
-msgid "Aucun microphone détecté ? Branchez-en un puis actualisez."
-msgstr "Aucun microphone détecté ? Branchez-en un puis actualisez."
+msgid "Aucun microphone détecté. Branchez-en un puis actualisez."
+msgstr "Aucun microphone détecté. Branchez-en un puis actualisez."
 
 #: ui/onboarding_view.slint:333
 msgctxt "OnboardingView"
@@ -1104,9 +1094,9 @@ msgstr "Rien ici pour l'instant"
 #: ui/components/timeline_section.slint:279
 msgctxt "TimelineSection"
 msgid ""
-"Vos dictées et meetings apparaîtront ici, du plus récent au plus ancien."
+"Vos dictées et réunions apparaîtront ici, du plus récent au plus ancien."
 msgstr ""
-"Vos dictées et meetings apparaîtront ici, du plus récent au plus ancien."
+"Vos dictées et réunions apparaîtront ici, du plus récent au plus ancien."
 
 #: ui/components/timeline_section.slint:295
 msgctxt "TimelineSection"
@@ -3651,3 +3641,8 @@ msgstr "Confirmer"
 msgctxt "ModelDeleteRow"
 msgid "Attendez la fin de l'opération sur le modèle avant de le supprimer."
 msgstr "Attendez la fin de l'opération sur le modèle avant de le supprimer."
+
+#: ui/onboarding_view.slint
+msgctxt "OnboardingView"
+msgid "Le modèle est en erreur."
+msgstr "Le modèle est en erreur."

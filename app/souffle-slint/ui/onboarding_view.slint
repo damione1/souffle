@@ -73,6 +73,10 @@ export component OnboardingView inherits Rectangle {
     callback back-requested();
     callback continue-requested();
 
+    pure function status-text(message: string) -> string {
+        if message == "MODEL_ERROR" { return @tr("Le modèle est en erreur."); }
+        return message;
+    }
     pure function step-title(step: OnboardingStep) -> string {
         if step == OnboardingStep.permissions { return @tr("Permissions"); }
         if step == OnboardingStep.microphone { return @tr("Choisissez votre microphone"); }
@@ -92,6 +96,9 @@ export component OnboardingView inherits Rectangle {
     // shadow is not clipped; its content is inset by the same amount.
     private property <length> shadow-bleed: 20px;
 
+    // The device list always starts with the Automatic entry.
+    property <bool> has-microphone: root.device-labels.length > 1;
+    property <bool> microphone-missing: root.step == OnboardingStep.microphone && !root.has-microphone;
     property <bool> is-last-step: root.step-index == root.step-count - 1;
     property <string> continue-label: root.step == OnboardingStep.model && root.model-phase != ModelPhase.ready ? @tr("Télécharger et continuer")
         : root.is-last-step ? @tr("Terminer")
@@ -162,7 +169,7 @@ export component OnboardingView inherits Rectangle {
                                 }
                             }
                             AppText {
-                                text: @tr("Transcription vocale locale pour la dictée et les meetings.");
+                                text: @tr("Transcription vocale locale pour la dictée et les réunions.");
                                 typography: Typography.reading;
                                 color: Theme.text-muted;
                                 horizontal-alignment: center;
@@ -187,7 +194,7 @@ export component OnboardingView inherits Rectangle {
                                     color: Theme.text-primary;
                                 }
                                 AppText {
-                                    text: @tr("Transcription vocale locale pour la dictée et les meetings.");
+                                    text: @tr("Transcription vocale locale pour la dictée et les réunions.");
                                     typography: Typography.reading;
                                     color: Theme.text-muted;
                                 }
@@ -211,13 +218,13 @@ export component OnboardingView inherits Rectangle {
                                 alignment: center;
                                 gap: compact;
                                 KitButton {
-                                    text: @tr("English");
+                                    text: "English";
                                     control-size: ControlSize.compact;
                                     intent: root.locale == AppLocale.en ? ButtonIntent.primary : ButtonIntent.secondary;
                                     activated => { root.locale-changed(AppLocale.en); }
                                 }
                                 KitButton {
-                                    text: @tr("Français");
+                                    text: "Français";
                                     control-size: ControlSize.compact;
                                     intent: root.locale == AppLocale.fr ? ButtonIntent.primary : ButtonIntent.secondary;
                                     activated => { root.locale-changed(AppLocale.fr); }
@@ -272,7 +279,7 @@ export component OnboardingView inherits Rectangle {
                                 inset: 12px;
                                 corner-radius: 12px;
                                 severity: AlertSeverity.error;
-                                message: root.status-message;
+                                message: root.status-text(root.status-message);
                             }
 
                             if root.step == OnboardingStep.permissions: PermissionsStep {
@@ -354,8 +361,8 @@ export component OnboardingView inherits Rectangle {
                                         }
                                     }
                                 }
-                                AppText {
-                                    text: @tr("Aucun microphone détecté ? Branchez-en un puis actualisez.");
+                                if !root.has-microphone: AppText {
+                                    text: @tr("Aucun microphone détecté. Branchez-en un puis actualisez.");
                                     typography: Typography.hint;
                                     color: Theme.text-muted;
                                     wrap: word-wrap;
@@ -539,7 +546,7 @@ export component OnboardingView inherits Rectangle {
             KitButton {
                 text: root.continue-label;
                 intent: ButtonIntent.primary;
-                disabled: !(!root.busy && root.continue-enabled);
+                disabled: root.busy || !root.continue-enabled || root.microphone-missing;
                 activated => { root.continue-requested(); }
             }
         }

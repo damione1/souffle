@@ -11,7 +11,7 @@ from pathlib import Path
 # translation; make any new exception an explicit review decision.
 UNCHANGED_ENGLISH = {
     "AUDIO", "Audio", "Claude Code", "DIAGNOSTICS",
-    "English", "EXPANSION", "INTERFACE", "Interface", "MICROPHONE",
+    "English", "EXPANSION", "Microphone", "Permissions", "INTERFACE", "Interface", "MICROPHONE",
     "NOTES", "Notes", "PERMISSIONS", "Soufflé", "Suggestions", "Transcription", "×", "✕",
     # Symbols, acronyms and placeholder-only templates: identical spelling
     # in both languages is correct, not a missed translation.

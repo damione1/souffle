@@ -479,7 +479,7 @@ msgstr "Summary generation failed: {}"
 #: ui/onboarding_view.slint:74
 msgctxt "OnboardingView"
 msgid "Permissions"
-msgstr "App Permissions"
+msgstr "Permissions"
 
 #: ui/onboarding_view.slint:75 ui/onboarding_view.slint:280
 msgctxt "OnboardingView"
@@ -540,23 +540,13 @@ msgstr "Soufflé"
 
 #: ui/onboarding_view.slint:158
 msgctxt "OnboardingView"
-msgid "Transcription vocale locale pour la dictée et les meetings."
+msgid "Transcription vocale locale pour la dictée et les réunions."
 msgstr "Local speech-to-text for dictation and meetings."
 
 #: ui/onboarding_view.slint:168
 msgctxt "OnboardingView"
 msgid "Votre audio est transcrit sur ce Mac. Pas de compte."
 msgstr "Your audio is transcribed on this Mac. No account."
-
-#: ui/onboarding_view.slint:182
-msgctxt "OnboardingView"
-msgid "English"
-msgstr "English"
-
-#: ui/onboarding_view.slint:188
-msgctxt "OnboardingView"
-msgid "Français"
-msgstr "French"
 
 #: ui/onboarding_view.slint:200 ui/onboarding_view.slint:219
 msgctxt "OnboardingView"
@@ -590,8 +580,8 @@ msgstr "Speak to check that the microphone picks up your voice."
 
 #: ui/onboarding_view.slint:322
 msgctxt "OnboardingView"
-msgid "Aucun microphone détecté ? Branchez-en un puis actualisez."
-msgstr "No microphone detected? Plug one in, then refresh."
+msgid "Aucun microphone détecté. Branchez-en un puis actualisez."
+msgstr "No microphone detected. Plug one in, then refresh."
 
 #: ui/onboarding_view.slint:333
 msgctxt "OnboardingView"
@@ -1099,7 +1089,7 @@ msgstr "Nothing here yet"
 #: ui/components/timeline_section.slint:279
 msgctxt "TimelineSection"
 msgid ""
-"Vos dictées et meetings apparaîtront ici, du plus récent au plus ancien."
+"Vos dictées et réunions apparaîtront ici, du plus récent au plus ancien."
 msgstr "Your dictations and meetings will appear here, from newest to oldest."
 
 #: ui/components/timeline_section.slint:295
@@ -3414,7 +3404,7 @@ msgstr "Got it"
 #: ui/components/onboarding/permissions_step.slint:29
 msgctxt "PermissionsStep"
 msgid "Microphone"
-msgstr "Mic"
+msgstr "Microphone"
 
 #: ui/components/onboarding/permissions_step.slint:30
 msgctxt "PermissionsStep"
@@ -3634,3 +3624,8 @@ msgstr "Confirm"
 msgctxt "ModelDeleteRow"
 msgid "Attendez la fin de l'opération sur le modèle avant de le supprimer."
 msgstr "Wait for the model operation to finish before deleting it."
+
+#: ui/onboarding_view.slint
+msgctxt "OnboardingView"
+msgid "Le modèle est en erreur."
+msgstr "Model error."

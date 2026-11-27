@@ -2395,11 +2395,8 @@ fn model_download_channel(
                         load_model_in_background(weak.clone(), handle.clone(), transition.clone());
                     } else {
                         window.set_settings_model_download_progress_label(
-                            format!(
-                                "{} / {} fichiers",
-                                progress.completed_files, progress.total_files
-                            )
-                            .into(),
+                            format!("{} / {}", progress.completed_files, progress.total_files)
+                                .into(),
                         );
                     }
                 }
@@ -3581,7 +3578,7 @@ fn start_onboarding_model_transition(
             TranscriptionRuntimePhase::Failed => {
                 window.set_onboarding_busy(false);
                 window.set_onboarding_continue_enabled(true);
-                window.set_onboarding_status_message("Le modèle est en erreur.".into());
+                window.set_onboarding_status_message("MODEL_ERROR".into());
             }
             TranscriptionRuntimePhase::AudioFailed => {
                 window.set_onboarding_busy(false);
@@ -3635,11 +3632,8 @@ fn onboarding_model_download_channel(
                         );
                     } else if !globally_complete {
                         window.set_onboarding_download_progress_label(
-                            format!(
-                                "{} / {} fichiers",
-                                progress.completed_files, progress.total_files
-                            )
-                            .into(),
+                            format!("{} / {}", progress.completed_files, progress.total_files)
+                                .into(),
                         );
                     }
                 }
