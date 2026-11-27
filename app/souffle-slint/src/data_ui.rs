@@ -6,29 +6,12 @@ use crate::MainWindow;
 use souffle_lib::archive::DataStats;
 use souffle_lib::commands::McpSetupInfo;
 use souffle_lib::settings::AppSettings;
-use souffle_lib::summary::SummaryProviderChoice;
 
 pub fn populate(window: &MainWindow, settings: &AppSettings) {
     window.set_settings_meeting_audio_retention(crate::settings_ui::audio_retention_to_slint(
         settings.meeting_audio_retention,
     ));
     window.set_settings_auto_update_check(settings.auto_update_check_enabled);
-    window.set_settings_about_transcription_label(settings.transcription_model_id.as_str().into());
-    window.set_settings_about_summary_label(summary_label(settings).into());
-}
-
-fn summary_label(settings: &AppSettings) -> String {
-    match settings.summary_provider {
-        SummaryProviderChoice::AppleIntelligence => "Apple Intelligence".to_string(),
-        SummaryProviderChoice::Ollama => {
-            if settings.ollama_model.is_empty() {
-                "Ollama".to_string()
-            } else {
-                settings.ollama_model.clone()
-            }
-        }
-        SummaryProviderChoice::Auto => "Automatique".to_string(),
-    }
 }
 
 fn format_bytes(bytes: u64) -> String {
@@ -69,7 +52,6 @@ pub fn populate_stats(window: &MainWindow, stats: &DataStats) {
 }
 
 pub fn populate_mcp(window: &MainWindow, info: &McpSetupInfo) {
-    window.set_settings_mcp_binary_path(info.binary_path.as_str().into());
     window.set_settings_mcp_exists(info.exists);
     window.set_settings_mcp_claude_desktop_snippet(info.claude_desktop_snippet.as_str().into());
     window.set_settings_mcp_claude_code_command(info.claude_code_command.as_str().into());

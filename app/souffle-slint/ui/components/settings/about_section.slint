@@ -1,4 +1,4 @@
-import { FieldSetAppearance, FieldRowAppearance, ButtonIntent, ChoiceLabelPosition, ControlWidth, KitButton, KitSwitch, Ownership, KitBadge, KitFieldRow, KitFieldSet, KitText, KitThemeContext, KitThemes, TextViewFont, Tone, TypographyRole, ControlSize } from "@kit";
+import { FieldSetAppearance, FieldRowAppearance, ButtonIntent, ChoiceLabelPosition, ControlWidth, KitButton, KitSwitch, Ownership, KitFieldRow, KitFieldSet, KitText, KitThemeContext, KitThemes, TextViewFont, TypographyRole, ControlSize } from "@kit";
 import { Theme } from "../../theme.slint";
 import { InstallBlockReason, UpdateRowStatus } from "../../types.slint";
 import { UpdateCopy } from "../update_copy.slint";
@@ -11,8 +11,6 @@ import { UpdateCopy } from "../update_copy.slint";
 // meaningful only for the statuses that carry them.
 export component AboutSection inherits KitFieldSet {
     in property <string> app-version;
-    in property <string> transcription-label;
-    in property <string> summary-label;
     in property <bool> auto-update-check;
     in property <UpdateRowStatus> update-row: UpdateRowStatus.unchecked;
     in property <string> update-version;
@@ -103,60 +101,6 @@ export component AboutSection inherits KitFieldSet {
             overflow: elide;
             width: Theme.settings-control-width;
             vertical-alignment: center;
-        }
-    }
-
-    KitFieldRow {
-        theme: root.theme;
-        modal-layer: 0;
-        orientation: Theme.settings-field-orientation(self.width);
-        appearance: FieldRowAppearance.inset;
-        show-divider: true;
-        label: @tr("Transcription");
-
-        KitText {
-            text: root.transcription-label;
-            role: TypographyRole.body;
-            color: Theme.text-tertiary;
-            horizontal-alignment: right;
-            overflow: elide;
-            width: Theme.settings-control-width;
-            vertical-alignment: center;
-        }
-    }
-
-    KitFieldRow {
-        theme: root.theme;
-        modal-layer: 0;
-        orientation: Theme.settings-field-orientation(self.width);
-        appearance: FieldRowAppearance.inset;
-        show-divider: true;
-        label: @tr("Résumés");
-
-        KitText {
-            text: root.summary-label;
-            role: TypographyRole.body;
-            color: Theme.text-tertiary;
-            horizontal-alignment: right;
-            overflow: elide;
-            width: Theme.settings-control-width;
-            vertical-alignment: center;
-        }
-    }
-
-    KitFieldRow {
-        theme: root.theme;
-        modal-layer: 0;
-        orientation: Theme.settings-field-orientation(self.width);
-        appearance: FieldRowAppearance.inset;
-        show-divider: true;
-        label: @tr("Confidentialité");
-
-        KitBadge {
-            theme: root.theme;
-            text: @tr("100 % local");
-            tone: Tone.success;
-            subtle: true;
         }
     }
 

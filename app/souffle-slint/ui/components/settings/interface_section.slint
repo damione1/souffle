@@ -2,6 +2,7 @@ import { SettingsOptions, ClosedSettingsPicker } from "settings_options.slint";
 import { FieldSetAppearance, FieldRowAppearance, AlertActions, AlertSeverity, ButtonIntent, ChoiceLabelPosition, ControlSize, ControlWidth, FieldAccess, KeycapSize, KitAlert, KitButton, KitFieldRow, KitFieldSet, KitKeycap, KitMetrics, KitModalContext, KitNumberStepper, KitSegmentedControl, KitSwitch, KitText, KitThemeContext, KitThemes, Ownership, TypographyRole, SegmentedAppearance, StepperAppearance, TextViewFont, KitTheme } from "@kit";
 import { LucideArrows } from "@kit-icons/arrows.slint";
 import { SettingsNoticeRow } from "settings_notice_row.slint";
+import { SettingsAdvancedBlock } from "settings_advanced_block.slint";
 import { Theme } from "../../theme.slint";
 import { AppTheme, AppLocale, PasteMethod, ShortcutField, ShortcutNotice, SettingsCaptureError } from "../../types.slint";
 
@@ -136,7 +137,6 @@ export component InterfaceSection inherits VerticalLayout {
     in property <ShortcutNotice> shortcut-notice;
     in property <bool> native-tap-warning-visible;
     in property <bool> pill-hidden;
-    in property <bool> pill-hidden-in-captures;
 
     callback theme-changed(AppTheme);
     callback locale-changed(AppLocale);
@@ -144,7 +144,6 @@ export component InterfaceSection inherits VerticalLayout {
     callback paste-method-changed(PasteMethod);
     callback paste-delay-changed(int);
     callback pill-hidden-changed(bool);
-    callback pill-hidden-in-captures-changed(bool);
     callback shortcut-record-requested(ShortcutField);
     callback shortcut-captured(ShortcutField, string, bool, bool, bool, bool);
     callback shortcut-released(ShortcutField, string, bool, bool, bool, bool);
@@ -242,66 +241,6 @@ export component InterfaceSection inherits VerticalLayout {
                 accessible-label: @tr("Collage automatique après dictée");
                 checked: root.auto-paste;
                 toggled(new) => { root.auto-paste-changed(new); }
-            }
-        }
-
-        if root.auto-paste: KitFieldRow {
-            theme: KitThemeContext.current;
-            modal-layer: 0;
-            orientation: Theme.settings-field-orientation(self.width);
-            appearance: FieldRowAppearance.inset;
-            show-divider: true;
-            focus-requested => { method-picker.take-focus(); }
-            private property <bool> control-focused: method-picker.has-focus;
-            changed control-focused => {
-                if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
-            }
-            label: @tr("Méthode de collage");
-            description: @tr("Le champ ciblé utilise l'accessibilité pour insérer dans la sélection. Utilisez la frappe simulée si une app refuse le ⌘V synthétique (terminaux, champs sécurisés).");
-
-            method-picker := ClosedSettingsPicker {
-                theme: KitThemeContext.current;
-                modal-layer: 0;
-                label: @tr("Méthode de collage");
-                choices: SettingsOptions.paste-method-options(root.paste-method);
-                chosen(row) => { root.paste-method-changed(SettingsOptions.paste-method-value(row, root.paste-method)); }
-            }
-        }
-
-        if root.auto-paste: KitFieldRow {
-            theme: KitThemeContext.current;
-            modal-layer: 0;
-            orientation: Theme.settings-field-orientation(self.width);
-            appearance: FieldRowAppearance.inset;
-            show-divider: true;
-            focus-requested => { delay-stepper.take-focus(); }
-            private property <bool> control-focused: delay-stepper.has-focus;
-            changed control-focused => {
-                if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
-            }
-            label: @tr("Délai de collage (ms)");
-            description: @tr("Temps d'attente avant le collage. Augmentez si le texte arrive dans la mauvaise application.");
-
-            delay-stepper := KitNumberStepper {
-                theme: KitThemeContext.current;
-                modal-layer: 0;
-                appearance: StepperAppearance.compact;
-                value-font: TextViewFont.monospace;
-                // The editor's end padding adds to this gap.
-                value-button-gap: 5px;
-                // Keeps the editor slack before the value, next to the unit and buttons.
-                text-alignment: TextHorizontalAlignment.right;
-                control-size: ControlSize.compact;
-                decrement-glyph: LucideArrows.chevron-down();
-                increment-glyph: LucideArrows.chevron-up();
-                increment-label: @tr("Augmenter");
-                decrement-label: @tr("Diminuer");
-                accessible-name: @tr("Délai de collage en millisecondes");
-                text: root.paste-delay-ms;
-                min: root.paste-delay-min;
-                max: root.paste-delay-max;
-                step: 50;
-                committed(result) => { root.paste-delay-changed(result.value.text.to-float()); }
             }
         }
 
@@ -452,31 +391,62 @@ export component InterfaceSection inherits VerticalLayout {
             }
         }
 
-        KitFieldRow {
-            theme: KitThemeContext.current;
-            modal-layer: 0;
-            orientation: Theme.settings-field-orientation(self.width);
-            appearance: FieldRowAppearance.inset;
-            show-divider: true;
-            focus-requested => { screenshot-switch.take-focus(); }
-            private property <bool> control-focused: screenshot-switch.has-focus;
-            changed control-focused => {
-                if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
-            }
-            label: @tr("Masquer l'overlay dans les captures d'écran");
-            description: @tr("Quand l'overlay est affiché, l'exclure des captures d'écran, des enregistrements et des partages d'écran.");
-
-            screenshot-switch := KitSwitch {
+        if root.auto-paste: SettingsAdvancedBlock {
+            KitFieldRow {
                 theme: KitThemeContext.current;
                 modal-layer: 0;
-                label-position: ChoiceLabelPosition.start;
-                padding-inline: 0px;
-                ownership: Ownership.controlled;
-                control-width: ControlWidth.intrinsic;
-                accessible-label: @tr("Masquer l'overlay dans les captures d'écran");
-                access: !root.pill-hidden ? FieldAccess.editable : FieldAccess.disabled;
-                checked: root.pill-hidden-in-captures;
-                toggled(new) => { root.pill-hidden-in-captures-changed(new); }
+                orientation: Theme.settings-field-orientation(self.width);
+                focus-requested => { method-picker.take-focus(); }
+                private property <bool> control-focused: method-picker.has-focus;
+                changed control-focused => {
+                    if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
+                }
+                label: @tr("Méthode de collage");
+                description: @tr("Le champ ciblé utilise l'accessibilité pour insérer dans la sélection. Utilisez la frappe simulée si une app refuse le ⌘V synthétique (terminaux, champs sécurisés).");
+
+                method-picker := ClosedSettingsPicker {
+                    theme: KitThemeContext.current;
+                    modal-layer: 0;
+                    label: @tr("Méthode de collage");
+                    choices: SettingsOptions.paste-method-options(root.paste-method);
+                    chosen(row) => { root.paste-method-changed(SettingsOptions.paste-method-value(row, root.paste-method)); }
+                }
+            }
+
+            KitFieldRow {
+                theme: KitThemeContext.current;
+                modal-layer: 0;
+                orientation: Theme.settings-field-orientation(self.width);
+                show-divider: true;
+                focus-requested => { delay-stepper.take-focus(); }
+                private property <bool> control-focused: delay-stepper.has-focus;
+                changed control-focused => {
+                    if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
+                }
+                label: @tr("Délai de collage (ms)");
+                description: @tr("Temps d'attente avant le collage. Augmentez si le texte arrive dans la mauvaise application.");
+
+                delay-stepper := KitNumberStepper {
+                    theme: KitThemeContext.current;
+                    modal-layer: 0;
+                    appearance: StepperAppearance.compact;
+                    value-font: TextViewFont.monospace;
+                    // The editor's end padding adds to this gap.
+                    value-button-gap: 5px;
+                    // Keeps the editor slack before the value, next to the unit and buttons.
+                    text-alignment: TextHorizontalAlignment.right;
+                    control-size: ControlSize.compact;
+                    decrement-glyph: LucideArrows.chevron-down();
+                    increment-glyph: LucideArrows.chevron-up();
+                    increment-label: @tr("Augmenter");
+                    decrement-label: @tr("Diminuer");
+                    accessible-name: @tr("Délai de collage en millisecondes");
+                    text: root.paste-delay-ms;
+                    min: root.paste-delay-min;
+                    max: root.paste-delay-max;
+                    step: 50;
+                    committed(result) => { root.paste-delay-changed(result.value.text.to-float()); }
+                }
             }
         }
     }

@@ -33,11 +33,8 @@ const CAPTURE_SYSTEM_AUDIO_KEY: &str = "capture_system_audio";
 const CALENDAR_INTEGRATION_ENABLED_KEY: &str = "calendar_integration_enabled";
 const CALENDAR_SELECTED_IDS_KEY: &str = "calendar_selected_ids";
 const CALENDAR_REMINDER_MINUTES_KEY: &str = "calendar_reminder_minutes";
-const CALENDAR_AUTOSTART_ENABLED_KEY: &str = "calendar_autostart_enabled";
 const FEEDBACK_SOUNDS_ENABLED_KEY: &str = "feedback_sounds_enabled";
 const PILL_HIDDEN_KEY: &str = "pill_hidden";
-const PILL_HIDDEN_IN_CAPTURES_KEY: &str = "pill_hidden_in_captures";
-const FEEDBACK_SOUNDS_VOLUME_KEY: &str = "feedback_sounds_volume";
 const MODEL_UNLOAD_TIMEOUT_MINUTES_KEY: &str = "model_unload_timeout_minutes";
 const AUTO_UPDATE_CHECK_ENABLED_KEY: &str = "auto_update_check_enabled";
 /// Unix seconds of the last completed check. Not part of `AppSettings`: it is
@@ -249,9 +246,6 @@ pub struct AppSettings {
     pub calendar_selected_ids: Vec<String>,
     /// How long before an event the "start transcription?" reminder fires.
     pub calendar_reminder_minutes: u32,
-    /// When a calendar event starts and system audio is active, suggest
-    /// starting a meeting transcription (nudge only, never auto-records).
-    pub calendar_autostart_enabled: bool,
     /// Ask GitHub once a day whether a newer release exists, and show a
     /// dialog when there is one. Never downloads or installs anything.
     pub auto_update_check_enabled: bool,
@@ -259,11 +253,6 @@ pub struct AppSettings {
     pub feedback_sounds_enabled: bool,
     /// When true, the floating recording HUD is not shown.
     pub pill_hidden: bool,
-    /// When true, the HUD (while shown) is excluded from screenshots, screen
-    /// recordings and screen sharing. Independent of `pill_hidden`.
-    pub pill_hidden_in_captures: bool,
-    /// Feedback sound volume (0-100).
-    pub feedback_sounds_volume: u32,
     /// Unload the transcription model after this many idle minutes to
     /// reclaim RAM; 0 means never unload. The next recording reloads it
     /// through the normal load flow.
@@ -305,7 +294,6 @@ pub struct AppSettings {
 const ALLOWED_UNLOAD_TIMEOUT_MINUTES: [u32; 4] = [0, 5, 15, 60];
 
 const CALENDAR_REMINDER_MINUTES_RANGE: std::ops::RangeInclusive<u32> = 1..=30;
-const FEEDBACK_SOUNDS_VOLUME_RANGE: std::ops::RangeInclusive<u32> = 0..=100;
 
 pub const MIN_PASTE_DELAY_MS: u64 = 50;
 pub const MAX_PASTE_DELAY_MS: u64 = 1000;
@@ -320,8 +308,6 @@ pub struct SettingsOptions {
     pub paste_delay_ms_max: u64,
     pub calendar_reminder_minutes_min: u32,
     pub calendar_reminder_minutes_max: u32,
-    pub feedback_sounds_volume_min: u32,
-    pub feedback_sounds_volume_max: u32,
     pub default_shortcuts: ShortcutSettings,
 }
 
@@ -334,8 +320,6 @@ impl SettingsOptions {
             paste_delay_ms_max: MAX_PASTE_DELAY_MS,
             calendar_reminder_minutes_min: *CALENDAR_REMINDER_MINUTES_RANGE.start(),
             calendar_reminder_minutes_max: *CALENDAR_REMINDER_MINUTES_RANGE.end(),
-            feedback_sounds_volume_min: *FEEDBACK_SOUNDS_VOLUME_RANGE.start(),
-            feedback_sounds_volume_max: *FEEDBACK_SOUNDS_VOLUME_RANGE.end(),
             default_shortcuts: ShortcutSettings::default(),
         }
     }
@@ -376,12 +360,9 @@ impl Default for AppSettings {
             calendar_integration_enabled: false,
             calendar_selected_ids: Vec::new(),
             calendar_reminder_minutes: 2,
-            calendar_autostart_enabled: true,
             auto_update_check_enabled: true,
             feedback_sounds_enabled: true,
             pill_hidden: false,
-            pill_hidden_in_captures: true,
-            feedback_sounds_volume: 70,
             model_unload_timeout_minutes: 60,
             meeting_autostop_enabled: true,
             autostart_enabled: false,
@@ -513,11 +494,6 @@ impl AppSettings {
         {
             settings.calendar_reminder_minutes = calendar_reminder_minutes;
         }
-        if let Some(calendar_autostart_enabled) =
-            read_json_setting::<bool>(db, CALENDAR_AUTOSTART_ENABLED_KEY)?
-        {
-            settings.calendar_autostart_enabled = calendar_autostart_enabled;
-        }
         if let Some(feedback_sounds_enabled) =
             read_json_setting::<bool>(db, FEEDBACK_SOUNDS_ENABLED_KEY)?
         {
@@ -525,16 +501,6 @@ impl AppSettings {
         }
         if let Some(pill_hidden) = read_json_setting::<bool>(db, PILL_HIDDEN_KEY)? {
             settings.pill_hidden = pill_hidden;
-        }
-        if let Some(pill_hidden_in_captures) =
-            read_json_setting::<bool>(db, PILL_HIDDEN_IN_CAPTURES_KEY)?
-        {
-            settings.pill_hidden_in_captures = pill_hidden_in_captures;
-        }
-        if let Some(feedback_sounds_volume) =
-            read_json_setting::<u32>(db, FEEDBACK_SOUNDS_VOLUME_KEY)?
-        {
-            settings.feedback_sounds_volume = feedback_sounds_volume;
         }
         if let Some(auto_update_check_enabled) =
             read_json_setting::<bool>(db, AUTO_UPDATE_CHECK_ENABLED_KEY)?
@@ -742,9 +708,6 @@ impl AppSettings {
         };
         if !CALENDAR_REMINDER_MINUTES_RANGE.contains(&normalized.calendar_reminder_minutes) {
             normalized.calendar_reminder_minutes = Self::default().calendar_reminder_minutes;
-        }
-        if !FEEDBACK_SOUNDS_VOLUME_RANGE.contains(&normalized.feedback_sounds_volume) {
-            normalized.feedback_sounds_volume = Self::default().feedback_sounds_volume;
         }
 
         if !ALLOWED_UNLOAD_TIMEOUT_MINUTES.contains(&normalized.model_unload_timeout_minutes) {
@@ -983,11 +946,6 @@ impl AppSettings {
             )?;
             write_json_setting_in_transaction(
                 transaction,
-                CALENDAR_AUTOSTART_ENABLED_KEY,
-                &normalized.calendar_autostart_enabled,
-            )?;
-            write_json_setting_in_transaction(
-                transaction,
                 FEEDBACK_SOUNDS_ENABLED_KEY,
                 &normalized.feedback_sounds_enabled,
             )?;
@@ -995,16 +953,6 @@ impl AppSettings {
                 transaction,
                 PILL_HIDDEN_KEY,
                 &normalized.pill_hidden,
-            )?;
-            write_json_setting_in_transaction(
-                transaction,
-                PILL_HIDDEN_IN_CAPTURES_KEY,
-                &normalized.pill_hidden_in_captures,
-            )?;
-            write_json_setting_in_transaction(
-                transaction,
-                FEEDBACK_SOUNDS_VOLUME_KEY,
-                &normalized.feedback_sounds_volume,
             )?;
             write_json_setting_in_transaction(
                 transaction,
@@ -1403,11 +1351,8 @@ mod tests {
             calendar_integration_enabled: true,
             calendar_selected_ids: vec!["cal-1".into(), "cal-2".into()],
             calendar_reminder_minutes: 5,
-            calendar_autostart_enabled: true,
             feedback_sounds_enabled: false,
             pill_hidden: true,
-            pill_hidden_in_captures: false,
-            feedback_sounds_volume: 40,
             model_unload_timeout_minutes: 15,
             meeting_autostop_enabled: false,
             autostart_enabled: true,
@@ -1433,30 +1378,22 @@ mod tests {
     }
 
     #[test]
-    fn hud_activation_and_capture_exclusion_persist_independently() {
+    fn hud_activation_persists() {
         let (db, _dir) = test_db();
-        let defaults = AppSettings::default();
-        assert!(!defaults.pill_hidden, "the HUD is on by default");
         assert!(
-            defaults.pill_hidden_in_captures,
-            "the HUD stays out of screen captures by default"
+            !AppSettings::default().pill_hidden,
+            "the HUD is on by default"
         );
 
-        for (pill_hidden, pill_hidden_in_captures) in
-            [(false, false), (false, true), (true, false), (true, true)]
-        {
+        for pill_hidden in [true, false] {
             AppSettings {
                 pill_hidden,
-                pill_hidden_in_captures,
                 ..AppSettings::default()
             }
             .save(&db)
             .expect("save settings");
             let loaded = AppSettings::load(&db).expect("load settings");
-            assert_eq!(
-                (loaded.pill_hidden, loaded.pill_hidden_in_captures),
-                (pill_hidden, pill_hidden_in_captures)
-            );
+            assert_eq!(loaded.pill_hidden, pill_hidden);
         }
     }
 
@@ -1483,7 +1420,7 @@ mod tests {
         let candidate = AppSettings {
             theme: Theme::Dark,
             calendar_integration_enabled: true,
-            feedback_sounds_volume: 17,
+            calendar_reminder_minutes: 17,
             ..initial
         };
         let error = candidate.save(&db).expect_err("injected save must fail");
@@ -1961,6 +1898,9 @@ mod tests {
             ("debug_transcription", "true"),
             ("compact_transcript_enabled", "true"),
             ("summary_compression_rate", "0.7"),
+            ("calendar_autostart_enabled", "false"),
+            ("feedback_sounds_volume", "15"),
+            ("pill_hidden_in_captures", "false"),
         ];
         for (key, value) in retired {
             db.set_setting(key, value).expect("seed the retired key");
@@ -2338,7 +2278,7 @@ mod tests {
     }
 
     #[test]
-    fn volume_and_reminder_bounds_match_settings_options() {
+    fn reminder_bounds_match_settings_options() {
         let options = SettingsOptions::current();
         assert_eq!(
             options.calendar_reminder_minutes_min,
@@ -2347,14 +2287,6 @@ mod tests {
         assert_eq!(
             options.calendar_reminder_minutes_max,
             *super::CALENDAR_REMINDER_MINUTES_RANGE.end()
-        );
-        assert_eq!(
-            options.feedback_sounds_volume_min,
-            *super::FEEDBACK_SOUNDS_VOLUME_RANGE.start()
-        );
-        assert_eq!(
-            options.feedback_sounds_volume_max,
-            *super::FEEDBACK_SOUNDS_VOLUME_RANGE.end()
         );
     }
 

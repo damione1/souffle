@@ -5360,19 +5360,6 @@ fn wire_callbacks(
     });
 
     let weak = window.as_weak();
-    let settings_io_for_pill_hidden_in_captures = settings_io.clone();
-    window.on_settings_pill_hidden_in_captures_changed(move |hidden| {
-        save_settings_field(
-            &settings_io_for_pill_hidden_in_captures,
-            souffle_lib::commands::SettingsSaveLane::General,
-            move |settings| settings.pill_hidden_in_captures = hidden,
-        );
-        if let Some(window) = weak.upgrade() {
-            window.set_settings_pill_hidden_in_captures(hidden);
-        }
-    });
-
-    let weak = window.as_weak();
     let settings_io_for_feedback_enabled = settings_io.clone();
     window.on_settings_feedback_sounds_enabled_changed(move |enabled| {
         save_settings_field(
@@ -5478,19 +5465,6 @@ fn wire_callbacks(
             );
         })
         .expect("slint event loop not running");
-    });
-
-    let weak = window.as_weak();
-    let settings_io_for_calendar_autostart = settings_io.clone();
-    window.on_settings_calendar_autostart_enabled_changed(move |enabled| {
-        save_settings_field(
-            &settings_io_for_calendar_autostart,
-            souffle_lib::commands::SettingsSaveLane::General,
-            move |settings| settings.calendar_autostart_enabled = enabled,
-        );
-        if let Some(window) = weak.upgrade() {
-            window.set_settings_calendar_autostart_enabled(enabled);
-        }
     });
 
     let weak = window.as_weak();
@@ -5798,34 +5772,6 @@ fn wire_callbacks(
             return;
         };
         copy_to_clipboard(&window.get_settings_mcp_claude_code_command());
-    });
-
-    let weak = window.as_weak();
-    window.on_settings_mcp_test_requested(move || {
-        let Some(window) = weak.upgrade() else {
-            return;
-        };
-        window.set_settings_testing_mcp(true);
-        window.set_settings_mcp_test_status("".into());
-        let weak = weak.clone();
-        let worker =
-            souffle_lib::async_runtime::spawn_blocking(souffle_lib::commands::test_mcp_connection);
-        slint::spawn_local(async move {
-            let result = worker
-                .await
-                .map_err(|error| format!("Test MCP interrompu : {error}"))
-                .and_then(|result| result);
-            let Some(window) = weak.upgrade() else {
-                return;
-            };
-            match result {
-                Ok(tools) => window
-                    .set_settings_mcp_test_status(format!("Connexion réussie ({tools}).").into()),
-                Err(error) => window.set_settings_mcp_test_status(error.into()),
-            }
-            window.set_settings_testing_mcp(false);
-        })
-        .expect("slint event loop not running");
     });
 
     let weak = window.as_weak();

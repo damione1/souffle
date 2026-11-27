@@ -73,12 +73,9 @@ pub fn populate(window: &MainWindow, settings: &AppSettings) {
     );
     window.set_settings_paste_delay_ms(settings.paste_delay_ms as i32);
     window.set_settings_pill_hidden(settings.pill_hidden);
-    window.set_settings_pill_hidden_in_captures(settings.pill_hidden_in_captures);
     window.set_settings_feedback_sounds_enabled(settings.feedback_sounds_enabled);
-    window.set_settings_feedback_sounds_volume(settings.feedback_sounds_volume as i32);
 
     window.set_settings_calendar_enabled(settings.calendar_integration_enabled);
-    window.set_settings_calendar_autostart_enabled(settings.calendar_autostart_enabled);
     window.set_settings_calendar_reminder_minutes(settings.calendar_reminder_minutes as i32);
 
     window.set_settings_capture_system_audio(settings.capture_system_audio);
@@ -90,8 +87,6 @@ pub fn populate(window: &MainWindow, settings: &AppSettings) {
     let bounds = SettingsOptions::current();
     window.set_settings_paste_delay_min(bounds.paste_delay_ms_min as i32);
     window.set_settings_paste_delay_max(bounds.paste_delay_ms_max as i32);
-    window.set_settings_feedback_sounds_volume_min(bounds.feedback_sounds_volume_min as i32);
-    window.set_settings_feedback_sounds_volume_max(bounds.feedback_sounds_volume_max as i32);
     window.set_settings_calendar_reminder_minutes_min(bounds.calendar_reminder_minutes_min as i32);
     window.set_settings_calendar_reminder_minutes_max(bounds.calendar_reminder_minutes_max as i32);
 }

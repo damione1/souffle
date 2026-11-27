@@ -318,7 +318,6 @@ impl SettingsValueController {
         window.set_settings_locale(settings_ui::locale_to_slint(&settings.locale));
         window.set_settings_paste_method(settings_ui::paste_method_to_slint(settings.paste_method));
         window.set_settings_paste_delay_ms(settings.paste_delay_ms as i32);
-        window.set_settings_feedback_sounds_volume(settings.feedback_sounds_volume as i32);
         window.set_settings_calendar_reminder_minutes(settings.calendar_reminder_minutes as i32);
         window.set_settings_clamshell_device_id(
             settings
@@ -376,19 +375,6 @@ pub(crate) fn wire(window: &MainWindow, controller: Rc<SettingsValueController>)
             s.theme = settings_ui::theme_from_slint(value)
         });
     });
-    // The header must obey the same durable-value contract as the Settings buttons.
-    let c = controller.clone();
-    window.on_theme_toggle_requested(move || {
-        let Some(window) = c.window.upgrade() else {
-            return;
-        };
-        let theme = if window.global::<Theme>().get_dark() {
-            souffle_lib::settings::Theme::Light
-        } else {
-            souffle_lib::settings::Theme::Dark
-        };
-        c.apply(SettingsSaveLane::General, move |s| s.theme = theme);
-    });
     let c = controller.clone();
     let weak = window.as_weak();
     window.on_settings_locale_changed(move |value| {
@@ -416,14 +402,6 @@ pub(crate) fn wire(window: &MainWindow, controller: Rc<SettingsValueController>)
     });
     let c = controller.clone();
     let options = SettingsOptions::current();
-    let volume_min = options.feedback_sounds_volume_min as i32;
-    let volume_max = options.feedback_sounds_volume_max as i32;
-    window.on_settings_feedback_sounds_volume_changed(move |value| {
-        c.apply(SettingsSaveLane::General, move |s| {
-            s.feedback_sounds_volume = value.clamp(volume_min, volume_max) as u32
-        });
-    });
-    let c = controller.clone();
     let reminder_min = options.calendar_reminder_minutes_min as i32;
     let reminder_max = options.calendar_reminder_minutes_max as i32;
     window.on_settings_calendar_reminder_minutes_changed(move |value| {
@@ -757,22 +735,15 @@ mod tests {
     }
 
     #[test]
-    fn volume_and_reminder_callbacks_clamp_to_backend_options() {
+    fn reminder_callback_clamps_to_backend_options() {
         let harness = DatabaseHarness::new(AppSettings::default());
         let options = SettingsOptions::current();
 
         harness
             .window
-            .invoke_settings_feedback_sounds_volume_changed(-1);
-        harness
-            .window
             .invoke_settings_calendar_reminder_minutes_changed(0);
-        harness.wait_for_saves(2);
+        harness.wait_for_saves(1);
         let lower = AppSettings::load(&harness.db).unwrap();
-        assert_eq!(
-            lower.feedback_sounds_volume,
-            options.feedback_sounds_volume_min
-        );
         assert_eq!(
             lower.calendar_reminder_minutes,
             options.calendar_reminder_minutes_min
@@ -780,16 +751,9 @@ mod tests {
 
         harness
             .window
-            .invoke_settings_feedback_sounds_volume_changed(i32::MAX);
-        harness
-            .window
             .invoke_settings_calendar_reminder_minutes_changed(i32::MAX);
-        harness.wait_for_saves(4);
+        harness.wait_for_saves(2);
         let upper = AppSettings::load(&harness.db).unwrap();
-        assert_eq!(
-            upper.feedback_sounds_volume,
-            options.feedback_sounds_volume_max
-        );
         assert_eq!(
             upper.calendar_reminder_minutes,
             options.calendar_reminder_minutes_max
@@ -868,7 +832,7 @@ mod tests {
     }
 
     #[test]
-    fn rejected_header_theme_toggle_rolls_back_while_settings_are_closed() {
+    fn rejected_theme_change_rolls_back_while_settings_are_closed() {
         let window = test_window();
         let initial = AppSettings {
             theme: SettingsTheme::Light,
@@ -911,7 +875,7 @@ mod tests {
         });
         wire(&window, controller);
 
-        window.invoke_theme_toggle_requested();
+        window.invoke_settings_theme_changed(crate::AppTheme::Dark);
         assert!(window.global::<Theme>().get_dark());
         drain_until(&io, &saves, 1);
 
@@ -977,7 +941,7 @@ mod tests {
         });
         wire(&window, controller);
 
-        window.invoke_theme_toggle_requested();
+        window.invoke_settings_theme_changed(crate::AppTheme::Dark);
         assert!(window.global::<Theme>().get_dark());
         io.submit(
             SettingsSaveLane::General,
@@ -1057,7 +1021,7 @@ mod tests {
     }
 
     #[test]
-    fn all_thirteen_callbacks_publish_the_persisted_snapshot_without_reloading_catalogues() {
+    fn all_value_callbacks_publish_the_persisted_snapshot_without_reloading_catalogues() {
         {
             let harness = DatabaseHarness::new_unopened(AppSettings {
                 theme: SettingsTheme::Light,
@@ -1071,7 +1035,7 @@ mod tests {
             assert!(!window.global::<Theme>().get_dark());
             assert_eq!(harness.appearance.get(), None);
 
-            window.invoke_theme_toggle_requested();
+            window.invoke_settings_theme_changed(crate::AppTheme::Dark);
             harness.wait_for_saves(1);
 
             assert_eq!(window.get_settings_theme(), crate::AppTheme::Dark);
@@ -1101,13 +1065,12 @@ mod tests {
         window.invoke_settings_paste_delay_changed(window.get_settings_paste_delay_ms() + 50);
         assert_eq!(window.get_settings_paste_delay_ms(), 200);
         window.invoke_settings_paste_delay_changed(window.get_settings_paste_delay_ms() + 50);
-        window.invoke_settings_feedback_sounds_volume_changed(16);
         window.invoke_settings_calendar_reminder_minutes_changed(5);
         window.invoke_settings_clamshell_device_changed("mic-1".into());
         window.invoke_settings_meeting_audio_retention_changed(crate::AudioRetention::Keep7d);
         window.invoke_settings_ollama_model_changed("model-b".into());
         window.invoke_settings_unload_timeout_changed("5 min".into());
-        harness.wait_for_saves(11);
+        harness.wait_for_saves(10);
 
         assert_eq!(window.get_settings_theme(), crate::AppTheme::Dark);
         assert!(window.global::<Theme>().get_dark());
@@ -1118,7 +1081,6 @@ mod tests {
             crate::PasteMethod::Typing
         );
         assert_eq!(window.get_settings_paste_delay_ms(), 250);
-        assert_eq!(window.get_settings_feedback_sounds_volume(), 16);
         assert_eq!(window.get_settings_calendar_reminder_minutes(), 5);
         assert_eq!(
             window.get_settings_clamshell_device_label().as_str(),
@@ -1140,7 +1102,6 @@ mod tests {
         assert_eq!(stored.locale, "fr");
         assert_eq!(stored.paste_method, PasteMethod::Type);
         assert_eq!(stored.paste_delay_ms, 250);
-        assert_eq!(stored.feedback_sounds_volume, 16);
         assert_eq!(stored.calendar_reminder_minutes, 5);
         assert_eq!(stored.clamshell_audio_device.as_deref(), Some("mic-1"));
         assert_eq!(
@@ -1150,7 +1111,7 @@ mod tests {
         assert_eq!(stored.ollama_model, "model-b");
         assert_eq!(stored.model_unload_timeout_minutes, 5);
 
-        assert_eq!(harness.saves.load(Ordering::SeqCst), 11);
+        assert_eq!(harness.saves.load(Ordering::SeqCst), 10);
         assert_eq!(harness.fallback_loads.load(Ordering::SeqCst), 0);
         assert_eq!(harness.devices.borrow()[0].uid, "mic-1");
         assert_eq!(
@@ -1164,9 +1125,8 @@ mod tests {
             assert_eq!(cached.summary_templates, drafts.1);
         }
 
-        // The header follows the same canonical theme round trip.
-        window.invoke_theme_toggle_requested();
-        harness.wait_for_saves(12);
+        window.invoke_settings_theme_changed(crate::AppTheme::Light);
+        harness.wait_for_saves(11);
         assert_eq!(window.get_settings_theme(), crate::AppTheme::Light);
         assert!(!window.global::<Theme>().get_dark());
         assert_eq!(harness.appearance.get(), Some(false));
@@ -1178,7 +1138,7 @@ mod tests {
         // A value accepted by the callback but normalized by AppSettings must
         // publish the persisted default, never the requested label.
         window.invoke_settings_unload_timeout_changed("7 min".into());
-        harness.wait_for_saves(13);
+        harness.wait_for_saves(12);
         assert_eq!(window.get_settings_unload_timeout_label().as_str(), "1 h");
         assert_eq!(
             AppSettings::load(&harness.db)
@@ -1186,7 +1146,7 @@ mod tests {
                 .model_unload_timeout_minutes,
             60
         );
-        assert_eq!(harness.saves.load(Ordering::SeqCst), 13);
+        assert_eq!(harness.saves.load(Ordering::SeqCst), 12);
 
         assert_failure_projection_contract();
     }
@@ -1376,13 +1336,13 @@ mod tests {
         assert!(!window.get_settings_save_error().contains("Stored settings"));
         assert!(window.get_settings_save_error_unavailable());
 
-        window.invoke_settings_feedback_sounds_volume_changed(23);
+        window.invoke_settings_calendar_reminder_minutes_changed(23);
         drain_until(&io, &step, 4);
         assert_eq!(window.get_settings_paste_delay_ms(), 250);
-        assert_eq!(window.get_settings_feedback_sounds_volume(), 23);
+        assert_eq!(window.get_settings_calendar_reminder_minutes(), 23);
         let recovered = AppSettings::load(&db).unwrap();
         assert_eq!(recovered.paste_delay_ms, 250);
-        assert_eq!(recovered.feedback_sounds_volume, 23);
+        assert_eq!(recovered.calendar_reminder_minutes, 23);
         assert!(cache.is_known());
         assert!(window.get_settings_save_error().is_empty());
         assert!(!window.get_settings_save_error_unavailable());

@@ -44,11 +44,7 @@ export component SettingsView inherits KitAppShell {
     in property <int> paste-delay-min;
     in property <int> paste-delay-max;
     in property <bool> pill-hidden;
-    in property <bool> pill-hidden-in-captures;
     in property <bool> feedback-sounds-enabled;
-    in property <int> feedback-sounds-volume;
-    in property <int> feedback-sounds-volume-min;
-    in property <int> feedback-sounds-volume-max;
     in property <string> toggle-shortcut-label;
     in property <string> ptt-shortcut-label;
     in property <bool> native-tap-warning-visible;
@@ -68,7 +64,6 @@ export component SettingsView inherits KitAppShell {
     in property <bool> draft-save-error-unavailable;
     in property <bool> calendar-enabled;
     in property <AccessState> calendar-permission;
-    in property <bool> calendar-autostart-enabled;
     in property <int> calendar-reminder-minutes;
     in property <int> calendar-reminder-minutes-min;
     in property <int> calendar-reminder-minutes-max;
@@ -94,15 +89,10 @@ export component SettingsView inherits KitAppShell {
     in property <bool> data-exporting;
     in property <string> data-export-status;
     in property <bool> data-export-status-is-error;
-    in property <string> mcp-binary-path;
     in property <bool> mcp-exists;
     in property <string> mcp-claude-desktop-snippet;
     in property <string> mcp-claude-code-command;
-    in property <bool> testing-mcp;
-    in property <string> mcp-test-status;
     in property <string> app-version;
-    in property <string> about-transcription-label;
-    in property <string> about-summary-label;
     in property <bool> auto-update-check;
     in property <UpdateRowStatus> update-row: UpdateRowStatus.unchecked;
     in property <string> update-version;
@@ -210,16 +200,13 @@ export component SettingsView inherits KitAppShell {
     callback paste-method-changed(PasteMethod);
     callback paste-delay-changed(int);
     callback pill-hidden-changed(bool);
-    callback pill-hidden-in-captures-changed(bool);
     callback feedback-sounds-enabled-changed(bool);
-    callback feedback-sounds-volume-changed(int);
     callback shortcut-record-requested(ShortcutField);
     callback shortcut-captured(ShortcutField, string, bool, bool, bool, bool);
     callback shortcut-released(ShortcutField, string, bool, bool, bool, bool);
     callback shortcut-cleared(ShortcutField);
     callback shortcut-cancelled();
     callback calendar-enabled-changed(bool);
-    callback calendar-autostart-enabled-changed(bool);
     callback calendar-reminder-minutes-changed(int);
     callback calendar-toggled(string);
     callback calendar-open-system-settings-requested();
@@ -236,7 +223,6 @@ export component SettingsView inherits KitAppShell {
     callback data-reveal-requested();
     callback mcp-copy-desktop-snippet-requested();
     callback mcp-copy-code-command-requested();
-    callback mcp-test-requested();
     callback update-action-requested();
     callback auto-update-check-changed(bool);
     callback summary-provider-changed(SummaryProvider);
@@ -560,14 +546,12 @@ export component SettingsView inherits KitAppShell {
                                     shortcut-notice: root.shortcut-notice;
                                     native-tap-warning-visible: root.native-tap-warning-visible;
                                     pill-hidden: root.pill-hidden;
-                                    pill-hidden-in-captures: root.pill-hidden-in-captures;
                                     theme-changed(value) => { root.theme-changed(value); }
                                     locale-changed(value) => { root.locale-changed(value); }
                                     auto-paste-changed(value) => { root.auto-paste-changed(value); }
                                     paste-method-changed(value) => { root.paste-method-changed(value); }
                                     paste-delay-changed(value) => { root.paste-delay-changed(value); }
                                     pill-hidden-changed(value) => { root.pill-hidden-changed(value); }
-                                    pill-hidden-in-captures-changed(value) => { root.pill-hidden-in-captures-changed(value); }
                                     shortcut-record-requested(field) => { root.shortcut-record-requested(field); }
                                     shortcut-captured(field, text, ctrl, shift, alt, meta) => { root.shortcut-captured(field, text, ctrl, shift, alt, meta); }
                                     shortcut-released(field, text, ctrl, shift, alt, meta) => { root.shortcut-released(field, text, ctrl, shift, alt, meta); }
@@ -578,11 +562,7 @@ export component SettingsView inherits KitAppShell {
 
                                 if interface-page.mounted: FeedbackSoundsSection {
                                     enabled: root.feedback-sounds-enabled;
-                                    volume: root.feedback-sounds-volume;
-                                    volume-min: root.feedback-sounds-volume-min;
-                                    volume-max: root.feedback-sounds-volume-max;
                                     enabled-changed(value) => { root.feedback-sounds-enabled-changed(value); }
-                                    volume-changed(value) => { root.feedback-sounds-volume-changed(value); }
                                 }
                         }
 
@@ -595,13 +575,11 @@ export component SettingsView inherits KitAppShell {
                                 if meetings-page.mounted: CalendarSection {
                                     enabled: root.calendar-enabled;
                                     permission: root.calendar-permission;
-                                    autostart-enabled: root.calendar-autostart-enabled;
                                     reminder-minutes: root.calendar-reminder-minutes;
                                     reminder-minutes-min: root.calendar-reminder-minutes-min;
                                     reminder-minutes-max: root.calendar-reminder-minutes-max;
                                     calendars: root.calendars;
                                     enabled-changed(value) => { root.calendar-enabled-changed(value); }
-                                    autostart-enabled-changed(value) => { root.calendar-autostart-enabled-changed(value); }
                                     reminder-minutes-changed(value) => { root.calendar-reminder-minutes-changed(value); }
                                     calendar-toggled(id) => { root.calendar-toggled(id); }
                                     open-system-settings-requested => { root.calendar-open-system-settings-requested(); }
@@ -637,24 +615,18 @@ export component SettingsView inherits KitAppShell {
                                     exporting: root.data-exporting;
                                     export-status: root.data-export-status;
                                     export-status-is-error: root.data-export-status-is-error;
-                                    mcp-binary-path: root.mcp-binary-path;
                                     mcp-exists: root.mcp-exists;
                                     mcp-claude-desktop-snippet: root.mcp-claude-desktop-snippet;
                                     mcp-claude-code-command: root.mcp-claude-code-command;
-                                    testing-mcp: root.testing-mcp;
-                                    mcp-test-status: root.mcp-test-status;
                                     retention-changed(value) => { root.meeting-audio-retention-changed(value); }
                                     export-requested => { root.data-export-requested(); }
                                     reveal-requested => { root.data-reveal-requested(); }
                                     copy-desktop-snippet-requested => { root.mcp-copy-desktop-snippet-requested(); }
                                     copy-code-command-requested => { root.mcp-copy-code-command-requested(); }
-                                    test-mcp-requested => { root.mcp-test-requested(); }
                                 }
 
                                 if system-page.mounted: AboutSection {
                                     app-version: root.app-version;
-                                    transcription-label: root.about-transcription-label;
-                                    summary-label: root.about-summary-label;
                                     auto-update-check: root.auto-update-check;
                                     update-row: root.update-row;
                                     update-version: root.update-version;

@@ -236,7 +236,6 @@ fn apply_settings_effects(
             priority: settings.input_priority.clone(),
         });
     crate::pill::set_hidden(settings.pill_hidden);
-    crate::pill::set_hidden_in_captures(settings.pill_hidden_in_captures);
     // Toggling the calendar integration (or its lead time, or the selected
     // calendars) takes effect now: the scheduler parks between passes.
     crate::calendar::scheduler::wake();

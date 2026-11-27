@@ -1257,11 +1257,6 @@ msgctxt "AppHeader"
 msgid "Soufflé"
 msgstr ""
 
-#: ui/components/app_header.slint:103
-msgctxt "AppHeader"
-msgid "Basculer clair / sombre"
-msgstr ""
-
 #: ui/components/app_header.slint:110
 msgctxt "AppHeader"
 msgid "Réglages"
@@ -2108,19 +2103,6 @@ msgid ""
 "si la résolution change."
 msgstr ""
 
-#: ui/components/settings/interface_section.slint:451
-#: ui/components/settings/interface_section.slint:451
-msgctxt "InterfaceSection"
-msgid "Masquer l'overlay dans les captures d'écran"
-msgstr ""
-
-#: ui/components/settings/interface_section.slint:452
-msgctxt "InterfaceSection"
-msgid ""
-"Quand l'overlay est affiché, l'exclure des captures d'écran, des "
-"enregistrements et des partages d'écran."
-msgstr ""
-
 #: ui/components/settings/dictation_polish_section.slint:17
 msgctxt "DictationPolishSection"
 msgid "POLISH DE LA DICTÉE"
@@ -2176,21 +2158,6 @@ msgstr ""
 #: ui/components/settings/feedback_sounds_section.slint:29
 msgctxt "FeedbackSoundsSection"
 msgid "Jouer un son au démarrage et à l'arrêt de l'enregistrement."
-msgstr ""
-
-#: ui/components/settings/feedback_sounds_section.slint:51
-msgctxt "FeedbackSoundsSection"
-msgid "Volume"
-msgstr ""
-
-#: ui/components/settings/feedback_sounds_section.slint:68
-msgctxt "FeedbackSoundsSection"
-msgid "Volume des sons de dictée"
-msgstr ""
-
-#: ui/components/settings/feedback_sounds_section.slint:75
-msgctxt "FeedbackSoundsSection"
-msgid "{} %"
 msgstr ""
 
 #: ui/components/settings/snippets_section.slint:48
@@ -2413,9 +2380,7 @@ msgstr ""
 
 #: ui/components/settings/calendar_section.slint:51
 msgctxt "CalendarSection"
-msgid ""
-"Afficher les réunions du jour sur l'accueil et rappeler avant qu'elles "
-"commencent."
+msgid "Afficher les réunions du jour sur l'accueil, rappeler avant qu'elles commencent et proposer de les enregistrer si le micro est utilisé après leur début."
 msgstr ""
 
 #: ui/components/settings/calendar_section.slint:69
@@ -2428,27 +2393,14 @@ msgctxt "CalendarSection"
 msgid "Ouvrir les Réglages Système"
 msgstr ""
 
-#: ui/components/settings/calendar_section.slint:92
-#: ui/components/settings/calendar_section.slint:92
-msgctxt "CalendarSection"
-msgid "Proposer au début de la réunion"
-msgstr ""
-
-#: ui/components/settings/calendar_section.slint:93
-msgctxt "CalendarSection"
-msgid ""
-"Quand un événement commence et que l'audio système est actif, proposer de "
-"démarrer l'enregistrement."
-msgstr ""
-
 #: ui/components/settings/calendar_section.slint:119
 msgctxt "CalendarSection"
-msgid "Délai du rappel"
+msgid "Rappel avant la réunion"
 msgstr ""
 
 #: ui/components/settings/calendar_section.slint:120
 msgctxt "CalendarSection"
-msgid "Minutes avant un événement pour proposer de démarrer une transcription."
+msgid "Nombre de minutes entre le rappel et le début de l'événement."
 msgstr ""
 
 #: ui/components/settings/calendar_section.slint:131
@@ -2463,7 +2415,7 @@ msgstr ""
 
 #: ui/components/settings/calendar_section.slint:133
 msgctxt "CalendarSection"
-msgid "Délai du rappel en minutes"
+msgid "Rappel avant la réunion, en minutes"
 msgstr ""
 
 #: ui/components/settings/calendar_section.slint:159
@@ -2938,26 +2890,6 @@ msgctxt "AboutSection"
 msgid "v{}"
 msgstr ""
 
-#: ui/components/settings/about_section.slint:115
-msgctxt "AboutSection"
-msgid "Transcription"
-msgstr ""
-
-#: ui/components/settings/about_section.slint:134
-msgctxt "AboutSection"
-msgid "Résumés"
-msgstr ""
-
-#: ui/components/settings/about_section.slint:153
-msgctxt "AboutSection"
-msgid "Confidentialité"
-msgstr ""
-
-#: ui/components/settings/about_section.slint:157
-msgctxt "AboutSection"
-msgid "100 % local"
-msgstr ""
-
 #: ui/components/settings/about_section.slint:174
 msgctxt "AboutSection"
 msgid "Mises à jour"
@@ -3211,14 +3143,9 @@ msgid ""
 "transcriptions et résumés. Tout reste sur ce Mac."
 msgstr ""
 
-#: ui/components/settings/data_section.slint:217
-msgctxt "DataSection"
-msgid "Binaire sidecar"
-msgstr ""
-
 #: ui/components/settings/data_section.slint:225
 msgctxt "DataSection"
-msgid "Binaire introuvable. Compilez souffle-mcp pour le développement local."
+msgid "Le serveur MCP est absent de l'application. Réinstallez Soufflé."
 msgstr ""
 
 #: ui/components/settings/data_section.slint:247
@@ -3239,17 +3166,6 @@ msgstr ""
 #: ui/components/settings/data_section.slint:287
 msgctxt "DataSection"
 msgid "À exécuter une fois dans un terminal pour enregistrer le serveur."
-msgstr ""
-
-#: ui/components/settings/data_section.slint:313
-#: ui/components/settings/data_section.slint:313
-msgctxt "DataSection"
-msgid "Tester la connexion"
-msgstr ""
-
-#: ui/components/settings/data_section.slint:320
-msgctxt "DataSection"
-msgid "Test en cours…"
 msgstr ""
 
 #: ui/components/settings/model_section.slint:40

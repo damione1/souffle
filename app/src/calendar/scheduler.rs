@@ -1,7 +1,7 @@
 //! Calendar reminder scheduler: a background task that watches today's
 //! events and, shortly before one starts, sends a system notification.
 //!
-//! When an event is in progress and system audio is active but no recording
+//! When an event is in progress and the microphone is in use but no recording
 //! runs, a second at-event-time nudge fires (see
 //! [`CalendarMeetingNudgeKind::Autostart`]).
 //!
@@ -162,7 +162,7 @@ async fn run(state: Arc<AppState>) {
             );
         }
 
-        let due_autostart = if recording || !settings.calendar_autostart_enabled {
+        let due_autostart = if recording {
             Vec::new()
         } else {
             due_autostart_nudges(now, &events, &fired_autostart)
@@ -187,7 +187,6 @@ async fn run(state: Arc<AppState>) {
             &events,
             WakeInputs {
                 reminder_minutes: settings.calendar_reminder_minutes,
-                autostart_enabled: settings.calendar_autostart_enabled,
                 day_end: calendar::local_day_end(),
                 fired_reminders: &fired_reminders,
                 fired_autostart: &fired_autostart,
@@ -200,7 +199,6 @@ async fn run(state: Arc<AppState>) {
 /// What [`next_wake`] needs beyond the clock and the fetched events.
 struct WakeInputs<'a> {
     reminder_minutes: u32,
-    autostart_enabled: bool,
     /// Next local midnight: "today's events" changes meaning there.
     day_end: DateTime<Utc>,
     fired_reminders: &'a HashSet<OccurrenceKey>,
@@ -228,7 +226,7 @@ fn next_wake(
                 deadline = deadline.min(reminder_at);
             }
         }
-        if inputs.autostart_enabled && !inputs.fired_autostart.contains(&key) {
+        if !inputs.fired_autostart.contains(&key) {
             if event.start > now {
                 deadline = deadline.min(event.start);
             } else if now - event.start <= autostart_window && now < event.end {
@@ -329,10 +327,10 @@ fn notify(
         }
         CalendarMeetingNudgeKind::Autostart => {
             if locale.starts_with("fr") {
-                "La réunion a commencé et l'audio système est actif. Démarrer l'enregistrement ?"
+                "La réunion a commencé et le micro est utilisé. Démarrer l'enregistrement ?"
                     .to_string()
             } else {
-                "Your meeting started and system audio is active. Start recording?".to_string()
+                "Your meeting started and the microphone is in use. Start recording?".to_string()
             }
         }
     };
@@ -418,13 +416,11 @@ mod tests {
 
     fn inputs<'a>(
         now: DateTime<Utc>,
-        autostart_enabled: bool,
         fired_reminders: &'a HashSet<OccurrenceKey>,
         fired_autostart: &'a HashSet<OccurrenceKey>,
     ) -> WakeInputs<'a> {
         WakeInputs {
             reminder_minutes: 2,
-            autostart_enabled,
             day_end: now + chrono::Duration::hours(12),
             fired_reminders,
             fired_autostart,
@@ -436,7 +432,7 @@ mod tests {
         let now = Utc::now();
         let none = HashSet::new();
         assert_eq!(
-            next_wake(now, &[], inputs(now, true, &none, &none)),
+            next_wake(now, &[], inputs(now, &none, &none)),
             now + MAX_SLEEP
         );
     }
@@ -445,7 +441,7 @@ mod tests {
     fn next_wake_is_capped_by_local_midnight() {
         let now = Utc::now();
         let none = HashSet::new();
-        let mut wake_inputs = inputs(now, true, &none, &none);
+        let mut wake_inputs = inputs(now, &none, &none);
         wake_inputs.day_end = now + chrono::Duration::minutes(3);
         assert_eq!(
             next_wake(now, &[], wake_inputs),
@@ -464,7 +460,7 @@ mod tests {
             next_wake(
                 now,
                 std::slice::from_ref(&meeting),
-                inputs(now, true, &none, &none)
+                inputs(now, &none, &none)
             ),
             now + chrono::Duration::minutes(1)
         );
@@ -475,18 +471,9 @@ mod tests {
             next_wake(
                 now,
                 std::slice::from_ref(&meeting),
-                inputs(now, true, &fired, &none)
+                inputs(now, &fired, &none)
             ),
             meeting.start
-        );
-        assert_eq!(
-            next_wake(
-                now,
-                std::slice::from_ref(&meeting),
-                inputs(now, false, &fired, &none)
-            ),
-            now + MAX_SLEEP,
-            "auto-start off: nothing to do at the start"
         );
     }
 
@@ -499,7 +486,7 @@ mod tests {
             next_wake(
                 now,
                 std::slice::from_ref(&started),
-                inputs(now, true, &none, &none)
+                inputs(now, &none, &none)
             ),
             now + AUTOSTART_RECHECK
         );
@@ -510,7 +497,7 @@ mod tests {
             next_wake(
                 now,
                 std::slice::from_ref(&started),
-                inputs(now, true, &none, &fired)
+                inputs(now, &none, &fired)
             ),
             now + MAX_SLEEP,
             "nudged already: no more re-checks"
@@ -518,7 +505,7 @@ mod tests {
 
         let too_old = event("b", now - chrono::Duration::minutes(11));
         assert_eq!(
-            next_wake(now, &[too_old], inputs(now, true, &none, &none)),
+            next_wake(now, &[too_old], inputs(now, &none, &none)),
             now + MAX_SLEEP
         );
     }

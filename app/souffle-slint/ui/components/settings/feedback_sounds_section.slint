@@ -1,15 +1,10 @@
-import { FieldSetAppearance, FieldRowAppearance, ChoiceLabelPosition, ControlWidth, KitSlider, KitSwitch, Ownership, SliderPresentation, KitFieldSet, KitThemeContext, KitThemes, KitFieldRow } from "@kit";
-import { AppText, Typography } from "@typography";
+import { FieldSetAppearance, FieldRowAppearance, ChoiceLabelPosition, ControlWidth, KitSwitch, Ownership, KitFieldSet, KitThemeContext, KitThemes, KitFieldRow } from "@kit";
 import { Theme } from "../../theme.slint";
 
 export component FeedbackSoundsSection inherits KitFieldSet {
     in property <bool> enabled;
-    in property <int> volume;
-    in property <int> volume-min;
-    in property <int> volume-max;
 
     callback enabled-changed(bool);
-    callback volume-changed(int);
 
     theme: KitThemeContext.current;
     legend: @tr("SONS DE DICTÉE");
@@ -39,49 +34,6 @@ export component FeedbackSoundsSection inherits KitFieldSet {
             accessible-label: @tr("Activer les sons");
             checked: root.enabled;
             toggled(new) => { root.enabled-changed(new); }
-        }
-    }
-
-    if root.enabled: KitFieldRow {
-        theme: root.theme;
-        modal-layer: 0;
-        orientation: Theme.settings-field-orientation(self.width);
-        appearance: FieldRowAppearance.inset;
-        show-divider: true;
-        focus-requested => { volume-slider.take-focus(); }
-        label: @tr("Volume");
-
-        HorizontalLayout {
-            alignment: center;
-            horizontal-stretch: 0;
-
-            volume-slider := KitSlider {
-                theme: root.theme;
-                modal-layer: 0;
-                // The track is inset by the thumb on both sides: 174px visible.
-                width: 196px;
-                height: 20px;
-                presentation: SliderPresentation.line;
-                track-thickness: 6px;
-                // A plain value bar; the kit still outlines the thumb on keyboard focus.
-                handle-brush: transparent;
-                track-brush: Theme.surface-3;
-                ownership: Ownership.controlled;
-                spec: { minimum: root.volume-min, maximum: root.volume-max, step: 1 };
-                label: @tr("Volume des sons de dictée");
-                value: root.volume;
-                chosen(value) => { root.volume-changed(value.to-float()); }
-            }
-
-            AppText {
-                text: @tr("{} %", root.volume);
-                typography: Typography.mono;
-                color: Theme.text-muted;
-                wrap: no-wrap;
-                vertical-alignment: center;
-                width: 38px;
-                horizontal-alignment: right;
-            }
         }
     }
 }

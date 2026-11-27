@@ -10,7 +10,7 @@ from pathlib import Path
 # languages. An unchanged French sentence in the English catalogue is not a
 # translation; make any new exception an explicit review decision.
 UNCHANGED_ENGLISH = {
-    "100% local", "AUDIO", "Audio", "Claude Code", "DIAGNOSTICS",
+    "AUDIO", "Audio", "Claude Code", "DIAGNOSTICS",
     "English", "EXPANSION", "INTERFACE", "Interface", "MICROPHONE",
     "NOTES", "Notes", "PERMISSIONS", "Soufflé", "Suggestions", "Transcription", "×", "✕",
     # Symbols, acronyms and placeholder-only templates: identical spelling

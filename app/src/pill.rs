@@ -49,7 +49,6 @@ unsafe extern "C" {
     fn pill_typography_register(bytes: *const u8, count: usize, index: i32) -> i32;
     fn pill_panel_create();
     fn pill_panel_set_visible(visible: i32);
-    fn pill_panel_set_capture_excluded(excluded: i32);
     fn pill_panel_set_mode(
         mode: i32,
         title: *const std::ffi::c_char,
@@ -67,8 +66,6 @@ unsafe extern "C" {
 unsafe fn pill_panel_create() {}
 #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
 unsafe fn pill_panel_set_visible(_visible: i32) {}
-#[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
-unsafe fn pill_panel_set_capture_excluded(_excluded: i32) {}
 #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
 unsafe fn pill_panel_set_mode(
     _mode: i32,
@@ -110,10 +107,6 @@ static LAST_RECORDING: AtomicBool = AtomicBool::new(false);
 static LAST_SHOWN: AtomicBool = AtomicBool::new(false);
 
 static PILL_HIDDEN: AtomicBool = AtomicBool::new(false);
-/// Whether the HUD is excluded from screen captures / sharing. Independent of
-/// `PILL_HIDDEN`: one decides whether the HUD shows at all, the other whether
-/// a shown HUD appears in a capture.
-static PILL_HIDDEN_IN_CAPTURES: AtomicBool = AtomicBool::new(true);
 static CURRENT_RMS_BITS: std::sync::atomic::AtomicU32 =
     std::sync::atomic::AtomicU32::new(0.0f32.to_bits());
 
@@ -249,19 +242,6 @@ pub fn set_hidden(hidden: bool) {
 
 fn is_hidden() -> bool {
     PILL_HIDDEN.load(Ordering::SeqCst)
-}
-
-/// Exclude (or include) the HUD from screenshots, screen recordings and
-/// screen sharing. Applied to the native panel immediately.
-pub fn set_hidden_in_captures(hidden: bool) {
-    PILL_HIDDEN_IN_CAPTURES.store(hidden, Ordering::SeqCst);
-    // SAFETY: Swift hops to the main thread internally.
-    unsafe { pill_panel_set_capture_excluded(i32::from(hidden)) };
-}
-
-#[cfg(test)]
-fn is_hidden_in_captures() -> bool {
-    PILL_HIDDEN_IN_CAPTURES.load(Ordering::SeqCst)
 }
 
 fn set_hold_state(kind: PillHoldKind) {
@@ -517,9 +497,8 @@ pub fn live_text_tail(text: &str, max_chars: usize) -> String {
 // Position persistence
 // ---------------------------------------------------------------------------
 
-pub(crate) fn restore_from_db(db: &Database, hidden: bool, hidden_in_captures: bool) {
+pub(crate) fn restore_from_db(db: &Database, hidden: bool) {
     set_hidden(hidden);
-    set_hidden_in_captures(hidden_in_captures);
     match db.get_setting(PILL_POSITION_KEY) {
         Ok(Some(raw)) => {
             if let Ok((x, y)) = serde_json::from_str::<(f64, f64)>(&raw) {
@@ -759,7 +738,7 @@ mod tests {
         let (db, _dir) = crate::test_helpers::fixtures::test_db();
         db.set_setting(crate::settings::PILL_POSITION_KEY, "[100.5,200.25]")
             .unwrap();
-        restore_from_db(&db, true, true);
+        restore_from_db(&db, true);
         assert!(is_hidden());
         assert_eq!(custom_origin(), Some((100.5, 200.25)));
         set_hidden(false);
@@ -772,31 +751,6 @@ mod tests {
         assert!(origin_changed(None, (10.0, 20.0)), "first origin is new");
         assert!(!origin_changed(Some((10.0, 20.0)), (10.0, 20.0)));
         assert!(origin_changed(Some((10.0, 20.0)), (10.0, 21.0)));
-    }
-
-    #[test]
-    fn hud_activation_and_capture_exclusion_are_independent() {
-        let _guard = hold_test_guard();
-        let (db, _dir) = crate::test_helpers::fixtures::test_db();
-
-        // HUD on, but shown in captures: it must still be shown.
-        restore_from_db(&db, false, false);
-        assert!(!is_hidden());
-        assert!(!is_hidden_in_captures());
-        assert!(should_show_pill(true, false, is_hidden()));
-
-        // HUD on and excluded from captures: still shown on screen.
-        set_hidden_in_captures(true);
-        assert!(!is_hidden());
-        assert!(should_show_pill(true, false, is_hidden()));
-
-        // HUD off: the capture preference survives untouched.
-        set_hidden(true);
-        assert!(is_hidden_in_captures());
-        assert!(!should_show_pill(true, false, is_hidden()));
-
-        set_hidden(false);
-        set_hidden_in_captures(true);
     }
 
     #[test]

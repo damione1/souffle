@@ -57,12 +57,13 @@ impl Drop for FeedbackSlot {
     }
 }
 
+const FEEDBACK_GAIN: f32 = 0.7;
+
 /// Fire-and-forget playback on a background thread so capture never blocks.
 pub fn play_dictation_feedback(settings: &AppSettings, kind: DictationFeedbackKind) {
     if !settings.feedback_sounds_enabled {
         return;
     }
-    let volume = normalized_volume(settings.feedback_sounds_volume);
     let filename = match kind {
         DictationFeedbackKind::Start => "sounds/dictation_start.wav",
         DictationFeedbackKind::Stop => "sounds/dictation_stop.wav",
@@ -82,17 +83,13 @@ pub fn play_dictation_feedback(settings: &AppSettings, kind: DictationFeedbackKi
         .name("feedback-sound".into())
         .spawn(move || {
             let _slot = FeedbackSlot(&FEEDBACK_IN_FLIGHT);
-            if let Err(e) = play_wav_blocking(&path, volume) {
+            if let Err(e) = play_wav_blocking(&path, FEEDBACK_GAIN) {
                 warn!("Feedback sound playback failed: {e}");
             }
         });
     if spawned.is_err() {
         FEEDBACK_IN_FLIGHT.fetch_sub(1, Ordering::AcqRel);
     }
-}
-
-fn normalized_volume(percent: u32) -> f32 {
-    (percent.min(100) as f32 / 100.0).clamp(0.0, 1.0)
 }
 
 fn play_wav_blocking(path: &Path, volume: f32) -> Result<(), String> {
@@ -243,13 +240,6 @@ mod tests {
         assert!(panicked.is_err());
         assert_eq!(IN_FLIGHT.load(Ordering::Acquire), 0);
         assert!(try_reserve_slot(&IN_FLIGHT, 1));
-    }
-
-    #[test]
-    fn normalized_volume_clamps() {
-        assert_eq!(normalized_volume(0), 0.0);
-        assert_eq!(normalized_volume(100), 1.0);
-        assert_eq!(normalized_volume(200), 1.0);
     }
 
     #[test]

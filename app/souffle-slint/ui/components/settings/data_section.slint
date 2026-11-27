@@ -1,8 +1,9 @@
 import { AppText, Typography } from "@typography";
 import { SettingsOptions, ClosedSettingsPicker } from "settings_options.slint";
-import { FieldSetAppearance, FieldRowAppearance, KitButton, KitTextArea, FieldAccess, KitFieldSet, KitThemeContext, KitThemes, KitFieldRow, ControlSize, KitFieldSeparator, FieldDecoration } from "@kit";
+import { FieldSetAppearance, FieldRowAppearance, KitButton, KitTextArea, FieldAccess, KitFieldSet, KitThemeContext, KitThemes, KitFieldRow, ControlSize, KitFieldSeparator, FieldDecoration, AlertActions, AlertSeverity, KitAlert } from "@kit";
 import { LucideFiles } from "@kit-icons/files.slint";
 import { LucideText } from "@kit-icons/text.slint";
+import { SettingsNoticeRow } from "settings_notice_row.slint";
 import { Theme } from "../../theme.slint";
 import { AudioRetention } from "../../types.slint";
 
@@ -54,21 +55,15 @@ export component DataSection inherits VerticalLayout {
     in property <bool> exporting;
     in property <string> export-status;
     in property <bool> export-status-is-error;
-    in property <string> mcp-binary-path;
     in property <bool> mcp-exists;
     in property <string> mcp-claude-desktop-snippet;
     in property <string> mcp-claude-code-command;
-    in property <bool> testing-mcp;
-    in property <string> mcp-test-status;
 
     callback retention-changed(AudioRetention);
     callback export-requested();
     callback reveal-requested();
     callback copy-desktop-snippet-requested();
     callback copy-code-command-requested();
-    callback test-mcp-requested();
-
-
 
     spacing: 20px;
     alignment: start;
@@ -204,28 +199,11 @@ export component DataSection inherits VerticalLayout {
             }
         }
 
-        KitFieldSeparator { }
-
-        VerticalLayout {
-            padding-left: 20px;
-            padding-right: 20px;
-            padding-top: 14px;
-            padding-bottom: 14px;
-            spacing: 8px;
-
-            AppText {
-                text: @tr("Binaire sidecar");
-                typography: Typography.field-heading;
-                color: Theme.text-primary;
-            }
-            CodeBlock {
-                body: root.mcp-binary-path;
-            }
-            if !root.mcp-exists: AppText {
-                text: @tr("Binaire introuvable. Compilez souffle-mcp pour le développement local.");
-                color: Theme.warning;
-                typography: Typography.secondary;
-                wrap: word-wrap;
+        if !root.mcp-exists: SettingsNoticeRow {
+            KitAlert { bordered: false; corner-radius: 12px; inset: 12px; actions-placement: AlertActions.trailing;
+                theme: KitThemeContext.current;
+                severity: AlertSeverity.warning;
+                message: @tr("Le serveur MCP est absent de l'application. Réinstallez Soufflé.");
             }
         }
 
@@ -296,30 +274,6 @@ export component DataSection inherits VerticalLayout {
             }
             CodeBlock {
                 body: root.mcp-claude-code-command;
-            }
-        }
-
-        KitFieldRow {
-            theme: KitThemeContext.current;
-            modal-layer: 0;
-            orientation: Theme.settings-field-orientation(self.width);
-            appearance: FieldRowAppearance.inset;
-            show-divider: true;
-            focus-requested => { connection-button.take-focus(); }
-            private property <bool> control-focused: connection-button.has-focus;
-            changed control-focused => {
-                if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
-            }
-            label: @tr("Tester la connexion");
-            description: root.mcp-test-status;
-
-            connection-button := KitButton {
-                theme: KitThemeContext.current;
-                modal-layer: 0;
-                control-size: ControlSize.compact;
-                text: root.testing-mcp ? @tr("Test en cours…") : @tr("Tester la connexion");
-                disabled: !(root.mcp-exists && !root.testing-mcp);
-                activated => { root.test-mcp-requested(); }
             }
         }
     }

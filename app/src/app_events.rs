@@ -160,7 +160,7 @@ pub enum CalendarMeetingNudgeKind {
     /// Pre-event reminder inside the configured lead-time window.
     #[default]
     Reminder,
-    /// At-event-time suggestion when system audio is active but no recording runs.
+    /// At-event-time suggestion when the microphone is in use but no recording runs.
     Autostart,
 }
 

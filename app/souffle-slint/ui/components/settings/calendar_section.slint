@@ -16,14 +16,12 @@ export struct CalendarRow {
 export component CalendarSection inherits VerticalLayout {
     in property <bool> enabled;
     in property <AccessState> permission;
-    in property <bool> autostart-enabled;
     in property <int> reminder-minutes;
     in property <int> reminder-minutes-min;
     in property <int> reminder-minutes-max;
     in property <[CalendarRow]> calendars;
 
     callback enabled-changed(bool);
-    callback autostart-enabled-changed(bool);
     callback reminder-minutes-changed(int);
     callback calendar-toggled(string);
     callback open-system-settings-requested();
@@ -48,7 +46,7 @@ export component CalendarSection inherits VerticalLayout {
                 if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
             }
             label: @tr("Intégration du calendrier");
-            description: @tr("Afficher les réunions du jour sur l'accueil et rappeler avant qu'elles commencent.");
+            description: @tr("Afficher les réunions du jour sur l'accueil, rappeler avant qu'elles commencent et proposer de les enregistrer si le micro est utilisé après leur début.");
 
             calendar-switch := KitSwitch {
                 theme: KitThemeContext.current;
@@ -84,40 +82,13 @@ export component CalendarSection inherits VerticalLayout {
             orientation: Theme.settings-field-orientation(self.width);
             appearance: FieldRowAppearance.inset;
             show-divider: true;
-            focus-requested => { reminder-switch.take-focus(); }
-            private property <bool> control-focused: reminder-switch.has-focus;
-            changed control-focused => {
-                if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
-            }
-            label: @tr("Proposer au début de la réunion");
-            description: @tr("Quand un événement commence et que l'audio système est actif, proposer de démarrer l'enregistrement.");
-
-            reminder-switch := KitSwitch {
-                theme: KitThemeContext.current;
-                modal-layer: 0;
-                label-position: ChoiceLabelPosition.start;
-                padding-inline: 0px;
-                ownership: Ownership.controlled;
-                control-width: ControlWidth.intrinsic;
-                accessible-label: @tr("Proposer au début de la réunion");
-                checked: root.autostart-enabled;
-                toggled(new) => { root.autostart-enabled-changed(new); }
-            }
-        }
-
-        if root.enabled && root.permission == AccessState.granted: KitFieldRow {
-            theme: KitThemeContext.current;
-            modal-layer: 0;
-            orientation: Theme.settings-field-orientation(self.width);
-            appearance: FieldRowAppearance.inset;
-            show-divider: true;
             focus-requested => { delay-stepper.take-focus(); }
             private property <bool> control-focused: delay-stepper.has-focus;
             changed control-focused => {
                 if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
             }
-            label: @tr("Délai du rappel");
-            description: @tr("Minutes avant un événement pour proposer de démarrer une transcription.");
+            label: @tr("Rappel avant la réunion");
+            description: @tr("Nombre de minutes entre le rappel et le début de l'événement.");
 
             delay-stepper := KitNumberStepper {
                 theme: KitThemeContext.current;
@@ -131,7 +102,7 @@ export component CalendarSection inherits VerticalLayout {
                 increment-glyph: LucideArrows.chevron-up();
                 increment-label: @tr("Augmenter");
                 decrement-label: @tr("Diminuer");
-                accessible-name: @tr("Délai du rappel en minutes");
+                accessible-name: @tr("Rappel avant la réunion, en minutes");
                 suffix: " min";
                 affix-in-value-ink: true;
                 // The editor's end padding adds to this gap.

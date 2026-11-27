@@ -4,7 +4,7 @@ use super::{
     audio_ui, ia_ui, lists_ui, live_view, microphone_list, model, scroll_bench, strings, timeline,
     transcript, transcript_window,
 };
-use slint::{ComponentHandle, Model, SharedString};
+use slint::{ComponentHandle, Model};
 use souffle_lib::audio::{AudioInputDevice, InputPriority, KnownDevice, TransportType};
 use souffle_lib::db::dictionary::DictionarySuggestion;
 use souffle_lib::db::snippets::SnippetEntry;
@@ -872,8 +872,6 @@ fn snippet(id: i64, trigger: &str, expansion: &str) -> SnippetEntry {
 
 fn settings(window: &MainWindow) {
     window.set_settings_app_version("0.42.0".into());
-    window.set_settings_about_transcription_label("Kyutai STT 1B".into());
-    window.set_settings_about_summary_label("Apple Intelligence".into());
     window.set_settings_auto_update_check(true);
     window.set_settings_update_row(UpdateRowStatus::UpToDate);
 
@@ -993,11 +991,7 @@ fn settings(window: &MainWindow) {
     window.set_settings_paste_delay_max(1000);
     window.set_settings_toggle_shortcut_label("⌥ Espace".into());
     window.set_settings_native_tap_warning_visible(true);
-    window.set_settings_pill_hidden_in_captures(true);
     window.set_settings_feedback_sounds_enabled(true);
-    window.set_settings_feedback_sounds_volume(60);
-    window.set_settings_feedback_sounds_volume_min(0);
-    window.set_settings_feedback_sounds_volume_max(100);
 
     // Meetings
     window.set_settings_calendar_enabled(true);
@@ -1008,7 +1002,6 @@ fn settings(window: &MainWindow) {
             AccessState::Unknown
         },
     );
-    window.set_settings_calendar_autostart_enabled(true);
     window.set_settings_calendar_reminder_minutes(5);
     window.set_settings_calendar_reminder_minutes_min(0);
     window.set_settings_calendar_reminder_minutes_max(30);
@@ -1029,8 +1022,6 @@ fn settings(window: &MainWindow) {
     window.set_settings_autostart_enabled(true);
     window.set_settings_meeting_audio_retention(AudioRetention::Keep30d);
     window.set_settings_mcp_exists(true);
-    window
-        .set_settings_mcp_binary_path(SharedString::from("/Applications/Souffle.app/souffle-mcp"));
     window.set_settings_mcp_claude_desktop_snippet(
         "{\n  \"souffle\": { \"command\": \"souffle-mcp\" }\n}".into(),
     );

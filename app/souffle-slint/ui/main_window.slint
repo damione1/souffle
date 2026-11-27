@@ -223,11 +223,7 @@ export component MainWindow inherits Window {
     in property <int> settings-paste-delay-min;
     in property <int> settings-paste-delay-max;
     in property <bool> settings-pill-hidden;
-    in property <bool> settings-pill-hidden-in-captures;
     in property <bool> settings-feedback-sounds-enabled;
-    in property <int> settings-feedback-sounds-volume;
-    in property <int> settings-feedback-sounds-volume-min;
-    in property <int> settings-feedback-sounds-volume-max;
     in property <string> settings-toggle-shortcut-label;
     in property <string> settings-ptt-shortcut-label;
     in property <bool> settings-native-tap-warning-visible;
@@ -241,7 +237,6 @@ export component MainWindow inherits Window {
     in property <bool> settings-draft-save-error-unavailable;
     in property <bool> settings-calendar-enabled;
     in property <AccessState> settings-calendar-permission;
-    in property <bool> settings-calendar-autostart-enabled;
     in property <int> settings-calendar-reminder-minutes;
     in property <int> settings-calendar-reminder-minutes-min;
     in property <int> settings-calendar-reminder-minutes-max;
@@ -268,15 +263,10 @@ export component MainWindow inherits Window {
     in property <bool> settings-data-exporting;
     in property <string> settings-data-export-status;
     in property <bool> settings-data-export-status-is-error;
-    in property <string> settings-mcp-binary-path;
     in property <bool> settings-mcp-exists;
     in property <string> settings-mcp-claude-desktop-snippet;
     in property <string> settings-mcp-claude-code-command;
-    in property <bool> settings-testing-mcp;
-    in property <string> settings-mcp-test-status;
     in property <string> settings-app-version;
-    in property <string> settings-about-transcription-label;
-    in property <string> settings-about-summary-label;
     in property <bool> settings-auto-update-check;
     // Settings > "Mises à jour" row: written only by
     // `update_ui::project_update_row`, always as a set.
@@ -402,7 +392,6 @@ export component MainWindow inherits Window {
         root.settings-closed();
     }
     callback settings-quit-requested();
-    callback theme-toggle-requested();
     callback settings-autostart-changed(bool);
     callback settings-permissions-review-requested();
     callback settings-detailed-logging-changed(bool);
@@ -413,16 +402,13 @@ export component MainWindow inherits Window {
     callback settings-paste-method-changed(PasteMethod);
     callback settings-paste-delay-changed(int);
     callback settings-pill-hidden-changed(bool);
-    callback settings-pill-hidden-in-captures-changed(bool);
     callback settings-feedback-sounds-enabled-changed(bool);
-    callback settings-feedback-sounds-volume-changed(int);
     callback settings-shortcut-record-requested(ShortcutField);
     callback settings-shortcut-captured(ShortcutField, string, bool, bool, bool, bool);
     callback settings-shortcut-released(ShortcutField, string, bool, bool, bool, bool);
     callback settings-shortcut-cleared(ShortcutField);
     callback settings-shortcut-cancelled();
     callback settings-calendar-enabled-changed(bool);
-    callback settings-calendar-autostart-enabled-changed(bool);
     callback settings-calendar-reminder-minutes-changed(int);
     callback settings-calendar-toggled(string);
     callback settings-calendar-open-system-settings-requested();
@@ -439,7 +425,6 @@ export component MainWindow inherits Window {
     callback settings-data-reveal-requested();
     callback settings-mcp-copy-desktop-snippet-requested();
     callback settings-mcp-copy-code-command-requested();
-    callback settings-mcp-test-requested();
     callback settings-update-action-requested();
     callback settings-auto-update-check-changed(bool);
     callback settings-summary-provider-changed(SummaryProvider);
@@ -663,7 +648,6 @@ export component MainWindow inherits Window {
                     root.settings-requested();
                 }
             }
-            theme-toggle-requested => { root.theme-toggle-requested(); }
         }
 
         routes := KitRouter {
@@ -859,11 +843,7 @@ export component MainWindow inherits Window {
                 paste-delay-min: root.settings-paste-delay-min;
                 paste-delay-max: root.settings-paste-delay-max;
                 pill-hidden: root.settings-pill-hidden;
-                pill-hidden-in-captures: root.settings-pill-hidden-in-captures;
                 feedback-sounds-enabled: root.settings-feedback-sounds-enabled;
-                feedback-sounds-volume: root.settings-feedback-sounds-volume;
-                feedback-sounds-volume-min: root.settings-feedback-sounds-volume-min;
-                feedback-sounds-volume-max: root.settings-feedback-sounds-volume-max;
                 toggle-shortcut-label: root.settings-toggle-shortcut-label;
                 ptt-shortcut-label: root.settings-ptt-shortcut-label;
                 native-tap-warning-visible: root.settings-native-tap-warning-visible;
@@ -877,7 +857,6 @@ export component MainWindow inherits Window {
                 draft-save-error-unavailable: root.settings-draft-save-error-unavailable;
                 calendar-enabled: root.settings-calendar-enabled;
                 calendar-permission: root.settings-calendar-permission;
-                calendar-autostart-enabled: root.settings-calendar-autostart-enabled;
                 calendar-reminder-minutes: root.settings-calendar-reminder-minutes;
                 calendar-reminder-minutes-min: root.settings-calendar-reminder-minutes-min;
                 calendar-reminder-minutes-max: root.settings-calendar-reminder-minutes-max;
@@ -903,15 +882,10 @@ export component MainWindow inherits Window {
                 data-exporting: root.settings-data-exporting;
                 data-export-status: root.settings-data-export-status;
                 data-export-status-is-error: root.settings-data-export-status-is-error;
-                mcp-binary-path: root.settings-mcp-binary-path;
                 mcp-exists: root.settings-mcp-exists;
                 mcp-claude-desktop-snippet: root.settings-mcp-claude-desktop-snippet;
                 mcp-claude-code-command: root.settings-mcp-claude-code-command;
-                testing-mcp: root.settings-testing-mcp;
-                mcp-test-status: root.settings-mcp-test-status;
                 app-version: root.settings-app-version;
-                about-transcription-label: root.settings-about-transcription-label;
-                about-summary-label: root.settings-about-summary-label;
                 auto-update-check: root.settings-auto-update-check;
                 update-row: root.settings-update-row;
                 update-version: root.settings-update-version;
@@ -1023,16 +997,13 @@ export component MainWindow inherits Window {
                 paste-method-changed(value) => { root.settings-paste-method-changed(value); }
                 paste-delay-changed(value) => { root.settings-instrument-input(SettingsInteraction.number); root.settings-paste-delay-changed(value); }
                 pill-hidden-changed(value) => { root.settings-pill-hidden-changed(value); }
-                pill-hidden-in-captures-changed(value) => { root.settings-pill-hidden-in-captures-changed(value); }
                 feedback-sounds-enabled-changed(value) => { root.settings-feedback-sounds-enabled-changed(value); }
-                feedback-sounds-volume-changed(value) => { root.settings-feedback-sounds-volume-changed(value); }
                 shortcut-record-requested(field) => { root.settings-shortcut-record-requested(field); }
                 shortcut-captured(field, text, ctrl, shift, alt, meta) => { root.settings-shortcut-captured(field, text, ctrl, shift, alt, meta); }
                 shortcut-released(field, text, ctrl, shift, alt, meta) => { root.settings-shortcut-released(field, text, ctrl, shift, alt, meta); }
                 shortcut-cleared(field) => { root.settings-shortcut-cleared(field); }
                 shortcut-cancelled => { root.settings-shortcut-cancelled(); }
                 calendar-enabled-changed(value) => { root.settings-calendar-enabled-changed(value); }
-                calendar-autostart-enabled-changed(value) => { root.settings-calendar-autostart-enabled-changed(value); }
                 calendar-reminder-minutes-changed(value) => { root.settings-calendar-reminder-minutes-changed(value); }
                 calendar-toggled(id) => { root.settings-calendar-toggled(id); }
                 calendar-open-system-settings-requested => { root.settings-calendar-open-system-settings-requested(); }

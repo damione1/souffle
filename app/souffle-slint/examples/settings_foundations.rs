@@ -360,7 +360,7 @@ fn header_states(w: &MainWindow, path: &std::path::Path) {
             .query_descendants()
             .match_inherits("KitIconButton")
             .find_all();
-        assert_eq!(actions.len(), 2);
+        assert_eq!(actions.len(), 1);
         let center_y = |item: &i_slint_backend_testing::ElementHandle| {
             item.absolute_position().y + item.size().height / 2.
         };
@@ -370,10 +370,11 @@ fn header_states(w: &MainWindow, path: &std::path::Path) {
             .match_inherits("KitImage")
             .find_first()
             .unwrap();
-        let labels = header
-            .query_descendants()
-            .match_inherits("KitText")
-            .find_all();
+        // The brand is an AppText, the model label a KitText shown only when ready.
+        let labels: Vec<_> = ["AppText", "KitText"]
+            .into_iter()
+            .flat_map(|kind| header.query_descendants().match_inherits(kind).find_all())
+            .collect();
         assert!(!labels.is_empty());
         let centers: Vec<_> = std::iter::once(&logo)
             .chain(labels.iter())

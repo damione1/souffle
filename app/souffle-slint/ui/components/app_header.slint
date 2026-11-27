@@ -1,6 +1,5 @@
 import { ButtonIntent, ControlSize, ElevationLevel, KitBadge, KitIconButton, KitImage, KitWrap, KitSurface, KitDivider, KitText, KitLayoutMetrics, KitMetrics, Tone } from "@kit";
 import { LucideAccount } from "@kit-icons/account.slint";
-import { LucideAccessibility } from "@kit-icons/accessibility.slint";
 import { AppText, Typography } from "@typography";
 import { Theme } from "../theme.slint";
 import { TranscriptionLabels } from "transcription_labels.slint";
@@ -14,10 +13,6 @@ export component AppHeader inherits KitSurface {
     in property <string> model-label: "";
 
     callback settings-toggled();
-    // main.rs flips the real `Theme.dark` (and persists the choice) on this
-    // callback - the icon below reads `Theme.dark` directly rather than
-    // keeping its own copy, so it can't drift from the actual palette.
-    callback theme-toggle-requested();
 
     property <string> status-label: root.model-phase == TranscriptionPhase.failed ? @tr("Erreur du modèle")
         : root.model-phase == TranscriptionPhase.audio-failed ? @tr("Erreur de capture audio")
@@ -68,7 +63,7 @@ export component AppHeader inherits KitSurface {
                 min-width: 0px;
                 max-width: max(0px, root.width - bar.padding-left - bar.padding-right
                     - bar.spacing - 26px - brand.spacing - status.preferred-width
-                    - 2 * KitMetrics.control-height(root.theme, ControlSize.medium) - 2 * actions.spacing);
+                    - KitMetrics.control-height(root.theme, ControlSize.medium) - actions.spacing);
                 text: @tr("Soufflé");
                 vertical-alignment: center;
             }
@@ -85,7 +80,7 @@ export component AppHeader inherits KitSurface {
                 min-width: 0px;
                 max-width: max(0px, root.width - bar.padding-left - bar.padding-right
                     - 2 * bar.spacing - brand.preferred-width - status.preferred-width
-                    - 2 * KitMetrics.control-height(root.theme, ControlSize.medium) - 3 * parent.spacing);
+                    - KitMetrics.control-height(root.theme, ControlSize.medium) - 2 * parent.spacing);
                 wrap: no-wrap;
                 overflow: elide;
                 vertical-alignment: center;
@@ -97,13 +92,6 @@ export component AppHeader inherits KitSurface {
                     : root.model-phase == TranscriptionPhase.ready ? Tone.accent : Tone.warning;
                 subtle: true;
                 dot: true;
-            }
-            theme-area := KitIconButton {
-                theme: root.theme;
-                accessible-name: @tr("Basculer clair / sombre");
-                control-size: medium;
-                glyph: Theme.dark ? LucideAccessibility.sun() : LucideAccessibility.moon();
-                activated => { root.theme-toggle-requested(); }
             }
             settings-area := KitIconButton {
                 theme: root.theme;

@@ -229,7 +229,6 @@ fn main() {
         "Apple Intelligence",
         "Local — Inter & français",
     ]));
-    window.set_settings_about_summary_label("Inter 4.1 — 100–900 & vrais italiques".into());
     window.set_settings_app_version("SOU-276 QA".into());
     window.set_settings_open(surface.starts_with("settings-"));
     window.set_settings_tab(match surface.as_str() {
