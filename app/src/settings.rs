@@ -246,7 +246,7 @@ pub struct AppSettings {
     pub calendar_selected_ids: Vec<String>,
     /// How long before an event the "start transcription?" reminder fires.
     pub calendar_reminder_minutes: u32,
-    /// Ask GitHub once a day whether a newer release exists, and show a
+    /// Ask GitHub at launch, then about once a day, whether a newer release exists, and show a
     /// dialog when there is one. Never downloads or installs anything.
     pub auto_update_check_enabled: bool,
     /// Audible start/stop cues for dictation sessions.

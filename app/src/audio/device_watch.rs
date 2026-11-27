@@ -1,7 +1,7 @@
 //! CoreAudio input-device observability and route-change notifications.
 //!
 //! Property listeners log device arrivals/removals and default input/output
-//! changes for Settings > Diagnostics. Relevant changes (device list and
+//! changes, which the copied diagnostics include. Relevant changes (device list and
 //! default input) are also forwarded to the input-route coordinator so
 //! capture can re-resolve the mic and hot-swap when needed.
 //!
