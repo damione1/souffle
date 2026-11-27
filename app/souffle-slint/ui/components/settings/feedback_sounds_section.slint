@@ -11,8 +11,6 @@ export component FeedbackSoundsSection inherits KitFieldSet {
     appearance: FieldSetAppearance.card;
 
     KitFieldRow {
-        theme: root.theme;
-        modal-layer: 0;
         orientation: Theme.settings-field-orientation(self.width);
         appearance: FieldRowAppearance.inset;
         show-divider: true;
@@ -25,8 +23,6 @@ export component FeedbackSoundsSection inherits KitFieldSet {
         description: @tr("Jouer un son au démarrage et à l'arrêt de l'enregistrement.");
 
         sounds-switch := KitSwitch {
-            theme: root.theme;
-            modal-layer: 0;
             label-position: ChoiceLabelPosition.start;
             padding-inline: 0px;
             ownership: Ownership.controlled;

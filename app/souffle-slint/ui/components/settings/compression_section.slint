@@ -16,7 +16,6 @@ export component CompressionSection inherits VerticalLayout {
 
         KitFieldRow {
             theme: KitThemeContext.current;
-            modal-layer: 0;
             orientation: Theme.settings-field-orientation(self.width);
             appearance: FieldRowAppearance.inset;
             show-divider: true;
@@ -30,7 +29,6 @@ export component CompressionSection inherits VerticalLayout {
 
             summary-switch := KitSwitch {
                 theme: KitThemeContext.current;
-                modal-layer: 0;
                 label-position: ChoiceLabelPosition.start;
                 padding-inline: 0px;
                 ownership: Ownership.controlled;

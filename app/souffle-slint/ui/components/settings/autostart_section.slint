@@ -11,8 +11,6 @@ export component AutostartSection inherits KitFieldSet {
     appearance: FieldSetAppearance.card;
 
     KitFieldRow {
-        theme: root.theme;
-        modal-layer: 0;
         orientation: Theme.settings-field-orientation(self.width);
         appearance: FieldRowAppearance.inset;
         show-divider: true;
@@ -25,8 +23,6 @@ export component AutostartSection inherits KitFieldSet {
         description: @tr("Ouvrir Soufflé automatiquement au démarrage du Mac.");
 
         autostart-switch := KitSwitch {
-            theme: root.theme;
-            modal-layer: 0;
             label-position: ChoiceLabelPosition.start;
             padding-inline: 0px;
             ownership: Ownership.controlled;

@@ -21,7 +21,6 @@ export component DiagnosticsSection inherits VerticalLayout {
 
         KitFieldRow {
             theme: KitThemeContext.current;
-            modal-layer: 0;
             orientation: Theme.settings-field-orientation(self.width);
             appearance: FieldRowAppearance.inset;
             show-divider: true;
@@ -35,7 +34,6 @@ export component DiagnosticsSection inherits VerticalLayout {
 
             logging-switch := KitSwitch {
                 theme: KitThemeContext.current;
-                modal-layer: 0;
                 label-position: ChoiceLabelPosition.start;
                 padding-inline: 0px;
                 ownership: Ownership.controlled;
@@ -58,7 +56,6 @@ export component DiagnosticsSection inherits VerticalLayout {
                 alignment: start;
                 KitButton {
                     theme: KitThemeContext.current;
-                    modal-layer: 0;
                     text: root.copying-diagnostics ? @tr("Copie…") : @tr("Copier les diagnostics");
                     intent: ButtonIntent.secondary;
                     control-size: ControlSize.compact;

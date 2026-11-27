@@ -161,7 +161,6 @@ export component InterfaceSection inherits VerticalLayout {
 
         KitFieldRow {
             theme: KitThemeContext.current;
-            modal-layer: 0;
             orientation: Theme.settings-field-orientation(self.width);
             appearance: FieldRowAppearance.inset;
             show-divider: true;
@@ -175,7 +174,6 @@ export component InterfaceSection inherits VerticalLayout {
 
             language-picker := KitSegmentedControl {
                 theme: KitThemeContext.current;
-                modal-layer: 0;
                 horizontal-stretch: 0;
                 appearance: SegmentedAppearance.raised;
                 control-width: ControlWidth.intrinsic;
@@ -190,7 +188,6 @@ export component InterfaceSection inherits VerticalLayout {
 
         KitFieldRow {
             theme: KitThemeContext.current;
-            modal-layer: 0;
             orientation: Theme.settings-field-orientation(self.width);
             appearance: FieldRowAppearance.inset;
             show-divider: true;
@@ -204,7 +201,6 @@ export component InterfaceSection inherits VerticalLayout {
 
             theme-picker := KitSegmentedControl {
                 theme: KitThemeContext.current;
-                modal-layer: 0;
                 horizontal-stretch: 0;
                 appearance: SegmentedAppearance.raised;
                 control-width: ControlWidth.intrinsic;
@@ -219,7 +215,6 @@ export component InterfaceSection inherits VerticalLayout {
 
         KitFieldRow {
             theme: KitThemeContext.current;
-            modal-layer: 0;
             orientation: Theme.settings-field-orientation(self.width);
             appearance: FieldRowAppearance.inset;
             show-divider: true;
@@ -233,7 +228,6 @@ export component InterfaceSection inherits VerticalLayout {
 
             paste-switch := KitSwitch {
                 theme: KitThemeContext.current;
-                modal-layer: 0;
                 label-position: ChoiceLabelPosition.start;
                 padding-inline: 0px;
                 ownership: Ownership.controlled;
@@ -246,7 +240,6 @@ export component InterfaceSection inherits VerticalLayout {
 
         KitFieldRow {
             theme: KitThemeContext.current;
-            modal-layer: 0;
             orientation: Theme.settings-field-orientation(self.width);
             appearance: FieldRowAppearance.inset;
             show-divider: true;
@@ -285,7 +278,6 @@ export component InterfaceSection inherits VerticalLayout {
 
         KitFieldRow {
             theme: KitThemeContext.current;
-            modal-layer: 0;
             orientation: Theme.settings-field-orientation(self.width);
             appearance: FieldRowAppearance.inset;
             show-divider: true;
@@ -366,7 +358,6 @@ export component InterfaceSection inherits VerticalLayout {
 
         KitFieldRow {
             theme: KitThemeContext.current;
-            modal-layer: 0;
             orientation: Theme.settings-field-orientation(self.width);
             appearance: FieldRowAppearance.inset;
             show-divider: true;
@@ -380,7 +371,6 @@ export component InterfaceSection inherits VerticalLayout {
 
             overlay-switch := KitSwitch {
                 theme: KitThemeContext.current;
-                modal-layer: 0;
                 label-position: ChoiceLabelPosition.start;
                 padding-inline: 0px;
                 ownership: Ownership.controlled;
@@ -394,7 +384,6 @@ export component InterfaceSection inherits VerticalLayout {
         if root.auto-paste: SettingsAdvancedBlock {
             KitFieldRow {
                 theme: KitThemeContext.current;
-                modal-layer: 0;
                 orientation: Theme.settings-field-orientation(self.width);
                 focus-requested => { method-picker.take-focus(); }
                 private property <bool> control-focused: method-picker.has-focus;
@@ -406,7 +395,6 @@ export component InterfaceSection inherits VerticalLayout {
 
                 method-picker := ClosedSettingsPicker {
                     theme: KitThemeContext.current;
-                    modal-layer: 0;
                     label: @tr("Méthode de collage");
                     choices: SettingsOptions.paste-method-options(root.paste-method);
                     chosen(row) => { root.paste-method-changed(SettingsOptions.paste-method-value(row, root.paste-method)); }
@@ -415,7 +403,6 @@ export component InterfaceSection inherits VerticalLayout {
 
             KitFieldRow {
                 theme: KitThemeContext.current;
-                modal-layer: 0;
                 orientation: Theme.settings-field-orientation(self.width);
                 show-divider: true;
                 focus-requested => { delay-stepper.take-focus(); }
@@ -428,7 +415,6 @@ export component InterfaceSection inherits VerticalLayout {
 
                 delay-stepper := KitNumberStepper {
                     theme: KitThemeContext.current;
-                    modal-layer: 0;
                     appearance: StepperAppearance.compact;
                     value-font: TextViewFont.monospace;
                     // The editor's end padding adds to this gap.

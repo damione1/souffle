@@ -38,7 +38,6 @@ export component AppHeader inherits KitSurface {
     bar := KitWrap {
         flex-wrap: no-wrap;
         cross-axis-alignment: center;
-        theme: root.theme;
         alignment: space-between;
         padding-left: 100px; // Native traffic-light clearance.
         padding-right: 20px;
@@ -48,10 +47,8 @@ export component AppHeader inherits KitSurface {
         brand := KitWrap {
             flex-wrap: no-wrap;
             cross-axis-alignment: center;
-            theme: root.theme;
             spacing: 12px;
             logo := KitImage {
-                theme: root.theme;
                 width: 26px;
                 source: @image-url("../assets/icon.png");
             }
@@ -71,10 +68,8 @@ export component AppHeader inherits KitSurface {
         actions := KitWrap {
             flex-wrap: no-wrap;
             cross-axis-alignment: center;
-            theme: root.theme;
             spacing: 12px;
             if root.show-model-label: KitText {
-                theme: root.theme;
                 text: root.model-label == "__APPLE_SPEECH_SYSTEM__" ? TranscriptionLabels.speech-short-label() : root.model-label;
                 role: caption;
                 min-width: 0px;
@@ -86,7 +81,6 @@ export component AppHeader inherits KitSurface {
                 vertical-alignment: center;
             }
             status := KitBadge {
-                theme: root.theme;
                 text: root.status-label;
                 tone: root.recording-mode != RecordingMode.idle ? Tone.danger
                     : root.model-phase == TranscriptionPhase.ready ? Tone.accent : Tone.warning;
@@ -94,7 +88,6 @@ export component AppHeader inherits KitSurface {
                 dot: true;
             }
             settings-area := KitIconButton {
-                theme: root.theme;
                 accessible-name: @tr("Réglages");
                 control-size: medium;
                 intent: root.settings-open ? ButtonIntent.secondary : ButtonIntent.quiet;
@@ -103,5 +96,5 @@ export component AppHeader inherits KitSurface {
             }
         }
     }
-    rule := KitDivider { theme: root.theme; }
+    rule := KitDivider { }
 }

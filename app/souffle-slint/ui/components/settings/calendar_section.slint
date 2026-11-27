@@ -36,7 +36,6 @@ export component CalendarSection inherits VerticalLayout {
 
         KitFieldRow {
             theme: KitThemeContext.current;
-            modal-layer: 0;
             orientation: Theme.settings-field-orientation(self.width);
             appearance: FieldRowAppearance.inset;
             show-divider: true;
@@ -50,7 +49,6 @@ export component CalendarSection inherits VerticalLayout {
 
             calendar-switch := KitSwitch {
                 theme: KitThemeContext.current;
-                modal-layer: 0;
                 label-position: ChoiceLabelPosition.start;
                 padding-inline: 0px;
                 ownership: Ownership.controlled;
@@ -78,7 +76,6 @@ export component CalendarSection inherits VerticalLayout {
 
         if root.enabled && root.permission == AccessState.granted: KitFieldRow {
             theme: KitThemeContext.current;
-            modal-layer: 0;
             orientation: Theme.settings-field-orientation(self.width);
             appearance: FieldRowAppearance.inset;
             show-divider: true;
@@ -92,7 +89,6 @@ export component CalendarSection inherits VerticalLayout {
 
             delay-stepper := KitNumberStepper {
                 theme: KitThemeContext.current;
-                modal-layer: 0;
                 appearance: StepperAppearance.compact;
                 value-font: TextViewFont.monospace;
                 // Keeps the editor slack before the value, next to the unit and buttons.

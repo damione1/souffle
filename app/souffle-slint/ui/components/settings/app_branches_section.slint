@@ -34,7 +34,6 @@ export component AppBranchesSection inherits VerticalLayout {
 
         KitFieldRow {
             theme: KitThemeContext.current;
-            modal-layer: 0;
             orientation: Theme.settings-field-orientation(self.width);
             appearance: FieldRowAppearance.inset;
             show-divider: true;
@@ -48,21 +47,18 @@ export component AppBranchesSection inherits VerticalLayout {
             padding-bottom: 14px;
             spacing: 12px;
             KitTextField {
-                modal-layer: 0;
                 text <=> root.new-pattern;
                 placeholder: @tr("Nom d'application");
                 accessible-name: @tr("Nouvelle règle d'application");
                 horizontal-stretch: 1;
             }
             CatalogPicker {
-                modal-layer: 0;
                 control-label: @tr("Gabarit de la nouvelle règle");
                 model: root.target-labels;
                 current-value: root.target-labels[root.new-target-index];
                 selected-index(index) => { root.new-target-index = index; }
             }
             KitButton {
-                modal-layer: 0;
                 text: @tr("Ajouter");
                 intent: ButtonIntent.primary;
                 disabled: root.new-pattern == "";
@@ -88,7 +84,6 @@ export component AppBranchesSection inherits VerticalLayout {
                 HorizontalLayout {
                     spacing: 12px;
                     KitSwitch {
-                        modal-layer: 0;
                         label-position: ChoiceLabelPosition.start;
                         padding-inline: 0px;
                         ownership: Ownership.controlled;
@@ -98,14 +93,12 @@ export component AppBranchesSection inherits VerticalLayout {
                         toggled(value) => { root.rule-enabled(rule.id, value); }
                     }
                     pattern-field := KitTextField {
-                        modal-layer: 0;
                         text: rule.app-pattern;
                         accessible-name: @tr("Motif de la règle");
                         horizontal-stretch: 1;
                         committed(result) => { root.rule-pattern-changed(rule.id, result.value.text); }
                     }
                     CatalogPicker {
-                        modal-layer: 0;
                         control-label: @tr("Gabarit partagé de la règle");
                         model: root.target-labels;
                         current-value: rule.target-label;
@@ -116,7 +109,6 @@ export component AppBranchesSection inherits VerticalLayout {
                     spacing: 8px;
                     alignment: end;
                     KitButton {
-                        modal-layer: 0;
                         control-size: ControlSize.compact;
                         intent: ButtonIntent.quiet;
                         text: @tr("Monter");
@@ -124,7 +116,6 @@ export component AppBranchesSection inherits VerticalLayout {
                         activated => { root.rule-moved(rule.id, index - 1); }
                     }
                     KitButton {
-                        modal-layer: 0;
                         control-size: ControlSize.compact;
                         intent: ButtonIntent.quiet;
                         text: @tr("Descendre");
@@ -132,7 +123,6 @@ export component AppBranchesSection inherits VerticalLayout {
                         activated => { root.rule-moved(rule.id, index + 1); }
                     }
                     KitButton {
-                        modal-layer: 0;
                         control-size: ControlSize.compact;
                         intent: ButtonIntent.quiet;
                         text: @tr("Supprimer");

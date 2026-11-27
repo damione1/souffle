@@ -41,8 +41,6 @@ export component ModelSection inherits KitFieldSet {
     appearance: FieldSetAppearance.card;
 
     KitFieldRow {
-        theme: root.theme;
-        modal-layer: 0;
         orientation: Theme.settings-field-orientation(self.width);
         appearance: FieldRowAppearance.inset;
         show-divider: true;
@@ -63,7 +61,6 @@ export component ModelSection inherits KitFieldSet {
                 alignment: center;
                 horizontal-stretch: 0;
                 phase-badge := KitBadge {
-                    theme: root.theme;
                     text: root.model-phase == TranscriptionPhase.download-required ? @tr("Téléchargement requis")
                         : root.model-phase == TranscriptionPhase.downloading ? @tr("Téléchargement…")
                         : root.model-phase == TranscriptionPhase.load-required ? @tr("Chargement requis")
@@ -80,9 +77,7 @@ export component ModelSection inherits KitFieldSet {
                 }
             }
             model-picker := CatalogPicker {
-                theme: root.theme;
                 combo-width: max(140px, Theme.settings-control-width - phase-badge.preferred-width - root.theme.spacing.unit * 2);
-                modal-layer: 0;
                 control-label: @tr("Modèle de transcription");
                 model: root.model-labels;
                 option-values: root.model-ids;
@@ -95,12 +90,9 @@ export component ModelSection inherits KitFieldSet {
 
     if root.apple-speech-selected && !root.apple-speech-unavailable: SettingsNoticeRow {
         KitAlert { bordered: false; corner-radius: 12px; inset: 12px; actions-placement: AlertActions.trailing;
-            theme: root.theme;
             severity: AlertSeverity.information;
             message: @tr("La langue affichée est celle prise en charge par Apple Speech pour la langue et la région de ce Mac. Pour la modifier, ouvrez Réglages Système > Général > Langue et région, puis relancez Soufflé.") + "\n\n" + @tr("La transcription fonctionne sans activer Siri ou Apple Intelligence. macOS gère le modèle.");
             KitButton {
-                theme: root.theme;
-                modal-layer: 0;
                 text: @tr("Ouvrir Langue et région");
                 control-size: ControlSize.compact;
                 activated => { root.open-system-settings-requested(SystemSettingsPane.language-and-region); }
@@ -110,7 +102,6 @@ export component ModelSection inherits KitFieldSet {
 
     if root.apple-speech-selected && root.apple-speech-unavailable: SettingsNoticeRow {
         KitAlert { bordered: false; corner-radius: 12px; inset: 12px; actions-placement: AlertActions.trailing;
-            theme: root.theme;
             severity: AlertSeverity.warning;
             title: @tr("Apple Speech indisponible");
             message: root.apple-speech-unavailable-reason == TranscriptionUnavailableReason.os-unsupported
@@ -128,15 +119,11 @@ export component ModelSection inherits KitFieldSet {
                 : "";
             if root.apple-speech-unavailable-reason == TranscriptionUnavailableReason.locale-unsupported
                 || root.apple-speech-unavailable-reason == TranscriptionUnavailableReason.assets-unsupported: KitButton {
-                theme: root.theme;
-                modal-layer: 0;
                 text: @tr("Ouvrir Langue et région");
                 control-size: ControlSize.compact;
                 activated => { root.open-system-settings-requested(SystemSettingsPane.language-and-region); }
             }
             if root.apple-speech-unavailable-reason == TranscriptionUnavailableReason.os-unsupported: KitButton {
-                theme: root.theme;
-                modal-layer: 0;
                 text: @tr("Ouvrir Mise à jour de logiciels");
                 control-size: ControlSize.compact;
                 activated => { root.open-system-settings-requested(SystemSettingsPane.software-update); }
@@ -146,7 +133,6 @@ export component ModelSection inherits KitFieldSet {
 
     if root.downloading: SettingsNoticeRow {
         KitProgress {
-            theme: root.theme;
             intent: ProgressIntent.accent;
             label: root.download-progress-label;
             value: root.download-progress-fraction;
@@ -155,15 +141,12 @@ export component ModelSection inherits KitFieldSet {
 
     if root.error-message != "": SettingsNoticeRow {
         KitAlert { bordered: false; corner-radius: 12px; inset: 12px; actions-placement: AlertActions.trailing;
-            theme: root.theme;
             severity: AlertSeverity.error;
             message: root.error-message;
         }
     }
 
     if !root.apple-speech-selected: KitFieldRow {
-        theme: root.theme;
-        modal-layer: 0;
         orientation: Theme.settings-field-orientation(self.width);
         appearance: FieldRowAppearance.inset;
         show-divider: true;
@@ -176,8 +159,6 @@ export component ModelSection inherits KitFieldSet {
         description: @tr("Décharger le modèle de la mémoire après une période d'inactivité.");
 
         timeout-picker := CatalogPicker {
-            theme: root.theme;
-            modal-layer: 0;
             control-label: @tr("Délai avant déchargement");
             model: root.unload-timeout-labels;
             current-value: root.unload-timeout-label;

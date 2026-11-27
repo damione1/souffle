@@ -6,14 +6,13 @@ export component SettingsAdvancedBlock inherits VerticalLayout {
     in property <KitTheme> theme: KitThemeContext.current;
 
     vertical-stretch: 0;
-    KitFieldSeparator { theme: root.theme; }
+    KitFieldSeparator { }
     VerticalLayout {
         // KitCollapse insets its title and body by four spacing units, the
         // card's rows by five.
         padding-left: root.theme.spacing.unit;
         padding-right: root.theme.spacing.unit;
         KitCollapse {
-            theme: root.theme;
             title: @tr("Avancé");
             @children
         }

@@ -30,7 +30,6 @@ export component SummaryTemplatesSection inherits KitFieldSet {
 
     KitFieldRow {
         theme: KitThemeContext.current;
-        modal-layer: 0;
         orientation: Theme.settings-field-orientation(self.width);
         appearance: FieldRowAppearance.inset;
         show-divider: true;
@@ -44,7 +43,6 @@ export component SummaryTemplatesSection inherits KitFieldSet {
 
         default-picker := CatalogPicker {
             theme: KitThemeContext.current;
-            modal-layer: 0;
             control-label: @tr("Gabarit de résumé par défaut");
             model: root.template-labels;
             option-values: root.template-ids;
@@ -55,7 +53,6 @@ export component SummaryTemplatesSection inherits KitFieldSet {
 
     edit-target-row := KitFieldRow {
         theme: KitThemeContext.current;
-        modal-layer: 0;
         orientation: Theme.settings-field-orientation(self.width);
         appearance: FieldRowAppearance.inset;
         show-divider: true;
@@ -68,13 +65,11 @@ export component SummaryTemplatesSection inherits KitFieldSet {
         description: root.editing-is-builtin ? @tr("Gabarit intégré : le prompt peut être personnalisé mais pas supprimé.") : "";
 
         KitWrap {
-            theme: root.theme;
             cross-axis-alignment: center;
             horizontal-stretch: 0;
 
             template-picker := CatalogPicker {
                 theme: KitThemeContext.current;
-                modal-layer: 0;
                 control-label: @tr("Gabarit de résumé à modifier");
                 model: root.template-labels;
                 option-values: root.template-ids;
@@ -82,8 +77,6 @@ export component SummaryTemplatesSection inherits KitFieldSet {
                 value-chosen(id) => { root.edit-target-changed(id); }
             }
             if !root.editing-is-builtin: KitButton {
-                theme: root.theme;
-                modal-layer: 0;
                 control-size: ControlSize.compact;
                 text: @tr("Supprimer");
                 focus-observed(focused) => {
@@ -96,7 +89,6 @@ export component SummaryTemplatesSection inherits KitFieldSet {
 
     if !root.editing-is-builtin: KitFieldRow {
         theme: KitThemeContext.current;
-        modal-layer: 0;
         orientation: Theme.settings-field-orientation(self.width);
         appearance: FieldRowAppearance.inset;
         show-divider: true;
@@ -109,7 +101,6 @@ export component SummaryTemplatesSection inherits KitFieldSet {
 
         name-editor := KitTextField {
             theme: KitThemeContext.current;
-            modal-layer: 0;
             width: Theme.settings-control-width;
             accessible-name: @tr("Nom du gabarit de résumé");
             text <=> root.editing-name;
@@ -119,7 +110,6 @@ export component SummaryTemplatesSection inherits KitFieldSet {
 
     instruction-row := KitFieldRow {
         theme: KitThemeContext.current;
-        modal-layer: 0;
         orientation: vertical;
         appearance: FieldRowAppearance.inset;
         show-divider: true;
@@ -133,7 +123,6 @@ export component SummaryTemplatesSection inherits KitFieldSet {
 
         instruction-editor := KitTextArea {
             theme: KitThemeContext.current;
-            modal-layer: 0;
             text <=> root.editing-prompt;
             description: instruction-row.description;
             show-description: false;
@@ -144,8 +133,6 @@ export component SummaryTemplatesSection inherits KitFieldSet {
     }
 
     add-form := KitForm {
-        theme: root.theme;
-        modal-layer: 0;
         accessible-name: add-button.text;
         implicit-submit: false;
         valid: root.new-template-draft != "";
@@ -153,8 +140,6 @@ export component SummaryTemplatesSection inherits KitFieldSet {
         submit-requested => { root.add-requested(root.new-template-draft); }
 
         add-row := KitFieldRow {
-            theme: root.theme;
-            modal-layer: 0;
             orientation: Theme.settings-field-orientation(self.width);
             appearance: FieldRowAppearance.inset;
             show-divider: true;
@@ -166,8 +151,6 @@ export component SummaryTemplatesSection inherits KitFieldSet {
                 width: 280px;
                 spacing: 8px;
                 new-name-editor := KitTextField {
-                    theme: root.theme;
-                    modal-layer: 0;
                     text <=> root.new-template-draft;
                     placeholder: @tr("Nom du nouveau gabarit");
                     accessible-name: @tr("Nom du nouveau gabarit de résumé");
@@ -181,8 +164,6 @@ export component SummaryTemplatesSection inherits KitFieldSet {
                     horizontal-stretch: 0;
 
                     add-button := KitButton {
-                        theme: root.theme;
-                        modal-layer: 0;
                         control-size: ControlSize.compact;
                         text: @tr("Ajouter");
                         intent: ButtonIntent.primary;

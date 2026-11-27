@@ -30,7 +30,6 @@ export component ModelDeleteRow inherits VerticalLayout {
 
     KitFieldRow {
         theme: KitThemeContext.current;
-        modal-layer: 0;
         orientation: Theme.settings-field-orientation(self.width);
         appearance: FieldRowAppearance.inset;
         show-divider: true;
@@ -47,7 +46,6 @@ export component ModelDeleteRow inherits VerticalLayout {
 
             if !root.confirming: KitButton {
                 theme: KitThemeContext.current;
-                modal-layer: 0;
                 text: @tr("Supprimer");
                 control-size: ControlSize.compact;
                 intent: ButtonIntent.destructive;
@@ -57,7 +55,6 @@ export component ModelDeleteRow inherits VerticalLayout {
 
             if root.confirming: KitButton {
                 theme: KitThemeContext.current;
-                modal-layer: 0;
                 text: @tr("Annuler");
                 control-size: ControlSize.compact;
                 intent: ButtonIntent.quiet;
@@ -66,7 +63,6 @@ export component ModelDeleteRow inherits VerticalLayout {
 
             if root.confirming: KitButton {
                 theme: KitThemeContext.current;
-                modal-layer: 0;
                 text: @tr("Confirmer");
                 control-size: ControlSize.compact;
                 intent: ButtonIntent.destructive;

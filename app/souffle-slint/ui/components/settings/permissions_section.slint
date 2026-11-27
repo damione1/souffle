@@ -11,8 +11,6 @@ export component PermissionsSection inherits KitFieldSet {
     appearance: FieldSetAppearance.card;
 
     KitFieldRow {
-        theme: root.theme;
-        modal-layer: 0;
         orientation: Theme.settings-field-orientation(self.width);
         appearance: FieldRowAppearance.inset;
         show-divider: true;
@@ -25,8 +23,6 @@ export component PermissionsSection inherits KitFieldSet {
         description: @tr("Revérifier les permissions macOS si le collage ou l'enregistrement cesse de fonctionner.");
 
         permissions-button := KitButton {
-            theme: root.theme;
-            modal-layer: 0;
             intent: ButtonIntent.secondary;
             control-size: ControlSize.compact;
             text: @tr("Vérifier les permissions");

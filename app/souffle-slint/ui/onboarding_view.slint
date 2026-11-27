@@ -488,7 +488,6 @@ export component OnboardingView inherits Rectangle {
 
                                 KitFieldRow {
                                     theme: KitThemeContext.current;
-                                    modal-layer: 0;
                                     focus-requested => { autostart-switch.take-focus(); }
                                     private property <bool> control-focused: autostart-switch.has-focus;
                                     changed control-focused => {
@@ -499,7 +498,6 @@ export component OnboardingView inherits Rectangle {
 
                                     autostart-switch := KitSwitch {
                                         theme: KitThemeContext.current;
-                                        modal-layer: 0;
                                         label-position: ChoiceLabelPosition.start;
                                         padding-inline: 0px;
                                         ownership: Ownership.controlled;

@@ -60,11 +60,9 @@ component MicrophonePriorityRow inherits KitFieldRow {
     }
 
     KitInline {
-        theme: root.theme;
         spacing: 2px;
 
         up-button := MicrophoneActionButton {
-            theme: root.theme;
             modal-layer: root.modal-layer;
             device-uid: root.device.uid;
             glyph: LucideArrows.chevron-up();
@@ -74,7 +72,6 @@ component MicrophonePriorityRow inherits KitFieldRow {
             focus-observed(focused) => { if focused { root.ensure-visible(KitThemes.scroll-behavior(root.theme)); } }
         }
         down-button := MicrophoneActionButton {
-            theme: root.theme;
             modal-layer: root.modal-layer;
             device-uid: root.device.uid;
             glyph: LucideArrows.chevron-down();
@@ -91,7 +88,6 @@ component MicrophonePriorityRow inherits KitFieldRow {
             height: down-button.preferred-height;
             if !root.device.connected: MicrophoneActionButton {
                 x: 0px; y: 0px;
-                theme: root.theme;
                 modal-layer: root.modal-layer;
                 device-uid: root.device.uid;
                 glyph: LucideFiles.trash();
@@ -130,8 +126,6 @@ export component MicrophoneSection inherits KitFieldSet {
     appearance: FieldSetAppearance.card;
 
     priority := KitFieldRow {
-        theme: root.theme;
-        modal-layer: 0;
         padding-left: 20px;
         padding-right: 20px;
         padding-top: 14px;
@@ -141,7 +135,6 @@ export component MicrophoneSection inherits KitFieldSet {
     }
 
     if root.microphones.length > 0: priority-list := ListView {
-        theme: root.theme;
         enabled: !KitModalContext.inert(0);
         accessible-label: priority.label;
         horizontal-scrollbar-policy: always-off;
@@ -156,10 +149,8 @@ export component MicrophoneSection inherits KitFieldSet {
             width: priority-list.visible-width;
             height: self.preferred-height;
 
-            KitFieldSeparator { theme: root.theme; }
+            KitFieldSeparator { }
             MicrophonePriorityRow {
-                theme: root.theme;
-                modal-layer: 0;
                 device: row;
                 last-seen: !row.connected && row.last-seen-age-seconds >= 0
                     ? root.format-last-seen(row.last-seen-age-seconds) : "";
@@ -173,15 +164,12 @@ export component MicrophoneSection inherits KitFieldSet {
 
     if root.sample-rate-high: SettingsNoticeRow {
         rate-alert := KitAlert { bordered: false; corner-radius: 12px; inset: 12px; actions-placement: AlertActions.trailing;
-            theme: root.theme;
             severity: AlertSeverity.warning;
             message: root.capture-busy
                 ? root.rate-warning + " " + @tr("Terminez l'enregistrement avant de réinitialiser la fréquence du microphone.")
                 : root.rate-warning;
 
             KitButton {
-                theme: root.theme;
-                modal-layer: 0;
                 control-size: compact;
                 text-wrap: word-wrap;
                 text: root.resetting-sample-rate ? @tr("Réinitialisation…") : @tr("Réinitialiser à 48 kHz");

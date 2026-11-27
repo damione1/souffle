@@ -85,8 +85,6 @@ export component AboutSection inherits KitFieldSet {
     appearance: FieldSetAppearance.card;
 
     KitFieldRow {
-        theme: root.theme;
-        modal-layer: 0;
         orientation: Theme.settings-field-orientation(self.width);
         appearance: FieldRowAppearance.inset;
         show-divider: true;
@@ -105,8 +103,6 @@ export component AboutSection inherits KitFieldSet {
     }
 
     KitFieldRow {
-        theme: root.theme;
-        modal-layer: 0;
         orientation: Theme.settings-field-orientation(self.width);
         appearance: FieldRowAppearance.inset;
         show-divider: true;
@@ -120,7 +116,6 @@ export component AboutSection inherits KitFieldSet {
 
         update-button := KitButton {
             theme: KitThemeContext.current;
-            modal-layer: 0;
             control-size: ControlSize.compact;
             text: root.update-button-label();
             intent: root.update-button-intent();
@@ -130,8 +125,6 @@ export component AboutSection inherits KitFieldSet {
     }
 
     KitFieldRow {
-        theme: root.theme;
-        modal-layer: 0;
         orientation: Theme.settings-field-orientation(self.width);
         appearance: FieldRowAppearance.inset;
         show-divider: true;
@@ -145,7 +138,6 @@ export component AboutSection inherits KitFieldSet {
 
         update-switch := KitSwitch {
             theme: KitThemeContext.current;
-            modal-layer: 0;
             label-position: ChoiceLabelPosition.start;
             padding-inline: 0px;
             ownership: Ownership.controlled;

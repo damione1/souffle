@@ -31,8 +31,6 @@ export component AudioSection inherits KitFieldSet {
     appearance: FieldSetAppearance.card;
 
     if root.system-audio-supported: KitFieldRow {
-        theme: root.theme;
-        modal-layer: 0;
         orientation: Theme.settings-field-orientation(self.width);
         appearance: FieldRowAppearance.inset;
         show-divider: true;
@@ -45,8 +43,6 @@ export component AudioSection inherits KitFieldSet {
         description: @tr("Inclure le son des haut-parleurs (l'autre côté d'un appel) dans les réunions.");
 
         system-audio-switch := KitSwitch {
-            theme: root.theme;
-            modal-layer: 0;
             label-position: ChoiceLabelPosition.start;
             padding-inline: 0px;
             ownership: Ownership.controlled;
@@ -58,8 +54,6 @@ export component AudioSection inherits KitFieldSet {
     }
 
     KitFieldRow {
-        theme: root.theme;
-        modal-layer: 0;
         orientation: Theme.settings-field-orientation(self.width);
         appearance: FieldRowAppearance.inset;
         show-divider: true;
@@ -72,8 +66,6 @@ export component AudioSection inherits KitFieldSet {
         description: @tr("Arrête la réunion après 10 minutes de silence, puis 2 minutes pour annuler, et dans tous les cas au bout de 4 heures. Désactivé, aucune de ces limites ne s'applique.");
 
         autostop-switch := KitSwitch {
-            theme: root.theme;
-            modal-layer: 0;
             label-position: ChoiceLabelPosition.start;
             padding-inline: 0px;
             ownership: Ownership.controlled;
@@ -85,8 +77,6 @@ export component AudioSection inherits KitFieldSet {
     }
 
     KitFieldRow {
-        theme: root.theme;
-        modal-layer: 0;
         orientation: Theme.settings-field-orientation(self.width);
         appearance: FieldRowAppearance.inset;
         show-divider: true;
@@ -99,8 +89,6 @@ export component AudioSection inherits KitFieldSet {
         description: @tr("Retirer les \"euh\", \"hum\" et autres marqueurs d'hésitation.");
 
         filler-switch := KitSwitch {
-            theme: root.theme;
-            modal-layer: 0;
             label-position: ChoiceLabelPosition.start;
             padding-inline: 0px;
             ownership: Ownership.controlled;
@@ -112,8 +100,6 @@ export component AudioSection inherits KitFieldSet {
     }
 
     KitFieldRow {
-        theme: root.theme;
-        modal-layer: 0;
         orientation: Theme.settings-field-orientation(self.width);
         appearance: FieldRowAppearance.inset;
         show-divider: true;
@@ -126,8 +112,6 @@ export component AudioSection inherits KitFieldSet {
         description: @tr("Appliquer automatiquement les corrections du dictionnaire personnel.");
 
         dictionary-switch := KitSwitch {
-            theme: root.theme;
-            modal-layer: 0;
             label-position: ChoiceLabelPosition.start;
             padding-inline: 0px;
             ownership: Ownership.controlled;
@@ -139,11 +123,8 @@ export component AudioSection inherits KitFieldSet {
     }
 
     if root.is-laptop: SettingsAdvancedBlock {
-        theme: root.theme;
 
         clamshell-field := KitFieldRow {
-            theme: root.theme;
-            modal-layer: 0;
             orientation: Theme.settings-field-orientation(self.width);
             focus-requested => { clamshell-picker.take-focus(); }
             private property <bool> control-focused: clamshell-picker.has-focus;
@@ -154,8 +135,6 @@ export component AudioSection inherits KitFieldSet {
             description: @tr("Utiliser ce microphone à la place quand le capot est fermé avec un écran externe connecté.");
 
             clamshell-picker := CatalogPicker {
-                theme: root.theme;
-                modal-layer: 0;
                 control-label: @tr("Microphone quand le capot est fermé");
                 model: root.clamshell-device-labels;
                 option-values: root.clamshell-device-ids;

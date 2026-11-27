@@ -58,7 +58,6 @@ export component IntelligenceSection inherits KitFieldSet {
 
     KitFieldRow {
         theme: KitThemeContext.current;
-        modal-layer: 0;
         orientation: Theme.settings-field-orientation(self.width);
         appearance: FieldRowAppearance.inset;
         show-divider: true;
@@ -72,7 +71,6 @@ export component IntelligenceSection inherits KitFieldSet {
 
         engine-picker := ClosedSettingsPicker {
             theme: KitThemeContext.current;
-            modal-layer: 0;
             label: @tr("Moteur IA");
             choices: SettingsOptions.provider-options(root.summary-provider);
             chosen(row) => { root.summary-provider-changed(SettingsOptions.provider-value(row, root.summary-provider)); }
@@ -81,15 +79,12 @@ export component IntelligenceSection inherits KitFieldSet {
 
     if root.provider-unavailable && root.effective-engine != SummaryProvider.auto: SettingsNoticeRow {
         unavailable-notice := KitAlert { bordered: false; corner-radius: 12px; inset: 12px; actions-placement: AlertActions.trailing;
-            theme: root.theme;
             severity: warning;
             message: root.effective-engine == SummaryProvider.apple-intelligence
                 ? @tr("Apple Intelligence n'est pas disponible sur cet appareil.")
                 : root.ollama-available ? @tr("Aucun modèle Ollama compatible n'est installé.")
                 : @tr("Le serveur Ollama ne répond pas à cette adresse.");
             if root.refresh-error == "": KitButton {
-                theme: root.theme;
-                modal-layer: 0;
                 control-size: ControlSize.compact;
                 text: @tr("Réessayer");
                 disabled: root.ollama-checking || root.ollama-pulling;
@@ -103,12 +98,9 @@ export component IntelligenceSection inherits KitFieldSet {
 
     if root.refresh-error != "": SettingsNoticeRow {
         error-notice := KitAlert { bordered: false; corner-radius: 12px; inset: 12px; actions-placement: AlertActions.trailing;
-            theme: root.theme;
             severity: error;
             message: root.refresh-error;
             KitButton {
-                theme: root.theme;
-                modal-layer: 0;
                 control-size: ControlSize.compact;
                 text: @tr("Réessayer");
                 disabled: root.ollama-checking || root.ollama-pulling;
@@ -122,7 +114,6 @@ export component IntelligenceSection inherits KitFieldSet {
 
     if root.effective-engine == SummaryProvider.apple-intelligence: apple-row := KitFieldRow {
         theme: KitThemeContext.current;
-        modal-layer: 0;
         orientation: Theme.settings-field-orientation(self.width);
         appearance: FieldRowAppearance.inset;
         show-divider: true;
@@ -130,11 +121,9 @@ export component IntelligenceSection inherits KitFieldSet {
         description: root.apple-intelligence-available ? "" : root.apple-reason-label(root.apple-intelligence-reason);
 
         KitWrap {
-            theme: root.theme;
             cross-axis-alignment: center;
             horizontal-stretch: 0;
             KitBadge {
-                theme: root.theme;
                 text: root.apple-intelligence-available ? @tr("Disponible") : @tr("Non disponible");
                 tone: root.apple-intelligence-available ? Tone.success : Tone.warning;
                 subtle: true;
@@ -142,8 +131,6 @@ export component IntelligenceSection inherits KitFieldSet {
                 dot: root.apple-intelligence-available;
             }
             if !root.apple-intelligence-available && root.apple-intelligence-reason == AppleIntelligenceUnavailableReason.apple-intelligence-not-enabled: KitButton {
-                theme: root.theme;
-                modal-layer: 0;
                 control-size: compact;
                 text: @tr("Réglages Système");
                 text-wrap: word-wrap;
@@ -157,7 +144,6 @@ export component IntelligenceSection inherits KitFieldSet {
 
     if root.effective-engine == SummaryProvider.ollama: url-row := KitFieldRow {
         theme: KitThemeContext.current;
-        modal-layer: 0;
         orientation: Theme.settings-field-orientation(self.width);
         appearance: FieldRowAppearance.inset;
         show-divider: true;
@@ -171,7 +157,6 @@ export component IntelligenceSection inherits KitFieldSet {
 
         url-editor := KitTextField {
             theme: KitThemeContext.current;
-            modal-layer: 0;
             width: Theme.settings-control-width;
             accessible-name: @tr("URL Ollama");
             description: url-row.description;
@@ -184,7 +169,6 @@ export component IntelligenceSection inherits KitFieldSet {
 
     if root.effective-engine == SummaryProvider.ollama && root.model-picker-visible: KitFieldRow {
         theme: KitThemeContext.current;
-        modal-layer: 0;
         orientation: Theme.settings-field-orientation(self.width);
         appearance: FieldRowAppearance.inset;
         show-divider: true;
@@ -197,7 +181,6 @@ export component IntelligenceSection inherits KitFieldSet {
 
         model-picker := CatalogPicker {
             theme: KitThemeContext.current;
-            modal-layer: 0;
             control-label: @tr("Modèle Ollama");
             model: root.model-labels;
             option-values: root.model-ids;
@@ -208,7 +191,6 @@ export component IntelligenceSection inherits KitFieldSet {
 
     if root.effective-engine == SummaryProvider.ollama && root.show-ollama-setup && root.ollama-pull-error != "": SettingsNoticeRow {
         KitAlert { bordered: false; corner-radius: 12px; inset: 12px; actions-placement: AlertActions.trailing;
-            theme: root.theme;
             severity: error;
             message: @tr("Échec du téléchargement : {}", root.ollama-pull-error);
         }
@@ -216,7 +198,6 @@ export component IntelligenceSection inherits KitFieldSet {
 
     if root.effective-engine == SummaryProvider.ollama && root.show-ollama-setup: setup-row := KitFieldRow {
         theme: KitThemeContext.current;
-        modal-layer: 0;
         orientation: Theme.settings-field-orientation(self.width);
         appearance: FieldRowAppearance.inset;
         show-divider: true;
@@ -226,8 +207,6 @@ export component IntelligenceSection inherits KitFieldSet {
             : "";
 
         if !root.ollama-pulling: KitButton {
-            theme: root.theme;
-            modal-layer: 0;
             intent: primary;
             control-size: compact;
             text: @tr("Télécharger {}", root.recommended-model);

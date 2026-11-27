@@ -98,7 +98,6 @@ export component DataSection inherits VerticalLayout {
 
     KitFieldRow {
         theme: KitThemeContext.current;
-        modal-layer: 0;
         orientation: Theme.settings-field-orientation(self.width);
         appearance: FieldRowAppearance.inset;
         show-divider: true;
@@ -112,7 +111,6 @@ export component DataSection inherits VerticalLayout {
 
         retention-picker := ClosedSettingsPicker {
             theme: KitThemeContext.current;
-            modal-layer: 0;
             label: @tr("Conservation audio des réunions");
             choices: SettingsOptions.retention-options(root.retention);
             chosen(row) => { root.retention-changed(SettingsOptions.retention-value(row, root.retention)); }
@@ -121,7 +119,6 @@ export component DataSection inherits VerticalLayout {
 
     KitFieldRow {
         theme: KitThemeContext.current;
-        modal-layer: 0;
         orientation: Theme.settings-field-orientation(self.width);
         appearance: FieldRowAppearance.inset;
         show-divider: true;
@@ -135,7 +132,6 @@ export component DataSection inherits VerticalLayout {
 
         export-button := KitButton {
             theme: KitThemeContext.current;
-            modal-layer: 0;
             control-size: ControlSize.compact;
             text: root.exporting ? @tr("Export en cours…") : @tr("Exporter…");
             disabled: root.exporting;
@@ -145,7 +141,6 @@ export component DataSection inherits VerticalLayout {
 
     KitFieldRow {
         theme: KitThemeContext.current;
-        modal-layer: 0;
         orientation: Theme.settings-field-orientation(self.width);
         appearance: FieldRowAppearance.inset;
         show-divider: true;
@@ -158,7 +153,6 @@ export component DataSection inherits VerticalLayout {
 
         reveal-button := KitButton {
             theme: KitThemeContext.current;
-            modal-layer: 0;
             control-size: ControlSize.compact;
             leading-icon: LucideFiles.folder();
             text: @tr("Afficher dans le Finder");

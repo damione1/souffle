@@ -8,8 +8,6 @@ export component SummarizationSection inherits KitFieldSet {
     appearance: FieldSetAppearance.card;
 
     KitFieldRow {
-        theme: root.theme;
-        modal-layer: 0;
         orientation: Theme.settings-field-orientation(self.width);
         appearance: FieldRowAppearance.inset;
         show-divider: true;
@@ -22,8 +20,6 @@ export component SummarizationSection inherits KitFieldSet {
         description: @tr("Active les résumés de réunion et la compaction expérimentaux. La qualité des longs résumés locaux reste à évaluer.");
 
         summarization-switch := KitSwitch {
-            theme: root.theme;
-            modal-layer: 0;
             label-position: ChoiceLabelPosition.start;
             padding-inline: 0px;
             ownership: Ownership.controlled;

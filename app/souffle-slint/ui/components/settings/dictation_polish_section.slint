@@ -19,7 +19,6 @@ export component DictationPolishSection inherits KitFieldSet {
 
     KitFieldRow {
         theme: KitThemeContext.current;
-        modal-layer: 0;
         orientation: Theme.settings-field-orientation(self.width);
         appearance: FieldRowAppearance.inset;
         show-divider: true;
@@ -33,7 +32,6 @@ export component DictationPolishSection inherits KitFieldSet {
 
         polish-switch := KitSwitch {
             theme: KitThemeContext.current;
-            modal-layer: 0;
             label-position: ChoiceLabelPosition.start;
             padding-inline: 0px;
             ownership: Ownership.controlled;
@@ -46,7 +44,6 @@ export component DictationPolishSection inherits KitFieldSet {
 
     if root.enabled && root.template-labels.length > 0: KitFieldRow {
         theme: KitThemeContext.current;
-        modal-layer: 0;
         orientation: Theme.settings-field-orientation(self.width);
         appearance: FieldRowAppearance.inset;
         show-divider: true;
@@ -59,7 +56,6 @@ export component DictationPolishSection inherits KitFieldSet {
 
         model-picker := CatalogPicker {
             theme: KitThemeContext.current;
-            modal-layer: 0;
             control-label: @tr("Gabarit de retouche");
             model: root.template-labels;
             option-values: root.template-ids;
@@ -70,7 +66,6 @@ export component DictationPolishSection inherits KitFieldSet {
 
     if root.enabled && root.template-labels.length > 0: instruction-row := KitFieldRow {
         theme: KitThemeContext.current;
-        modal-layer: 0;
         orientation: self.width < 600px ? Orientation.vertical : Orientation.horizontal;
         row-alignment: FieldRowAlignment.top;
         appearance: FieldRowAppearance.inset;
@@ -85,7 +80,6 @@ export component DictationPolishSection inherits KitFieldSet {
 
         instruction-editor := KitTextArea {
             theme: KitThemeContext.current;
-            modal-layer: 0;
             width: 340px;
             min-lines: 4;
             max-lines: 4;
