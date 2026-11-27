@@ -41,7 +41,8 @@ pub fn is_builtin_summary_template(id: &str) -> bool {
 
 /// Shows the rows of an explicitly chosen engine at once. The automatic
 /// choice keeps the last resolved engine until a provider check answers, so
-/// rows never flash between the two engines.
+/// rows never flash between the two engines. The unavailable warning of the
+/// previous engine does not carry over: the pending check decides it.
 pub fn project_explicit_engine(
     window: &MainWindow,
     choice: souffle_lib::summary::SummaryProviderChoice,
@@ -50,7 +51,11 @@ pub fn project_explicit_engine(
     match choice {
         SummaryProviderChoice::Auto => {}
         SummaryProviderChoice::AppleIntelligence | SummaryProviderChoice::Ollama => {
-            window.set_settings_summary_effective_engine(summary_provider_to_slint(choice));
+            let engine = summary_provider_to_slint(choice);
+            if window.get_settings_summary_effective_engine() != engine {
+                window.set_settings_summary_effective_engine(engine);
+                window.set_settings_summary_provider_unavailable(false);
+            }
         }
     }
 }

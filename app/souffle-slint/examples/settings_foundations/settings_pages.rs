@@ -957,6 +957,8 @@ fn type_text(w: &MainWindow, editor: &ElementHandle, text: &str) {
 async fn ai_actions(w: &MainWindow, path: &Path) {
     let en = w.get_settings_locale() == crate::AppLocale::En;
     w.set_settings_tab(SettingsTab::Ai);
+    // The summary template editors are mounted only with summaries on.
+    w.global::<crate::SummarizationUi>().set_enabled(true);
     let log: Log = Default::default();
     {
         let l = log.clone();

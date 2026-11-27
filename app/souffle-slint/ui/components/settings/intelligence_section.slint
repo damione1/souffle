@@ -182,7 +182,7 @@ export component IntelligenceSection inherits KitFieldSet {
         }
     }
 
-    if root.model-picker-visible: KitFieldRow {
+    if root.effective-engine == SummaryProvider.ollama && root.model-picker-visible: KitFieldRow {
         theme: KitThemeContext.current;
         modal-layer: 0;
         orientation: Theme.settings-field-orientation(self.width);
@@ -206,7 +206,7 @@ export component IntelligenceSection inherits KitFieldSet {
         }
     }
 
-    if root.show-ollama-setup && root.ollama-pull-error != "": SettingsNoticeRow {
+    if root.effective-engine == SummaryProvider.ollama && root.show-ollama-setup && root.ollama-pull-error != "": SettingsNoticeRow {
         KitAlert { bordered: false; corner-radius: 12px; inset: 12px; actions-placement: AlertActions.trailing;
             theme: root.theme;
             severity: error;
@@ -214,7 +214,7 @@ export component IntelligenceSection inherits KitFieldSet {
         }
     }
 
-    if root.show-ollama-setup: setup-row := KitFieldRow {
+    if root.effective-engine == SummaryProvider.ollama && root.show-ollama-setup: setup-row := KitFieldRow {
         theme: KitThemeContext.current;
         modal-layer: 0;
         orientation: Theme.settings-field-orientation(self.width);
