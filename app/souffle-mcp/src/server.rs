@@ -32,16 +32,18 @@ const MAX_LISTED_RESOURCES: i64 = 200;
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct ListMeetingsArgs {
-    /// Optional full-text search filter (FTS5 syntax). When omitted, lists
+    /// Optional full-text filter on transcript text (FTS5 syntax); titles,
+    /// notes and summaries are not searched. When omitted or blank, lists
     /// meetings newest first with no text filter.
     #[serde(default)]
     pub query: Option<String>,
     /// Inclusive lower bound on the meeting start time (ISO 8601 date or
-    /// date-time).
+    /// date-time; UTC when no offset is given). A date alone means midnight.
     #[serde(default)]
     pub from: Option<String>,
     /// Inclusive upper bound on the meeting start time (ISO 8601 date or
-    /// date-time).
+    /// date-time; UTC when no offset is given). A date alone means midnight,
+    /// so it excludes meetings started later that day: pass the next day.
     #[serde(default)]
     pub to: Option<String>,
     /// Maximum number of meetings to return (default 20, capped at 200).
@@ -61,14 +63,18 @@ pub struct GetMeetingArgs {
 
 #[derive(Debug, Default, Deserialize, JsonSchema)]
 pub struct LatestMeetingArgs {
-    /// summary: overview; compact: lossy economical first pass; transcript: exact citations.
+    /// Which sections to include: any of "transcript", "summary", "notes",
+    /// "metadata", "compact". Omit (or leave empty) to include everything.
+    /// summary: overview; compact: lossy economical first pass; transcript:
+    /// exact citations.
     #[serde(default)]
     pub include: Option<Vec<MeetingSection>>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct SearchMeetingsArgs {
-    /// Full-text search query (FTS5 syntax).
+    /// Full-text search query on transcript text (FTS5 syntax). A blank query
+    /// returns no results.
     pub query: String,
     /// Maximum number of hits to return (default 20, capped at 200).
     #[serde(default)]
@@ -154,7 +160,7 @@ impl SouffleMcpServer {
     }
 
     #[tool(
-        description = "Full-text search across all meetings, returning matched snippets. Ongoing meetings are un-indexed FTS until session end."
+        description = "Full-text search across meeting transcripts (not titles, notes or summaries), returning matched snippets ranked by relevance. Ongoing meetings are un-indexed FTS until session end."
     )]
     async fn search_meetings(
         &self,
@@ -210,7 +216,8 @@ impl ServerHandler for SouffleMcpServer {
              un-flushed segments buffered in RAM, un-indexed FTS until session end). Tools: \
              list_meetings (browse/filter), get_meeting (fetch one meeting by id), search_meetings \
              (full-text search), get_latest_meeting (most recent), list_dictations (dictation history). \
-             Also exposes each meeting as a souffle://meeting/{id} resource returning its transcript."
+             Also exposes meetings as souffle://meeting/{id} resources: markdown with the title, \
+             start time, summary, decisions, action items, open questions and transcript."
                 .to_string(),
         )
     }

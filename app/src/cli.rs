@@ -1,11 +1,13 @@
-//! Headless CLI mode: `souffle --transcribe-file input.wav [...]`.
+//! Headless CLI mode: transcription of a WAV file, meeting compaction and
+//! summaries, the AEC diagnostic replay and the engine and model lists.
 //!
-//! Drives the same engine trait (`crate::engine::TranscriptionEngine`) used by
-//! the app, but on the calling thread directly — no engine actor, no audio
-//! capture, no Tauri window, no model download. Doubles as a performance
-//! regression harness via `--repeat`.
+//! Transcription drives the same engine trait
+//! (`crate::engine::TranscriptionEngine`) used by the app, on the calling
+//! thread, with no audio capture, window or speech model download. It doubles
+//! as a performance regression harness via `--repeat`. `--compact-meeting`
+//! may download the compression model.
 //!
-//! `try_run_headless` is called from `main` before Tauri's `run()`. It must
+//! `try_run_headless` is called from `main` before the app boots. It must
 //! stay lenient about unrecognized arguments: macOS Finder/launchd can pass
 //! flags like `-psn_0_123456` to the binary, and those must fall through to
 //! the normal GUI launch rather than aborting the app.
@@ -34,28 +36,29 @@ enum SummaryProviderArg {
 #[derive(Parser, Debug, Clone)]
 #[command(
     name = "souffle",
-    about = "Souffle headless transcription CLI",
+    about = "Soufflé headless CLI: transcription, meeting compaction and summaries",
     disable_help_subcommand = true
 )]
 struct CliArgs {
-    /// Generate and persist a local compact transcript (downloads model if missing).
+    /// Save a compact transcript for a stopped meeting, by id (downloads the compression model if missing).
     #[arg(long, conflicts_with_all=["summarize_meeting","transcribe_file","aec_replay","list_models","list_engines"])]
     compact_meeting: Option<String>,
-    /// Summarize a stored meeting using the selected provider.
+    /// Summarize a stored meeting, by id, and save the result.
     #[arg(long, conflicts_with_all=["transcribe_file","aec_replay","list_models","list_engines"])]
     summarize_meeting: Option<String>,
-    /// Alternate SQLite database for headless actions.
+    /// Database for --compact-meeting and --summarize-meeting only (default: SOUFFLE_DB, then the app database).
     #[arg(long)]
     database: Option<PathBuf>,
-    /// Override compression for summary map input for this invocation only.
+    /// For this run only, turn compression of long transcripts before summarizing on or off.
     #[arg(long, value_enum)]
     summary_compression: Option<CompressionOverride>,
-    /// Summary model override, separate from the transcription --model.
+    /// Summary model id, separate from the transcription --model.
     #[arg(long)]
     summary_model: Option<String>,
+    /// For this run only, the provider used to pick the summary model when --summary-model is not given.
     #[arg(long, value_enum)]
     summary_provider: Option<SummaryProviderArg>,
-    /// Transcribe a WAV file through the configured engine and exit.
+    /// Transcribe a mono WAV file (16-bit PCM or 32-bit float) and exit. The speech model must be downloaded.
     #[arg(long, value_name = "WAV")]
     transcribe_file: Option<PathBuf>,
 
@@ -77,7 +80,7 @@ struct CliArgs {
     #[arg(long)]
     backend: Option<String>,
 
-    /// Emit a single machine-readable JSON object instead of text.
+    /// Emit machine-readable JSON instead of text (--aec-replay always prints JSON).
     #[arg(long)]
     json: bool,
 
@@ -106,7 +109,7 @@ impl CliArgs {
     }
 }
 
-/// Entry point called from `main` before Tauri boots. Returns `Some(exit_code)`
+/// Entry point called from `main` before the app boots. Returns `Some(exit_code)`
 /// when headless work ran (the caller should `std::process::exit` with it), or
 /// `None` when the app should launch normally.
 pub fn try_run_headless() -> Option<i32> {
@@ -301,7 +304,9 @@ fn run(cli: CliArgs) -> i32 {
     }
 
     let Some(wav_path) = cli.transcribe_file.clone() else {
-        eprintln!("No action requested. Use --transcribe-file, --list-models, or --list-engines.");
+        eprintln!(
+            "No action requested. Use --transcribe-file, --summarize-meeting, --compact-meeting, --aec-replay, --list-models or --list-engines."
+        );
         return 1;
     };
 

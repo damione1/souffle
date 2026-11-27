@@ -1,16 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Builds the souffle-mcp sidecar and copies it into app/binaries/ with
-# the target-triple suffix Tauri's `externalBin` bundling expects (it strips
-# the suffix again when copying into the app bundle). Not needed for
-# `npm run dev` — the Settings UI handles a missing sidecar gracefully — but
-# must run before `tauri build` so release bundles include it (wired into
-# `beforeBuildCommand` in app/tauri.conf.json).
+# Builds the souffle-mcp sidecar and copies it into app/binaries/ with a
+# target-triple suffix. scripts/bundle-macos.sh copies it from there into the
+# app bundle without the suffix. The Settings UI reports a missing sidecar.
 #
-# Default is --release (LTO, the packaging profile). Pass --debug for CI:
-# Tauri's build script only checks that the file exists, and the debug
-# artifact is the same profile as `cargo test` / clippy.
+# Default is --release (LTO, the packaging profile). Pass --debug for CI: the
+# debug artifact is the same profile as `cargo test` / clippy.
 #
 # Cargo artifacts are not always at app/target. CARGO_TARGET_DIR and
 # .cargo/config.toml `build.target-dir` relocate them. Ask cargo metadata.

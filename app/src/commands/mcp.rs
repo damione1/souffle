@@ -1,4 +1,4 @@
-//! Settings > Data "Connect to AI assistants" support: locates the bundled
+//! Support for the "MCP server" card on the System settings tab: locates the bundled
 //! `souffle-mcp` sidecar binary and helps the user wire it into an MCP
 //! client (Claude Desktop, Claude Code).
 
@@ -6,9 +6,8 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-/// Sidecar binary name once bundled — Tauri strips the target-triple suffix
-/// (`souffle-mcp-aarch64-apple-darwin`) when it copies `externalBin` entries
-/// into the app bundle, leaving just this name next to the app executable.
+/// Sidecar binary name once bundled: `scripts/bundle-macos.sh` drops the
+/// target-triple suffix when it copies the sidecar next to the app executable.
 const MCP_BINARY_NAME: &str = "souffle-mcp";
 
 /// Shell-escape a path for pasting into zsh/bash (e.g. `claude mcp add souffle …`).
@@ -30,7 +29,7 @@ pub struct McpSetupInfo {
 /// Resolve the `souffle-mcp` sidecar path.
 ///
 /// - Release bundle: sits next to the app executable (`Contents/MacOS/` on
-///   macOS), because Tauri copies `externalBin` entries there at build time.
+///   macOS), where `scripts/bundle-macos.sh` copies it.
 /// - Dev: the app binary runs from `target/{debug,release}/souffle`, but the
 ///   sidecar is built separately (`scripts/build-mcp-sidecar.sh` or
 ///   `cargo build -p souffle-mcp`) into the sibling `target/{debug,release}/`.
@@ -57,8 +56,8 @@ pub fn resolve_mcp_binary_path() -> PathBuf {
     bundled
 }
 
-/// Resolve the sidecar path and build the copy/paste snippets for Settings >
-/// Data. Never fails: an absent binary is a valid (if inactionable) state
+/// Resolve the sidecar path and build the copy/paste snippets for the settings
+/// card. Never fails: an absent binary is a valid (if inactionable) state
 /// the UI shows, not an error.
 pub fn get_mcp_setup_info() -> Result<McpSetupInfo, String> {
     let path = resolve_mcp_binary_path();
