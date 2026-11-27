@@ -411,71 +411,66 @@ msgctxt "CompressionUi"
 msgid "Disponible une fois l'enregistrement terminé."
 msgstr "Disponible une fois l'enregistrement terminé."
 
-#: ui/compression.slint:13 ui/compression.slint:27
+#: ui/compression.slint:13 ui/compression.slint:26
 msgctxt "CompressionUi"
 msgid "La transcription ne contient aucun texte."
 msgstr "La transcription ne contient aucun texte."
 
 #: ui/compression.slint:14
 msgctxt "CompressionUi"
-msgid "Pourcentage de texte à conserver invalide."
-msgstr "Pourcentage de texte à conserver invalide."
-
-#: ui/compression.slint:15
-msgctxt "CompressionUi"
 msgid ""
 "Modèle de compression indisponible. Le résumé utilise le texte original."
 msgstr ""
 "Modèle de compression indisponible. Le résumé utilise le texte original."
 
-#: ui/compression.slint:16
+#: ui/compression.slint:15
 msgctxt "CompressionUi"
 msgid "Une compression est déjà en cours pour cette réunion."
 msgstr "Une compression est déjà en cours pour cette réunion."
 
-#: ui/compression.slint:17
+#: ui/compression.slint:16
 msgctxt "CompressionUi"
 msgid ""
 "Le modèle de compression est occupé. Réessayez après l'opération en cours."
 msgstr ""
 "Le modèle de compression est occupé. Réessayez après l'opération en cours."
 
-#: ui/compression.slint:18
+#: ui/compression.slint:17
 msgctxt "CompressionUi"
 msgid "Impossible de supprimer le modèle : {}"
 msgstr "Impossible de supprimer le modèle : {}"
 
-#: ui/compression.slint:19
+#: ui/compression.slint:18
 msgctxt "CompressionUi"
 msgid "Impossible de préparer le modèle : {}"
 msgstr "Impossible de préparer le modèle : {}"
 
-#: ui/compression.slint:20
+#: ui/compression.slint:19
 msgctxt "CompressionUi"
 msgid "Modèle de compression invalide : {}"
 msgstr "Modèle de compression invalide : {}"
 
-#: ui/compression.slint:21
+#: ui/compression.slint:20
 msgctxt "CompressionUi"
 msgid "La compression a échoué : {}"
 msgstr "La compression a échoué : {}"
 
-#: ui/compression.slint:22 ui/compression.slint:26
+#: ui/compression.slint:21 ui/compression.slint:25
 msgctxt "CompressionUi"
 msgid "Erreur de base de données : {}"
 msgstr "Erreur de base de données : {}"
 
-#: ui/compression.slint:23
+#: ui/compression.slint:22
 msgctxt "CompressionUi"
 msgid "Erreur du moteur de compression : {}"
 msgstr "Erreur du moteur de compression : {}"
 
-#: ui/compression.slint:28
+#: ui/compression.slint:27
 msgctxt "CompressionUi"
 msgid "Fournisseur de résumé indisponible : {}"
 msgstr "Fournisseur de résumé indisponible : {}"
 
-#: ui/compression.slint:29
+#: ui/compression.slint:28
 msgctxt "CompressionUi"
 msgid "La génération du résumé a échoué : {}"
 msgstr "La génération du résumé a échoué : {}"
@@ -2312,58 +2307,15 @@ msgctxt "CompressionSection"
 msgid "Compresser les longues transcriptions avant le résumé"
 msgstr "Compresser les longues transcriptions avant le résumé"
 
-#: ui/components/settings/compression_section.slint:29
-msgctxt "CompressionSection"
-msgid ""
-"Réduit l'entrée des étapes intermédiaires. Les résumés courts utilisent le "
-"texte original."
-msgstr ""
-"Réduit l'entrée des étapes intermédiaires. Les résumés courts utilisent le "
-"texte original."
-
 #: ui/components/settings/compression_section.slint:38
 msgctxt "CompressionSection"
 msgid "Compresser avant le résumé"
 msgstr "Compresser avant le résumé"
 
-#: ui/components/settings/compression_section.slint:55
+#: ui/components/settings/compression_section.slint:29
 msgctxt "CompressionSection"
-msgid "Créer aussi une version compacte lors du résumé"
-msgstr "Créer aussi une version compacte lors du résumé"
-
-#: ui/components/settings/compression_section.slint:56
-msgctxt "CompressionSection"
-msgid ""
-"Conserve un texte compact consultable, indépendamment de l'entrée utilisée "
-"pour le résumé."
-msgstr ""
-"Conserve un texte compact consultable, indépendamment de l'entrée utilisée "
-"pour le résumé."
-
-#: ui/components/settings/compression_section.slint:65
-msgctxt "CompressionSection"
-msgid "Créer aussi une version compacte"
-msgstr "Créer aussi une version compacte"
-
-#: ui/components/settings/compression_section.slint:78
-msgctxt "CompressionSection"
-msgid "Texte à conserver"
-msgstr "Texte à conserver"
-
-#: ui/components/settings/compression_section.slint:79
-msgctxt "CompressionSection"
-msgid "Une valeur basse omet des mots."
-msgstr "Une valeur basse omet des mots."
-
-#: ui/components/settings/compression_section.slint:92
-msgctxt "CompressionSection"
-msgid "Pourcentage de texte à conserver"
-msgstr "Pourcentage de texte à conserver"
-
-#: ui/components/settings/compression_section.slint:98
-msgctxt "CompressionSection"
-msgid "{} %"
-msgstr "{} %"
+msgid "Réduit l'entrée des étapes intermédiaires et enregistre la version compacte avec la réunion. Les résumés courts utilisent le texte original."
+msgstr "Réduit l'entrée des étapes intermédiaires et enregistre la version compacte avec la réunion. Les résumés courts utilisent le texte original."
 
 #: ui/components/settings/compression_section.slint:116
 msgctxt "CompressionStorageSection"

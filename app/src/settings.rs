@@ -225,10 +225,6 @@ pub struct AppSettings {
     pub meeting_summaries_enabled: bool,
     #[serde(default)]
     pub summary_compression_enabled: bool,
-    #[serde(default)]
-    pub compact_transcript_enabled: bool,
-    #[serde(default = "default_compression_rate")]
-    pub summary_compression_rate: f32,
     /// Debug level logging, transcript lines in the log, and the short
     /// engine input capture that lives for the length of a session.
     pub detailed_logging: bool,
@@ -326,9 +322,6 @@ pub struct SettingsOptions {
     pub calendar_reminder_minutes_max: u32,
     pub feedback_sounds_volume_min: u32,
     pub feedback_sounds_volume_max: u32,
-    pub compression_rate_min: f32,
-    pub compression_rate_max: f32,
-    pub compression_rate_default: f32,
     pub default_shortcuts: ShortcutSettings,
 }
 
@@ -343,16 +336,9 @@ impl SettingsOptions {
             calendar_reminder_minutes_max: *CALENDAR_REMINDER_MINUTES_RANGE.end(),
             feedback_sounds_volume_min: *FEEDBACK_SOUNDS_VOLUME_RANGE.start(),
             feedback_sounds_volume_max: *FEEDBACK_SOUNDS_VOLUME_RANGE.end(),
-            compression_rate_min: crate::summary::compress::CompressionRate::MIN,
-            compression_rate_max: crate::summary::compress::CompressionRate::MAX,
-            compression_rate_default: default_compression_rate(),
             default_shortcuts: ShortcutSettings::default(),
         }
     }
-}
-
-fn default_compression_rate() -> f32 {
-    crate::summary::compress::CompressionRate::DEFAULT
 }
 
 impl Default for AppSettings {
@@ -378,8 +364,6 @@ impl Default for AppSettings {
             ollama_model: String::new(),
             meeting_summaries_enabled: false,
             summary_compression_enabled: false,
-            compact_transcript_enabled: false,
-            summary_compression_rate: default_compression_rate(),
             detailed_logging: false,
             clamshell_audio_device: None,
             input_priority: InputPriority::default(),
@@ -474,12 +458,6 @@ impl AppSettings {
             read_json_setting(db, "meeting_summaries_enabled")?.unwrap_or(false);
         settings.summary_compression_enabled =
             read_json_setting(db, "summary_compression_enabled")?.unwrap_or(false);
-        settings.compact_transcript_enabled =
-            read_json_setting(db, "compact_transcript_enabled")?.unwrap_or(false);
-        settings.summary_compression_rate =
-            read_json_setting::<f32>(db, "summary_compression_rate")?
-                .filter(|rate| crate::summary::compress::CompressionRate::new(*rate).is_ok())
-                .unwrap_or_else(default_compression_rate);
         settings.summary_provider =
             SummaryProviderChoice::from_stored(stored_provider, &settings.ollama_model);
         if let Some(detailed_logging) = read_json_setting::<bool>(db, DETAILED_LOGGING_KEY)? {
@@ -706,10 +684,6 @@ impl AppSettings {
         let mut normalized = self.clone();
         normalized.locale = normalized.locale.trim().to_string();
         normalized.ollama_url = normalized.ollama_url.trim().to_string();
-        normalized.summary_compression_rate =
-            crate::summary::compress::CompressionRate::new(normalized.summary_compression_rate)
-                .map(|r| r.get())
-                .unwrap_or_else(|_| default_compression_rate());
         normalized.ollama_model = normalized.ollama_model.trim().to_string();
         normalized.transcription_engine_id = normalized.transcription_engine_id.trim().to_string();
         normalized.transcription_model_id = normalized.transcription_model_id.trim().to_string();
@@ -946,16 +920,6 @@ impl AppSettings {
                 transaction,
                 "summary_compression_enabled",
                 &normalized.summary_compression_enabled,
-            )?;
-            write_json_setting_in_transaction(
-                transaction,
-                "compact_transcript_enabled",
-                &normalized.compact_transcript_enabled,
-            )?;
-            write_json_setting_in_transaction(
-                transaction,
-                "summary_compression_rate",
-                &normalized.summary_compression_rate,
             )?;
             write_json_setting_in_transaction(
                 transaction,
@@ -1427,8 +1391,6 @@ mod tests {
             ollama_model: "qwen2.5".into(),
             meeting_summaries_enabled: true,
             summary_compression_enabled: false,
-            compact_transcript_enabled: false,
-            summary_compression_rate: super::default_compression_rate(),
             detailed_logging: true,
             clamshell_audio_device: Some("USB Mic".into()),
             input_priority: InputPriority::default(),
@@ -1997,6 +1959,8 @@ mod tests {
             ("meeting_audio_diagnostic", "true"),
             ("log_level", "\"debug\""),
             ("debug_transcription", "true"),
+            ("compact_transcript_enabled", "true"),
+            ("summary_compression_rate", "0.7"),
         ];
         for (key, value) in retired {
             db.set_setting(key, value).expect("seed the retired key");
@@ -2423,48 +2387,24 @@ mod tests {
 mod compression_tests {
     use super::*;
     #[test]
-    fn compression_defaults_bounds_and_roundtrip() {
+    fn compression_defaults_and_roundtrip() {
         let (db, _dir) = crate::test_helpers::fixtures::test_db();
         let mut s = AppSettings::default();
-        assert!(
-            !s.meeting_summaries_enabled
-                && !s.summary_compression_enabled
-                && !s.compact_transcript_enabled
-        );
+        assert!(!s.meeting_summaries_enabled && !s.summary_compression_enabled);
         assert!(
             !AppSettings::load_read_only(&db)
                 .unwrap()
                 .meeting_summaries_enabled
         );
-        assert_eq!(s.summary_compression_rate, 0.65);
-        assert_eq!(
-            AppSettings::load_read_only(&db)
-                .unwrap()
-                .summary_compression_rate,
-            0.65
-        );
         s.meeting_summaries_enabled = true;
         s.summary_compression_enabled = true;
-        s.compact_transcript_enabled = true;
-        s.summary_compression_rate = 0.7;
         s.save(&db).unwrap();
         let loaded = AppSettings::load_read_only(&db).unwrap();
-        assert!(
-            loaded.meeting_summaries_enabled
-                && loaded.summary_compression_enabled
-                && loaded.compact_transcript_enabled
-        );
-        assert_eq!(loaded.summary_compression_rate, 0.7);
+        assert!(loaded.meeting_summaries_enabled && loaded.summary_compression_enabled);
         s.meeting_summaries_enabled = false;
         s.save(&db).unwrap();
         let disabled = AppSettings::load_read_only(&db).unwrap();
         assert!(!disabled.meeting_summaries_enabled);
-        assert!(disabled.summary_compression_enabled && disabled.compact_transcript_enabled);
-        assert_eq!(disabled.summary_compression_rate, 0.7);
-        s.summary_compression_rate = f32::NAN;
-        assert_eq!(
-            s.sanitize_for_save().unwrap().summary_compression_rate,
-            0.65
-        );
+        assert!(disabled.summary_compression_enabled);
     }
 }

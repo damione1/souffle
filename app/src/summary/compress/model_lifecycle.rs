@@ -310,7 +310,6 @@ impl CompressionService {
                     | CompressionError::Deleted
                     | CompressionError::Ongoing
                     | CompressionError::EmptyTranscript
-                    | CompressionError::InvalidRate
                     | CompressionError::ModelUnavailable
                     | CompressionError::AlreadyRunning
                     | CompressionError::ModelBusy

@@ -50,26 +50,9 @@ impl std::fmt::Display for CompressionFailure {
 impl std::error::Error for CompressionFailure {}
 
 pub const POLICY: &str = "mbert-offset-spans-v2";
-#[derive(Debug, Clone, Copy, PartialEq)]
-/// A checked finite fraction of words to retain; no unchecked construction.
-pub struct CompressionRate(f32);
-impl CompressionRate {
-    pub const MIN: f32 = 0.3;
-    pub const MAX: f32 = 0.9;
-    pub const DEFAULT: f32 = 0.65;
-    /// Accept only finite fractions in MIN..=MAX; settings normalize invalid persisted values.
-    pub fn new(rate: f32) -> Result<Self, CompressionError> {
-        if rate.is_finite() && (Self::MIN..=Self::MAX).contains(&rate) {
-            Ok(Self(rate))
-        } else {
-            Err(CompressionError::InvalidRate)
-        }
-    }
-    /// Return the validated fraction for inference or percentage projection.
-    pub fn get(self) -> f32 {
-        self.0
-    }
-}
+/// Fraction of words every compact keeps. Saved compacts store the rate they
+/// were made with and are reused only when it equals this value exactly.
+pub const TARGET_RATE: f32 = 0.65;
 #[derive(Debug, Clone)]
 /// Immutable effective source shared by fingerprinting, compression and reuse.
 pub struct CompressionInput {
@@ -298,15 +281,10 @@ impl CompressionService {
     }
     /// Reuse only fresh source/rate/checkpoint/policy-compatible saved output,
     /// even if the optional runtime model cache has since been removed.
-    pub fn compatible(
-        &self,
-        compact: &CompactTranscript,
-        input: &CompressionInput,
-        rate: CompressionRate,
-    ) -> bool {
+    pub fn compatible(&self, compact: &CompactTranscript, input: &CompressionInput) -> bool {
         !compact.is_stale
             && compact.source_sha256 == input.source_sha256
-            && compact.rate == rate.get()
+            && compact.rate == TARGET_RATE
             && compact
                 .model
                 .strip_prefix(&format!(
@@ -506,7 +484,6 @@ fn reconstruct(body: &str, words: &[Word]) -> String {
 pub fn compress(
     dir: &Path,
     input: CompressionInput,
-    rate: CompressionRate,
     cancel: &AtomicBool,
     progress: impl Fn(usize, usize),
 ) -> Result<CompactTranscript, CompressionFailure> {
@@ -628,7 +605,7 @@ pub fn compress(
             .then_with(|| a.0.cmp(&b.0))
             .then_with(|| a.1.cmp(&b.1))
     });
-    let target = (ranked.len() as f32 * rate.get()).ceil() as usize;
+    let target = (ranked.len() as f32 * TARGET_RATE).ceil() as usize;
     for &(line, word, _) in ranked.iter().take(target) {
         line_words[line][word].keep = true;
     }
@@ -647,7 +624,7 @@ pub fn compress(
         approx_tokens: souffle_schema::estimate_tokens(&text),
         text,
         model: provenance(&meta),
-        rate: rate.get(),
+        rate: TARGET_RATE,
         generated_at: chrono::Utc::now().to_rfc3339(),
         is_stale: false,
         source_sha256: input.source_sha256,
@@ -722,13 +699,11 @@ mod tests {
         );
     }
     #[test]
-    fn rate_and_unicode_protection() {
+    fn prefix_and_unicode_protection() {
         assert_eq!(
             split_prefix("[0:12] Me: [session 2] Decision reversed"),
             ("[0:12] Me: [session 2] ", "Decision reversed")
         );
-        assert!(CompressionRate::new(f32::NAN).is_err());
-        assert!(CompressionRate::new(0.1).is_err());
         let body = "Élodie Martin n’approuve pas les 42 dépenses, néanmoins.";
         let ws = words(body, &["Élodie Martin".into()]);
         let kept = reconstruct(body, &ws);
@@ -752,14 +727,7 @@ mod tests {
             compression::prepare_cached(&source, &dir).unwrap();
         }
         let input=CompressionInput::new(vec!["[0:12] Me: Élodie Martin ne doit pas payer 42 euros pour cette longue discussion sans décision finale.".into(),"Plain edited English sentence about a detailed and rather repetitive meeting plan with seven possible ideas.".into()],vec!["Élodie Martin".into()],&Vec::<String>::new(),false,false);
-        let output = compress(
-            &dir,
-            input,
-            CompressionRate::new(0.5).unwrap(),
-            &AtomicBool::new(false),
-            |_, _| {},
-        )
-        .unwrap();
+        let output = compress(&dir, input, &AtomicBool::new(false), |_, _| {}).unwrap();
         assert!(output.text.contains("Élodie Martin"));
         assert!(output.text.contains("ne"));
         assert!(output.text.contains("pas"));

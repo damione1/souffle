@@ -1,8 +1,6 @@
 //! Compression admission and persistence. Commands delegate this lifecycle to the
 //! concrete service; no application/DB lock survives a queue wait or inference.
-use super::{
-    CompactJobStatus, CompressionFailure, CompressionInput, CompressionRate, CompressionService,
-};
+use super::{CompactJobStatus, CompressionFailure, CompressionInput, CompressionService};
 use crate::{models::compression, state::AppState, transcript::CompactTranscript};
 use std::sync::{Arc, atomic::Ordering};
 
@@ -76,8 +74,6 @@ pub enum CompressionError {
     Ongoing,
     #[error("Transcript has no text")]
     EmptyTranscript,
-    #[error("Compression rate must be finite and between 0.3 and 0.9")]
-    InvalidRate,
     #[error("Compression model unavailable; summary uses original input")]
     ModelUnavailable,
     #[error("Compression already in progress; summary uses original input")]
@@ -185,30 +181,16 @@ fn database(detail: String) -> CompressionError {
     CompressionError::Database { detail }
 }
 
-/// The two independent user preferences have three valid preparation outcomes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SummaryCompressionUse {
-    Disabled,
-    CompactOnly,
-    CompactAndMap,
-}
-fn summary_compression_use(
-    settings: &crate::settings::AppSettings,
-    needs_map: bool,
-) -> SummaryCompressionUse {
-    if settings.summary_compression_enabled && needs_map {
-        SummaryCompressionUse::CompactAndMap
-    } else if settings.compact_transcript_enabled {
-        SummaryCompressionUse::CompactOnly
-    } else {
-        SummaryCompressionUse::Disabled
-    }
+/// Only a summary long enough to need the map stage is compressed; a short
+/// one keeps its original text and gets no compact.
+fn compresses_summary_input(settings: &crate::settings::AppSettings, needs_map: bool) -> bool {
+    settings.summary_compression_enabled && needs_map
 }
 
 impl CompressionService {
     /// Prepare optional compressed map input below the command layer. The original
-    /// source still selects stuff/map; the alongside preference persists a compact
-    /// even for short summaries, and missing/failed compression always falls back.
+    /// source still selects stuff/map; the compact made for a long summary is
+    /// saved with the meeting, and missing/failed compression always falls back.
     pub async fn prepare_summary_map(
         self: &Arc<Self>,
         state: Arc<AppState>,
@@ -221,15 +203,13 @@ impl CompressionService {
     {
         let needs_map = crate::summary::needs_map(text, model)
             .map_err(|detail| crate::summary::SummaryCommandError::Provider { detail })?;
-        let usage = summary_compression_use(settings, needs_map);
-        match usage {
-            SummaryCompressionUse::Disabled => return Ok(None),
-            SummaryCompressionUse::CompactOnly | SummaryCompressionUse::CompactAndMap => {}
+        if !compresses_summary_input(settings, needs_map) {
+            return Ok(None);
         }
-        let fresh = meeting.compact_transcript.as_ref().is_some_and(|compact| {
-            CompressionRate::new(settings.summary_compression_rate)
-                .is_ok_and(|rate| self.compatible(compact, source, rate))
-        });
+        let fresh = meeting
+            .compact_transcript
+            .as_ref()
+            .is_some_and(|compact| self.compatible(compact, source));
         if !fresh && compression::installed(&self.model_dir).is_none() {
             tracing::warn!("Compression model unavailable; summarizing original transcript");
             return Ok(None);
@@ -238,7 +218,6 @@ impl CompressionService {
             .generate(
                 state,
                 meeting.id.clone(),
-                Some(settings.summary_compression_rate),
                 false,
                 CompressionAdmission::ReadyOnly,
             )
@@ -256,15 +235,12 @@ impl CompressionService {
             );
             return Ok(None);
         }
-        match usage {
-            SummaryCompressionUse::Disabled | SummaryCompressionUse::CompactOnly => Ok(None),
-            SummaryCompressionUse::CompactAndMap => Ok(Some(crate::summary::CompressedMapInput {
-                turns: source
-                    .segmented
-                    .then(|| compact.text.split('\n').map(str::to_owned).collect()),
-                text: compact.text,
-            })),
-        }
+        Ok(Some(crate::summary::CompressedMapInput {
+            turns: source
+                .segmented
+                .then(|| compact.text.split('\n').map(str::to_owned).collect()),
+            text: compact.text,
+        }))
     }
 
     /// Generate/reuse a compact through one admitted worker, persist it with a
@@ -273,7 +249,6 @@ impl CompressionService {
         self: &Arc<Self>,
         state: Arc<AppState>,
         id: String,
-        rate: Option<f32>,
         regenerate: bool,
         admission: CompressionAdmission,
     ) -> impl std::future::Future<Output = Result<CompactTranscript, CompressionError>>
@@ -302,7 +277,7 @@ impl CompressionService {
         async move {
             let request = request?;
             service
-                .generate_reserved(state, id, rate, regenerate, admission, &request)
+                .generate_reserved(state, id, regenerate, admission, &request)
                 .await
         }
     }
@@ -311,7 +286,6 @@ impl CompressionService {
         self: &Arc<Self>,
         state: Arc<AppState>,
         id: String,
-        rate: Option<f32>,
         regenerate: bool,
         admission: CompressionAdmission,
         request: &GenerationRequest,
@@ -341,17 +315,9 @@ impl CompressionService {
             if input.lines.iter().all(|line| line.trim().is_empty()) {
                 return Err(CompressionError::EmptyTranscript);
             }
-            let rate = CompressionRate::new(match rate {
-                Some(rate) => rate,
-                None => {
-                    crate::settings::AppSettings::load(&state.db)
-                        .map_err(database)?
-                        .summary_compression_rate
-                }
-            })?;
             if !regenerate
                 && let Some(compact) = &initial.compact_transcript
-                && self.compatible(compact, &input, rate)
+                && self.compatible(compact, &input)
             {
                 return Ok(compact.clone());
             }
@@ -435,7 +401,7 @@ impl CompressionService {
             );
             let compact = tokio::task::spawn_blocking(move || {
                 let _permit = permit;
-                super::compress(&dir, input, rate, &cancel, |completed, total| {
+                super::compress(&dir, input, &cancel, |completed, total| {
                     worker.update_job(
                         &worker_id,
                         &generation,
@@ -488,7 +454,6 @@ impl CompressionService {
                 | CompressionError::Deleted
                 | CompressionError::Ongoing
                 | CompressionError::EmptyTranscript
-                | CompressionError::InvalidRate
                 | CompressionError::ModelUnavailable
                 | CompressionError::AlreadyRunning
                 | CompressionError::ModelBusy
@@ -519,31 +484,12 @@ impl CompressionService {
 mod tests {
     use super::*;
     #[test]
-    fn compression_summary_policy_preserves_original_short_input_and_independent_compact() {
+    fn compression_summary_policy_preserves_original_short_input() {
         let mut settings = crate::settings::AppSettings::default();
-        assert_eq!(
-            summary_compression_use(&settings, true),
-            SummaryCompressionUse::Disabled
-        );
+        assert!(!compresses_summary_input(&settings, true));
         settings.summary_compression_enabled = true;
-        assert_eq!(
-            summary_compression_use(&settings, false),
-            SummaryCompressionUse::Disabled
-        );
-        assert_eq!(
-            summary_compression_use(&settings, true),
-            SummaryCompressionUse::CompactAndMap
-        );
-        settings.compact_transcript_enabled = true;
-        assert_eq!(
-            summary_compression_use(&settings, false),
-            SummaryCompressionUse::CompactOnly
-        );
-        settings.summary_compression_enabled = false;
-        assert_eq!(
-            summary_compression_use(&settings, true),
-            SummaryCompressionUse::CompactOnly
-        );
+        assert!(!compresses_summary_input(&settings, false));
+        assert!(compresses_summary_input(&settings, true));
     }
 
     fn fixture() -> (Arc<AppState>, tempfile::TempDir) {
@@ -577,7 +523,6 @@ mod tests {
         let first = state.compression.generate(
             state.clone(),
             "cancel".into(),
-            None,
             true,
             CompressionAdmission::InstallIfNeeded,
         );
@@ -585,7 +530,6 @@ mod tests {
         let duplicate = state.compression.generate(
             state.clone(),
             "cancel".into(),
-            None,
             true,
             CompressionAdmission::InstallIfNeeded,
         );
@@ -716,7 +660,6 @@ mod tests {
                 .generate(
                     state.clone(),
                     "empty".into(),
-                    Some(0.5),
                     false,
                     CompressionAdmission::InstallIfNeeded
                 )
@@ -740,7 +683,6 @@ mod tests {
                 .generate(
                     state.clone(),
                     "empty".into(),
-                    Some(0.5),
                     false,
                     CompressionAdmission::ReadyOnly
                 )
@@ -752,21 +694,7 @@ mod tests {
                 .compression
                 .generate(
                     state.clone(),
-                    "empty".into(),
-                    Some(f32::NAN),
-                    false,
-                    CompressionAdmission::InstallIfNeeded
-                )
-                .await,
-            Err(CompressionError::InvalidRate)
-        );
-        assert_eq!(
-            state
-                .compression
-                .generate(
-                    state.clone(),
                     "deleted".into(),
-                    None,
                     false,
                     CompressionAdmission::InstallIfNeeded
                 )
@@ -781,7 +709,6 @@ mod tests {
                 .generate(
                     state.clone(),
                     "empty".into(),
-                    None,
                     false,
                     CompressionAdmission::InstallIfNeeded
                 )

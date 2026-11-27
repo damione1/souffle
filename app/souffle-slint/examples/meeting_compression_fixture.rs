@@ -71,20 +71,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     show(&window, &state, "compression-fixture");
     // Same persisted command + after-commit installer used by the production settings coordinator.
-    for kind in 0..4 {
+    for kind in 0..2 {
         let state = state.clone();
         let weak = window.as_weak();
-        let callback = move |value: i32| {
+        let callback = move |enabled: bool| {
             let state = state.clone();
             let weak = weak.clone();
             souffle_lib::async_runtime::spawn(async move {
                 let mut settings =
                     souffle_lib::settings::AppSettings::load_read_only(&state.db).unwrap();
                 match kind {
-                    0 => settings.summary_compression_enabled = value != 0,
-                    1 => settings.compact_transcript_enabled = value != 0,
-                    2 => settings.summary_compression_rate = value as f32 / 100.,
-                    3 => settings.meeting_summaries_enabled = value != 0,
+                    0 => settings.summary_compression_enabled = enabled,
+                    1 => settings.meeting_summaries_enabled = enabled,
                     _ => unreachable!(),
                 }
                 let outcome = souffle_lib::commands::save_settings_observed_in_lane(
@@ -104,14 +102,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         match kind {
             0 => window
                 .global::<CompressionUi>()
-                .on_summary_changed(move |enabled| callback(i32::from(enabled))),
+                .on_summary_changed(callback),
             1 => window
-                .global::<CompressionUi>()
-                .on_alongside_changed(move |enabled| callback(i32::from(enabled))),
-            2 => window.global::<CompressionUi>().on_rate_changed(callback),
-            3 => window
                 .global::<SummarizationUi>()
-                .on_enabled_changed(move |enabled| callback(i32::from(enabled))),
+                .on_enabled_changed(callback),
             _ => unreachable!(),
         }
     }

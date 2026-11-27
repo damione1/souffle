@@ -7583,7 +7583,6 @@ mod tests {
             C::Deleted,
             C::Ongoing,
             C::EmptyTranscript,
-            C::InvalidRate,
             C::ModelUnavailable,
             C::AlreadyRunning,
             C::ModelBusy,

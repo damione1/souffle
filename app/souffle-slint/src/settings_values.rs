@@ -361,22 +361,6 @@ pub(crate) fn wire(window: &MainWindow, controller: Rc<SettingsValueController>)
                 s.summary_compression_enabled = enabled
             })
         });
-    let c = controller.clone();
-    window
-        .global::<crate::CompressionUi>()
-        .on_alongside_changed(move |enabled| {
-            c.apply(SettingsSaveLane::General, move |s| {
-                s.compact_transcript_enabled = enabled
-            })
-        });
-    let c = controller.clone();
-    window
-        .global::<crate::CompressionUi>()
-        .on_rate_changed(move |percent| {
-            c.apply(SettingsSaveLane::General, move |s| {
-                s.summary_compression_rate = percent as f32 / 100.
-            })
-        });
     let weak_controller = Rc::downgrade(&controller);
     controller.io.set_save_projection(move |order, outcome| {
         if let Some(controller) = weak_controller.upgrade() {
@@ -723,8 +707,6 @@ mod tests {
         let harness = DatabaseHarness::new(AppSettings {
             dictation_polish_enabled: true,
             summary_compression_enabled: true,
-            compact_transcript_enabled: true,
-            summary_compression_rate: 0.7,
             ..AppSettings::default()
         });
         let ui = harness.window.global::<crate::SummarizationUi>();
@@ -743,8 +725,7 @@ mod tests {
         let settings = AppSettings::load_read_only(&harness.db).unwrap();
         assert!(!settings.meeting_summaries_enabled);
         assert!(settings.dictation_polish_enabled);
-        assert!(settings.summary_compression_enabled && settings.compact_transcript_enabled);
-        assert_eq!(settings.summary_compression_rate, 0.7);
+        assert!(settings.summary_compression_enabled);
     }
 
     #[test]

@@ -50,9 +50,6 @@ struct CliArgs {
     /// Override compression for summary map input for this invocation only.
     #[arg(long, value_enum)]
     summary_compression: Option<CompressionOverride>,
-    /// Target fraction of words to retain (0.3–0.9).
-    #[arg(long)]
-    compression_rate: Option<f32>,
     /// Summary model override, separate from the transcription --model.
     #[arg(long)]
     summary_model: Option<String>,
@@ -195,12 +192,6 @@ fn run_meeting_action(cli: &CliArgs) -> i32 {
             });
         let db = Arc::new(crate::db::Database::open(&path)?);
         let mut settings = crate::settings::AppSettings::load_read_only(&db)?;
-        if let Some(rate) = cli.compression_rate {
-            settings.summary_compression_rate =
-                crate::summary::compress::CompressionRate::new(rate)
-                    .map_err(|error| error.to_string())?
-                    .get();
-        }
         if let Some(value) = cli.summary_compression {
             settings.summary_compression_enabled = match value {
                 CompressionOverride::On => true,
@@ -232,14 +223,10 @@ fn run_meeting_action(cli: &CliArgs) -> i32 {
         ));
         crate::async_runtime::block_on(async {
             if let Some(id) = &cli.compact_meeting {
-                let compact = crate::commands::generate_compact_transcript(
-                    state,
-                    id.clone(),
-                    Some(settings.summary_compression_rate),
-                    false,
-                )
-                .await
-                .map_err(|error| error.to_string())?;
+                let compact =
+                    crate::commands::generate_compact_transcript(state, id.clone(), false)
+                        .await
+                        .map_err(|error| error.to_string())?;
                 return serde_json::to_value(compact).map_err(|e| e.to_string());
             }
             let id = cli.summarize_meeting.as_ref().ok_or("No meeting action")?;
@@ -921,8 +908,6 @@ mod tests {
             "fixture",
             "--database",
             "/tmp/fixture.db",
-            "--compression-rate",
-            "0.5",
             "--json",
         ];
         let cli = CliArgs::try_parse_from(args).unwrap();

@@ -41,19 +41,19 @@ those notes. This workflow does not require enabling local summarization.
 
 ## Local generation options
 
-Once Summarization is enabled, Settings → AI provides two independent,
-default-off options: compress long
-summary map input, and create a compact transcript alongside a summary. A
-standalone Generate/Regenerate action in meeting detail works without any LLM
-provider. Short summary input always uses the original text. Missing/downloading
+Once Summarization is enabled, Settings → AI provides one default-off switch:
+compress long summary map input. The compact made for that summary is saved
+with the meeting. A standalone Generate/Regenerate action in meeting detail
+works without any LLM provider. Short summary input always uses the original
+text and creates no compact. Missing/downloading
 weights cause summaries to proceed immediately using original input; they never
 wait for a model download. A successful compact is saved before summary calls,
 even if the later summary fails.
 
 The compact is **lossy extraction**, not a summary or a verbatim citation source.
-The default target retains **65%** of the text. Settings show “A low value omits
-words” only below that default; the compact preview uses the saved compact's
-target rate for the same warning, independently of the current settings.
+The target is fixed: every new compact retains **65%** of the text. A compact
+saved earlier at another rate is regenerated on its next use; until then its
+preview shows “A low value omits words” when its own rate is below 65%.
 The retained percentage is a target: protected participant names, numbers and
 French negations may increase it. Edited transcript text takes precedence over
 segments, including plain edited prose. Original timestamp/speaker prefixes and
@@ -121,7 +121,7 @@ Settings → AI exposes explicit compression-model removal even with Summarizati
 ## CLI and MCP
 
 ```sh
-souffle --compact-meeting MEETING_ID --compression-rate 0.65 --json
+souffle --compact-meeting MEETING_ID --json
 souffle --summarize-meeting MEETING_ID --summary-compression on \
   --summary-provider ollama --summary-model qwen2.5:7b --json
 # Use --database /path/to/fixture.db (or SOUFFLE_DB) for an alternate database.

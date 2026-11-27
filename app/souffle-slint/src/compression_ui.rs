@@ -5,7 +5,7 @@ use crate::{
 use slint::ComponentHandle;
 use souffle_lib::{
     models::compression::ModelStatus,
-    settings::{AppSettings, SettingsOptions},
+    settings::AppSettings,
     state::AppState,
     summary::compress::{CompactJobStatus, CompressionError, CompressionInput},
     transcript::MeetingTranscript,
@@ -23,7 +23,6 @@ fn failure_projection(error: &CompressionError) -> (crate::CompressionFailureRea
         CompressionError::Deleted => (Reason::Deleted, ""),
         CompressionError::Ongoing => (Reason::Ongoing, ""),
         CompressionError::EmptyTranscript => (Reason::EmptyTranscript, ""),
-        CompressionError::InvalidRate => (Reason::InvalidRate, ""),
         CompressionError::ModelUnavailable => (Reason::ModelUnavailable, ""),
         CompressionError::AlreadyRunning => (Reason::AlreadyRunning, ""),
         CompressionError::ModelBusy => (Reason::ModelBusy, ""),
@@ -69,13 +68,8 @@ pub fn populate_settings(window: &MainWindow, settings: &AppSettings) {
         .global::<SummarizationUi>()
         .set_enabled(settings.meeting_summaries_enabled);
     let ui = window.global::<CompressionUi>();
-    let options = SettingsOptions::current();
     ui.set_summary_enabled(settings.summary_compression_enabled);
-    ui.set_alongside_enabled(settings.compact_transcript_enabled);
-    ui.set_rate((settings.summary_compression_rate * 100.).round() as i32);
-    ui.set_rate_min((options.compression_rate_min * 100.).round() as i32);
-    ui.set_rate_max((options.compression_rate_max * 100.).round() as i32);
-    ui.set_rate_default((options.compression_rate_default * 100.).round() as i32);
+    ui.set_rate_default((souffle_lib::summary::compress::TARGET_RATE * 100.).round() as i32);
 }
 /// Associate a compact turn with its exact original recording session. Edited,
 /// stale, cross-session or unverified source spans deliberately have no seek target.
@@ -317,7 +311,6 @@ pub fn install(window: &MainWindow, state: Arc<AppState>) -> slint::Timer {
         let generation = souffle_lib::commands::generate_compact_transcript_native(
             state.clone(),
             id.clone(),
-            None,
             true,
         );
         souffle_lib::async_runtime::spawn(async move {

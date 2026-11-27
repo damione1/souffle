@@ -2,7 +2,7 @@ import { AppText, Typography } from "@typography";
 import { CompressionUi } from "../../compression.slint";
 import { Theme } from "../../theme.slint";
 import { CompressionStatus } from "../compression_status.slint";
-import { FieldSetAppearance, FieldRowAppearance, ChoiceLabelPosition, ControlWidth, KitFieldRow, KitFieldSet, KitSlider, KitSwitch, KitThemeContext, KitThemes, Ownership, KitFieldSeparator } from "@kit";
+import { FieldSetAppearance, FieldRowAppearance, ChoiceLabelPosition, ControlWidth, KitFieldRow, KitFieldSet, KitSwitch, KitThemeContext, KitThemes, Ownership, KitFieldSeparator } from "@kit";
 
 export component CompressionSection inherits VerticalLayout {
     spacing: 20px;
@@ -26,7 +26,7 @@ export component CompressionSection inherits VerticalLayout {
                 if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
             }
             label: @tr("Compresser les longues transcriptions avant le résumé");
-            description: @tr("Réduit l'entrée des étapes intermédiaires. Les résumés courts utilisent le texte original.");
+            description: @tr("Réduit l'entrée des étapes intermédiaires et enregistre la version compacte avec la réunion. Les résumés courts utilisent le texte original.");
 
             summary-switch := KitSwitch {
                 theme: KitThemeContext.current;
@@ -38,69 +38,6 @@ export component CompressionSection inherits VerticalLayout {
                 accessible-label: @tr("Compresser avant le résumé");
                 checked: CompressionUi.summary-enabled;
                 toggled(new) => { CompressionUi.summary-changed(new); }
-            }
-        }
-
-        KitFieldRow {
-            theme: KitThemeContext.current;
-            modal-layer: 0;
-            orientation: Theme.settings-field-orientation(self.width);
-            appearance: FieldRowAppearance.inset;
-            show-divider: true;
-            focus-requested => { alongside-switch.take-focus(); }
-            private property <bool> control-focused: alongside-switch.has-focus;
-            changed control-focused => {
-                if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
-            }
-            label: @tr("Créer aussi une version compacte lors du résumé");
-            description: @tr("Conserve un texte compact consultable, indépendamment de l'entrée utilisée pour le résumé.");
-
-            alongside-switch := KitSwitch {
-                theme: KitThemeContext.current;
-                modal-layer: 0;
-                label-position: ChoiceLabelPosition.start;
-                padding-inline: 0px;
-                ownership: Ownership.controlled;
-                control-width: ControlWidth.intrinsic;
-                accessible-label: @tr("Créer aussi une version compacte");
-                checked: CompressionUi.alongside-enabled;
-                toggled(new) => { CompressionUi.alongside-changed(new); }
-            }
-        }
-
-        KitFieldRow {
-            theme: KitThemeContext.current;
-            modal-layer: 0;
-            orientation: Theme.settings-field-orientation(self.width);
-            appearance: FieldRowAppearance.inset;
-            show-divider: true;
-            focus-requested => { rate-slider.take-focus(); }
-            label: @tr("Texte à conserver");
-            description: CompressionUi.rate < CompressionUi.rate-default ? @tr("Une valeur basse omet des mots.") : "";
-
-            HorizontalLayout {
-                spacing: 10px;
-                alignment: center;
-                horizontal-stretch: 0;
-
-                rate-slider := KitSlider {
-                    theme: KitThemeContext.current;
-                    modal-layer: 0;
-                    width: 140px;
-                    ownership: Ownership.controlled;
-                    spec: { minimum: CompressionUi.rate-min, maximum: CompressionUi.rate-max, step: 1 };
-                    label: @tr("Pourcentage de texte à conserver");
-                    value: CompressionUi.rate;
-                    chosen(value) => { CompressionUi.rate-changed(value.to-float()); }
-                }
-
-                AppText {
-                    text: @tr("{} %", CompressionUi.rate);
-                    typography: Typography.secondary;
-                    color: Theme.text-muted;
-                    vertical-alignment: center;
-                    width: 40px;
-                }
             }
         }
     }

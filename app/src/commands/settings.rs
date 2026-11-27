@@ -165,15 +165,13 @@ fn save_settings_in_lane(
     result
 }
 
-/// Remember subordinate preferences while opted out, but only an explicit
+/// Remember the compression preference while opted out, but only an explicit
 /// enabled change can authorize an installation. Startup never calls this.
 fn compression_install_requested(previous: Option<&AppSettings>, next: &AppSettings) -> bool {
     next.meeting_summaries_enabled
-        && (next.summary_compression_enabled || next.compact_transcript_enabled)
+        && next.summary_compression_enabled
         && previous.is_some_and(|previous| {
-            !previous.meeting_summaries_enabled
-                || (!previous.summary_compression_enabled && next.summary_compression_enabled)
-                || (!previous.compact_transcript_enabled && next.compact_transcript_enabled)
+            !previous.meeting_summaries_enabled || !previous.summary_compression_enabled
         })
 }
 
@@ -419,7 +417,6 @@ mod tests {
             &next
         ));
         next.summary_compression_enabled = false;
-        next.compact_transcript_enabled = false;
         previous = next.clone();
         next.meeting_summaries_enabled = true;
         assert!(!super::compression_install_requested(
@@ -427,7 +424,7 @@ mod tests {
             &next
         ));
         previous = next.clone();
-        next.compact_transcript_enabled = true;
+        next.summary_compression_enabled = true;
         assert!(super::compression_install_requested(Some(&previous), &next));
     }
 
