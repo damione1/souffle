@@ -48,9 +48,10 @@ mkdir "$qa"
 SLINT_MCP_PORT=9315 "$app/Contents/MacOS/souffle" > "$qa/app.log" 2>&1
 ```
 
-1. Select the webcam explicitly in Soufflé's input settings. Keep its position,
+1. In Settings > Audio, move the webcam to the top of Soufflé's microphone
+   preference order. Keep its position,
    mouth distance, speaker volume and output fixed. Choose Standard in macOS
-   microphone controls when available. Record the OS, selected device, browser
+   microphone controls when available. Record the OS, input device, browser
    version, fixture starting position and actual scripts in private notes.
 2. Using the same browser passage, make three separate meetings of 30–40 seconds:
    remote speech only, local speech only, then both together. Include a fixed
@@ -60,14 +61,15 @@ SLINT_MCP_PORT=9315 "$app/Contents/MacOS/souffle" > "$qa/app.log" 2>&1
    Parakeet weights, recording catalogue model/backend IDs. Listen for remote
    speech leaking into Me and local words being cut. Note these separately.
 4. In the logs require `Apple meeting microphone requested=... readbacks=...`
-   with the chosen input and successful start, then
+   with the webcam as input and successful start, then
    `Meeting backend=Apple VoiceProcessingIO, FDAF=disabled`. Check AGC is
    disabled, negotiated formats, callback losses/errors and route rebuilds.
    An intent log or visible Me/Them text alone is insufficient.
 5. Quit with ⌘Q after stopping the meeting. Record any failure to stop or quit.
 
-If the explicitly chosen input cannot start, retain the error as a failed trial.
-Do not substitute another input or treat a fallback as successful Apple capture.
+If the webcam cannot start, retain the error as a failed trial. The preference
+order can fall back to another input: check the logged input, and count a
+fallback as a failed trial, not as successful Apple capture.
 These app checks establish operator observations; they do not populate the
 formal probe matrix below. Keep WAVs, transcripts and hardware UIDs outside Git.
 

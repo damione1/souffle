@@ -57,9 +57,9 @@ body:
     attributes:
       label: Diagnostics
       description: |
-        Settings > Diagnostics, copy the bundle and the log tail. No transcript
-        text is included; the paths do contain your user name, so redact them if
-        you would rather not share it.
+        Settings > System > Diagnostics, press "Copy diagnostics" and paste the
+        result here. It includes the recent log lines. Transcript log lines are
+        removed and your home folder is written as ~. Read it before posting.
       render: text
     validations:
       required: false
