@@ -86,7 +86,7 @@
   ],
   "overlay": {
     "title": "La même dictée, dans toutes vos apps.",
-    "body": "Pas besoin de garder une fenêtre ouverte : restez dans votre application habituelle, appuyez sur le raccourci, une petite pastille apparaît par-dessus ce que vous faites, et le texte arrive directement dans le champ où était votre curseur. Messagerie, courriel, éditeur, terminal : la pastille s'en fiche, et par défaut elle est exclue des enregistrements d'écran.",
+    "body": "Pas besoin de garder une fenêtre ouverte : restez dans votre application habituelle, appuyez sur le raccourci, une petite pastille apparaît par-dessus ce que vous faites, et le texte arrive directement dans le champ où était votre curseur. Messagerie, courriel, éditeur, terminal : la pastille s'en fiche, et elle est exclue des enregistrements d'écran.",
     "bullets": [
       "Le texte atterrit là où votre curseur était déjà, sans copier-coller",
       "Les terminaux et les champs sécurisés peuvent recevoir des frappes simulées",
@@ -531,7 +531,7 @@
             "p": "Appuyez sur le raccourci n'importe où, parlez, appuyez à nouveau. Le texte est inséré dans l'app qui avait le focus, ou copié dans le presse-papiers tant que le collage automatique est inactif. Appuyez sur <kbd>Échap</kbd> pendant une dictée en bascule pour la jeter. Si un collage échoue, le texte attend sur l'accueil sous <em>Dictée à récupérer</em> jusqu'à ce que vous le copiiez ou le supprimiez."
           },
           {
-            "p": "Les apps qui refusent un collage synthétique (terminaux, champs sécurisés) peuvent recevoir des frappes simulées à la place. Paramètres → Interface propose trois méthodes de collage : le presse-papiers avec ⌘V, la frappe simulée, ou une écriture directe dans le champ focalisé via l'Accessibilité."
+            "p": "Les apps qui refusent un collage synthétique (terminaux, champs sécurisés) peuvent recevoir des frappes simulées à la place. Quand le collage automatique est actif, Paramètres → Interface → Avancé propose trois méthodes de collage : le presse-papiers avec ⌘V, la frappe simulée, ou une écriture directe dans le champ focalisé via l'Accessibilité."
           },
           {
             "p": "Deux passages tournent à la sortie, et chacun se désactive. Le <strong>polish de la dictée</strong>, actif par défaut quand un fournisseur est disponible, fait passer la transcription brute dans un LLM local, avec un modèle de prompt que vous pouvez modifier (nettoyage, courriel professionnel, liste à puces, retrait des hésitations) ; il demande Apple Intelligence ou Ollama. L'<strong>apprentissage des corrections</strong>, actif par défaut, surveille le champ juste après l'insertion : corrigez un nom mal entendu une fois à la main, et Soufflé garde cette orthographe pour la suite, dans le dictionnaire personnalisé sous Paramètres → Transcription."
@@ -577,7 +577,7 @@
             "p": "La dictée n'ouvre pas de fenêtre. Une petite pastille apparaît au-dessus de ce que vous êtes en train de faire : un point d'enregistrement, le libellé, une forme d'onde en direct et un bouton d'arrêt. Elle reste compacte tant qu'il n'y a rien à afficher, puis s'élargit et grandit ligne par ligne pendant que vous parlez."
           },
           {
-            "p": "À l'arrêt, la pastille passe en <em>Reformulation…</em> le temps du passage de polish local, puis disparaît au moment où le texte atterrit dans le champ que vous utilisiez déjà. Par défaut, sa fenêtre est exclue de la capture d'écran : elle n'apparaît pas dans la réunion où vous êtes ; <em>Masquer l'overlay dans les captures d'écran</em>, dans Paramètres → Interface, change ce comportement."
+            "p": "À l'arrêt, la pastille passe en <em>Reformulation…</em> le temps du passage de polish local, puis disparaît au moment où le texte atterrit dans le champ que vous utilisiez déjà. Sa fenêtre est exclue de la capture d'écran : elle n'apparaît pas dans la réunion où vous êtes."
           },
           {
             "p": "Vous pouvez masquer la pastille dans Paramètres → Interface ; faites-la glisser quand elle est visible pour la déplacer. La position est mémorisée d'un écran à l'autre."
@@ -689,7 +689,7 @@
           {
             "table": [
               [
-                "Méthode de collage<br><span class=\"docs-tab\">Interface</span>",
+                "Méthode de collage<br><span class=\"docs-tab\">Interface › Avancé</span>",
                 "Presse-papiers et ⌘V, frappe simulée, ou écriture directe via l'Accessibilité. À changer quand une app refuse le collage."
               ],
               [
@@ -697,7 +697,7 @@
                 "Actif : le texte part dans l'app que vous utilisiez. Inactif, par défaut : il est copié dans le presse-papiers."
               ],
               [
-                "Délai de collage<br><span class=\"docs-tab\">Interface</span>",
+                "Délai de collage<br><span class=\"docs-tab\">Interface › Avancé</span>",
                 "Temps d'attente avant le collage. Augmentez-le si le texte arrive dans la mauvaise app."
               ],
               [
@@ -706,11 +706,11 @@
               ],
               [
                 "Sons de dictée<br><span class=\"docs-tab\">Interface</span>",
-                "Signaux sonores de départ et d'arrêt, avec un volume."
+                "Signaux sonores de départ et d'arrêt."
               ],
               [
                 "Masquer l'overlay d'enregistrement<br><span class=\"docs-tab\">Interface</span>",
-                "Cache le HUD flottant pendant la dictée ou une réunion. Faites-le glisser quand il est visible pour le déplacer ; la position est mémorisée. Un second interrupteur, actif par défaut, l'exclut des captures d'écran."
+                "Cache le HUD flottant pendant la dictée ou une réunion. Faites-le glisser quand il est visible pour le déplacer ; la position est mémorisée. Il n'apparaît jamais dans les captures d'écran."
               ],
               [
                 "Polish de la dictée<br><span class=\"docs-tab\">IA</span>",
@@ -860,7 +860,7 @@
             "code": "{\n  \"mcpServers\": {\n    \"souffle\": {\n      \"command\": \"/Applications/Soufflé.app/Contents/MacOS/souffle-mcp\"\n    }\n  }\n}"
           },
           {
-            "p": "Cinq outils sont exposés : <code>list_meetings</code>, <code>get_meeting</code>, <code>search_meetings</code>, <code>get_latest_meeting</code> et <code>list_dictations</code>. Paramètres → Système → Données reprend les mêmes extraits avec le chemin déjà rempli, et un bouton qui teste la connexion."
+            "p": "Cinq outils sont exposés : <code>list_meetings</code>, <code>get_meeting</code>, <code>search_meetings</code>, <code>get_latest_meeting</code> et <code>list_dictations</code>. Paramètres → Système → Données reprend les mêmes extraits avec le chemin déjà rempli."
           },
           {
             "p": "Le serveur MCP de Soufflé est local et en lecture seule. Le client que vous y connectez peut ensuite utiliser les transcriptions avec son propre fournisseur d'IA : ses réglages de confidentialité s'appliquent à cette utilisation."
@@ -939,7 +939,7 @@
               ],
               [
                 "Une app refuse le collage",
-                "Les terminaux et les champs sécurisés rejettent souvent un ⌘V synthétique. Passez la méthode de collage en frappe simulée dans Paramètres → Interface."
+                "Les terminaux et les champs sécurisés rejettent souvent un ⌘V synthétique. Passez la méthode de collage en frappe simulée dans Paramètres → Interface → Avancé."
               ],
               [
                 "Ce n'est pas le bon micro qui est pris",

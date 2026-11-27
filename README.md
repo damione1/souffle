@@ -56,7 +56,7 @@ You can also use the read-only MCP server with a compatible client to let Claude
 
 ## Dictation, straight into the app you are already in
 
-Soufflé is not a window you type into. Press the shortcut and a small pill appears above whatever you are working in; when you stop, the text lands in the field your cursor was already in. Chat, mail, an editor, a terminal: the pill does not care which, and by default it is excluded from screen capture, so it does not turn up in the meeting you are in (Settings > Interface > *Hide recording overlay in screen captures*).
+Soufflé is not a window you type into. Press the shortcut and a small pill appears above whatever you are working in; when you stop, the text lands in the field your cursor was already in. Chat, mail, an editor, a terminal: the pill does not care which, and it is excluded from screen capture, so it does not turn up in the meeting you are in.
 
 <p align="center">
   <img src="docs/demo/overlay.gif" width="820" alt="The pill floating over a chat app: shortcut, dictation, reformulation, and the tidied text landing in the composer">

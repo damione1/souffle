@@ -86,7 +86,7 @@
   ],
   "overlay": {
     "title": "The same dictation, in every app you use.",
-    "body": "Soufflé is not a window you type into. Press the shortcut and a small overlay appears above whatever you are in, then the text lands in the field your cursor was already in. Chat, mail, an editor, a terminal: the overlay does not care which, and by default it is kept out of screen recordings.",
+    "body": "Soufflé is not a window you type into. Press the shortcut and a small overlay appears above whatever you are in, then the text lands in the field your cursor was already in. Chat, mail, an editor, a terminal: the overlay does not care which, and it is kept out of screen recordings.",
     "bullets": [
       "The text lands where your cursor already was, with no copy and paste",
       "Terminals and secure fields can get simulated keystrokes instead",
@@ -531,7 +531,7 @@
             "p": "Press the shortcut anywhere, talk, press it again. The text is inserted into whatever app had focus, or copied to the clipboard while auto-paste is off. Press <kbd>Esc</kbd> during a toggle dictation to throw it away. If a paste fails, the text waits on Home under <em>Dictation to recover</em> until you copy or delete it."
           },
           {
-            "p": "Apps that reject a synthetic paste (terminals, secure fields) can receive simulated keystrokes instead. Settings → Interface offers three insertion methods: the clipboard and ⌘V, simulated typing, or a direct write to the focused field through Accessibility."
+            "p": "Apps that reject a synthetic paste (terminals, secure fields) can receive simulated keystrokes instead. While auto-paste is on, Settings → Interface → Advanced offers three insertion methods: the clipboard and ⌘V, simulated typing, or a direct write to the focused field through Accessibility."
           },
           {
             "p": "Two passes run on the way out, and each can be turned off. <strong>Dictation polish</strong>, on by default when a provider is available, sends the raw transcript through a local LLM with an editable prompt template (clean up, professional email, bullet points, remove fillers) and needs Apple Intelligence or Ollama. <strong>Learn from edits</strong>, on by default, watches the field just after insertion: correct a misheard name by hand once and Soufflé keeps that spelling for next time, in the custom dictionary under Settings → Transcription."
@@ -577,7 +577,7 @@
             "p": "Dictation does not open a window. A small overlay, the pill, appears above whatever you are working in: a recording dot, the label, a live waveform and a stop button. It stays compact until there is text to show, then widens and grows line by line as you talk."
           },
           {
-            "p": "When you stop, the pill switches to <em>Reformulating…</em> while the local polish pass runs, then disappears as the text lands in the field you were already using. By default the window is excluded from screen capture, so it does not turn up in the meeting you are in; <em>Hide recording overlay in screen captures</em> in Settings → Interface turns that off."
+            "p": "When you stop, the pill switches to <em>Reformulating…</em> while the local polish pass runs, then disappears as the text lands in the field you were already using. The window is excluded from screen capture, so it does not turn up in the meeting you are in."
           },
           {
             "p": "You can hide the overlay in Settings → Interface; drag it when visible to move it. Position is remembered across display changes."
@@ -689,7 +689,7 @@
           {
             "table": [
               [
-                "Insertion method<br><span class=\"docs-tab\">Interface</span>",
+                "Insertion method<br><span class=\"docs-tab\">Interface › Advanced</span>",
                 "Clipboard and ⌘V, simulated typing, or a direct Accessibility write. Change it when an app refuses the paste."
               ],
               [
@@ -697,7 +697,7 @@
                 "On: the text goes into the app you were using. Off, the default: it is copied to the clipboard."
               ],
               [
-                "Paste delay<br><span class=\"docs-tab\">Interface</span>",
+                "Paste delay<br><span class=\"docs-tab\">Interface › Advanced</span>",
                 "How long to wait before pasting. Raise it if the text lands in the wrong app."
               ],
               [
@@ -706,11 +706,11 @@
               ],
               [
                 "Dictation sounds<br><span class=\"docs-tab\">Interface</span>",
-                "Start and stop cues, with a volume."
+                "Start and stop cues."
               ],
               [
                 "Hide recording overlay<br><span class=\"docs-tab\">Interface</span>",
-                "Hide the floating HUD while dictating or in a meeting. Drag it when visible to move it; the position is remembered. A second switch, on by default, keeps it out of screen captures."
+                "Hide the floating HUD while dictating or in a meeting. Drag it when visible to move it; the position is remembered. It never appears in screen captures."
               ],
               [
                 "Dictation polish<br><span class=\"docs-tab\">AI</span>",
@@ -860,7 +860,7 @@
             "code": "{\n  \"mcpServers\": {\n    \"souffle\": {\n      \"command\": \"/Applications/Soufflé.app/Contents/MacOS/souffle-mcp\"\n    }\n  }\n}"
           },
           {
-            "p": "Five tools are exposed: <code>list_meetings</code>, <code>get_meeting</code>, <code>search_meetings</code>, <code>get_latest_meeting</code> and <code>list_dictations</code>. Settings → System → Data carries the same snippets with the path already filled in, plus a button that tests the connection."
+            "p": "Five tools are exposed: <code>list_meetings</code>, <code>get_meeting</code>, <code>search_meetings</code>, <code>get_latest_meeting</code> and <code>list_dictations</code>. Settings → System → Data carries the same snippets with the path already filled in."
           },
           {
             "p": "Soufflé's MCP server is local and read-only. A client you connect can then use the transcripts with its own AI provider; that client's privacy settings apply to that use."
@@ -939,7 +939,7 @@
               ],
               [
                 "One app refuses the paste",
-                "Terminals and secure fields often reject a synthetic ⌘V. Switch the insertion method to simulated typing in Settings → Interface."
+                "Terminals and secure fields often reject a synthetic ⌘V. Switch the insertion method to simulated typing in Settings → Interface → Advanced."
               ],
               [
                 "The wrong microphone is picked",
