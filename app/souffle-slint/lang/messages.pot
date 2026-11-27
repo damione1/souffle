@@ -544,7 +544,7 @@ msgstr ""
 
 #: ui/onboarding_view.slint:168
 msgctxt "OnboardingView"
-msgid "100 % local : rien ne quitte votre Mac. Pas de compte, pas de cloud."
+msgid "Votre audio est transcrit sur ce Mac. Pas de compte."
 msgstr ""
 
 #: ui/onboarding_view.slint:182
@@ -1632,7 +1632,7 @@ msgstr ""
 
 #: ui/components/picker_labels.slint:30
 msgctxt "PickerLabels"
-msgid "Modèle introuvable"
+msgid "Gabarit introuvable"
 msgstr ""
 
 #: ui/components/update_copy.slint:9
@@ -1751,10 +1751,7 @@ msgstr ""
 
 #: ui/components/settings/app_branches_section.slint:42
 msgctxt "AppBranchesSection"
-msgid ""
-"La première règle active valide gagne. Le nom de l'application contient le "
-"motif, sans tenir compte de la casse. Par défaut suit le modèle global ; "
-"les instructions sont partagées."
+msgid "La première règle active valide gagne. Le nom de l'application contient le motif, sans tenir compte de la casse. Par défaut suit le gabarit global ; les instructions sont partagées."
 msgstr ""
 
 #: ui/components/settings/app_branches_section.slint:53
@@ -1769,7 +1766,7 @@ msgstr ""
 
 #: ui/components/settings/app_branches_section.slint:59
 msgctxt "AppBranchesSection"
-msgid "Modèle de la nouvelle règle"
+msgid "Gabarit de la nouvelle règle"
 msgstr ""
 
 #: ui/components/settings/app_branches_section.slint:66
@@ -1789,7 +1786,7 @@ msgstr ""
 
 #: ui/components/settings/app_branches_section.slint:109
 msgctxt "AppBranchesSection"
-msgid "Modèle partagé de la règle"
+msgid "Gabarit partagé de la règle"
 msgstr ""
 
 #: ui/components/settings/app_branches_section.slint:122
@@ -1809,24 +1806,22 @@ msgstr ""
 
 #: ui/components/settings/summary_templates_section.slint:28
 msgctxt "SummaryTemplatesSection"
-msgid "MODÈLES DE RÉSUMÉ"
+msgid "GABARITS DE RÉSUMÉ"
 msgstr ""
 
 #: ui/components/settings/summary_templates_section.slint:42
 msgctxt "SummaryTemplatesSection"
-msgid "Modèle par défaut"
+msgid "Gabarit par défaut"
 msgstr ""
 
 #: ui/components/settings/summary_templates_section.slint:43
 msgctxt "SummaryTemplatesSection"
-msgid ""
-"Le modèle par défaut est utilisé lorsque vous générez le résumé d'une "
-"réunion terminée."
+msgid "Le gabarit par défaut est utilisé lorsque vous générez le résumé d'une réunion terminée."
 msgstr ""
 
 #: ui/components/settings/summary_templates_section.slint:48
 msgctxt "SummaryTemplatesSection"
-msgid "Modèle de résumé par défaut"
+msgid "Gabarit de résumé par défaut"
 msgstr ""
 
 #: ui/components/settings/summary_templates_section.slint:67
@@ -1836,12 +1831,12 @@ msgstr ""
 
 #: ui/components/settings/summary_templates_section.slint:68
 msgctxt "SummaryTemplatesSection"
-msgid "Modèle intégré : le prompt peut être personnalisé mais pas supprimé."
+msgid "Gabarit intégré : le prompt peut être personnalisé mais pas supprimé."
 msgstr ""
 
 #: ui/components/settings/summary_templates_section.slint:78
 msgctxt "SummaryTemplatesSection"
-msgid "Modèle de résumé à modifier"
+msgid "Gabarit de résumé à modifier"
 msgstr ""
 
 #: ui/components/settings/summary_templates_section.slint:88
@@ -1856,7 +1851,7 @@ msgstr ""
 
 #: ui/components/settings/summary_templates_section.slint:114
 msgctxt "SummaryTemplatesSection"
-msgid "Nom du modèle de résumé"
+msgid "Nom du gabarit de résumé"
 msgstr ""
 
 #: ui/components/settings/summary_templates_section.slint:131
@@ -1876,18 +1871,18 @@ msgstr ""
 
 #: ui/components/settings/summary_templates_section.slint:141
 msgctxt "SummaryTemplatesSection"
-msgid "Instruction du modèle de résumé"
+msgid "Instruction du gabarit de résumé"
 msgstr ""
 
 #: ui/components/settings/summary_templates_section.slint:161
 #: ui/components/settings/summary_templates_section.slint:161
 msgctxt "SummaryTemplatesSection"
-msgid "Nom du nouveau modèle"
+msgid "Nom du nouveau gabarit"
 msgstr ""
 
 #: ui/components/settings/summary_templates_section.slint:173
 msgctxt "SummaryTemplatesSection"
-msgid "Nom du nouveau modèle de résumé"
+msgid "Nom du nouveau gabarit de résumé"
 msgstr ""
 
 #: ui/components/settings/summary_templates_section.slint:183
@@ -2116,16 +2111,13 @@ msgstr ""
 
 #: ui/components/settings/dictation_polish_section.slint:32
 msgctxt "DictationPolishSection"
-msgid ""
-"Passe le même fournisseur de résumés (Ollama ou Apple Intelligence) après "
-"transcription pour corriger ponctuation, termes techniques et "
-"autocorrections parlées, sans changer le sens."
+msgid "Après la dictée, le moteur IA (Apple Intelligence ou Ollama) retouche le texte transcrit en suivant le gabarit de retouche."
 msgstr ""
 
 #: ui/components/settings/dictation_polish_section.slint:58
 #: ui/components/settings/dictation_polish_section.slint:58
 msgctxt "DictationPolishSection"
-msgid "Modèle de retouche"
+msgid "Gabarit de retouche"
 msgstr ""
 
 #: ui/components/settings/dictation_polish_section.slint:83
@@ -2214,7 +2206,7 @@ msgstr ""
 
 #: ui/components/settings/snippets_section.slint:114
 msgctxt "SnippetsSection"
-msgid "Aucune formule."
+msgid "Aucun extrait."
 msgstr ""
 
 #: ui/components/settings/snippets_section.slint:178
@@ -2456,10 +2448,7 @@ msgstr ""
 
 #: ui/components/settings/dictionary_section.slint:77
 msgctxt "DictionarySection"
-msgid ""
-"Suggestions propose les corrections après collage et en réunion. "
-"Automatique apprend après collage. Les corrections de session restent "
-"immédiates."
+msgid "Suggestions propose des corrections après un collage et pendant une réunion. Automatique n'apprend qu'après un collage. L'apprentissage après collage demande que le collage automatique soit activé et réussisse. Quel que soit le mode, vos corrections en réunion s'appliquent à la suite de celle-ci si « Correction par dictionnaire » est activée."
 msgstr ""
 
 #: ui/components/settings/dictionary_section.slint:109
@@ -2902,7 +2891,7 @@ msgstr ""
 
 #: ui/components/settings/about_section.slint:200
 msgctxt "AboutSection"
-msgid "Vérifier les mises à jour au démarrage."
+msgid "Vérifier les mises à jour au lancement, puis environ une fois par jour."
 msgstr ""
 
 #: ui/components/settings/about_section.slint:209
@@ -3128,7 +3117,12 @@ msgstr ""
 
 #: ui/components/settings/data_section.slint:179
 msgctxt "DataSection"
-msgid "Export terminé vers {}"
+msgid "Export en cours vers {}…"
+msgstr ""
+
+#: ui/components/settings/data_section.slint:179
+msgctxt "DataSection"
+msgid "Export terminé vers {}."
 msgstr ""
 
 #: ui/components/settings/data_section.slint:189
@@ -3138,9 +3132,7 @@ msgstr ""
 
 #: ui/components/settings/data_section.slint:200
 msgctxt "DataSection"
-msgid ""
-"Permet à Claude Desktop, Claude Code ou un autre client MCP de lire vos "
-"transcriptions et résumés. Tout reste sur ce Mac."
+msgid "Permet à Claude Desktop, Claude Code ou un autre client MCP de lire vos réunions et votre historique de dictées. Le serveur est local et en lecture seule, mais le client connecté peut envoyer ce qu'il lit à son propre fournisseur d'IA."
 msgstr ""
 
 #: ui/components/settings/data_section.slint:225

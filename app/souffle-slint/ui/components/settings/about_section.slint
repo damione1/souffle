@@ -141,7 +141,7 @@ export component AboutSection inherits KitFieldSet {
             if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
         }
         label: @tr("Vérification automatique");
-        description: @tr("Vérifier les mises à jour au démarrage.");
+        description: @tr("Vérifier les mises à jour au lancement, puis environ une fois par jour.");
 
         update-switch := KitSwitch {
             theme: KitThemeContext.current;

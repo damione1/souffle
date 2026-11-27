@@ -185,9 +185,7 @@ fn monitor_archive_export(weak: slint::Weak<MainWindow>, destination: String) {
                     window.set_settings_data_export_status_is_error(true);
                 }
                 None => {
-                    window.set_settings_data_export_status(
-                        format!("Export terminé vers {destination}.").into(),
-                    );
+                    window.set_settings_data_export_status(destination.into());
                     window.set_settings_data_export_status_is_error(false);
                 }
             },
@@ -5737,9 +5735,7 @@ fn wire_callbacks(
 
             match souffle_lib::commands::export_archive(state, directory.clone()) {
                 Ok(()) => {
-                    window.set_settings_data_export_status(
-                        format!("Export en cours vers {directory}…").into(),
-                    );
+                    window.set_settings_data_export_status(directory.clone().into());
                     monitor_archive_export(weak, directory);
                 }
                 Err(error) => {

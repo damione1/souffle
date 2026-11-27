@@ -171,7 +171,9 @@ export component DataSection inherits VerticalLayout {
         padding-right: 20px;
         padding-bottom: 12px;
         AppText {
-            text: root.export-status-is-error ? root.export-status : @tr("Export terminé vers {}" , root.export-status);
+            text: root.export-status-is-error ? root.export-status
+                : root.exporting ? @tr("Export en cours vers {}…", root.export-status)
+                : @tr("Export terminé vers {}.", root.export-status);
             color: root.export-status-is-error ? Theme.danger : Theme.text-muted;
             typography: Typography.small;
             wrap: word-wrap;
@@ -192,7 +194,7 @@ export component DataSection inherits VerticalLayout {
             padding-top: 14px;
             padding-bottom: 14px;
             AppText {
-                text: @tr("Permet à Claude Desktop, Claude Code ou un autre client MCP de lire vos transcriptions et résumés. Tout reste sur ce Mac.");
+                text: @tr("Permet à Claude Desktop, Claude Code ou un autre client MCP de lire vos réunions et votre historique de dictées. Le serveur est local et en lecture seule, mais le client connecté peut envoyer ce qu'il lit à son propre fournisseur d'IA.");
                 typography: Typography.secondary;
                 color: Theme.text-muted;
                 wrap: word-wrap;

@@ -39,7 +39,7 @@ export component AppBranchesSection inherits VerticalLayout {
             appearance: FieldRowAppearance.inset;
             show-divider: true;
             label: @tr("Règles par application");
-            description: @tr("La première règle active valide gagne. Le nom de l'application contient le motif, sans tenir compte de la casse. Par défaut suit le modèle global ; les instructions sont partagées.");
+            description: @tr("La première règle active valide gagne. Le nom de l'application contient le motif, sans tenir compte de la casse. Par défaut suit le gabarit global ; les instructions sont partagées.");
         }
 
         HorizontalLayout {
@@ -56,7 +56,7 @@ export component AppBranchesSection inherits VerticalLayout {
             }
             CatalogPicker {
                 modal-layer: 0;
-                control-label: @tr("Modèle de la nouvelle règle");
+                control-label: @tr("Gabarit de la nouvelle règle");
                 model: root.target-labels;
                 current-value: root.target-labels[root.new-target-index];
                 selected-index(index) => { root.new-target-index = index; }
@@ -106,7 +106,7 @@ export component AppBranchesSection inherits VerticalLayout {
                     }
                     CatalogPicker {
                         modal-layer: 0;
-                        control-label: @tr("Modèle partagé de la règle");
+                        control-label: @tr("Gabarit partagé de la règle");
                         model: root.target-labels;
                         current-value: rule.target-label;
                         selected-index(value) => { root.rule-target-changed(rule.id, value); }

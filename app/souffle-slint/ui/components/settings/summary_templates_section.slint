@@ -25,7 +25,7 @@ export component SummaryTemplatesSection inherits KitFieldSet {
     callback add-requested(string);
 
     theme: KitThemeContext.current;
-    legend: @tr("MODÈLES DE RÉSUMÉ");
+    legend: @tr("GABARITS DE RÉSUMÉ");
     appearance: FieldSetAppearance.card;
 
     KitFieldRow {
@@ -39,13 +39,13 @@ export component SummaryTemplatesSection inherits KitFieldSet {
         changed control-focused => {
             if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
         }
-        label: @tr("Modèle par défaut");
-        description: @tr("Le modèle par défaut est utilisé lorsque vous générez le résumé d'une réunion terminée.");
+        label: @tr("Gabarit par défaut");
+        description: @tr("Le gabarit par défaut est utilisé lorsque vous générez le résumé d'une réunion terminée.");
 
         default-picker := CatalogPicker {
             theme: KitThemeContext.current;
             modal-layer: 0;
-            control-label: @tr("Modèle de résumé par défaut");
+            control-label: @tr("Gabarit de résumé par défaut");
             model: root.template-labels;
             option-values: root.template-ids;
             current-value: root.default-template-id;
@@ -65,7 +65,7 @@ export component SummaryTemplatesSection inherits KitFieldSet {
             if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
         }
         label: @tr("Modifier");
-        description: root.editing-is-builtin ? @tr("Modèle intégré : le prompt peut être personnalisé mais pas supprimé.") : "";
+        description: root.editing-is-builtin ? @tr("Gabarit intégré : le prompt peut être personnalisé mais pas supprimé.") : "";
 
         KitWrap {
             theme: root.theme;
@@ -75,7 +75,7 @@ export component SummaryTemplatesSection inherits KitFieldSet {
             template-picker := CatalogPicker {
                 theme: KitThemeContext.current;
                 modal-layer: 0;
-                control-label: @tr("Modèle de résumé à modifier");
+                control-label: @tr("Gabarit de résumé à modifier");
                 model: root.template-labels;
                 option-values: root.template-ids;
                 current-value: root.editing-template-id;
@@ -111,7 +111,7 @@ export component SummaryTemplatesSection inherits KitFieldSet {
             theme: KitThemeContext.current;
             modal-layer: 0;
             width: Theme.settings-control-width;
-            accessible-name: @tr("Nom du modèle de résumé");
+            accessible-name: @tr("Nom du gabarit de résumé");
             text <=> root.editing-name;
             edited(value) => { root.name-changed(value); }
         }
@@ -138,7 +138,7 @@ export component SummaryTemplatesSection inherits KitFieldSet {
             description: instruction-row.description;
             show-description: false;
             placeholder: @tr("Instruction de génération du résumé");
-            accessible-name: @tr("Instruction du modèle de résumé");
+            accessible-name: @tr("Instruction du gabarit de résumé");
             edited(value) => { root.prompt-changed(value); }
         }
     }
@@ -158,7 +158,7 @@ export component SummaryTemplatesSection inherits KitFieldSet {
             orientation: Theme.settings-field-orientation(self.width);
             appearance: FieldRowAppearance.inset;
             show-divider: true;
-            label: @tr("Nom du nouveau modèle");
+            label: @tr("Nom du nouveau gabarit");
             focus-requested => { new-name-editor.take-focus(); }
 
             HorizontalLayout {
@@ -169,8 +169,8 @@ export component SummaryTemplatesSection inherits KitFieldSet {
                     theme: root.theme;
                     modal-layer: 0;
                     text <=> root.new-template-draft;
-                    placeholder: @tr("Nom du nouveau modèle");
-                    accessible-name: @tr("Nom du nouveau modèle de résumé");
+                    placeholder: @tr("Nom du nouveau gabarit");
+                    accessible-name: @tr("Nom du nouveau gabarit de résumé");
                     horizontal-stretch: 1;
                     focus-observed(focused) => {
                         if focused { add-row.ensure-visible(KitThemes.scroll-behavior(root.theme)); }

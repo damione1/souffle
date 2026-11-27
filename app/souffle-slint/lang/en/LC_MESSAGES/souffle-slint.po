@@ -545,8 +545,8 @@ msgstr "Local speech-to-text for dictation and meetings."
 
 #: ui/onboarding_view.slint:168
 msgctxt "OnboardingView"
-msgid "100 % local : rien ne quitte votre Mac. Pas de compte, pas de cloud."
-msgstr "100% local: nothing ever leaves your Mac. No account, no cloud."
+msgid "Votre audio est transcrit sur ce Mac. Pas de compte."
+msgstr "Your audio is transcribed on this Mac. No account."
 
 #: ui/onboarding_view.slint:182
 msgctxt "OnboardingView"
@@ -1639,7 +1639,7 @@ msgstr "Code editor"
 
 #: ui/components/picker_labels.slint:30
 msgctxt "PickerLabels"
-msgid "Modèle introuvable"
+msgid "Gabarit introuvable"
 msgstr "Missing template"
 
 #: ui/components/update_copy.slint:9
@@ -1754,13 +1754,8 @@ msgstr "Per-app rules"
 
 #: ui/components/settings/app_branches_section.slint:42
 msgctxt "AppBranchesSection"
-msgid ""
-"La première règle active valide gagne. Le nom de l'application contient le "
-"motif, sans tenir compte de la casse. Par défaut suit le modèle global ; les "
-"instructions sont partagées."
-msgstr ""
-"The first valid active rule wins. The application name contains the pattern, "
-"ignoring case. Default follows the global template; instructions are shared."
+msgid "La première règle active valide gagne. Le nom de l'application contient le motif, sans tenir compte de la casse. Par défaut suit le gabarit global ; les instructions sont partagées."
+msgstr "The first valid active rule wins. The application name contains the pattern, ignoring case. Default follows the global template; instructions are shared."
 
 #: ui/components/settings/app_branches_section.slint:53
 msgctxt "AppBranchesSection"
@@ -1774,7 +1769,7 @@ msgstr "New application rule"
 
 #: ui/components/settings/app_branches_section.slint:59
 msgctxt "AppBranchesSection"
-msgid "Modèle de la nouvelle règle"
+msgid "Gabarit de la nouvelle règle"
 msgstr "New rule template"
 
 #: ui/components/settings/app_branches_section.slint:66
@@ -1794,7 +1789,7 @@ msgstr "Rule pattern"
 
 #: ui/components/settings/app_branches_section.slint:109
 msgctxt "AppBranchesSection"
-msgid "Modèle partagé de la règle"
+msgid "Gabarit partagé de la règle"
 msgstr "Shared rule template"
 
 #: ui/components/settings/app_branches_section.slint:122
@@ -1814,25 +1809,22 @@ msgstr "Delete"
 
 #: ui/components/settings/summary_templates_section.slint:28
 msgctxt "SummaryTemplatesSection"
-msgid "MODÈLES DE RÉSUMÉ"
+msgid "GABARITS DE RÉSUMÉ"
 msgstr "SUMMARY TEMPLATES"
 
 #: ui/components/settings/summary_templates_section.slint:42
 msgctxt "SummaryTemplatesSection"
-msgid "Modèle par défaut"
+msgid "Gabarit par défaut"
 msgstr "Default template"
 
 #: ui/components/settings/summary_templates_section.slint:43
 msgctxt "SummaryTemplatesSection"
-msgid ""
-"Le modèle par défaut est utilisé lorsque vous générez le résumé d'une "
-"réunion terminée."
-msgstr ""
-"The default template is used when you generate a completed meeting's summary."
+msgid "Le gabarit par défaut est utilisé lorsque vous générez le résumé d'une réunion terminée."
+msgstr "The default template is used when you generate a completed meeting's summary."
 
 #: ui/components/settings/summary_templates_section.slint:48
 msgctxt "SummaryTemplatesSection"
-msgid "Modèle de résumé par défaut"
+msgid "Gabarit de résumé par défaut"
 msgstr "Default summary template"
 
 #: ui/components/settings/summary_templates_section.slint:67
@@ -1842,12 +1834,12 @@ msgstr "Edit"
 
 #: ui/components/settings/summary_templates_section.slint:68
 msgctxt "SummaryTemplatesSection"
-msgid "Modèle intégré : le prompt peut être personnalisé mais pas supprimé."
+msgid "Gabarit intégré : le prompt peut être personnalisé mais pas supprimé."
 msgstr "Built-in template: the prompt can be customized but not deleted."
 
 #: ui/components/settings/summary_templates_section.slint:78
 msgctxt "SummaryTemplatesSection"
-msgid "Modèle de résumé à modifier"
+msgid "Gabarit de résumé à modifier"
 msgstr "Summary template to edit"
 
 #: ui/components/settings/summary_templates_section.slint:88
@@ -1862,7 +1854,7 @@ msgstr "Name"
 
 #: ui/components/settings/summary_templates_section.slint:114
 msgctxt "SummaryTemplatesSection"
-msgid "Nom du modèle de résumé"
+msgid "Nom du gabarit de résumé"
 msgstr "Summary template name"
 
 #: ui/components/settings/summary_templates_section.slint:131
@@ -1882,17 +1874,17 @@ msgstr "Summary generation instruction"
 
 #: ui/components/settings/summary_templates_section.slint:141
 msgctxt "SummaryTemplatesSection"
-msgid "Instruction du modèle de résumé"
+msgid "Instruction du gabarit de résumé"
 msgstr "Summary template prompt"
 
 #: ui/components/settings/summary_templates_section.slint:161
 msgctxt "SummaryTemplatesSection"
-msgid "Nom du nouveau modèle"
+msgid "Nom du nouveau gabarit"
 msgstr "Name of the new template"
 
 #: ui/components/settings/summary_templates_section.slint:173
 msgctxt "SummaryTemplatesSection"
-msgid "Nom du nouveau modèle de résumé"
+msgid "Nom du nouveau gabarit de résumé"
 msgstr "New summary template name"
 
 #: ui/components/settings/summary_templates_section.slint:183
@@ -2128,20 +2120,14 @@ msgstr "Polish dictation with AI"
 
 #: ui/components/settings/dictation_polish_section.slint:32
 msgctxt "DictationPolishSection"
-msgid ""
-"Passe le même fournisseur de résumés (Ollama ou Apple Intelligence) après "
-"transcription pour corriger ponctuation, termes techniques et "
-"autocorrections parlées, sans changer le sens."
-msgstr ""
-"Runs the same summary provider (Ollama or Apple Intelligence) after "
-"transcription to fix punctuation, technical terms and spoken autocorrects, "
-"without changing meaning."
+msgid "Après la dictée, le moteur IA (Apple Intelligence ou Ollama) retouche le texte transcrit en suivant le gabarit de retouche."
+msgstr "After dictation, the AI engine (Apple Intelligence or Ollama) polishes the transcribed text following the polishing template."
 
 #: ui/components/settings/dictation_polish_section.slint:58
 #: ui/components/settings/dictation_polish_section.slint:58
 msgctxt "DictationPolishSection"
-msgid "Modèle de retouche"
-msgstr "Polishing model"
+msgid "Gabarit de retouche"
+msgstr "Polishing template"
 
 #: ui/components/settings/dictation_polish_section.slint:83
 msgctxt "DictationPolishSection"
@@ -2225,8 +2211,8 @@ msgstr "Add snippet"
 
 #: ui/components/settings/snippets_section.slint:114
 msgctxt "SnippetsSection"
-msgid "Aucune formule."
-msgstr "No triggers."
+msgid "Aucun extrait."
+msgstr "No snippets."
 
 #: ui/components/settings/snippets_section.slint:178
 msgctxt "SnippetsSection"
@@ -2466,12 +2452,8 @@ msgstr "Learn from corrections"
 
 #: ui/components/settings/dictionary_section.slint:77
 msgctxt "DictionarySection"
-msgid ""
-"Suggestions propose les corrections après collage et en réunion. Automatique "
-"apprend après collage. Les corrections de session restent immédiates."
-msgstr ""
-"Suggestions collects corrections after pasting and during meetings. "
-"Automatic learns after pasting. Session corrections apply immediately."
+msgid "Suggestions propose des corrections après un collage et pendant une réunion. Automatique n'apprend qu'après un collage. L'apprentissage après collage demande que le collage automatique soit activé et réussisse. Quel que soit le mode, vos corrections en réunion s'appliquent à la suite de celle-ci si « Correction par dictionnaire » est activée."
+msgstr "Suggestions offers corrections after a paste and during a meeting. Automatic only learns after a paste. Learning after a paste requires auto-paste to be on and to succeed. In every mode, your corrections during a meeting apply to the rest of that meeting if “Dictionary correction” is on."
 
 #: ui/components/settings/dictionary_section.slint:109
 msgctxt "DictionarySection"
@@ -2911,8 +2893,8 @@ msgstr "Automatic check"
 
 #: ui/components/settings/about_section.slint:200
 msgctxt "AboutSection"
-msgid "Vérifier les mises à jour au démarrage."
-msgstr "Check for updates at startup."
+msgid "Vérifier les mises à jour au lancement, puis environ une fois par jour."
+msgstr "Check for updates at launch, then about once a day."
 
 #: ui/components/settings/about_section.slint:209
 msgctxt "AboutSection"
@@ -3135,8 +3117,13 @@ msgstr "Reveal in Finder"
 
 #: ui/components/settings/data_section.slint:179
 msgctxt "DataSection"
-msgid "Export terminé vers {}"
-msgstr "Export completed to {}"
+msgid "Export en cours vers {}…"
+msgstr "Exporting to {}…"
+
+#: ui/components/settings/data_section.slint:179
+msgctxt "DataSection"
+msgid "Export terminé vers {}."
+msgstr "Export completed to {}."
 
 #: ui/components/settings/data_section.slint:189
 msgctxt "DataSection"
@@ -3145,12 +3132,8 @@ msgstr "MCP SERVER"
 
 #: ui/components/settings/data_section.slint:200
 msgctxt "DataSection"
-msgid ""
-"Permet à Claude Desktop, Claude Code ou un autre client MCP de lire vos "
-"transcriptions et résumés. Tout reste sur ce Mac."
-msgstr ""
-"Allows Claude Desktop, Claude Code or another MCP client to read your "
-"transcriptions and summaries. Everything stays on this Mac."
+msgid "Permet à Claude Desktop, Claude Code ou un autre client MCP de lire vos réunions et votre historique de dictées. Le serveur est local et en lecture seule, mais le client connecté peut envoyer ce qu'il lit à son propre fournisseur d'IA."
+msgstr "Lets Claude Desktop, Claude Code or another MCP client read your meetings and dictation history. The server is local and read-only, but the connected client may send what it reads to its own AI provider."
 
 #: ui/components/settings/data_section.slint:225
 msgctxt "DataSection"
