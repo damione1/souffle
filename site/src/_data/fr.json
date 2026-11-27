@@ -610,7 +610,7 @@
         "h": "Résumés et compaction — expérimental",
         "blocks": [
           {
-            "p": "<strong>Cette fonctionnalité est expérimentale et désactivée par défaut.</strong> Dans Paramètres → IA, activez <strong>Résumés de réunion</strong> (<strong>Summarization</strong> dans l'interface anglaise) pour afficher le choix du fournisseur et du modèle, les gabarits de résumé, les options de compaction et les actions de génération dans les réunions. Désactiver cet interrupteur masque ces éléments tout en conservant vos réglages et les résultats déjà enregistrés. La transcription, les exports et la lecture par MCP restent disponibles. La reformulation des dictées conserve sa configuration indépendante ; son fournisseur IA reste accessible si elle est activée."
+            "p": "<strong>Cette fonctionnalité est expérimentale et désactivée par défaut.</strong> Dans Paramètres → IA, activez <strong>Résumés de réunion</strong> (<strong>Summarization</strong> dans l'interface anglaise) pour afficher le choix du fournisseur et du modèle, les gabarits de résumé, l'interrupteur de compaction et les actions de génération dans les réunions. Désactiver cet interrupteur masque ces éléments tout en conservant vos réglages et les résultats déjà enregistrés. La transcription, les exports et la lecture par MCP restent disponibles. La reformulation des dictées conserve sa configuration indépendante ; son fournisseur IA reste accessible si elle est activée."
           },
           {
             "p": "Transcrire correctement une réunion en local est déjà exigeant. Résumer fidèlement une longue transcription avec un modèle local l'est encore davantage : il faut conserver les décisions, leurs conditions, les négations, les responsables et les échéances. La priorité de Soufflé est de fournir une transcription de qualité sur les Mac Apple Silicon pris en charge, y compris les configurations modestes, plutôt que de supposer que chacun dispose d'une grosse machine."
@@ -899,7 +899,7 @@
             "table": [
               [
                 "<code>query</code>",
-                "<a href=\"https://www.sqlite.org/fts5.html#full_text_query_syntax\">Syntaxe FTS5</a>, appliquée au seul texte des transcriptions : titres, notes, résumés et dictées ne sont pas fouillés. Mettez entre guillemets une expression ou un mot à trait d'union, par exemple <code>\"follow-up\"</code>. Dans <code>list_meetings</code>, une valeur vide ne filtre rien."
+                "<a href=\"https://www.sqlite.org/fts5.html#full_text_query_syntax\">Syntaxe FTS5</a>, appliquée au seul texte des transcriptions : titres, notes, résumés et dictées ne sont pas fouillés. Mettez entre guillemets une expression ou un mot à trait d'union, par exemple <code>\"follow-up\"</code>. Dans <code>list_meetings</code>, une valeur vide ne filtre rien. Un terme seul correspond aussi aux champs internes de type et d'identifiant de l'index : <code>meeting</code> correspond donc à toutes les réunions. Écrivez <code>content:meeting</code> pour ne chercher que dans le texte de la transcription."
               ],
               [
                 "<code>from</code>",

@@ -253,7 +253,7 @@ There are five tools. `limit` defaults to 20 and is kept between 1 and 200. Ther
 
 | Parameter | Meaning |
 | --- | --- |
-| `query` (optional) | [FTS5](https://www.sqlite.org/fts5.html#full_text_query_syntax) filter on the transcript text only, not titles, notes or summaries. Quote a phrase or a hyphenated word: `"follow-up"`. A blank value means no filter. |
+| `query` (optional) | [FTS5](https://www.sqlite.org/fts5.html#full_text_query_syntax) filter on the transcript text only, not titles, notes or summaries. Quote a phrase or a hyphenated word: `"follow-up"`. A blank value means no filter. A bare term also matches the index's internal type and id fields, so `meeting` matches every meeting: write `content:meeting` to match the transcript text only. |
 | `from` (optional) | Earliest start time, inclusive: an ISO 8601 date or date-time, read as UTC without an offset. |
 | `to` (optional) | Latest start time, inclusive. A date alone means midnight at the **start** of that day, so `to: "2026-03-05"` leaves out meetings later on the 5th: pass the next day. |
 | `limit` (optional) | Maximum number of meetings. |
@@ -281,7 +281,7 @@ Use the summary for an overview, the compact for an economical but lossy first p
 
 | Parameter | Meaning |
 | --- | --- |
-| `query` (required) | FTS5 query. A blank query returns nothing. Titles, notes, summaries and dictations are not searched. |
+| `query` (required) | FTS5 query. A blank query returns nothing. Titles, notes, summaries and dictations are not searched. As in `list_meetings`, use `content:` for a term such as `meeting`. |
 | `limit` (optional) | Maximum number of hits. |
 
 Returns `results`, ranked by relevance, each with `id`, `title`, `started_at` and a short `snippet` where matches are wrapped in `**` and cuts are marked `...`.

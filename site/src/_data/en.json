@@ -610,7 +610,7 @@
         "h": "Summaries and compaction — experimental",
         "blocks": [
           {
-            "p": "<strong>This feature is experimental and off by default.</strong> Enable <strong>Summarization</strong> in Settings → AI to reveal provider and model selection, prompt templates, compaction options and generation actions in meetings. Turning it off hides those controls while keeping your preferences and saved results. Transcription, exports and read-only MCP access remain available. Dictation polish has its own switch; its AI provider can still be configured when polish is enabled."
+            "p": "<strong>This feature is experimental and off by default.</strong> Enable <strong>Summarization</strong> in Settings → AI to reveal provider and model selection, prompt templates, the compaction switch and generation actions in meetings. Turning it off hides those controls while keeping your preferences and saved results. Transcription, exports and read-only MCP access remain available. Dictation polish has its own switch; its AI provider can still be configured when polish is enabled."
           },
           {
             "p": "Accurately transcribing a meeting locally is already demanding. Producing a faithful summary of a long transcript with a local model is harder still: decisions, conditions, negations, owners and deadlines all need to survive. Soufflé prioritizes a useful transcript across supported Apple Silicon Macs, including modest configurations, rather than assuming everyone owns a large machine."
@@ -899,7 +899,7 @@
             "table": [
               [
                 "<code>query</code>",
-                "<a href=\"https://www.sqlite.org/fts5.html#full_text_query_syntax\">FTS5 syntax</a>, applied to transcript text only: titles, notes, summaries and dictations are not searched. Quote a phrase or a hyphenated word, such as <code>\"follow-up\"</code>. In <code>list_meetings</code> a blank value means no filter."
+                "<a href=\"https://www.sqlite.org/fts5.html#full_text_query_syntax\">FTS5 syntax</a>, applied to transcript text only: titles, notes, summaries and dictations are not searched. Quote a phrase or a hyphenated word, such as <code>\"follow-up\"</code>. In <code>list_meetings</code> a blank value means no filter. A bare term also matches the index's internal type and id fields, so <code>meeting</code> matches every meeting: write <code>content:meeting</code> to match the transcript text only."
               ],
               [
                 "<code>from</code>",
