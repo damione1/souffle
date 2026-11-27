@@ -34,7 +34,6 @@ export global SettingsOptions {
         if hours { return count == 1 ? @tr("{} heure", count) : @tr("{} heures", count); }
         return count == 1 ? @tr("{} minute", count) : @tr("{} minutes", count);
     }
-    pure callback joined-labels([string]) -> string;
 
     pure callback locale-options(AppLocale) -> SettingsOptionList;
     pure callback locale-value(OptionRow, AppLocale) -> AppLocale;

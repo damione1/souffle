@@ -935,7 +935,7 @@ fn settings(window: &MainWindow) {
     };
     window.set_settings_ollama_url("http://localhost:11434".into());
     ia_ui::populate_intelligence(window, &app_settings, &status);
-    ia_ui::populate_dictation_polish(window, &app_settings, true);
+    ia_ui::populate_dictation_polish(window, &app_settings);
     ia_ui::populate_summary_templates(window, &app_settings, "brief");
 
     // Audio

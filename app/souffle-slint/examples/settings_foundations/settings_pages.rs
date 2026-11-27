@@ -263,6 +263,8 @@ pub(super) async fn exercise(w: &MainWindow, path: &Path) {
         models: Vec::new(),
     };
     w.set_settings_tab(SettingsTab::Ai);
+    // The engine card is mounted while summaries or polish are on.
+    w.set_settings_dictation_polish_enabled(true);
     for reason in [
         Reason::DeviceNotEligible,
         Reason::AppleIntelligenceNotEnabled,
@@ -284,9 +286,14 @@ pub(super) async fn exercise(w: &MainWindow, path: &Path) {
             "Apple Intelligence n'est pas disponible sur cet appareil."
         };
         assert!(labels.iter().any(|s| s == expected), "{labels:?}");
-        let notice = reveal(w, &page, "IntelligenceSection::apple-notice");
+        let notice = reveal(w, &page, "IntelligenceSection::unavailable-notice");
         assert!(!notice.accessible_label().unwrap().is_empty());
-        wheel(w, &page, -80.);
+        reveal(w, &page, "IntelligenceSection::apple-row");
+        assert!(
+            ElementHandle::find_by_element_id(w, "IntelligenceSection::url-row")
+                .next()
+                .is_none()
+        );
         let system = items(w, "KitButton").into_iter().find(|e| {
             e.accessible_label().as_deref()
                 == Some(if en {
@@ -320,16 +327,30 @@ pub(super) async fn exercise(w: &MainWindow, path: &Path) {
         settle(w);
         assert!(alerts(w).iter().any(|s| s
             == if en {
-                "No compatible Ollama model is installed."
+                "The Ollama server is not responding at this address."
             } else {
-                "Aucun modèle Ollama compatible n'est installé."
+                "Le serveur Ollama ne répond pas à cette adresse."
             }));
+        assert!(
+            ElementHandle::find_by_element_id(w, "IntelligenceSection::apple-row")
+                .next()
+                .is_none()
+        );
     }
-    let button = reveal(
+    reveal(
         w,
         &id(w, "SettingsView::ai-page"),
-        "IntelligenceSection::connection-button",
+        "IntelligenceSection::url-row",
     );
+    // The failed check carries the only Retry action of the card.
+    let retry_buttons: Vec<_> = items(w, "KitButton")
+        .into_iter()
+        .filter(|e| {
+            e.accessible_label().as_deref() == Some(if en { "Retry" } else { "Réessayer" })
+        })
+        .collect();
+    assert_eq!(retry_buttons.len(), 1);
+    let button = retry_buttons.into_iter().next().unwrap();
     let retries = Rc::new(Cell::new(0));
     let observed = retries.clone();
     w.on_settings_summary_providers_retry_requested(move || observed.set(observed.get() + 1));
@@ -342,10 +363,17 @@ pub(super) async fn exercise(w: &MainWindow, path: &Path) {
     status.ollama_available = true;
     ia_ui::populate_intelligence(w, &settings, &status);
     assert!(w.get_settings_show_ollama_setup());
+    settle(w);
+    assert!(alerts(w).iter().any(|s| s
+        == if en {
+            "No compatible Ollama model is installed."
+        } else {
+            "Aucun modèle Ollama compatible n'est installé."
+        }));
     let download_area = reveal(
         w,
         &id(w, "SettingsView::ai-page"),
-        "IntelligenceSection::download-actions",
+        "IntelligenceSection::setup-row",
     );
     let download = download_area
         .query_descendants()
@@ -387,13 +415,14 @@ pub(super) async fn exercise(w: &MainWindow, path: &Path) {
         .prompt
         .clone_from(&prompt);
     settings.dictation_polish_template_id = settings.dictation_polish_templates[0].id.clone();
-    ia_ui::populate_dictation_polish(w, &settings, true);
+    ia_ui::populate_dictation_polish(w, &settings);
     settings.summary_templates.push(SummaryTemplate {
         id: "custom".into(),
         name: "Rapport de la réunion – version de travail".into(),
         prompt: prompt.clone(),
     });
     ia_ui::populate_summary_templates(w, &settings, "custom");
+    w.global::<crate::SummarizationUi>().set_enabled(true);
     let page = id(w, "SettingsView::ai-page");
     reveal(w, &page, "SummaryTemplatesSection::name-editor");
     assert_widths(w);
@@ -984,7 +1013,7 @@ async fn ai_actions(w: &MainWindow, path: &Path) {
         models: vec![model("m1"), model("m2")],
     };
     ia_ui::populate_intelligence(w, &settings, &status);
-    ia_ui::populate_dictation_polish(w, &settings, true);
+    ia_ui::populate_dictation_polish(w, &settings);
     settings.summary_templates.push(SummaryTemplate {
         id: "custom".into(),
         name: "Compte rendu".into(),

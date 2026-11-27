@@ -118,7 +118,7 @@ export component SettingsView inherits KitAppShell {
     in property <string> ollama-url;
     in property <bool> ollama-available;
     in property <bool> ollama-checking;
-    in property <int> summary-model-count;
+    in property <SummaryProvider> summary-effective-engine;
     in property <bool> summary-model-picker-visible;
     in property <[string]> summary-model-ids;
     in property <[string]> summary-model-labels;
@@ -131,7 +131,6 @@ export component SettingsView inherits KitAppShell {
     in property <string> summary-refresh-error;
     in property <bool> summary-provider-unavailable;
     in property <bool> dictation-polish-enabled;
-    in property <bool> dictation-polish-provider-available;
     in property <[string]> dictation-polish-template-ids;
     in property <[string]> dictation-polish-template-labels;
     in property <string> active-dictation-polish-id;
@@ -426,14 +425,14 @@ export component SettingsView inherits KitAppShell {
 
                                 if ai-page.mounted: SummarizationSection { }
 
-                                if ai-page.mounted && SummarizationUi.enabled: IntelligenceSection {
+                                if ai-page.mounted && (SummarizationUi.enabled || root.dictation-polish-enabled): IntelligenceSection {
                                     summary-provider: root.summary-provider;
+                                    effective-engine: root.summary-effective-engine;
                                     apple-intelligence-available: root.apple-intelligence-available;
                                     apple-intelligence-reason: root.apple-intelligence-reason;
                                     ollama-url: root.ollama-url;
                                     ollama-available: root.ollama-available;
                                     ollama-checking: root.ollama-checking;
-                                    summary-model-count: root.summary-model-count;
                                     model-picker-visible: root.summary-model-picker-visible;
                                     model-ids: root.summary-model-ids;
                                     model-labels: root.summary-model-labels;
@@ -458,7 +457,6 @@ export component SettingsView inherits KitAppShell {
 
                                 if ai-page.mounted: DictationPolishSection {
                                     enabled: root.dictation-polish-enabled;
-                                    provider-available: root.dictation-polish-provider-available;
                                     template-ids: root.dictation-polish-template-ids;
                                     template-labels: root.dictation-polish-template-labels;
                                     active-template-id: root.active-dictation-polish-id;
@@ -466,7 +464,6 @@ export component SettingsView inherits KitAppShell {
                                     enabled-changed(value) => { root.dictation-polish-enabled-changed(value); }
                                     template-changed(value) => { root.dictation-polish-template-changed(value); }
                                     prompt-changed(value) => { root.dictation-polish-prompt-changed(value); }
-                                    open-provider-settings-requested => { root.open-apple-intelligence-settings-requested(); }
                                 }
 
                                 if ai-page.mounted && SummarizationUi.enabled: SummaryTemplatesSection {
@@ -495,34 +492,6 @@ export component SettingsView inherits KitAppShell {
                                     rule-pattern-changed(id, value) => { root.app-branch-pattern-changed(id, value); }
                                     rule-target-changed(id, target) => { root.app-branch-target-changed(id, target); }
                                     rule-moved(id, index) => { root.app-branch-moved(id, index); }
-                                }
-
-                                if ai-page.mounted && !SummarizationUi.enabled && root.dictation-polish-enabled: IntelligenceSection {
-                                    for-dictation: true;
-                                    summary-provider: root.summary-provider;
-                                    apple-intelligence-available: root.apple-intelligence-available;
-                                    apple-intelligence-reason: root.apple-intelligence-reason;
-                                    ollama-url: root.ollama-url;
-                                    ollama-available: root.ollama-available;
-                                    ollama-checking: root.ollama-checking;
-                                    summary-model-count: root.summary-model-count;
-                                    model-picker-visible: root.summary-model-picker-visible;
-                                    model-ids: root.summary-model-ids;
-                                    model-labels: root.summary-model-labels;
-                                    selected-model-id: root.selected-summary-model-id;
-                                    show-ollama-setup: root.show-ollama-setup;
-                                    ollama-pulling: root.ollama-pulling;
-                                    ollama-pull-status: root.ollama-pull-status;
-                                    ollama-pull-error: root.ollama-pull-error;
-                                    recommended-model: root.recommended-ollama-model;
-                                    refresh-error: root.summary-refresh-error;
-                                    provider-unavailable: root.summary-provider-unavailable;
-                                    summary-provider-changed(value) => { root.summary-provider-changed(value); }
-                                    ollama-url-changed(value) => { root.ollama-url-changed(value); }
-                                    ollama-model-changed(value) => { root.ollama-model-changed(value); }
-                                    retry-requested => { root.summary-providers-retry-requested(); }
-                                    download-recommended-requested => { root.download-recommended-ollama-model-requested(); }
-                                    open-apple-intelligence-settings-requested => { root.open-apple-intelligence-settings-requested(); }
                                 }
                         }
 

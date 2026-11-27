@@ -1,25 +1,27 @@
-import { FieldSetAppearance, FieldRowAppearance, AlertActions, KitAlert, KitBadge, KitButton, KitFieldRow, KitFieldSet, KitTextField, KitThemeContext, KitThemes, KitWrap, Tone } from "@kit";
+import { FieldSetAppearance, FieldRowAppearance, AlertActions, ControlSize, KitAlert, KitBadge, KitButton, KitFieldRow, KitFieldSet, KitTextField, KitThemeContext, KitThemes, KitWrap, Tone } from "@kit";
 import { SettingsOptions, ClosedSettingsPicker } from "settings_options.slint";
 import { CatalogPicker } from "../catalog_picker.slint";
 import { SettingsNoticeRow } from "settings_notice_row.slint";
 import { Theme } from "../../theme.slint";
 import { AppleIntelligenceUnavailableReason, SummaryProvider } from "../../types.slint";
 
-// Provider, Apple Intelligence status, Ollama connection, model choice and
-// recovery actions. Rust projects the facts (availability, per-reason enum,
-// `provider-unavailable`, model catalogue); every user-facing message is
-// localized here with @tr, and the free-form `refresh-error` from the service
-// is shown as received. Summary models keep their open-set ids paired with
-// labels through the picker so duplicate labels remain distinct.
+// The one AI engine card, shared by summaries and dictation polish: engine
+// choice, then only the rows of the engine actually in use, and Retry only
+// when a check failed or the engine is unavailable. Rust projects the facts
+// (availability, per-reason enum, `provider-unavailable`, model catalogue);
+// every user-facing message is localized here with @tr, and the free-form
+// `refresh-error` from the service is shown as received. Ollama models keep
+// their open-set ids paired with labels through the picker so duplicate
+// labels remain distinct.
 export component IntelligenceSection inherits KitFieldSet {
-    in property <bool> for-dictation: false;
     in property <SummaryProvider> summary-provider;
+    // `auto` until the automatic choice has been resolved by a provider check.
+    in property <SummaryProvider> effective-engine;
     in property <bool> apple-intelligence-available;
     in property <AppleIntelligenceUnavailableReason> apple-intelligence-reason;
     in property <string> ollama-url;
     in property <bool> ollama-available;
     in property <bool> ollama-checking;
-    in property <int> summary-model-count;
     in property <bool> model-picker-visible;
     in property <[string]> model-ids;
     in property <[string]> model-labels;
@@ -51,7 +53,7 @@ export component IntelligenceSection inherits KitFieldSet {
     }
 
     theme: KitThemeContext.current;
-    legend: root.for-dictation ? @tr("FOURNISSEUR IA DE LA DICTÉE") : @tr("RÉSUMÉS (EXPÉRIMENTAUX)");
+    legend: @tr("MOTEUR IA");
     appearance: FieldSetAppearance.card;
 
     KitFieldRow {
@@ -66,36 +68,59 @@ export component IntelligenceSection inherits KitFieldSet {
             if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
         }
         label: @tr("Moteur");
-        description: root.for-dictation ? @tr("Le moteur qui nettoie la dictée.") : @tr("Le moteur qui rédige les résumés et nettoie la dictée.");
+        description: @tr("Le moteur qui rédige les résumés et nettoie la dictée.");
 
         engine-picker := ClosedSettingsPicker {
             theme: KitThemeContext.current;
             modal-layer: 0;
-            label: root.for-dictation ? @tr("Moteur de dictée IA") : @tr("Moteur de résumé");
+            label: @tr("Moteur IA");
             choices: SettingsOptions.provider-options(root.summary-provider);
             chosen(row) => { root.summary-provider-changed(SettingsOptions.provider-value(row, root.summary-provider)); }
         }
     }
 
-    if root.provider-unavailable: SettingsNoticeRow {
-        KitAlert { bordered: false; corner-radius: 12px; inset: 12px; actions-placement: AlertActions.trailing;
+    if root.provider-unavailable && root.effective-engine != SummaryProvider.auto: SettingsNoticeRow {
+        unavailable-notice := KitAlert { bordered: false; corner-radius: 12px; inset: 12px; actions-placement: AlertActions.trailing;
             theme: root.theme;
             severity: warning;
-            message: root.summary-provider == SummaryProvider.apple-intelligence
+            message: root.effective-engine == SummaryProvider.apple-intelligence
                 ? @tr("Apple Intelligence n'est pas disponible sur cet appareil.")
-                : @tr("Aucun modèle Ollama compatible n'est installé.");
+                : root.ollama-available ? @tr("Aucun modèle Ollama compatible n'est installé.")
+                : @tr("Le serveur Ollama ne répond pas à cette adresse.");
+            if root.refresh-error == "": KitButton {
+                theme: root.theme;
+                modal-layer: 0;
+                control-size: ControlSize.compact;
+                text: @tr("Réessayer");
+                disabled: root.ollama-checking || root.ollama-pulling;
+                focus-observed(focused) => {
+                    if focused { unavailable-notice.ensure-visible(KitThemes.scroll-behavior(root.theme)); }
+                }
+                activated => { root.retry-requested(); }
+            }
         }
     }
 
     if root.refresh-error != "": SettingsNoticeRow {
-        KitAlert { bordered: false; corner-radius: 12px; inset: 12px; actions-placement: AlertActions.trailing;
+        error-notice := KitAlert { bordered: false; corner-radius: 12px; inset: 12px; actions-placement: AlertActions.trailing;
             theme: root.theme;
             severity: error;
             message: root.refresh-error;
+            KitButton {
+                theme: root.theme;
+                modal-layer: 0;
+                control-size: ControlSize.compact;
+                text: @tr("Réessayer");
+                disabled: root.ollama-checking || root.ollama-pulling;
+                focus-observed(focused) => {
+                    if focused { error-notice.ensure-visible(KitThemes.scroll-behavior(root.theme)); }
+                }
+                activated => { root.retry-requested(); }
+            }
         }
     }
 
-    apple-row := KitFieldRow {
+    if root.effective-engine == SummaryProvider.apple-intelligence: apple-row := KitFieldRow {
         theme: KitThemeContext.current;
         modal-layer: 0;
         orientation: Theme.settings-field-orientation(self.width);
@@ -130,7 +155,7 @@ export component IntelligenceSection inherits KitFieldSet {
         }
     }
 
-    url-row := KitFieldRow {
+    if root.effective-engine == SummaryProvider.ollama: url-row := KitFieldRow {
         theme: KitThemeContext.current;
         modal-layer: 0;
         orientation: Theme.settings-field-orientation(self.width);
@@ -157,45 +182,6 @@ export component IntelligenceSection inherits KitFieldSet {
         }
     }
 
-    KitFieldRow {
-        theme: KitThemeContext.current;
-        modal-layer: 0;
-        orientation: Theme.settings-field-orientation(self.width);
-        appearance: FieldRowAppearance.inset;
-        show-divider: true;
-        focus-requested => { connection-button.take-focus(); }
-        private property <bool> control-focused: connection-button.has-focus;
-        changed control-focused => {
-            if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
-        }
-        label: @tr("État de la connexion");
-        description: root.summary-model-count == 0 ? @tr("Aucun modèle trouvé.")
-            : root.summary-model-count == 1 ? @tr("1 modèle trouvé.")
-            : @tr("{} modèles trouvés.", root.summary-model-count);
-
-        KitWrap {
-            theme: root.theme;
-            cross-axis-alignment: center;
-            horizontal-stretch: 0;
-            KitBadge {
-                theme: root.theme;
-                text: root.ollama-available ? @tr("Connecté") : @tr("Non disponible");
-                tone: root.ollama-available ? Tone.success : Tone.warning;
-                subtle: true;
-                preferred-height: 24px;
-                dot: root.ollama-available;
-            }
-            connection-button := KitButton {
-                theme: KitThemeContext.current;
-                modal-layer: 0;
-                control-size: compact;
-                text: @tr("Réessayer");
-                disabled: root.ollama-checking || root.ollama-pulling;
-                activated => { root.retry-requested(); }
-            }
-        }
-    }
-
     if root.model-picker-visible: KitFieldRow {
         theme: KitThemeContext.current;
         modal-layer: 0;
@@ -207,12 +193,12 @@ export component IntelligenceSection inherits KitFieldSet {
         changed control-focused => {
             if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
         }
-        label: root.for-dictation ? @tr("Modèle de dictée IA") : @tr("Modèle de résumé");
+        label: @tr("Modèle Ollama");
 
         model-picker := CatalogPicker {
             theme: KitThemeContext.current;
             modal-layer: 0;
-            control-label: root.for-dictation ? @tr("Modèle de dictée IA") : @tr("Modèle de résumé");
+            control-label: @tr("Modèle Ollama");
             model: root.model-labels;
             option-values: root.model-ids;
             current-value: root.selected-model-id;

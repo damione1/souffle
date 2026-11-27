@@ -1,12 +1,9 @@
-import { FieldSetAppearance, FieldRowAppearance, FieldRowAlignment, AlertActions, ChoiceLabelPosition, ControlWidth, KitAlert, KitButton, KitFieldRow, KitFieldSet, KitSwitch, KitTextArea, KitThemeContext, KitThemes, Ownership, ControlSize, ResizePolicy } from "@kit";
+import { FieldSetAppearance, FieldRowAppearance, FieldRowAlignment, ChoiceLabelPosition, ControlWidth, KitFieldRow, KitFieldSet, KitSwitch, KitTextArea, KitThemeContext, KitThemes, Ownership, ResizePolicy } from "@kit";
 import { CatalogPicker } from "../catalog_picker.slint";
-import { SettingsNoticeRow } from "settings_notice_row.slint";
-import { SettingsOptions } from "settings_options.slint";
 import { Theme } from "../../theme.slint";
 
 export component DictationPolishSection inherits KitFieldSet {
     in property <bool> enabled;
-    in property <bool> provider-available;
     in property <[string]> template-ids;
     in property <[string]> template-labels;
     in property <string> active-template-id;
@@ -15,7 +12,6 @@ export component DictationPolishSection inherits KitFieldSet {
     callback enabled-changed(bool);
     callback template-changed(string);
     callback prompt-changed(string);
-    callback open-provider-settings-requested();
 
     theme: KitThemeContext.current;
     legend: @tr("POLISH DE LA DICTÉE");
@@ -48,25 +44,6 @@ export component DictationPolishSection inherits KitFieldSet {
         }
     }
 
-    if root.enabled && !root.provider-available: SettingsNoticeRow {
-        provider-notice := KitAlert { bordered: false; corner-radius: 12px; inset: 12px; actions-placement: AlertActions.trailing;
-            theme: root.theme;
-            severity: warning;
-            message: @tr("Aucun fournisseur IA disponible pour la retouche.");
-            KitButton {
-                theme: root.theme;
-                modal-layer: 0;
-                text: @tr("Choisir un fournisseur");
-                control-size: ControlSize.compact;
-                text-wrap: word-wrap;
-                focus-observed(focused) => {
-                    if focused { provider-notice.ensure-visible(KitThemes.scroll-behavior(root.theme)); }
-                }
-                activated => { root.open-provider-settings-requested(); }
-            }
-        }
-    }
-
     if root.enabled && root.template-labels.length > 0: KitFieldRow {
         theme: KitThemeContext.current;
         modal-layer: 0;
@@ -79,7 +56,6 @@ export component DictationPolishSection inherits KitFieldSet {
             if self.control-focused { self.ensure-visible(KitThemes.scroll-behavior(self.theme)); }
         }
         label: @tr("Modèle de retouche");
-        description: SettingsOptions.joined-labels(root.template-labels);
 
         model-picker := CatalogPicker {
             theme: KitThemeContext.current;

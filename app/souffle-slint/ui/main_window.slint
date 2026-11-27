@@ -293,7 +293,7 @@ export component MainWindow inherits Window {
     in property <string> settings-ollama-url;
     in property <bool> settings-ollama-available;
     in property <bool> settings-ollama-checking;
-    in property <int> settings-summary-model-count;
+    in property <SummaryProvider> settings-summary-effective-engine;
     in property <bool> settings-summary-model-picker-visible;
     in property <[string]> settings-summary-model-ids;
     in property <[string]> settings-summary-model-labels;
@@ -306,7 +306,6 @@ export component MainWindow inherits Window {
     in property <string> settings-summary-refresh-error;
     in property <bool> settings-summary-provider-unavailable;
     in property <bool> settings-dictation-polish-enabled;
-    in property <bool> settings-dictation-polish-provider-available;
     in property <[string]> settings-dictation-polish-template-ids;
     in property <[string]> settings-dictation-polish-template-labels;
     in property <string> settings-active-dictation-polish-id;
@@ -926,7 +925,7 @@ export component MainWindow inherits Window {
                 ollama-url: root.settings-ollama-url;
                 ollama-available: root.settings-ollama-available;
                 ollama-checking: root.settings-ollama-checking;
-                summary-model-count: root.settings-summary-model-count;
+                summary-effective-engine: root.settings-summary-effective-engine;
                 summary-model-picker-visible: root.settings-summary-model-picker-visible;
                 summary-model-ids: root.settings-summary-model-ids;
                 summary-model-labels: root.settings-summary-model-labels;
@@ -939,7 +938,6 @@ export component MainWindow inherits Window {
                 summary-refresh-error: root.settings-summary-refresh-error;
                 summary-provider-unavailable: root.settings-summary-provider-unavailable;
                 dictation-polish-enabled: root.settings-dictation-polish-enabled;
-                dictation-polish-provider-available: root.settings-dictation-polish-provider-available;
                 dictation-polish-template-ids: root.settings-dictation-polish-template-ids;
                 dictation-polish-template-labels: root.settings-dictation-polish-template-labels;
                 active-dictation-polish-id: root.settings-active-dictation-polish-id;

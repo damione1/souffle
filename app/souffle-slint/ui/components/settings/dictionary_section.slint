@@ -97,96 +97,95 @@ export component DictionarySection inherits VerticalLayout {
         }
     }
 
-    KitFieldSeparator { }
+    if root.suggestion-count > 0 || root.suggestion-error != "": VerticalLayout {
+        KitFieldSeparator { }
 
-    VerticalLayout {
-        padding-left: 20px;
-        padding-right: 20px;
-        padding-top: 12px;
-        padding-bottom: 6px;
-        spacing: 8px;
-        KitOverline { label: @tr("CORRECTIONS À VALIDER"); }
-        if root.suggestion-count == 0: AppText {
-            text: @tr("Aucune suggestion en attente."); color: Theme.text-muted; typography: Typography.secondary;
-        }
-        if root.suggestion-error != "": AppText {
-            text: root.suggestion-error; color: Theme.danger; typography: Typography.caption; wrap: word-wrap;
-        }
-        suggestion-list := ListView {
-            // A reserved scrollbar gutter would shorten the correction strips.
-            overlay-scrollbars: true;
-            height: min(root.suggestion-content-height * 1px, 240px);
-            horizontal-scrollbar-policy: always-off;
-            content-y <=> root.suggestion-scroll-top;
+        VerticalLayout {
+            padding-left: 20px;
+            padding-right: 20px;
+            padding-top: 12px;
+            padding-bottom: 6px;
+            spacing: 8px;
+            KitOverline { label: @tr("CORRECTIONS À VALIDER"); }
+            if root.suggestion-error != "": AppText {
+                text: root.suggestion-error; color: Theme.danger; typography: Typography.caption; wrap: word-wrap;
+            }
+            suggestion-list := ListView {
+                // A reserved scrollbar gutter would shorten the correction strips.
+                overlay-scrollbars: true;
+                height: min(root.suggestion-content-height * 1px, 240px);
+                horizontal-scrollbar-policy: always-off;
+                content-y <=> root.suggestion-scroll-top;
 
-            for row in root.suggestions: Rectangle {
-                width: suggestion-list.visible-width;
-                height: 52px;
-                KitSurface {
-                    y: 0px;
-                    height: 46px;
-                    level: SurfaceLevel.inset;
-                    border: SurfaceBorder.none;
-                    corner-radius: 10px;
-                    inset: LayoutSpace.none;
-                    HorizontalLayout {
+                for row in root.suggestions: Rectangle {
+                    width: suggestion-list.visible-width;
+                    height: 52px;
+                    KitSurface {
+                        y: 0px;
                         height: 46px;
-                        padding-left: 12px;
-                        padding-right: 12px;
-                        padding-top: 8px;
-                        padding-bottom: 8px;
-                        spacing: 10px;
-                        alignment: stretch;
+                        level: SurfaceLevel.inset;
+                        border: SurfaceBorder.none;
+                        corner-radius: 10px;
+                        inset: LayoutSpace.none;
                         HorizontalLayout {
-                            spacing: 4px;
-                            alignment: start;
-                            horizontal-stretch: 1;
-                            AppText {
-                                text: @tr("Correction :");
-                                accessible-label: @tr("Correction : {} → {}", row.misspelling, row.term);
-                                typography: Typography.content;
-                                color: Theme.text-primary;
-                                vertical-alignment: center;
+                            height: 46px;
+                            padding-left: 12px;
+                            padding-right: 12px;
+                            padding-top: 8px;
+                            padding-bottom: 8px;
+                            spacing: 10px;
+                            alignment: stretch;
+                            HorizontalLayout {
+                                spacing: 4px;
+                                alignment: start;
+                                horizontal-stretch: 1;
+                                AppText {
+                                    text: @tr("Correction :");
+                                    accessible-label: @tr("Correction : {} → {}", row.misspelling, row.term);
+                                    typography: Typography.content;
+                                    color: Theme.text-primary;
+                                    vertical-alignment: center;
+                                }
+                                KitText {
+                                    text: row.misspelling;
+                                    role: TypographyRole.control;
+                                    font: TextViewFont.monospace;
+                                    wrap: no-wrap;
+                                    overflow: elide;
+                                    vertical-alignment: center;
+                                }
+                                AppText {
+                                    text: "→";
+                                    typography: Typography.content;
+                                    color: Theme.text-primary;
+                                    vertical-alignment: center;
+                                    accessible-role: none;
+                                }
+                                AppText {
+                                    text: row.term;
+                                    typography: Typography.section;
+                                    color: Theme.text-primary;
+                                    overflow: elide;
+                                    vertical-alignment: center;
+                                    accessible-role: none;
+                                }
                             }
-                            KitText {
-                                text: row.misspelling;
-                                role: TypographyRole.control;
-                                font: TextViewFont.monospace;
-                                wrap: no-wrap;
-                                overflow: elide;
-                                vertical-alignment: center;
+                            KitButton {
+                                text: @tr("Ignorer");
+                                accessible-label: @tr("Ignorer {} → {}", row.misspelling, row.term);
+                                control-size: ControlSize.compact;
+                                intent: ButtonIntent.quiet;
+                                disabled: root.suggestion-busy;
+                                activated => { root.suggestion-dismiss-requested(row.id); }
                             }
-                            AppText {
-                                text: "→";
-                                typography: Typography.content;
-                                color: Theme.text-primary;
-                                vertical-alignment: center;
-                                accessible-role: none;
+                            KitButton {
+                                text: @tr("Accepter");
+                                accessible-label: @tr("Accepter {} → {}", row.misspelling, row.term);
+                                control-size: ControlSize.compact;
+                                intent: ButtonIntent.primary;
+                                disabled: root.suggestion-busy;
+                                activated => { root.suggestion-accept-requested(row.id); }
                             }
-                            AppText {
-                                text: row.term;
-                                typography: Typography.section;
-                                color: Theme.text-primary;
-                                overflow: elide;
-                                vertical-alignment: center;
-                                accessible-role: none;
-                            }
-                        }
-                        KitButton {
-                            text: @tr("Ignorer");
-                            accessible-label: @tr("Ignorer {} → {}", row.misspelling, row.term);
-                            control-size: ControlSize.compact;
-                            intent: ButtonIntent.quiet;
-                            disabled: root.suggestion-busy;
-                            activated => { root.suggestion-dismiss-requested(row.id); }
-                        }
-                        KitButton {
-                            text: @tr("Accepter");
-                            accessible-label: @tr("Accepter {} → {}", row.misspelling, row.term);
-                            control-size: ControlSize.compact;
-                            intent: ButtonIntent.primary;
-                            disabled: root.suggestion-busy;
-                            activated => { root.suggestion-accept-requested(row.id); }
                         }
                     }
                 }

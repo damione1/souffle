@@ -1095,8 +1095,7 @@ fn refresh_summary_providers(
             return;
         };
         ia_ui::populate_intelligence(&window, settings, &status);
-        let provider_available = !window.get_settings_summary_provider_unavailable();
-        ia_ui::populate_dictation_polish(&window, settings, provider_available);
+        ia_ui::populate_dictation_polish(&window, settings);
         settings_drafts.reapply_polish_prompt(&window, &settings.dictation_polish_template_id);
         let current_editing_id = summary_template_editing.borrow().clone();
         let editing_id = settings_drafts::summary_editing_id(&current_editing_id, settings);
@@ -5017,6 +5016,7 @@ fn wire_callbacks(
         let token = settings_io_for_open.begin_open();
         if let Some(settings) = settings_state_for_open.known_snapshot() {
             summary_refresh_state_for_open.project_url_if_pristine(&window, &settings.ollama_url);
+            ia_ui::project_explicit_engine(&window, settings.summary_provider);
             settings_ui::populate(&window, &settings);
             data_ui::populate(&window, &settings);
             settings_values_for_open.observe_loaded(&settings);
@@ -5851,6 +5851,9 @@ fn wire_callbacks(
     window.on_settings_summary_provider_changed(move |value| {
         let submitted_generation = summary_refresh_state_for_provider.invalidate();
         let provider = ia_ui::summary_provider_from_slint(value);
+        if let Some(window) = weak.upgrade() {
+            ia_ui::project_explicit_engine(&window, provider);
+        }
         let weak = weak.clone();
         let handle = handle.clone();
         let state = settings_state_for_provider.clone();
@@ -5882,8 +5885,8 @@ fn wire_callbacks(
     let settings_drafts_for_ollama_url = settings_drafts.clone();
     window.on_settings_ollama_url_changed(move |value| {
         let submitted_generation = summary_refresh_state_for_ollama_url.mark_url_edited();
-        // Keep the draft on the window when the experimental toggle moves the
-        // shared provider editor between summary and dictation settings.
+        // Keep the draft on the window while the engine card is unmounted
+        // and mounted again by the summaries and polish switches.
         if let Some(window) = weak.upgrade() {
             window.set_settings_ollama_url(value.clone());
         }

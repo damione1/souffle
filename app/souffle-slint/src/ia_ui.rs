@@ -39,10 +39,27 @@ pub fn is_builtin_summary_template(id: &str) -> bool {
     SUMMARY_TEMPLATE_BUILT_INS.contains(&id)
 }
 
+/// Shows the rows of an explicitly chosen engine at once. The automatic
+/// choice keeps the last resolved engine until a provider check answers, so
+/// rows never flash between the two engines.
+pub fn project_explicit_engine(
+    window: &MainWindow,
+    choice: souffle_lib::summary::SummaryProviderChoice,
+) {
+    use souffle_lib::summary::SummaryProviderChoice;
+    match choice {
+        SummaryProviderChoice::Auto => {}
+        SummaryProviderChoice::AppleIntelligence | SummaryProviderChoice::Ollama => {
+            window.set_settings_summary_effective_engine(summary_provider_to_slint(choice));
+        }
+    }
+}
+
 /// Pushes the provider/model picker state from a real
-/// `check_summary_providers()` result. The effective provider (Auto resolves
-/// to Apple Intelligence when available) decides `provider-unavailable`, a
-/// flag the UI turns into a localized message; Rust never emits that text.
+/// `check_summary_providers()` result. The effective engine (Auto resolves
+/// to Apple Intelligence when available) decides which rows are shown and
+/// `provider-unavailable`, a flag the UI turns into a localized message;
+/// Rust never emits that text.
 pub fn populate_intelligence(
     window: &MainWindow,
     settings: &AppSettings,
@@ -58,13 +75,17 @@ pub fn populate_intelligence(
             .unwrap_or(SlintAppleReason::Unknown),
     );
     window.set_settings_ollama_available(status.ollama_available);
-    window.set_settings_summary_model_count(ollama_models.len() as i32);
 
     let effective_is_apple = match settings.summary_provider {
         souffle_lib::summary::SummaryProviderChoice::AppleIntelligence => true,
         souffle_lib::summary::SummaryProviderChoice::Ollama => false,
         souffle_lib::summary::SummaryProviderChoice::Auto => status.apple_intelligence_available,
     };
+    window.set_settings_summary_effective_engine(if effective_is_apple {
+        crate::SummaryProvider::AppleIntelligence
+    } else {
+        crate::SummaryProvider::Ollama
+    });
     let unavailable = if effective_is_apple {
         !status.apple_intelligence_available
     } else {
@@ -153,14 +174,9 @@ pub fn summary_provider_from_slint(
 /// Pushes the dictation-polish template picker + the active template's
 /// prompt. `active_id` picks which template is shown; falls back to the
 /// first template when absent (mirrors `templates.find(...) ?? templates[0]`).
-pub fn populate_dictation_polish(
-    window: &MainWindow,
-    settings: &AppSettings,
-    provider_available: bool,
-) {
+pub fn populate_dictation_polish(window: &MainWindow, settings: &AppSettings) {
     window.set_settings_dictation_polish_enabled(settings.dictation_polish_enabled);
     crate::app_branch_ui::populate(window, settings);
-    window.set_settings_dictation_polish_provider_available(provider_available);
     let labels: Vec<String> = settings
         .dictation_polish_templates
         .iter()

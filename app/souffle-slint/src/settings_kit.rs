@@ -116,20 +116,6 @@ pub(crate) fn new_window() -> Result<MainWindow, slint::PlatformError> {
         locale_options(current, |value| labels.invoke_locale_label(value))
     });
     options.on_locale_value(enum_value);
-    let weak = window.as_weak();
-    options.on_joined_labels(move |labels| {
-        let Some(window) = weak.upgrade() else {
-            return Default::default();
-        };
-        labels.model_tracker().track_row_count_changes();
-        let translations = window.global::<PickerLabels>();
-        (0..labels.row_count())
-            .filter_map(|index| labels.row_data_tracked(index))
-            .map(|label| translations.invoke_display(label).to_string())
-            .collect::<Vec<_>>()
-            .join(" · ")
-            .into()
-    });
     bind_options!(on_theme_options, invoke_theme_label, on_theme_value);
     bind_options!(
         on_paste_method_options,

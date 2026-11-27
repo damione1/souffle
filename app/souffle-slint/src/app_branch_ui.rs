@@ -141,8 +141,7 @@ pub(crate) struct Editor {
 
 impl Editor {
     fn project_routing(&self, window: &MainWindow, settings: &AppSettings) {
-        let provider_available = !window.get_settings_summary_provider_unavailable();
-        ia_ui::populate_dictation_polish(window, settings, provider_available);
+        ia_ui::populate_dictation_polish(window, settings);
         let displayed_id = window.get_settings_active_dictation_polish_id();
         self.drafts
             .reapply_polish_prompt(window, displayed_id.as_str());
@@ -669,7 +668,7 @@ mod tests {
     #[test]
     fn global_template_then_rule_publishes_canonical_polish_controls() {
         let test = BlockedEditor::new();
-        ia_ui::populate_dictation_polish(&test.window, &AppSettings::load(&test.db).unwrap(), true);
+        ia_ui::populate_dictation_polish(&test.window, &AppSettings::load(&test.db).unwrap());
         assert_eq!(
             test.window.get_settings_active_dictation_polish_id(),
             "clean"
@@ -696,7 +695,7 @@ mod tests {
     #[test]
     fn polish_enabled_then_rule_publishes_canonical_polish_controls() {
         let test = BlockedEditor::new();
-        ia_ui::populate_dictation_polish(&test.window, &AppSettings::load(&test.db).unwrap(), true);
+        ia_ui::populate_dictation_polish(&test.window, &AppSettings::load(&test.db).unwrap());
         assert!(test.window.get_settings_dictation_polish_enabled());
         test.window
             .invoke_settings_dictation_polish_enabled_changed(false);
@@ -716,7 +715,7 @@ mod tests {
     fn coalesced_routing_preserves_shared_prompt_drafts_and_routes_visible_edits() {
         let (window, io, db, _dir, editor) = isolated_editor();
         let initial = AppSettings::load(&db).unwrap();
-        ia_ui::populate_dictation_polish(&window, &initial, true);
+        ia_ui::populate_dictation_polish(&window, &initial);
         window.invoke_settings_dictation_polish_template_changed(
             souffle_lib::summary::TEMPLATE_EMAIL.into(),
         );
@@ -836,7 +835,7 @@ mod tests {
             SettingsDraftController::new(&window, io.clone()),
         );
         wire_polish_routing_callbacks(&window, editor.clone());
-        ia_ui::populate_dictation_polish(&window, &initial, true);
+        ia_ui::populate_dictation_polish(&window, &initial);
         window.invoke_settings_dictation_polish_template_changed(
             souffle_lib::summary::TEMPLATE_EMAIL.into(),
         );
@@ -1716,7 +1715,7 @@ mod tests {
             window.get_settings_app_branch_target_labels().as_any()
         ));
         assert_eq!(rules.row_data(1).unwrap().pattern_rollback_revision, 0);
-        ia_ui::populate_dictation_polish(&window, &AppSettings::load(&db).unwrap(), true);
+        ia_ui::populate_dictation_polish(&window, &AppSettings::load(&db).unwrap());
         pump();
         assert_eq!(
             inputs[1].accessible_value().unwrap(),

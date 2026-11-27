@@ -135,6 +135,9 @@ fn visit_tabs(w: &MainWindow) {
         SettingsTab::Meetings,
         SettingsTab::System,
     ];
+    // Either switch mounts the engine card; its Ollama rows need a resolved engine.
+    w.set_settings_dictation_polish_enabled(true);
+    w.set_settings_summary_effective_engine(SummaryProvider::Ollama);
     click(w, &tab_item(tabs[0]));
     let mut retained = None;
     let mut editor_y = 0.;

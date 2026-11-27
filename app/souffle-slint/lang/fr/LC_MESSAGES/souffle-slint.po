@@ -2154,17 +2154,18 @@ msgstr ""
 "Quand l'overlay est affiché, l'exclure des captures d'écran, des "
 "enregistrements et des partages d'écran."
 
-#: ui/components/settings/dictation_polish_section.slint:21
+#: ui/components/settings/dictation_polish_section.slint:17
 msgctxt "DictationPolishSection"
 msgid "POLISH DE LA DICTÉE"
 msgstr "POLISH DE LA DICTÉE"
 
-#: ui/components/settings/dictation_polish_section.slint:35
+#: ui/components/settings/dictation_polish_section.slint:31
+#: ui/components/settings/dictation_polish_section.slint:31
 msgctxt "DictationPolishSection"
 msgid "Nettoyer la dictée avec l'IA"
 msgstr "Nettoyer la dictée avec l'IA"
 
-#: ui/components/settings/dictation_polish_section.slint:36
+#: ui/components/settings/dictation_polish_section.slint:32
 msgctxt "DictationPolishSection"
 msgid ""
 "Passe le même fournisseur de résumés (Ollama ou Apple Intelligence) après "
@@ -2175,32 +2176,24 @@ msgstr ""
 "transcription pour corriger ponctuation, termes techniques et "
 "autocorrections parlées, sans changer le sens."
 
-#: ui/components/settings/dictation_polish_section.slint:55
-msgctxt "DictationPolishSection"
-msgid "Aucun fournisseur IA disponible pour la retouche."
-msgstr "Aucun fournisseur IA disponible pour la retouche."
-
-#: ui/components/settings/dictation_polish_section.slint:59
-msgctxt "DictationPolishSection"
-msgid "Choisir un fournisseur"
-msgstr "Choisir un fournisseur"
-
-#: ui/components/settings/dictation_polish_section.slint:81
+#: ui/components/settings/dictation_polish_section.slint:58
+#: ui/components/settings/dictation_polish_section.slint:58
 msgctxt "DictationPolishSection"
 msgid "Modèle de retouche"
 msgstr "Modèle de retouche"
 
-#: ui/components/settings/dictation_polish_section.slint:106
+#: ui/components/settings/dictation_polish_section.slint:83
 msgctxt "DictationPolishSection"
 msgid "Instruction"
 msgstr "Instruction"
 
-#: ui/components/settings/dictation_polish_section.slint:107
+#: ui/components/settings/dictation_polish_section.slint:84
 msgctxt "DictationPolishSection"
 msgid "Prompt envoyé à l'IA pour retoucher le texte transcrit."
 msgstr "Prompt envoyé à l'IA pour retoucher le texte transcrit."
 
-#: ui/components/settings/dictation_polish_section.slint:119
+#: ui/components/settings/dictation_polish_section.slint:97
+#: ui/components/settings/dictation_polish_section.slint:97
 msgctxt "DictationPolishSection"
 msgid "Instruction de retouche"
 msgstr "Instruction de retouche"
@@ -2634,33 +2627,34 @@ msgctxt "CalendarSection"
 msgid "Tous les calendriers sont inclus ; décochez ceux à masquer."
 msgstr "Tous les calendriers sont inclus ; décochez ceux à masquer."
 
-#: ui/components/settings/dictionary_section.slint:65
+#: ui/components/settings/dictionary_section.slint:57
 msgctxt "DictionarySection"
 msgid "Désactivé"
 msgstr "Désactivé"
 
-#: ui/components/settings/dictionary_section.slint:66
+#: ui/components/settings/dictionary_section.slint:58
 msgctxt "DictionarySection"
 msgid "Suggestions"
 msgstr "Suggestions"
 
-#: ui/components/settings/dictionary_section.slint:67
+#: ui/components/settings/dictionary_section.slint:59
 msgctxt "DictionarySection"
 msgid "Automatique"
 msgstr "Automatique"
 
-#: ui/components/settings/dictionary_section.slint:75
+#: ui/components/settings/dictionary_section.slint:67
 msgctxt "DictionarySection"
 msgid "DICTIONNAIRE PERSONNALISÉ"
 msgstr "DICTIONNAIRE PERSONNALISÉ"
 
+#: ui/components/settings/dictionary_section.slint:76
+#: ui/components/settings/dictionary_section.slint:76
 #
-#: ui/components/settings/dictionary_section.slint:84
 msgctxt "DictionarySection"
 msgid "Apprentissage depuis les corrections"
 msgstr "Apprentissage depuis les corrections"
 
-#: ui/components/settings/dictionary_section.slint:85
+#: ui/components/settings/dictionary_section.slint:77
 msgctxt "DictionarySection"
 msgid ""
 "Suggestions propose les corrections après collage et en réunion. Automatique "
@@ -2669,102 +2663,97 @@ msgstr ""
 "Suggestions propose les corrections après collage et en réunion. Automatique "
 "apprend après collage. Les corrections de session restent immédiates."
 
-#: ui/components/settings/dictionary_section.slint:116
+#: ui/components/settings/dictionary_section.slint:109
 msgctxt "DictionarySection"
 msgid "CORRECTIONS À VALIDER"
 msgstr "CORRECTIONS À VALIDER"
 
-#: ui/components/settings/dictionary_section.slint:118
-msgctxt "DictionarySection"
-msgid "Aucune suggestion en attente."
-msgstr "Aucune suggestion en attente."
-
-#: ui/components/settings/dictionary_section.slint:155
+#: ui/components/settings/dictionary_section.slint:143
 msgctxt "DictionarySection"
 msgid "Correction :"
 msgstr "Correction :"
 
-#: ui/components/settings/dictionary_section.slint:156
+#: ui/components/settings/dictionary_section.slint:144
 msgctxt "DictionarySection"
 msgid "Correction : {} → {}"
 msgstr "Correction : {} → {}"
 
-#: ui/components/settings/dictionary_section.slint:186
+#: ui/components/settings/dictionary_section.slint:174
 msgctxt "DictionarySection"
 msgid "Ignorer"
 msgstr "Ignorer"
 
-#: ui/components/settings/dictionary_section.slint:187
+#: ui/components/settings/dictionary_section.slint:175
 msgctxt "DictionarySection"
 msgid "Ignorer {} → {}"
 msgstr "Ignorer {} → {}"
 
-#: ui/components/settings/dictionary_section.slint:194
+#: ui/components/settings/dictionary_section.slint:182
 msgctxt "DictionarySection"
 msgid "Accepter"
 msgstr "Accepter"
 
-#: ui/components/settings/dictionary_section.slint:195
+#: ui/components/settings/dictionary_section.slint:183
 msgctxt "DictionarySection"
 msgid "Accepter {} → {}"
 msgstr "Accepter {} → {}"
 
-#: ui/components/settings/dictionary_section.slint:223
+#: ui/components/settings/dictionary_section.slint:210
 msgctxt "DictionarySection"
 msgid "TERME"
 msgstr "TERME"
 
-#: ui/components/settings/dictionary_section.slint:224
+#: ui/components/settings/dictionary_section.slint:211
 msgctxt "DictionarySection"
 msgid "PRONONCIATION"
 msgstr "PRONONCIATION"
 
-#: ui/components/settings/dictionary_section.slint:225
+#: ui/components/settings/dictionary_section.slint:212
 msgctxt "DictionarySection"
 msgid "CATÉGORIE"
 msgstr "CATÉGORIE"
 
-#: ui/components/settings/dictionary_section.slint:233
+#: ui/components/settings/dictionary_section.slint:220
 msgctxt "DictionarySection"
 msgid "ex. Kubernetes"
 msgstr "ex. Kubernetes"
 
-#: ui/components/settings/dictionary_section.slint:234
+#: ui/components/settings/dictionary_section.slint:221
 msgctxt "DictionarySection"
 msgid "Terme"
 msgstr "Terme"
 
-#: ui/components/settings/dictionary_section.slint:239
+#: ui/components/settings/dictionary_section.slint:226
 msgctxt "DictionarySection"
 msgid "ex. vaysix"
 msgstr "ex. vaysix"
 
-#: ui/components/settings/dictionary_section.slint:240
+#: ui/components/settings/dictionary_section.slint:227
 msgctxt "DictionarySection"
 msgid "Prononciation facultative"
 msgstr "Prononciation facultative"
 
-#: ui/components/settings/dictionary_section.slint:245
+#: ui/components/settings/dictionary_section.slint:232
 msgctxt "DictionarySection"
 msgid "ex. tech"
 msgstr "ex. tech"
 
-#: ui/components/settings/dictionary_section.slint:246
+#: ui/components/settings/dictionary_section.slint:233
 msgctxt "DictionarySection"
 msgid "Catégorie facultative"
 msgstr "Catégorie facultative"
 
-#: ui/components/settings/dictionary_section.slint:250
+#: ui/components/settings/dictionary_section.slint:237
 msgctxt "DictionarySection"
 msgid "Ajouter"
 msgstr "Ajouter"
 
-#: ui/components/settings/dictionary_section.slint:267
+#: ui/components/settings/dictionary_section.slint:254
 msgctxt "DictionarySection"
 msgid "Aucune entrée."
 msgstr "Aucune entrée."
 
-#: ui/components/settings/dictionary_section.slint:325
+#: ui/components/settings/dictionary_section.slint:314
 msgctxt "DictionarySection"
 msgid "Supprimer"
 msgstr "Supprimer"
@@ -2949,17 +2938,18 @@ msgctxt "DataSection"
 msgid "Ne pas conserver"
 msgstr "Ne pas conserver"
 
-#: ui/components/settings/settings_options.slint:87
+#: ui/components/settings/settings_options.slint:77
+#: ui/components/settings/settings_options.slint:77
 msgctxt "IntelligenceSection"
 msgid "Apple Intelligence"
 msgstr "Apple Intelligence"
 
-#: ui/components/settings/settings_options.slint:88
+#: ui/components/settings/settings_options.slint:78
 msgctxt "IntelligenceSection"
 msgid "Ollama"
 msgstr "Ollama"
 
-#: ui/components/settings/settings_options.slint:89
+#: ui/components/settings/settings_options.slint:79
 msgctxt "IntelligenceSection"
 msgid "Automatique"
 msgstr "Automatique"
@@ -3164,177 +3154,140 @@ msgctxt "DiagnosticsSection"
 msgid "Copier les diagnostics"
 msgstr "Copier les diagnostics"
 
-#: ui/components/settings/intelligence_section.slint:43
+#: ui/components/settings/intelligence_section.slint:45
 msgctxt "IntelligenceSection"
 msgid "Ce Mac ne prend pas en charge Apple Intelligence."
 msgstr "Ce Mac ne prend pas en charge Apple Intelligence."
 
-#: ui/components/settings/intelligence_section.slint:44
+#: ui/components/settings/intelligence_section.slint:46
 msgctxt "IntelligenceSection"
 msgid ""
 "Activez Apple Intelligence dans les Réglages Système, puis rouvrez Soufflé."
 msgstr ""
 "Activez Apple Intelligence dans les Réglages Système, puis rouvrez Soufflé."
 
-#: ui/components/settings/intelligence_section.slint:45
+#: ui/components/settings/intelligence_section.slint:47
 msgctxt "IntelligenceSection"
 msgid "macOS télécharge encore le modèle on-device ; réessayez plus tard."
 msgstr "macOS télécharge encore le modèle on-device ; réessayez plus tard."
 
-#: ui/components/settings/intelligence_section.slint:46
+#: ui/components/settings/intelligence_section.slint:48
 msgctxt "IntelligenceSection"
 msgid "Apple Intelligence nécessite macOS 26 ou plus récent."
 msgstr "Apple Intelligence nécessite macOS 26 ou plus récent."
 
-#: ui/components/settings/intelligence_section.slint:47
+#: ui/components/settings/intelligence_section.slint:49
 msgctxt "IntelligenceSection"
 msgid "Cette version ne comprend pas le support d'Apple Intelligence."
 msgstr "Cette version ne comprend pas le support d'Apple Intelligence."
 
-#: ui/components/settings/intelligence_section.slint:48
+#: ui/components/settings/intelligence_section.slint:50
 msgctxt "IntelligenceSection"
 msgid "Apple Intelligence nécessite une puce Apple Silicon."
 msgstr "Apple Intelligence nécessite une puce Apple Silicon."
 
-#: ui/components/settings/intelligence_section.slint:49
+#: ui/components/settings/intelligence_section.slint:51
 msgctxt "IntelligenceSection"
 msgid "Apple Intelligence n'est pas disponible."
 msgstr "Apple Intelligence n'est pas disponible."
 
-#: ui/components/settings/intelligence_section.slint:54
-msgctxt "IntelligenceSection"
-msgid "FOURNISSEUR IA DE LA DICTÉE"
-msgstr "FOURNISSEUR IA DE LA DICTÉE"
-
-#: ui/components/settings/intelligence_section.slint:54
-msgctxt "IntelligenceSection"
-msgid "RÉSUMÉS (EXPÉRIMENTAUX)"
-msgstr "RÉSUMÉS (EXPÉRIMENTAUX)"
-
-#: ui/components/settings/intelligence_section.slint:68
+#: ui/components/settings/intelligence_section.slint:70
 msgctxt "IntelligenceSection"
 msgid "Moteur"
 msgstr "Moteur"
 
-#: ui/components/settings/intelligence_section.slint:69
-msgctxt "IntelligenceSection"
-msgid "Le moteur qui nettoie la dictée."
-msgstr "Le moteur qui nettoie la dictée."
-
-#: ui/components/settings/intelligence_section.slint:69
+#: ui/components/settings/intelligence_section.slint:71
 msgctxt "IntelligenceSection"
 msgid "Le moteur qui rédige les résumés et nettoie la dictée."
 msgstr "Le moteur qui rédige les résumés et nettoie la dictée."
 
-#: ui/components/settings/intelligence_section.slint:74
-msgctxt "IntelligenceSection"
-msgid "Moteur de dictée IA"
-msgstr "Moteur de dictée IA"
-
-#: ui/components/settings/intelligence_section.slint:74
-msgctxt "IntelligenceSection"
-msgid "Moteur de résumé"
-msgstr "Moteur de résumé"
-
-#: ui/components/settings/intelligence_section.slint:85
+#: ui/components/settings/intelligence_section.slint:87
 msgctxt "IntelligenceSection"
 msgid "Apple Intelligence n'est pas disponible sur cet appareil."
 msgstr "Apple Intelligence n'est pas disponible sur cet appareil."
 
-#: ui/components/settings/intelligence_section.slint:86
+#: ui/components/settings/intelligence_section.slint:88
 msgctxt "IntelligenceSection"
 msgid "Aucun modèle Ollama compatible n'est installé."
 msgstr "Aucun modèle Ollama compatible n'est installé."
 
-#: ui/components/settings/intelligence_section.slint:113
+#: ui/components/settings/intelligence_section.slint:138
 msgctxt "IntelligenceSection"
 msgid "Disponible"
 msgstr "Disponible"
 
-#: ui/components/settings/intelligence_section.slint:113
+#: ui/components/settings/intelligence_section.slint:138
 msgctxt "IntelligenceSection"
 msgid "Non disponible"
 msgstr "Non disponible"
 
-#: ui/components/settings/intelligence_section.slint:123
+#: ui/components/settings/intelligence_section.slint:148
 msgctxt "IntelligenceSection"
 msgid "Réglages Système"
 msgstr "Réglages Système"
 
-#: ui/components/settings/intelligence_section.slint:144
+#: ui/components/settings/intelligence_section.slint:169
+#: ui/components/settings/intelligence_section.slint:169
 msgctxt "IntelligenceSection"
 msgid "URL Ollama"
 msgstr "URL Ollama"
 
-#: ui/components/settings/intelligence_section.slint:145
+#: ui/components/settings/intelligence_section.slint:170
 msgctxt "IntelligenceSection"
 msgid "Adresse du serveur Ollama local ou distant."
 msgstr "Adresse du serveur Ollama local ou distant."
 
-#: ui/components/settings/intelligence_section.slint:154
+#: ui/components/settings/intelligence_section.slint:179
 msgctxt "IntelligenceSection"
 msgid "http://localhost:11434"
 msgstr "http://localhost:11434"
 
-#: ui/components/settings/intelligence_section.slint:171
-msgctxt "IntelligenceSection"
-msgid "État de la connexion"
-msgstr "État de la connexion"
-
-#: ui/components/settings/intelligence_section.slint:172
-msgctxt "IntelligenceSection"
-msgid "Aucun modèle trouvé."
-msgstr "Aucun modèle trouvé."
-
-#: ui/components/settings/intelligence_section.slint:173
-msgctxt "IntelligenceSection"
-msgid "1 modèle trouvé."
-msgstr "1 modèle trouvé."
-
-#: ui/components/settings/intelligence_section.slint:174
-msgctxt "IntelligenceSection"
-msgid "{} modèles trouvés."
-msgstr "{} modèles trouvés."
-
-#: ui/components/settings/intelligence_section.slint:182
-msgctxt "IntelligenceSection"
-msgid "Connecté"
-msgstr "Connecté"
-
-#: ui/components/settings/intelligence_section.slint:192
+#: ui/components/settings/intelligence_section.slint:94
+#: ui/components/settings/intelligence_section.slint:94
 msgctxt "IntelligenceSection"
 msgid "Réessayer"
 msgstr "Réessayer"
 
-#: ui/components/settings/intelligence_section.slint:210
-msgctxt "IntelligenceSection"
-msgid "Modèle de dictée IA"
-msgstr "Modèle de dictée IA"
-
-#: ui/components/settings/intelligence_section.slint:210
-msgctxt "IntelligenceSection"
-msgid "Modèle de résumé"
-msgstr "Modèle de résumé"
-
-#: ui/components/settings/intelligence_section.slint:227
+#: ui/components/settings/intelligence_section.slint:213
 msgctxt "IntelligenceSection"
 msgid "Échec du téléchargement : {}"
 msgstr "Échec du téléchargement : {}"
 
-#: ui/components/settings/intelligence_section.slint:237
+#: ui/components/settings/intelligence_section.slint:223
 msgctxt "IntelligenceSection"
 msgid "Aucun modèle compatible installé."
 msgstr "Aucun modèle compatible installé."
 
-#: ui/components/settings/intelligence_section.slint:239
+#: ui/components/settings/intelligence_section.slint:225
 msgctxt "IntelligenceSection"
 msgid "Téléchargement de {}…"
 msgstr "Téléchargement de {}…"
 
-#: ui/components/settings/intelligence_section.slint:247
+#: ui/components/settings/intelligence_section.slint:233
 msgctxt "IntelligenceSection"
 msgid "Télécharger {}"
 msgstr "Télécharger {}"
+
+#: ui/components/settings/intelligence_section.slint:56
+msgctxt "IntelligenceSection"
+msgid "MOTEUR IA"
+msgstr "MOTEUR IA"
+
+#: ui/components/settings/intelligence_section.slint:76
+msgctxt "IntelligenceSection"
+msgid "Moteur IA"
+msgstr "Moteur IA"
+
+#: ui/components/settings/intelligence_section.slint:89
+msgctxt "IntelligenceSection"
+msgid "Le serveur Ollama ne répond pas à cette adresse."
+msgstr "Le serveur Ollama ne répond pas à cette adresse."
+
+#: ui/components/settings/intelligence_section.slint:196
+#: ui/components/settings/intelligence_section.slint:196
+msgctxt "IntelligenceSection"
+msgid "Modèle Ollama"
+msgstr "Modèle Ollama"
 
 #: ui/components/settings/data_section.slint:21
 msgctxt "CodeBlock"
