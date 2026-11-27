@@ -534,7 +534,7 @@
             "p": "Les apps qui refusent un collage synthétique (terminaux, champs sécurisés) peuvent recevoir des frappes simulées à la place. Quand le collage automatique est actif, Paramètres → Interface → Avancé propose trois méthodes de collage : le presse-papiers avec ⌘V, la frappe simulée, ou une écriture directe dans le champ focalisé via l'Accessibilité."
           },
           {
-            "p": "Deux passages tournent à la sortie, et chacun se désactive. Le <strong>polish de la dictée</strong>, actif par défaut quand un fournisseur est disponible, fait passer la transcription brute dans un LLM local, avec un modèle de prompt que vous pouvez modifier (nettoyage, courriel professionnel, liste à puces, retrait des hésitations) ; il demande Apple Intelligence ou Ollama. L'<strong>apprentissage des corrections</strong>, actif par défaut, surveille le champ juste après l'insertion : corrigez un nom mal entendu une fois à la main, et Soufflé garde cette orthographe pour la suite, dans le dictionnaire personnalisé sous Paramètres → Transcription."
+            "p": "Deux passages tournent à la sortie, et chacun se désactive. Le <strong>polish de la dictée</strong>, actif par défaut quand un fournisseur est disponible, fait passer la transcription brute dans un LLM local, avec un gabarit de prompt que vous pouvez modifier (nettoyage, courriel professionnel, liste à puces, retrait des hésitations) ; il demande Apple Intelligence ou Ollama. L'<strong>apprentissage des corrections</strong>, actif par défaut, surveille le champ juste après l'insertion : corrigez un nom mal entendu une fois à la main, et Soufflé garde cette orthographe pour la suite, dans le dictionnaire personnalisé sous Paramètres → Transcription."
           },
           {
             "p": "Les <strong>extraits vocaux</strong> vivent sous Paramètres → Transcription : dites une phrase déclencheur en début de dictée et Soufflé colle l'expansion à la place, sans tenir compte de la casse ni des accents, et sans polish IA sur cette prise. Le menu de la barre des menus propose aussi <em>Copier la dernière transcription</em> quand vous en avez besoin, et <em>Pause raccourci (1 h)</em> quand la touche doit servir à autre chose."
@@ -610,7 +610,7 @@
         "h": "Résumés et compaction — expérimental",
         "blocks": [
           {
-            "p": "<strong>Cette fonctionnalité est expérimentale et désactivée par défaut.</strong> Dans Paramètres → IA, activez <strong>Résumés de réunion</strong> (<strong>Summarization</strong> dans l'interface anglaise) pour afficher le choix du fournisseur et du modèle, les modèles de consignes, les options de compaction et les actions de génération dans les réunions. Désactiver cet interrupteur masque ces éléments tout en conservant vos réglages et les résultats déjà enregistrés. La transcription, les exports et la lecture par MCP restent disponibles. La reformulation des dictées conserve sa configuration indépendante ; son fournisseur IA reste accessible si elle est activée."
+            "p": "<strong>Cette fonctionnalité est expérimentale et désactivée par défaut.</strong> Dans Paramètres → IA, activez <strong>Résumés de réunion</strong> (<strong>Summarization</strong> dans l'interface anglaise) pour afficher le choix du fournisseur et du modèle, les gabarits de résumé, les options de compaction et les actions de génération dans les réunions. Désactiver cet interrupteur masque ces éléments tout en conservant vos réglages et les résultats déjà enregistrés. La transcription, les exports et la lecture par MCP restent disponibles. La reformulation des dictées conserve sa configuration indépendante ; son fournisseur IA reste accessible si elle est activée."
           },
           {
             "p": "Transcrire correctement une réunion en local est déjà exigeant. Résumer fidèlement une longue transcription avec un modèle local l'est encore davantage : il faut conserver les décisions, leurs conditions, les négations, les responsables et les échéances. La priorité de Soufflé est de fournir une transcription de qualité sur les Mac Apple Silicon pris en charge, y compris les configurations modestes, plutôt que de supposer que chacun dispose d'une grosse machine."
@@ -634,7 +634,7 @@
             "code": "brew install ollama\nbrew services start ollama\nollama pull qwen2.5:7b"
           },
           {
-            "p": "Une fois Résumés de réunion activé dans Paramètres → IA, laissez le serveur sur <code>http://localhost:11434</code> et choisissez votre modèle. <code>qwen2.5:7b</code> est une option de départ proposée par l'app, pas une validation de qualité sur les réunions longues. Vous pouvez modifier les modèles de consignes et comparer les résultats à la transcription. Le fournisseur est partagé avec la reformulation des dictées, qui reste utilisable sans activer les résumés."
+            "p": "Une fois Résumés de réunion activé dans Paramètres → IA, laissez le serveur sur <code>http://localhost:11434</code> et choisissez votre modèle. <code>qwen2.5:7b</code> est une option de départ proposée par l'app, pas une validation de qualité sur les réunions longues. Vous pouvez modifier les gabarits de résumé et comparer les résultats à la transcription. Le fournisseur est partagé avec la reformulation des dictées, qui reste utilisable sans activer les résumés."
           },
           {
             "p": "Avec Apple Intelligence ou Ollama sur <code>localhost</code>, le texte est traité sur votre Mac. Si vous remplacez l'adresse par un serveur Ollama distant, Soufflé lui envoie le texte nécessaire au résumé ou à la reformulation. Choisissez ce serveur en connaissance de cause."
@@ -714,7 +714,7 @@
               ],
               [
                 "Polish de la dictée<br><span class=\"docs-tab\">IA</span>",
-                "Le passage LLM local et ses modèles de prompt, modifiables. Actif par défaut quand Apple Intelligence ou Ollama est disponible."
+                "Le passage LLM local et ses gabarits de prompt, modifiables. Actif par défaut quand Apple Intelligence ou Ollama est disponible."
               ],
               [
                 "Dictionnaire personnalisé<br><span class=\"docs-tab\">Transcription</span>",
@@ -742,7 +742,7 @@
               ],
               [
                 "Résumés de réunion — expérimental<br><span class=\"docs-tab\">IA</span>",
-                "Interrupteur désactivé par défaut. Affiche les consignes de résumé, l'interrupteur de compression et les actions des réunions. La carte Moteur IA, partagée avec la reformulation des dictées, apparaît dès que l'un des deux est actif et ne montre que le moteur utilisé : Apple Intelligence, ou Ollama avec son URL et son modèle. La reformulation des dictées reste indépendante."
+                "Interrupteur désactivé par défaut. Affiche les gabarits de résumé, l'interrupteur de compression et les actions des réunions. La carte Moteur IA, partagée avec la reformulation des dictées, apparaît dès que l'un des deux est actif et ne montre que le moteur utilisé : Apple Intelligence, ou Ollama avec son URL et son modèle. La reformulation des dictées reste indépendante."
               ],
               [
                 "Lancer à l'ouverture de session<br><span class=\"docs-tab\">Système</span>",
