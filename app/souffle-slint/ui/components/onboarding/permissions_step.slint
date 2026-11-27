@@ -1,5 +1,5 @@
 import {
-    AlertSeverity, ButtonIntent, ControlSize, KitAlert, KitAvatar, KitBadge, KitButton, KitDivider,
+    AlertSeverity, ButtonIntent, KitAlert, KitAvatar, KitBadge, KitDivider,
     KitText, KitThemeContext, Tone, TypographyRole, AvatarShape
 } from "@kit";
 import { IconGlyph } from "@kit";
@@ -10,6 +10,7 @@ import { LucideTime } from "@kit-icons/time.slint";
 import { AppText, Typography } from "@typography";
 import { AccessState, PermissionKind } from "../../types.slint";
 import { Theme } from "../../theme.slint";
+import { BannerAlert, CompactButton } from "../app_controls.slint";
 
 // Port of PermissionsStep.svelte. Each row's status comes from a real,
 // repeatedly-polled `get_permission_status()` snapshot (main.rs polls every
@@ -124,9 +125,8 @@ export component PermissionsStep inherits VerticalLayout {
                     role: TypographyRole.caption;
                     vertical-alignment: center;
                 }
-                if row.state != AccessState.granted && row.state != AccessState.unsupported: KitButton {
+                if row.state != AccessState.granted && row.state != AccessState.unsupported: CompactButton {
                     modal-layer: root.modal-layer;
-                    control-size: ControlSize.compact;
                     intent: ButtonIntent.secondary;
                     text: row.busy ? @tr("Vérification…") : row-action-label(row.kind);
                     disabled: row.busy;
@@ -141,19 +141,15 @@ export component PermissionsStep inherits VerticalLayout {
             if row-hint(row.kind, row.state) != "" && !(root.compact && row.kind == PermissionKind.accessibility): VerticalLayout {
                 padding-top: root.unit * 3;
 
-                KitAlert {
-                    bordered: false;
-                    inset: 12px;
-                    corner-radius: 12px;
+                BannerAlert {
                     message-size: Typography.hint.size;
                     severity: AlertSeverity.information;
                     // Away from its row, the microphone hint has to name it.
                     title: row.kind == PermissionKind.microphone ? row-label(row.kind) : "";
                     message: row-hint(row.kind, row.state);
                     message-ink: Theme.text-primary;
-                    if row-hint-action-label(row.kind, row.state) != "": KitButton {
+                    if row-hint-action-label(row.kind, row.state) != "": CompactButton {
                         modal-layer: root.modal-layer;
-                        control-size: ControlSize.compact;
                         intent: ButtonIntent.link;
                         text: row-hint-action-label(row.kind, row.state);
                         activated => { root.hint-action-requested(row.kind); }
@@ -176,9 +172,8 @@ export component PermissionsStep inherits VerticalLayout {
             horizontal-stretch: 1;
             vertical-alignment: center;
         }
-        KitButton {
+        CompactButton {
             modal-layer: root.modal-layer;
-            control-size: ControlSize.compact;
             intent: ButtonIntent.quiet;
             text: root.repair-busy ? @tr("Vérification…") : @tr("Réparer");
             disabled: root.repair-busy || root.repair-cooldown;

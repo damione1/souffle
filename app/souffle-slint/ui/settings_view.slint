@@ -20,12 +20,13 @@ import { ModelSection } from "components/settings/model_section.slint";
 import { DictionarySection, DictionaryRow, DictionarySuggestionRow, DictionaryLearningOption } from "components/settings/dictionary_section.slint";
 import { SnippetsSection, SnippetRow } from "components/settings/snippets_section.slint";
 import { Theme } from "theme.slint";
-import { KitButton, KitAppShell, KitStack, KitInline, KitFocusBackground, KitAlert, KitText, KitRouter, KitLayoutMetrics, KitThemeContext, ButtonIntent, ControlSize, LayoutSpace } from "@kit";
+import { KitAppShell, KitStack, KitInline, KitFocusBackground, KitAlert, KitText, KitRouter, KitLayoutMetrics, KitThemeContext, ButtonIntent, LayoutSpace } from "@kit";
 import { LucideArrows } from "@kit-icons/arrows.slint";
 import { SettingsOptions } from "components/settings/settings_options.slint";
 import { SettingsTabBar, SettingsTabPage } from "components/settings/settings_tabs.slint";
 import { TranscriptionPhase, AppTheme, AppLocale, PasteMethod, AudioRetention, AccessState, ShortcutField, ShortcutNotice, SettingsCaptureError, SummaryProvider, AppleIntelligenceUnavailableReason, SettingsTab, InstallBlockReason, UpdateRowStatus, DictionaryLearningMode } from "types.slint";
 import { ModelDeletionError, TranscriptionUnavailableReason, SystemSettingsPane } from "types.slint";
+import { CompactButton } from "./components/app_controls.slint";
 
 // The six tab pages share one overlay and mount their sections on first visit.
 export component SettingsView inherits KitAppShell {
@@ -277,10 +278,9 @@ export component SettingsView inherits KitAppShell {
             vertical-stretch: 0;
 
             KitInline {
-                done := KitButton {
+                done := CompactButton {
                     text: @tr("Terminé");
                     accessible-name: @tr("Fermer les paramètres");
-                    control-size: ControlSize.compact;
                     intent: ButtonIntent.quiet;
                     leading-icon: LucideArrows.arrow-left();
                     activated => { root.close-requested(); }

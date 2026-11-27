@@ -1,5 +1,6 @@
-import { FieldSetAppearance, FieldRowAppearance, ChoiceLabelPosition, ControlWidth, KitSwitch, Ownership, KitFieldSet, KitThemeContext, KitThemes, KitFieldRow } from "@kit";
+import { FieldSetAppearance, ChoiceLabelPosition, ControlWidth, KitSwitch, Ownership, KitFieldSet, KitThemeContext, KitThemes } from "@kit";
 import { Theme } from "../../theme.slint";
+import { SettingsFieldRow } from "../app_controls.slint";
 
 export component FeedbackSoundsSection inherits KitFieldSet {
     in property <bool> enabled;
@@ -10,10 +11,7 @@ export component FeedbackSoundsSection inherits KitFieldSet {
     legend: @tr("SONS DE DICTÉE");
     appearance: FieldSetAppearance.card;
 
-    KitFieldRow {
-        orientation: Theme.settings-field-orientation(self.width);
-        appearance: FieldRowAppearance.inset;
-        show-divider: true;
+    SettingsFieldRow {
         focus-requested => { sounds-switch.take-focus(); }
         private property <bool> control-focused: sounds-switch.has-focus;
         changed control-focused => {

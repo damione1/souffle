@@ -1,11 +1,12 @@
 import { AppText, Typography } from "@typography";
-import { ButtonIntent, ChatBubbleTone, ChatSide, ControlSize, ControlWidth, FieldDecoration, KitButton, KitCard, KitChatBubble, KitLayoutMetrics, KitPressable, KitSearchField, KitSegmentedControl, KitText, KitThemeContext, LayoutSpace, ListView, OptionRow, Ownership, SegmentedAppearance, SurfaceLevel, TypographyRole } from "@kit";
+import { ButtonIntent, ChatBubbleTone, ChatSide, ControlSize, ControlWidth, FieldDecoration, KitCard, KitChatBubble, KitLayoutMetrics, KitPressable, KitSearchField, KitSegmentedControl, KitText, KitThemeContext, LayoutSpace, ListView, OptionRow, Ownership, SegmentedAppearance, SurfaceLevel, TypographyRole } from "@kit";
 import { LucideText } from "@kit-icons/text.slint";
 import { LucideNotifications } from "@kit-icons/notifications.slint";
 import { Theme } from "../theme.slint";
 import { TranscriptWord, TranscriptWordFlow, DictionaryAliasPopover, TranscriptNaturalWidth } from "transcript_words.slint";
 export { TranscriptWord }
 import { SpeakerRole } from "../types.slint";
+import { CompactButton } from "./app_controls.slint";
 
 // Port of MeetingTranscriptSection.svelte - paragraph grouping with speaker
 // labels and session-break dividers, click-to-seek on a paragraph's
@@ -126,10 +127,9 @@ export component TranscriptToolbar inherits KitCard {
             alignment: center;
             horizontal-stretch: 0;
 
-            KitButton {
+            CompactButton {
                 accessible-name: @tr("Copier la transcription");
                 text: root.just-copied ? @tr("Copié") : @tr("Copier");
-                control-size: ControlSize.compact;
                 intent: ButtonIntent.quiet;
                 leading-icon: root.just-copied ? LucideNotifications.check() : LucideText.copy();
                 activated => { root.copy-transcript(); }

@@ -1,6 +1,7 @@
 import { FieldSetAppearance, FieldRowAppearance, FieldRowAlignment, ChoiceLabelPosition, ControlWidth, KitFieldRow, KitFieldSet, KitSwitch, KitTextArea, KitThemeContext, KitThemes, Ownership, ResizePolicy } from "@kit";
 import { CatalogPicker } from "../catalog_picker.slint";
 import { Theme } from "../../theme.slint";
+import { SettingsFieldRow } from "../app_controls.slint";
 
 export component DictationPolishSection inherits KitFieldSet {
     in property <bool> enabled;
@@ -17,11 +18,8 @@ export component DictationPolishSection inherits KitFieldSet {
     legend: @tr("POLISH DE LA DICTÉE");
     appearance: FieldSetAppearance.card;
 
-    KitFieldRow {
+    SettingsFieldRow {
         theme: KitThemeContext.current;
-        orientation: Theme.settings-field-orientation(self.width);
-        appearance: FieldRowAppearance.inset;
-        show-divider: true;
         focus-requested => { polish-switch.take-focus(); }
         private property <bool> control-focused: polish-switch.has-focus;
         changed control-focused => {
@@ -42,11 +40,8 @@ export component DictationPolishSection inherits KitFieldSet {
         }
     }
 
-    if root.enabled && root.template-labels.length > 0: KitFieldRow {
+    if root.enabled && root.template-labels.length > 0: SettingsFieldRow {
         theme: KitThemeContext.current;
-        orientation: Theme.settings-field-orientation(self.width);
-        appearance: FieldRowAppearance.inset;
-        show-divider: true;
         focus-requested => { model-picker.take-focus(); }
         private property <bool> control-focused: model-picker.has-focus;
         changed control-focused => {

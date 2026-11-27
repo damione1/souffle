@@ -1,5 +1,5 @@
 import { FieldSetAppearance, AlertActions, AlertSeverity,
-    KitAlert, KitButton, KitFieldRow, KitFieldSet, KitIconButton,
+    KitFieldRow, KitFieldSet, KitIconButton,
     KitModalContext,
     KitThemeContext, KitThemes, ListView, KitFieldSeparator, KitInline
 } from "@kit";
@@ -8,6 +8,7 @@ import { LucideFiles } from "@kit-icons/files.slint";
 import { PickerLabels } from "../picker_labels.slint";
 import { SettingsNoticeRow } from "settings_notice_row.slint";
 import { Theme } from "../../theme.slint";
+import { BannerAlert, CompactButton } from "../app_controls.slint";
 
 // microphone_list.rs merges the connected and remembered devices in priority order.
 export struct MicrophoneRow {
@@ -163,14 +164,13 @@ export component MicrophoneSection inherits KitFieldSet {
     }
 
     if root.sample-rate-high: SettingsNoticeRow {
-        rate-alert := KitAlert { bordered: false; corner-radius: 12px; inset: 12px; actions-placement: AlertActions.trailing;
+        rate-alert := BannerAlert { actions-placement: AlertActions.trailing;
             severity: AlertSeverity.warning;
             message: root.capture-busy
                 ? root.rate-warning + " " + @tr("Terminez l'enregistrement avant de réinitialiser la fréquence du microphone.")
                 : root.rate-warning;
 
-            KitButton {
-                control-size: compact;
+            CompactButton {
                 text-wrap: word-wrap;
                 text: root.resetting-sample-rate ? @tr("Réinitialisation…") : @tr("Réinitialiser à 48 kHz");
                 disabled: root.resetting-sample-rate || root.capture-busy;

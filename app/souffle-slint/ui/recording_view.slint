@@ -1,5 +1,5 @@
 import { AppText, AppNumericText, Typography } from "@typography";
-import { AlertActions, AlertSeverity, ButtonIntent, ControlSize, IconGlyph, KitAlert, KitBadge, KitButton, KitCard, KitDivider, KitIcon, KitInline, KitScrollArea, KitSurface, KitTextArea, KitThemeContext, SurfaceLevel, Tone } from "@kit";
+import { AlertActions, AlertSeverity, ButtonIntent, IconGlyph, KitBadge, KitButton, KitCard, KitDivider, KitIcon, KitInline, KitScrollArea, KitSurface, KitTextArea, KitThemeContext, SurfaceLevel, Tone } from "@kit";
 import { ProLevelWaveform } from "@kit-pro";
 import { LucideDesign } from "@kit-icons/design.slint";
 import { LucideText } from "@kit-icons/text.slint";
@@ -10,6 +10,7 @@ import { StatusBanner } from "components/status_banner.slint";
 import { TranscriptBlock } from "components/transcript_section.slint";
 import { TranscriptWord, TranscriptWordFlow, DictionaryAliasPopover } from "components/transcript_words.slint";
 import { LiveTranscriptParagraph } from "components/live_transcript_paragraph.slint";
+import { BannerAlert, CompactButton } from "./components/app_controls.slint";
 
 // Vertical centring of a fixed-height control inside the toolbar row.
 component CenterY inherits VerticalLayout {
@@ -235,9 +236,7 @@ export component RecordingView inherits Rectangle {
                         dismissed => { root.wake-resume-notice-dismissed(); }
                     }
 
-                    if root.mode == RecordingMode.meeting && root.system-audio == LiveSystemAudio.unavailable: KitAlert { bordered: false;
-                        corner-radius: 12px;
-                        inset: 12px;
+                    if root.mode == RecordingMode.meeting && root.system-audio == LiveSystemAudio.unavailable: BannerAlert {
                         severity: AlertSeverity.warning;
                         accessible-label: @tr("Attention. Seul votre microphone est enregistré. L'audio des autres participants est indisponible.");
                         message: @tr("Seul votre microphone est enregistré. L’audio des autres participants est indisponible.");
@@ -246,25 +245,21 @@ export component RecordingView inherits Rectangle {
                     // The silence episode offers to keep recording or stop now
                     // (the meeting stops by itself 2 min later otherwise); the
                     // max-duration guard is already stopping it, so no buttons.
-                    if root.mode == RecordingMode.meeting && root.meeting-idle-banner != MeetingIdleBanner.hidden: KitAlert { bordered: false;
-                        corner-radius: 12px;
-                        inset: 12px;
+                    if root.mode == RecordingMode.meeting && root.meeting-idle-banner != MeetingIdleBanner.hidden: BannerAlert {
                         actions-placement: AlertActions.trailing;
                         severity: root.meeting-idle-banner == MeetingIdleBanner.max-duration
                             ? AlertSeverity.warning : AlertSeverity.information;
                         message: root.meeting-idle-banner == MeetingIdleBanner.max-duration
                             ? @tr("Durée maximale de la réunion atteinte. Arrêt de l'enregistrement.")
                             : @tr("Aucune parole détectée depuis {} min. L'enregistrement va bientôt s'arrêter.", root.meeting-idle-minutes);
-                        if root.meeting-idle-banner == MeetingIdleBanner.silence: KitButton {
+                        if root.meeting-idle-banner == MeetingIdleBanner.silence: CompactButton {
                             text: @tr("Continuer l'enregistrement");
                             intent: ButtonIntent.primary;
-                            control-size: ControlSize.compact;
                             activated => { root.meeting-idle-keep-recording(); }
                         }
-                        if root.meeting-idle-banner == MeetingIdleBanner.silence: KitButton {
+                        if root.meeting-idle-banner == MeetingIdleBanner.silence: CompactButton {
                             text: @tr("Arrêter maintenant");
                             intent: ButtonIntent.destructive-soft;
-                            control-size: ControlSize.compact;
                             disabled: root.stop-pending;
                             activated => { root.stop-requested(); }
                         }

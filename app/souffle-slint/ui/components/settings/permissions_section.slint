@@ -1,7 +1,8 @@
 import { Theme } from "../../theme.slint";
-import { FieldSetAppearance, FieldRowAppearance,
-    ButtonIntent, ControlSize, KitButton, KitFieldRow, KitFieldSet, KitThemeContext, KitThemes
+import { FieldSetAppearance,
+    ButtonIntent, KitFieldSet, KitThemeContext, KitThemes
 } from "@kit";
+import { CompactButton, SettingsFieldRow } from "../app_controls.slint";
 
 export component PermissionsSection inherits KitFieldSet {
     callback review-requested();
@@ -10,10 +11,7 @@ export component PermissionsSection inherits KitFieldSet {
     legend: @tr("PERMISSIONS");
     appearance: FieldSetAppearance.card;
 
-    KitFieldRow {
-        orientation: Theme.settings-field-orientation(self.width);
-        appearance: FieldRowAppearance.inset;
-        show-divider: true;
+    SettingsFieldRow {
         focus-requested => { permissions-button.take-focus(); }
         private property <bool> control-focused: permissions-button.has-focus;
         changed control-focused => {
@@ -22,9 +20,8 @@ export component PermissionsSection inherits KitFieldSet {
         label: @tr("Permissions");
         description: @tr("Revérifier les permissions macOS si le collage ou l'enregistrement cesse de fonctionner.");
 
-        permissions-button := KitButton {
+        permissions-button := CompactButton {
             intent: ButtonIntent.secondary;
-            control-size: ControlSize.compact;
             text: @tr("Vérifier les permissions");
             activated => { root.review-requested(); }
         }

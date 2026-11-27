@@ -1,4 +1,4 @@
-import { AvatarShape, ButtonIntent, ControlSize, KitAvatar, KitButton, KitDivider, KitIcon, KitMetrics, KitPressable, KitThemeContext, Tone } from "@kit";
+import { AvatarShape, ButtonIntent, ControlSize, KitAvatar, KitDivider, KitIcon, KitMetrics, KitPressable, KitThemeContext, Tone } from "@kit";
 import { LucideShapes } from "@kit-icons/shapes.slint";
 import { LucideAccount } from "@kit-icons/account.slint";
 import { LucideText } from "@kit-icons/text.slint";
@@ -8,6 +8,7 @@ import { AppText, Typography } from "@typography";
 import { TimelineKind } from "../types.slint";
 import { ActionGuards, MeetingDeletePermission } from "../action_guards.slint";
 import { Theme } from "../theme.slint";
+import { CompactButton } from "./app_controls.slint";
 
 // Port of features/timeline/components/TimelineItem.svelte. Struct name
 // avoids "TimelineItem" itself: Slint generates a Rust type of the same
@@ -158,13 +159,12 @@ export component TimelineItemRow inherits Rectangle {
                     Rectangle {
                         width: root.is-dictation ? copy-area.preferred-width + root.column-gap : 0px;
 
-                        copy-area := KitButton {
+                        copy-area := CompactButton {
                             x: root.column-gap;
                             width: self.preferred-width;
                             height: root.control-height;
                             visible: root.is-dictation;
                             disabled: !root.is-dictation;
-                            control-size: ControlSize.compact;
                             intent: ButtonIntent.quiet;
                             padding-inline: 8px;
                             text: root.copied ? @tr("Copié !") : @tr("Copier");
@@ -209,12 +209,11 @@ export component TimelineItemRow inherits Rectangle {
 
                         // One button for both states, so keyboard focus survives
                         // the switch to "Confirmer".
-                        delete-area := KitButton {
+                        delete-area := CompactButton {
                             x: root.column-gap;
                             width: parent.width - root.column-gap;
                             height: root.control-height;
                             disabled: root.delete-blocked;
-                            control-size: ControlSize.compact;
                             padding-inline: root.confirm-shown ? 10px : 0px;
                             intent: root.confirm-shown ? ButtonIntent.destructive-soft : ButtonIntent.quiet;
                             accessible-name: root.delete-blocked ? ActionGuards.reason(root.delete-permission) : root.confirming-delete ? @tr("Confirmer la suppression") : @tr("Supprimer");

@@ -1,10 +1,11 @@
 import { SettingsOptions, ClosedSettingsPicker } from "settings_options.slint";
-import { FieldSetAppearance, FieldRowAppearance, AlertActions, AlertSeverity, ButtonIntent, ChoiceLabelPosition, ControlSize, ControlWidth, KeycapSize, KitAlert, KitButton, KitFieldRow, KitFieldSet, KitKeycap, KitMetrics, KitModalContext, KitNumberStepper, KitSegmentedControl, KitSwitch, KitText, KitThemeContext, KitThemes, Ownership, TypographyRole, SegmentedAppearance, StepperAppearance, TextViewFont, KitTheme } from "@kit";
+import { FieldSetAppearance, AlertActions, AlertSeverity, ButtonIntent, ChoiceLabelPosition, ControlSize, ControlWidth, KeycapSize, KitButton, KitFieldRow, KitFieldSet, KitKeycap, KitMetrics, KitModalContext, KitNumberStepper, KitSegmentedControl, KitSwitch, KitText, KitThemeContext, KitThemes, Ownership, TypographyRole, SegmentedAppearance, StepperAppearance, TextViewFont, KitTheme } from "@kit";
 import { LucideArrows } from "@kit-icons/arrows.slint";
 import { SettingsNoticeRow } from "settings_notice_row.slint";
 import { SettingsAdvancedBlock } from "settings_advanced_block.slint";
 import { Theme } from "../../theme.slint";
 import { AppTheme, AppLocale, PasteMethod, ShortcutField, ShortcutNotice, SettingsCaptureError } from "../../types.slint";
+import { BannerAlert, CompactButton, SettingsFieldRow } from "../app_controls.slint";
 
 // The recorder's message for each `ShortcutNotice`, declared once for Settings
 // and onboarding (#360).
@@ -159,11 +160,8 @@ export component InterfaceSection inherits VerticalLayout {
         legend: @tr("INTERFACE");
         appearance: FieldSetAppearance.card;
 
-        KitFieldRow {
+        SettingsFieldRow {
             theme: KitThemeContext.current;
-            orientation: Theme.settings-field-orientation(self.width);
-            appearance: FieldRowAppearance.inset;
-            show-divider: true;
             focus-requested => { language-picker.take-focus(); }
             private property <bool> control-focused: language-picker.has-focus;
             changed control-focused => {
@@ -186,11 +184,8 @@ export component InterfaceSection inherits VerticalLayout {
             }
         }
 
-        KitFieldRow {
+        SettingsFieldRow {
             theme: KitThemeContext.current;
-            orientation: Theme.settings-field-orientation(self.width);
-            appearance: FieldRowAppearance.inset;
-            show-divider: true;
             focus-requested => { theme-picker.take-focus(); }
             private property <bool> control-focused: theme-picker.has-focus;
             changed control-focused => {
@@ -213,11 +208,8 @@ export component InterfaceSection inherits VerticalLayout {
             }
         }
 
-        KitFieldRow {
+        SettingsFieldRow {
             theme: KitThemeContext.current;
-            orientation: Theme.settings-field-orientation(self.width);
-            appearance: FieldRowAppearance.inset;
-            show-divider: true;
             focus-requested => { paste-switch.take-focus(); }
             private property <bool> control-focused: paste-switch.has-focus;
             changed control-focused => {
@@ -238,11 +230,8 @@ export component InterfaceSection inherits VerticalLayout {
             }
         }
 
-        KitFieldRow {
+        SettingsFieldRow {
             theme: KitThemeContext.current;
-            orientation: Theme.settings-field-orientation(self.width);
-            appearance: FieldRowAppearance.inset;
-            show-divider: true;
             focus-requested => { toggle-recorder.take-focus(); }
             private property <bool> control-focused: toggle-recorder.has-focus;
             changed control-focused => {
@@ -266,21 +255,17 @@ export component InterfaceSection inherits VerticalLayout {
                     cleared => { root.shortcut-cleared(ShortcutField.toggle); }
                     cancelled => { root.shortcut-cancelled(); }
                 }
-                if root.toggle-shortcut-label != "": KitButton {
+                if root.toggle-shortcut-label != "": CompactButton {
                     text: @tr("Effacer");
                     intent: ButtonIntent.quiet;
-                    control-size: ControlSize.compact;
                     disabled: root.capture-busy;
                     activated => { root.shortcut-cleared(ShortcutField.toggle); }
                 }
             }
         }
 
-        KitFieldRow {
+        SettingsFieldRow {
             theme: KitThemeContext.current;
-            orientation: Theme.settings-field-orientation(self.width);
-            appearance: FieldRowAppearance.inset;
-            show-divider: true;
             focus-requested => { ptt-recorder.take-focus(); }
             private property <bool> control-focused: ptt-recorder.has-focus;
             changed control-focused => {
@@ -304,10 +289,9 @@ export component InterfaceSection inherits VerticalLayout {
                     cleared => { root.shortcut-cleared(ShortcutField.ptt); }
                     cancelled => { root.shortcut-cancelled(); }
                 }
-                if root.ptt-shortcut-label != "": KitButton {
+                if root.ptt-shortcut-label != "": CompactButton {
                     text: @tr("Effacer");
                     intent: ButtonIntent.quiet;
-                    control-size: ControlSize.compact;
                     disabled: root.capture-busy;
                     activated => { root.shortcut-cleared(ShortcutField.ptt); }
                 }
@@ -324,13 +308,12 @@ export component InterfaceSection inherits VerticalLayout {
         }
 
         if root.native-tap-warning-visible: SettingsNoticeRow {
-            KitAlert { bordered: false; corner-radius: 12px; inset: 12px; actions-placement: AlertActions.trailing;
+            BannerAlert { actions-placement: AlertActions.trailing;
                 theme: KitThemeContext.current;
                 severity: AlertSeverity.warning;
                 message: @tr("Votre raccourci sur une seule touche ne fonctionnera pas tant que l'Accessibilité n'est pas accordée.");
-                KitButton {
+                CompactButton {
                     theme: KitThemeContext.current;
-                    control-size: ControlSize.compact;
                     text: @tr("Vérifier les permissions");
                     intent: ButtonIntent.secondary;
                     activated => { root.permissions-review-requested(); }
@@ -339,7 +322,7 @@ export component InterfaceSection inherits VerticalLayout {
         }
 
         if root.shortcut-error != "": SettingsNoticeRow {
-            KitAlert { bordered: false; corner-radius: 12px; inset: 12px; actions-placement: AlertActions.trailing;
+            BannerAlert { actions-placement: AlertActions.trailing;
                 theme: KitThemeContext.current;
                 severity: AlertSeverity.error;
                 message: root.shortcut-error-kind == SettingsCaptureError.capture-busy ? @tr("Terminez l'enregistrement avant de modifier les raccourcis.")
@@ -349,18 +332,15 @@ export component InterfaceSection inherits VerticalLayout {
         }
 
         if root.shortcut-notice != ShortcutNotice.none: SettingsNoticeRow {
-            KitAlert { bordered: false; corner-radius: 12px; inset: 12px; actions-placement: AlertActions.trailing;
+            BannerAlert { actions-placement: AlertActions.trailing;
                 theme: KitThemeContext.current;
                 severity: ShortcutNoticeText.is-warning(root.shortcut-notice) ? AlertSeverity.warning : AlertSeverity.error;
                 message: ShortcutNoticeText.text(root.shortcut-notice);
             }
         }
 
-        KitFieldRow {
+        SettingsFieldRow {
             theme: KitThemeContext.current;
-            orientation: Theme.settings-field-orientation(self.width);
-            appearance: FieldRowAppearance.inset;
-            show-divider: true;
             focus-requested => { overlay-switch.take-focus(); }
             private property <bool> control-focused: overlay-switch.has-focus;
             changed control-focused => {

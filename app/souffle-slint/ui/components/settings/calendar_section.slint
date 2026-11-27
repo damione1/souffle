@@ -1,9 +1,10 @@
-import { FieldSetAppearance, FieldRowAppearance, AlertActions, AlertSeverity, ChoiceLabelPosition, ButtonIntent, ControlSize, KitAlert, KitText, TypographyRole, CheckState, ControlWidth, KitButton, KitCheckbox, KitNumberStepper, KitSwitch, Ownership, KitFieldSet, KitThemeContext, KitThemes, KitFieldRow, KitFieldSeparator, KitOverline, StepperAppearance, TextViewFont } from "@kit";
+import { FieldSetAppearance, AlertActions, AlertSeverity, ChoiceLabelPosition, ButtonIntent, ControlSize, KitText, TypographyRole, CheckState, ControlWidth, KitCheckbox, KitNumberStepper, KitSwitch, Ownership, KitFieldSet, KitThemeContext, KitThemes, KitFieldSeparator, KitOverline, StepperAppearance, TextViewFont } from "@kit";
 import { AppText, Typography } from "@typography";
 import { LucideArrows } from "@kit-icons/arrows.slint";
 import { SettingsNoticeRow } from "settings_notice_row.slint";
 import { Theme } from "../../theme.slint";
 import { AccessState } from "../../types.slint";
+import { BannerAlert, CompactButton, SettingsFieldRow } from "../app_controls.slint";
 
 export struct CalendarRow {
     id: string,
@@ -34,11 +35,8 @@ export component CalendarSection inherits VerticalLayout {
         legend: @tr("CALENDRIER");
         appearance: FieldSetAppearance.card;
 
-        KitFieldRow {
+        SettingsFieldRow {
             theme: KitThemeContext.current;
-            orientation: Theme.settings-field-orientation(self.width);
-            appearance: FieldRowAppearance.inset;
-            show-divider: true;
             focus-requested => { calendar-switch.take-focus(); }
             private property <bool> control-focused: calendar-switch.has-focus;
             changed control-focused => {
@@ -60,25 +58,21 @@ export component CalendarSection inherits VerticalLayout {
         }
 
         if root.permission == AccessState.denied: SettingsNoticeRow {
-            KitAlert { bordered: false; corner-radius: 12px; inset: 12px; actions-placement: AlertActions.trailing;
+            BannerAlert { actions-placement: AlertActions.trailing;
                 severity: AlertSeverity.warning;
                 message: @tr("L'accès au calendrier a été refusé.");
                 vertical-stretch: 0;
 
-                KitButton {
+                CompactButton {
                     text: @tr("Ouvrir les Réglages Système");
                     intent: ButtonIntent.secondary;
-                    control-size: ControlSize.compact;
                     activated => { root.open-system-settings-requested(); }
                 }
             }
         }
 
-        if root.enabled && root.permission == AccessState.granted: KitFieldRow {
+        if root.enabled && root.permission == AccessState.granted: SettingsFieldRow {
             theme: KitThemeContext.current;
-            orientation: Theme.settings-field-orientation(self.width);
-            appearance: FieldRowAppearance.inset;
-            show-divider: true;
             focus-requested => { delay-stepper.take-focus(); }
             private property <bool> control-focused: delay-stepper.has-focus;
             changed control-focused => {

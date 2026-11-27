@@ -1,11 +1,12 @@
 import { AppText, Typography } from "@typography";
-import { AlertActions, AlertSeverity, ButtonIntent, ControlSize, CardBorderStyle, ElevationLevel, IconGlyph, KitAlert, KitButton, KitCard, KitDivider, KitIcon, KitInline, KitProgress, KitStack, KitThemeContext, ProgressMode, SurfaceLevel } from "@kit";
+import { AlertActions, AlertSeverity, ButtonIntent, CardBorderStyle, ElevationLevel, IconGlyph, KitAlert, KitButton, KitCard, KitDivider, KitIcon, KitInline, KitProgress, KitStack, KitThemeContext, ProgressMode, SurfaceLevel } from "@kit";
 import { LucideArrows } from "@kit-icons/arrows.slint";
 import { Theme } from "../theme.slint";
 import { LucideCursors } from "@kit-icons/cursors.slint";
 import { LucideText } from "@kit-icons/text.slint";
 import { LucideNotifications } from "@kit-icons/notifications.slint";
 import { CatalogPicker } from "catalog_picker.slint";
+import { BannerAlert, CompactButton } from "./app_controls.slint";
 
 export struct StructuredActionItem {
     text: string,
@@ -60,10 +61,9 @@ component SummaryModelRow inherits KitInline {
     VerticalLayout {
         alignment: center;
 
-        KitButton {
+        CompactButton {
             accessible-name: root.action-name;
             text: root.action-label;
-            control-size: ControlSize.compact;
             intent: ButtonIntent.secondary;
             leading-icon: LucideArrows.refresh-cw();
             activated => { root.action-triggered(); }
@@ -147,23 +147,18 @@ export component SummarySection inherits KitStack {
 
     gap: compact;
 
-    if root.summary == "" && !root.is-generating && root.available-models.length == 0: KitAlert { bordered: false;
-        corner-radius: 12px;
-        inset: 12px;
+    if root.summary == "" && !root.is-generating && root.available-models.length == 0: BannerAlert {
         severity: AlertSeverity.warning;
         message: @tr("Aucun fournisseur de résumé disponible. Activez Apple Intelligence ou connectez Ollama dans Réglages › IA.");
     }
 
-    if root.summary == "" && !root.is-generating && root.generation-error != "": KitAlert { bordered: false;
-        corner-radius: 12px;
-        inset: 12px;
+    if root.summary == "" && !root.is-generating && root.generation-error != "": BannerAlert {
         actions-placement: AlertActions.inline;
         severity: AlertSeverity.error;
         message: @tr("La génération du résumé a échoué : {}", root.generation-error);
-        if root.available-models.length > 0: KitButton {
+        if root.available-models.length > 0: CompactButton {
             text: @tr("Réessayer");
             intent: ButtonIntent.secondary;
-            control-size: ControlSize.compact;
             activated => { root.generate-requested(); }
         }
     }
@@ -283,19 +278,16 @@ export component SummarySection inherits KitStack {
                 model-label: root.summary-model-label;
 
                 // MeetingSummarySection.svelte's CopyButton: copies the summary as stored.
-                KitButton {
+                CompactButton {
                     accessible-name: @tr("Copier le résumé");
                     text: root.just-copied ? @tr("Copié") : @tr("Copier");
-                    control-size: ControlSize.compact;
                     intent: ButtonIntent.quiet;
                     leading-icon: root.just-copied ? LucideNotifications.check() : LucideText.copy();
                     activated => { root.copy-summary(); }
                 }
             }
 
-            if root.generation-error != "": KitAlert { bordered: false;
-                corner-radius: 12px;
-                inset: 12px;
+            if root.generation-error != "": BannerAlert {
                 severity: AlertSeverity.error;
                 message: @tr("La génération du résumé a échoué : {}", root.generation-error);
             }

@@ -1,5 +1,5 @@
 import { AppText, Typography } from "@typography";
-import { AvatarShape, ButtonIntent, ControlSize, KitAvatar, KitBadge, KitButton, KitCard, KitDivider, KitEmptyState, KitIcon, KitIconButton, KitLayoutMetrics, KitThemeContext, LayoutSpace, SurfaceLevel, Tone } from "@kit";
+import { AvatarShape, ButtonIntent, ControlSize, KitAvatar, KitBadge, KitCard, KitDivider, KitEmptyState, KitIcon, KitIconButton, KitLayoutMetrics, KitThemeContext, LayoutSpace, SurfaceLevel, Tone } from "@kit";
 import { LucideAccount } from "@kit-icons/account.slint";
 import { LucideCommunication } from "@kit-icons/communication.slint";
 import { LucideText } from "@kit-icons/text.slint";
@@ -8,6 +8,7 @@ import { LucideArrows } from "@kit-icons/arrows.slint";
 import { HistoryEntry, TimelineItemRow } from "timeline_item.slint";
 import { TimelineKind, TimelineDay, UpcomingPhase, AccessState } from "../types.slint";
 import { Theme } from "../theme.slint";
+import { CompactButton } from "./app_controls.slint";
 
 export struct TimelineDayGroup {
     day: TimelineDay,
@@ -250,8 +251,7 @@ export component TimelineSection inherits VerticalLayout {
                 alignment: center;
                 horizontal-stretch: 0;
 
-                KitButton {
-                    control-size: ControlSize.compact;
+                CompactButton {
                     intent: ButtonIntent.primary;
                     text: @tr("Configurer");
                     accessible-name: @tr("Configurer le calendrier");

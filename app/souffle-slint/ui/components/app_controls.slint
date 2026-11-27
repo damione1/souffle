@@ -1,0 +1,19 @@
+// App presets for kit controls whose options repeat across screens.
+import { ControlSize, FieldRowAppearance, KitAlert, KitButton, KitFieldRow } from "@kit";
+import { Theme } from "../theme.slint";
+
+export component BannerAlert inherits KitAlert {
+    bordered: false;
+    corner-radius: 12px;
+    inset: 12px;
+}
+
+export component CompactButton inherits KitButton {
+    control-size: ControlSize.compact;
+}
+
+export component SettingsFieldRow inherits KitFieldRow {
+    orientation: Theme.settings-field-orientation(self.width);
+    show-divider: true;
+    appearance: FieldRowAppearance.inset;
+}

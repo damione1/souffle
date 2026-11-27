@@ -1,6 +1,7 @@
-import { FieldSetAppearance, FieldRowAppearance, ButtonIntent, ChoiceLabelPosition, ControlSize, ControlWidth, KitButton, KitFieldRow, KitFieldSeparator, KitFieldSet, KitSwitch, KitTextField, KitThemeContext, Ownership } from "@kit";
+import { FieldSetAppearance, ButtonIntent, ChoiceLabelPosition, ControlWidth, KitButton, KitFieldSeparator, KitFieldSet, KitSwitch, KitTextField, KitThemeContext, Ownership } from "@kit";
 import { Theme } from "../../theme.slint";
 import { CatalogPicker } from "../catalog_picker.slint";
+import { CompactButton, SettingsFieldRow } from "../app_controls.slint";
 
 export struct AppBranchRow {
     id: string,
@@ -32,11 +33,8 @@ export component AppBranchesSection inherits VerticalLayout {
         legend: @tr("RETOUCHE PAR APPLICATION");
         appearance: FieldSetAppearance.card;
 
-        KitFieldRow {
+        SettingsFieldRow {
             theme: KitThemeContext.current;
-            orientation: Theme.settings-field-orientation(self.width);
-            appearance: FieldRowAppearance.inset;
-            show-divider: true;
             label: @tr("Règles par application");
             description: @tr("La première règle active valide gagne. Le nom de l'application contient le motif, sans tenir compte de la casse. Par défaut suit le gabarit global ; les instructions sont partagées.");
         }
@@ -108,22 +106,19 @@ export component AppBranchesSection inherits VerticalLayout {
                 HorizontalLayout {
                     spacing: 8px;
                     alignment: end;
-                    KitButton {
-                        control-size: ControlSize.compact;
+                    CompactButton {
                         intent: ButtonIntent.quiet;
                         text: @tr("Monter");
                         disabled: index <= 0;
                         activated => { root.rule-moved(rule.id, index - 1); }
                     }
-                    KitButton {
-                        control-size: ControlSize.compact;
+                    CompactButton {
                         intent: ButtonIntent.quiet;
                         text: @tr("Descendre");
                         disabled: index + 1 >= root.rules.length;
                         activated => { root.rule-moved(rule.id, index + 1); }
                     }
-                    KitButton {
-                        control-size: ControlSize.compact;
+                    CompactButton {
                         intent: ButtonIntent.quiet;
                         text: @tr("Supprimer");
                         activated => { root.rule-deleted(rule.id); }

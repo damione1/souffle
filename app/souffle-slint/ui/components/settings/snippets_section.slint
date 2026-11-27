@@ -1,6 +1,7 @@
 import { AppText, Typography } from "@typography";
-import { FieldSetAppearance, FieldRowAppearance, ButtonIntent, ControlSize, KitButton, KitFieldError, KitFieldRow, KitFieldSeparator, KitFieldSet, KitTextArea, KitTextField, KitThemeContext, ListView, ResizePolicy, KitOverline } from "@kit";
+import { FieldSetAppearance, FieldRowAppearance, ButtonIntent, KitButton, KitFieldError, KitFieldRow, KitFieldSeparator, KitFieldSet, KitTextArea, KitTextField, KitThemeContext, ListView, ResizePolicy, KitOverline } from "@kit";
 import { Theme } from "../../theme.slint";
+import { CompactButton } from "../app_controls.slint";
 
 // Port of SnippetsSettingsSection.svelte. Which row is being edited is
 // tracked in Rust (`snippets_editing` in main.rs), not local `.slint`
@@ -164,15 +165,13 @@ export component SnippetsSection inherits VerticalLayout {
                             spacing: 6px;
                             horizontal-stretch: 0;
                             alignment: start;
-                            KitButton {
+                            CompactButton {
                                 text: @tr("Modifier");
-                                control-size: ControlSize.compact;
                                 intent: ButtonIntent.quiet;
                                 activated => { root.edit-requested(row.id); }
                             }
-                            KitButton {
+                            CompactButton {
                                 text: @tr("Supprimer");
-                                control-size: ControlSize.compact;
                                 intent: ButtonIntent.quiet;
                                 activated => { root.delete-requested(row.id); }
                             }
@@ -199,15 +198,13 @@ export component SnippetsSection inherits VerticalLayout {
                         HorizontalLayout {
                             alignment: end;
                             spacing: 6px;
-                            KitButton {
+                            CompactButton {
                                 text: @tr("Annuler");
-                                control-size: ControlSize.compact;
                                 intent: ButtonIntent.quiet;
                                 activated => { root.cancel-edit-requested(); }
                             }
-                            KitButton {
+                            CompactButton {
                                 text: @tr("Enregistrer");
-                                control-size: ControlSize.compact;
                                 intent: ButtonIntent.primary;
                                 disabled: root.edit-trigger-draft == "" || root.edit-expansion-draft == "";
                                 activated => { root.save-edit-requested(row.id, root.edit-trigger-draft, root.edit-expansion-draft); }

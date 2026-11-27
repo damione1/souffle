@@ -1,6 +1,7 @@
-import { FieldSetAppearance, FieldRowAppearance, ButtonIntent, KitButton, KitFieldRow, KitFieldSet, KitForm, KitTextArea, KitTextField, KitThemeContext, KitThemes, KitWrap, ControlSize } from "@kit";
+import { FieldSetAppearance, FieldRowAppearance, ButtonIntent, KitFieldRow, KitFieldSet, KitForm, KitTextArea, KitTextField, KitThemeContext, KitThemes, KitWrap } from "@kit";
 import { CatalogPicker } from "../catalog_picker.slint";
 import { Theme } from "../../theme.slint";
+import { CompactButton, SettingsFieldRow } from "../app_controls.slint";
 
 // Port of SummaryTemplatesSettingsSection.svelte. Which template is being
 // edited is tracked in Rust (`summary_templates_state` in main.rs), not as
@@ -28,11 +29,8 @@ export component SummaryTemplatesSection inherits KitFieldSet {
     legend: @tr("GABARITS DE RÉSUMÉ");
     appearance: FieldSetAppearance.card;
 
-    KitFieldRow {
+    SettingsFieldRow {
         theme: KitThemeContext.current;
-        orientation: Theme.settings-field-orientation(self.width);
-        appearance: FieldRowAppearance.inset;
-        show-divider: true;
         focus-requested => { default-picker.take-focus(); }
         private property <bool> control-focused: default-picker.has-focus;
         changed control-focused => {
@@ -51,11 +49,8 @@ export component SummaryTemplatesSection inherits KitFieldSet {
         }
     }
 
-    edit-target-row := KitFieldRow {
+    edit-target-row := SettingsFieldRow {
         theme: KitThemeContext.current;
-        orientation: Theme.settings-field-orientation(self.width);
-        appearance: FieldRowAppearance.inset;
-        show-divider: true;
         focus-requested => { template-picker.take-focus(); }
         private property <bool> control-focused: template-picker.has-focus;
         changed control-focused => {
@@ -76,8 +71,7 @@ export component SummaryTemplatesSection inherits KitFieldSet {
                 current-value: root.editing-template-id;
                 value-chosen(id) => { root.edit-target-changed(id); }
             }
-            if !root.editing-is-builtin: KitButton {
-                control-size: ControlSize.compact;
+            if !root.editing-is-builtin: CompactButton {
                 text: @tr("Supprimer");
                 focus-observed(focused) => {
                     if focused { edit-target-row.ensure-visible(KitThemes.scroll-behavior(root.theme)); }
@@ -87,11 +81,8 @@ export component SummaryTemplatesSection inherits KitFieldSet {
         }
     }
 
-    if !root.editing-is-builtin: KitFieldRow {
+    if !root.editing-is-builtin: SettingsFieldRow {
         theme: KitThemeContext.current;
-        orientation: Theme.settings-field-orientation(self.width);
-        appearance: FieldRowAppearance.inset;
-        show-divider: true;
         focus-requested => { name-editor.take-focus(); }
         private property <bool> control-focused: name-editor.has-focus;
         changed control-focused => {
@@ -139,10 +130,7 @@ export component SummaryTemplatesSection inherits KitFieldSet {
         validation-requested => { return self.valid; }
         submit-requested => { root.add-requested(root.new-template-draft); }
 
-        add-row := KitFieldRow {
-            orientation: Theme.settings-field-orientation(self.width);
-            appearance: FieldRowAppearance.inset;
-            show-divider: true;
+        add-row := SettingsFieldRow {
             label: @tr("Nom du nouveau gabarit");
             focus-requested => { new-name-editor.take-focus(); }
 
@@ -163,8 +151,7 @@ export component SummaryTemplatesSection inherits KitFieldSet {
                     alignment: center;
                     horizontal-stretch: 0;
 
-                    add-button := KitButton {
-                        control-size: ControlSize.compact;
+                    add-button := CompactButton {
                         text: @tr("Ajouter");
                         intent: ButtonIntent.primary;
                         disabled: !add-form.valid;

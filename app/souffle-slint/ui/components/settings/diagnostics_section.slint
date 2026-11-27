@@ -1,6 +1,7 @@
-import { FieldSetAppearance, FieldRowAppearance, ButtonIntent, ChoiceLabelPosition, ControlSize, ControlWidth, KitButton, KitSwitch, Ownership, KitFieldSet, KitFieldSeparator, KitThemeContext, KitThemes, KitFieldRow } from "@kit";
+import { FieldSetAppearance, ButtonIntent, ChoiceLabelPosition, ControlWidth, KitSwitch, Ownership, KitFieldSet, KitFieldSeparator, KitThemeContext, KitThemes } from "@kit";
 import { LucideText } from "@kit-icons/text.slint";
 import { Theme } from "../../theme.slint";
+import { CompactButton, SettingsFieldRow } from "../app_controls.slint";
 
 export component DiagnosticsSection inherits VerticalLayout {
     in property <bool> detailed-logging;
@@ -19,11 +20,8 @@ export component DiagnosticsSection inherits VerticalLayout {
         legend: @tr("DIAGNOSTICS");
         appearance: FieldSetAppearance.card;
 
-        KitFieldRow {
+        SettingsFieldRow {
             theme: KitThemeContext.current;
-            orientation: Theme.settings-field-orientation(self.width);
-            appearance: FieldRowAppearance.inset;
-            show-divider: true;
             focus-requested => { logging-switch.take-focus(); }
             private property <bool> control-focused: logging-switch.has-focus;
             changed control-focused => {
@@ -54,11 +52,10 @@ export component DiagnosticsSection inherits VerticalLayout {
 
             HorizontalLayout {
                 alignment: start;
-                KitButton {
+                CompactButton {
                     theme: KitThemeContext.current;
                     text: root.copying-diagnostics ? @tr("Copie…") : @tr("Copier les diagnostics");
                     intent: ButtonIntent.secondary;
-                    control-size: ControlSize.compact;
                     leading-icon: LucideText.copy();
                     disabled: root.copying-diagnostics;
                     activated => { root.copy-diagnostics-requested(); }

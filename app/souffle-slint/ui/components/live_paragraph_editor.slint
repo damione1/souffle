@@ -1,4 +1,5 @@
-import { AlertSeverity, ButtonIntent, DialogSize, DialogTabPolicy, FieldAccess, KitAlert, KitDialog, KitTextArea } from "@kit";
+import { AlertSeverity, ButtonIntent, DialogSize, DialogTabPolicy, FieldAccess, KitDialog, KitTextArea } from "@kit";
+import { BannerAlert } from "./app_controls.slint";
 
 export component LiveParagraphEditor inherits KitDialog {
     in-out property <string> text;
@@ -29,9 +30,7 @@ export component LiveParagraphEditor inherits KitDialog {
         accessible-name: @tr("Texte du paragraphe");
         access: root.busy ? FieldAccess.disabled : FieldAccess.editable;
     }
-    if root.failed: KitAlert { bordered: false;
-        corner-radius: 12px;
-        inset: 12px;
+    if root.failed: BannerAlert {
         severity: AlertSeverity.error;
         message: @tr("Correction impossible. Fermez puis rouvrez le paragraphe pour réessayer.");
     }

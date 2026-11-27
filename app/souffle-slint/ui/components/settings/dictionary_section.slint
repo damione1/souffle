@@ -1,8 +1,9 @@
 import { AppText, Typography } from "@typography";
-import { FieldSetAppearance, FieldRowAppearance, ButtonIntent, ControlSize, KitBadge, KitButton, KitFieldRow, KitFieldSeparator, KitFieldSet, KitSegmentedControl, KitSurface, KitText, KitTextField, KitThemeContext, LayoutSpace, ListView, OptionRow, Ownership, SurfaceLevel, TypographyRole, TextViewFont, KitOverline, SegmentedAppearance, ControlWidth, SurfaceBorder } from "@kit";
+import { FieldSetAppearance, ButtonIntent, ControlSize, KitBadge, KitButton, KitFieldSeparator, KitFieldSet, KitSegmentedControl, KitSurface, KitText, KitTextField, KitThemeContext, LayoutSpace, ListView, OptionRow, Ownership, SurfaceLevel, TypographyRole, TextViewFont, KitOverline, SegmentedAppearance, ControlWidth, SurfaceBorder } from "@kit";
 import { LucideFiles } from "@kit-icons/files.slint";
 import { Theme } from "../../theme.slint";
 import { DictionaryLearningMode } from "../../types.slint";
+import { CompactButton, SettingsFieldRow } from "../app_controls.slint";
 
 export struct DictionaryRow {
     id: int,
@@ -67,11 +68,8 @@ export component DictionarySection inherits VerticalLayout {
         legend: @tr("DICTIONNAIRE PERSONNALISÉ");
         appearance: FieldSetAppearance.card;
 
-    KitFieldRow {
+    SettingsFieldRow {
         theme: KitThemeContext.current;
-        orientation: Theme.settings-field-orientation(self.width);
-        appearance: FieldRowAppearance.inset;
-        show-divider: true;
         label: @tr("Apprentissage depuis les corrections");
         description: @tr("Suggestions propose des corrections après un collage et pendant une réunion. Automatique n'apprend qu'après un collage. L'apprentissage après collage demande que le collage automatique soit activé et réussisse. Quel que soit le mode, vos corrections en réunion s'appliquent à la suite de celle-ci si « Correction par dictionnaire » est activée.");
     }
@@ -169,18 +167,16 @@ export component DictionarySection inherits VerticalLayout {
                                     accessible-role: none;
                                 }
                             }
-                            KitButton {
+                            CompactButton {
                                 text: @tr("Ignorer");
                                 accessible-label: @tr("Ignorer {} → {}", row.misspelling, row.term);
-                                control-size: ControlSize.compact;
                                 intent: ButtonIntent.quiet;
                                 disabled: root.suggestion-busy;
                                 activated => { root.suggestion-dismiss-requested(row.id); }
                             }
-                            KitButton {
+                            CompactButton {
                                 text: @tr("Accepter");
                                 accessible-label: @tr("Accepter {} → {}", row.misspelling, row.term);
-                                control-size: ControlSize.compact;
                                 intent: ButtonIntent.primary;
                                 disabled: root.suggestion-busy;
                                 activated => { root.suggestion-accept-requested(row.id); }
@@ -309,9 +305,8 @@ export component DictionarySection inherits VerticalLayout {
                             KitBadge { text: row.category; subtle: true; }
                         }
                     }
-                    KitButton {
+                    CompactButton {
                         text: @tr("Supprimer");
-                        control-size: ControlSize.compact;
                         intent: ButtonIntent.quiet;
                         leading-icon: LucideFiles.trash();
                         activated => { root.delete-requested(row.id); }

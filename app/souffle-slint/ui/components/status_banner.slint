@@ -1,19 +1,17 @@
-import { AlertSeverity, ButtonIntent, ControlSize, KitAlert, KitButton } from "@kit";
+import { AlertSeverity, ButtonIntent } from "@kit";
+import { BannerAlert, CompactButton } from "./app_controls.slint";
 
-export component StatusBanner inherits KitAlert { bordered: false;
+export component StatusBanner inherits BannerAlert {
     in property <string> action-label;
     in property <ButtonIntent> action-intent: ButtonIntent.secondary;
     callback action-triggered();
 
-    corner-radius: 12px;
-    inset: 12px;
     severity: AlertSeverity.warning;
     dismissible: true;
     dismiss-label: @tr("Fermer");
-    if root.action-label != "": KitButton {
+    if root.action-label != "": CompactButton {
         text: root.action-label;
         intent: root.action-intent;
-        control-size: ControlSize.compact;
         activated => { root.action-triggered(); }
     }
 }

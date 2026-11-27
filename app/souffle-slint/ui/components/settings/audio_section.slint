@@ -1,10 +1,11 @@
-import { FieldSetAppearance, FieldRowAppearance,
+import { FieldSetAppearance,
     ChoiceLabelPosition, ControlWidth, KitFieldRow, KitFieldSet, KitSwitch, KitThemeContext, KitThemes, Ownership
 } from "@kit";
 import { PickerLabels } from "../picker_labels.slint";
 import { CatalogPicker } from "../catalog_picker.slint";
 import { SettingsAdvancedBlock } from "settings_advanced_block.slint";
 import { Theme } from "../../theme.slint";
+import { SettingsFieldRow } from "../app_controls.slint";
 
 // Rust supplies the clamshell device identities.
 export component AudioSection inherits KitFieldSet {
@@ -30,10 +31,7 @@ export component AudioSection inherits KitFieldSet {
     legend: @tr("AUDIO");
     appearance: FieldSetAppearance.card;
 
-    if root.system-audio-supported: KitFieldRow {
-        orientation: Theme.settings-field-orientation(self.width);
-        appearance: FieldRowAppearance.inset;
-        show-divider: true;
+    if root.system-audio-supported: SettingsFieldRow {
         focus-requested => { system-audio-switch.take-focus(); }
         private property <bool> control-focused: system-audio-switch.has-focus;
         changed control-focused => {
@@ -53,10 +51,7 @@ export component AudioSection inherits KitFieldSet {
         }
     }
 
-    KitFieldRow {
-        orientation: Theme.settings-field-orientation(self.width);
-        appearance: FieldRowAppearance.inset;
-        show-divider: true;
+    SettingsFieldRow {
         focus-requested => { autostop-switch.take-focus(); }
         private property <bool> control-focused: autostop-switch.has-focus;
         changed control-focused => {
@@ -76,10 +71,7 @@ export component AudioSection inherits KitFieldSet {
         }
     }
 
-    KitFieldRow {
-        orientation: Theme.settings-field-orientation(self.width);
-        appearance: FieldRowAppearance.inset;
-        show-divider: true;
+    SettingsFieldRow {
         focus-requested => { filler-switch.take-focus(); }
         private property <bool> control-focused: filler-switch.has-focus;
         changed control-focused => {
@@ -99,10 +91,7 @@ export component AudioSection inherits KitFieldSet {
         }
     }
 
-    KitFieldRow {
-        orientation: Theme.settings-field-orientation(self.width);
-        appearance: FieldRowAppearance.inset;
-        show-divider: true;
+    SettingsFieldRow {
         focus-requested => { dictionary-switch.take-focus(); }
         private property <bool> control-focused: dictionary-switch.has-focus;
         changed control-focused => {

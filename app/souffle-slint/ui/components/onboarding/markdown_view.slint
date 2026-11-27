@@ -1,8 +1,9 @@
 import { AppText, Typography } from "@typography";
-import { ButtonIntent, ButtonRecipe, ControlSize, KitButton, KitThemeContext, KitThemes } from "@kit";
+import { ButtonIntent, ButtonRecipe, ControlSize, KitThemeContext, KitThemes } from "@kit";
 import { MarkdownBlock } from "markdown_block.slint";
 import { MarkdownBlockKind } from "../../types.slint";
 import { Theme } from "../../theme.slint";
+import { CompactButton } from "../app_controls.slint";
 
 export component MarkdownView inherits VerticalLayout {
     in property <int> modal-layer;
@@ -41,11 +42,10 @@ export component MarkdownView inherits VerticalLayout {
             typography: Typography.content;
             wrap: word-wrap;
         }
-        if block.kind == MarkdownBlockKind.link: KitButton {
+        if block.kind == MarkdownBlockKind.link: CompactButton {
             modal-layer: root.modal-layer;
             text: block.text;
             intent: ButtonIntent.link;
-            control-size: ControlSize.compact;
             // The kit link recipe without its underline.
             recipe: {
                 fill: root.link-base.fill,

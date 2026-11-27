@@ -1,9 +1,10 @@
-import { FieldSetAppearance, FieldRowAppearance, AlertActions, ControlSize, KitAlert, KitBadge, KitButton, KitFieldRow, KitFieldSet, KitTextField, KitThemeContext, KitThemes, KitWrap, Tone } from "@kit";
+import { FieldSetAppearance, AlertActions, KitBadge, KitFieldSet, KitTextField, KitThemeContext, KitThemes, KitWrap, Tone } from "@kit";
 import { SettingsOptions, ClosedSettingsPicker } from "settings_options.slint";
 import { CatalogPicker } from "../catalog_picker.slint";
 import { SettingsNoticeRow } from "settings_notice_row.slint";
 import { Theme } from "../../theme.slint";
 import { AppleIntelligenceUnavailableReason, SummaryProvider } from "../../types.slint";
+import { BannerAlert, CompactButton, SettingsFieldRow } from "../app_controls.slint";
 
 // The one AI engine card, shared by summaries and dictation polish: engine
 // choice, then only the rows of the engine actually in use, and Retry only
@@ -56,11 +57,8 @@ export component IntelligenceSection inherits KitFieldSet {
     legend: @tr("MOTEUR IA");
     appearance: FieldSetAppearance.card;
 
-    KitFieldRow {
+    SettingsFieldRow {
         theme: KitThemeContext.current;
-        orientation: Theme.settings-field-orientation(self.width);
-        appearance: FieldRowAppearance.inset;
-        show-divider: true;
         focus-requested => { engine-picker.take-focus(); }
         private property <bool> control-focused: engine-picker.has-focus;
         changed control-focused => {
@@ -78,14 +76,13 @@ export component IntelligenceSection inherits KitFieldSet {
     }
 
     if root.provider-unavailable && root.effective-engine != SummaryProvider.auto: SettingsNoticeRow {
-        unavailable-notice := KitAlert { bordered: false; corner-radius: 12px; inset: 12px; actions-placement: AlertActions.trailing;
+        unavailable-notice := BannerAlert { actions-placement: AlertActions.trailing;
             severity: warning;
             message: root.effective-engine == SummaryProvider.apple-intelligence
                 ? @tr("Apple Intelligence n'est pas disponible sur cet appareil.")
                 : root.ollama-available ? @tr("Aucun modèle Ollama compatible n'est installé.")
                 : @tr("Le serveur Ollama ne répond pas à cette adresse.");
-            if root.refresh-error == "": KitButton {
-                control-size: ControlSize.compact;
+            if root.refresh-error == "": CompactButton {
                 text: @tr("Réessayer");
                 disabled: root.ollama-checking || root.ollama-pulling;
                 focus-observed(focused) => {
@@ -97,11 +94,10 @@ export component IntelligenceSection inherits KitFieldSet {
     }
 
     if root.refresh-error != "": SettingsNoticeRow {
-        error-notice := KitAlert { bordered: false; corner-radius: 12px; inset: 12px; actions-placement: AlertActions.trailing;
+        error-notice := BannerAlert { actions-placement: AlertActions.trailing;
             severity: error;
             message: root.refresh-error;
-            KitButton {
-                control-size: ControlSize.compact;
+            CompactButton {
                 text: @tr("Réessayer");
                 disabled: root.ollama-checking || root.ollama-pulling;
                 focus-observed(focused) => {
@@ -112,11 +108,8 @@ export component IntelligenceSection inherits KitFieldSet {
         }
     }
 
-    if root.effective-engine == SummaryProvider.apple-intelligence: apple-row := KitFieldRow {
+    if root.effective-engine == SummaryProvider.apple-intelligence: apple-row := SettingsFieldRow {
         theme: KitThemeContext.current;
-        orientation: Theme.settings-field-orientation(self.width);
-        appearance: FieldRowAppearance.inset;
-        show-divider: true;
         label: @tr("Apple Intelligence");
         description: root.apple-intelligence-available ? "" : root.apple-reason-label(root.apple-intelligence-reason);
 
@@ -130,8 +123,7 @@ export component IntelligenceSection inherits KitFieldSet {
                 preferred-height: 24px;
                 dot: root.apple-intelligence-available;
             }
-            if !root.apple-intelligence-available && root.apple-intelligence-reason == AppleIntelligenceUnavailableReason.apple-intelligence-not-enabled: KitButton {
-                control-size: compact;
+            if !root.apple-intelligence-available && root.apple-intelligence-reason == AppleIntelligenceUnavailableReason.apple-intelligence-not-enabled: CompactButton {
                 text: @tr("Réglages Système");
                 text-wrap: word-wrap;
                 focus-observed(focused) => {
@@ -142,11 +134,8 @@ export component IntelligenceSection inherits KitFieldSet {
         }
     }
 
-    if root.effective-engine == SummaryProvider.ollama: url-row := KitFieldRow {
+    if root.effective-engine == SummaryProvider.ollama: url-row := SettingsFieldRow {
         theme: KitThemeContext.current;
-        orientation: Theme.settings-field-orientation(self.width);
-        appearance: FieldRowAppearance.inset;
-        show-divider: true;
         focus-requested => { url-editor.take-focus(); }
         private property <bool> control-focused: url-editor.has-focus;
         changed control-focused => {
@@ -167,11 +156,8 @@ export component IntelligenceSection inherits KitFieldSet {
         }
     }
 
-    if root.effective-engine == SummaryProvider.ollama && root.model-picker-visible: KitFieldRow {
+    if root.effective-engine == SummaryProvider.ollama && root.model-picker-visible: SettingsFieldRow {
         theme: KitThemeContext.current;
-        orientation: Theme.settings-field-orientation(self.width);
-        appearance: FieldRowAppearance.inset;
-        show-divider: true;
         focus-requested => { model-picker.take-focus(); }
         private property <bool> control-focused: model-picker.has-focus;
         changed control-focused => {
@@ -190,25 +176,21 @@ export component IntelligenceSection inherits KitFieldSet {
     }
 
     if root.effective-engine == SummaryProvider.ollama && root.show-ollama-setup && root.ollama-pull-error != "": SettingsNoticeRow {
-        KitAlert { bordered: false; corner-radius: 12px; inset: 12px; actions-placement: AlertActions.trailing;
+        BannerAlert { actions-placement: AlertActions.trailing;
             severity: error;
             message: @tr("Échec du téléchargement : {}", root.ollama-pull-error);
         }
     }
 
-    if root.effective-engine == SummaryProvider.ollama && root.show-ollama-setup: setup-row := KitFieldRow {
+    if root.effective-engine == SummaryProvider.ollama && root.show-ollama-setup: setup-row := SettingsFieldRow {
         theme: KitThemeContext.current;
-        orientation: Theme.settings-field-orientation(self.width);
-        appearance: FieldRowAppearance.inset;
-        show-divider: true;
         label: @tr("Aucun modèle compatible installé.");
         description: root.ollama-pulling
             ? (root.ollama-pull-status == "" ? @tr("Téléchargement de {}…", root.recommended-model) : root.ollama-pull-status)
             : "";
 
-        if !root.ollama-pulling: KitButton {
+        if !root.ollama-pulling: CompactButton {
             intent: primary;
-            control-size: compact;
             text: @tr("Télécharger {}", root.recommended-model);
             text-wrap: word-wrap;
             focus-observed(focused) => {

@@ -1,7 +1,8 @@
 import { AppText, Typography } from "@typography";
-import { FieldRowAppearance, ButtonIntent, ControlSize, KitButton, KitThemeContext, KitFieldRow } from "@kit";
+import { ButtonIntent, KitThemeContext } from "@kit";
 import { Theme } from "../../theme.slint";
 import { TranscriptionPhase, ModelDeletionError } from "../../types.slint";
+import { CompactButton, SettingsFieldRow } from "../app_controls.slint";
 
 // Destructive "delete the downloaded model" row of the transcription model
 // card. Two-step inline confirm, no modal: the confirmation states that the
@@ -28,11 +29,8 @@ export component ModelDeleteRow inherits VerticalLayout {
 
     vertical-stretch: 0;
 
-    KitFieldRow {
+    SettingsFieldRow {
         theme: KitThemeContext.current;
-        orientation: Theme.settings-field-orientation(self.width);
-        appearance: FieldRowAppearance.inset;
-        show-divider: true;
         label: @tr("Supprimer le modèle téléchargé");
         description: root.deleting ? @tr("Suppression de {}…", root.model-label)
             : root.capture-busy ? @tr("Terminez l'enregistrement avant de supprimer le modèle.")
@@ -44,27 +42,24 @@ export component ModelDeleteRow inherits VerticalLayout {
             spacing: 8px;
             horizontal-stretch: 0;
 
-            if !root.confirming: KitButton {
+            if !root.confirming: CompactButton {
                 theme: KitThemeContext.current;
                 text: @tr("Supprimer");
-                control-size: ControlSize.compact;
                 intent: ButtonIntent.destructive;
                 disabled: !root.can-delete;
                 activated => { root.confirming = true; }
             }
 
-            if root.confirming: KitButton {
+            if root.confirming: CompactButton {
                 theme: KitThemeContext.current;
                 text: @tr("Annuler");
-                control-size: ControlSize.compact;
                 intent: ButtonIntent.quiet;
                 activated => { root.confirming = false; }
             }
 
-            if root.confirming: KitButton {
+            if root.confirming: CompactButton {
                 theme: KitThemeContext.current;
                 text: @tr("Confirmer");
-                control-size: ControlSize.compact;
                 intent: ButtonIntent.destructive;
                 disabled: !root.can-delete;
                 activated => {

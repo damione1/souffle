@@ -1,5 +1,6 @@
 import { Theme } from "../../theme.slint";
-import { FieldSetAppearance, FieldRowAppearance, ChoiceLabelPosition, ControlWidth, KitSwitch, Ownership, KitFieldSet, KitThemeContext, KitThemes, KitFieldRow } from "@kit";
+import { FieldSetAppearance, ChoiceLabelPosition, ControlWidth, KitSwitch, Ownership, KitFieldSet, KitThemeContext, KitThemes } from "@kit";
+import { SettingsFieldRow } from "../app_controls.slint";
 
 export component AutostartSection inherits KitFieldSet {
     in-out property <bool> autostart-enabled;
@@ -10,10 +11,7 @@ export component AutostartSection inherits KitFieldSet {
     legend: @tr("DÉMARRAGE");
     appearance: FieldSetAppearance.card;
 
-    KitFieldRow {
-        orientation: Theme.settings-field-orientation(self.width);
-        appearance: FieldRowAppearance.inset;
-        show-divider: true;
+    SettingsFieldRow {
         focus-requested => { autostart-switch.take-focus(); }
         private property <bool> control-focused: autostart-switch.has-focus;
         changed control-focused => {

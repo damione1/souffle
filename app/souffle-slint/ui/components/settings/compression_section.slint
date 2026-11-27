@@ -2,7 +2,8 @@ import { AppText, Typography } from "@typography";
 import { CompressionUi } from "../../compression.slint";
 import { Theme } from "../../theme.slint";
 import { CompressionStatus } from "../compression_status.slint";
-import { FieldSetAppearance, FieldRowAppearance, ChoiceLabelPosition, ControlWidth, KitFieldRow, KitFieldSet, KitSwitch, KitThemeContext, KitThemes, Ownership, KitFieldSeparator } from "@kit";
+import { FieldSetAppearance, ChoiceLabelPosition, ControlWidth, KitFieldSet, KitSwitch, KitThemeContext, KitThemes, Ownership, KitFieldSeparator } from "@kit";
+import { SettingsFieldRow } from "../app_controls.slint";
 
 export component CompressionSection inherits VerticalLayout {
     spacing: 20px;
@@ -14,11 +15,8 @@ export component CompressionSection inherits VerticalLayout {
         legend: @tr("COMPRESSION DES TRANSCRIPTIONS");
         appearance: FieldSetAppearance.card;
 
-        KitFieldRow {
+        SettingsFieldRow {
             theme: KitThemeContext.current;
-            orientation: Theme.settings-field-orientation(self.width);
-            appearance: FieldRowAppearance.inset;
-            show-divider: true;
             focus-requested => { summary-switch.take-focus(); }
             private property <bool> control-focused: summary-switch.has-focus;
             changed control-focused => {

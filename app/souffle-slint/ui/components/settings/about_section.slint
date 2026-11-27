@@ -1,7 +1,8 @@
-import { FieldSetAppearance, FieldRowAppearance, ButtonIntent, ChoiceLabelPosition, ControlWidth, KitButton, KitSwitch, Ownership, KitFieldRow, KitFieldSet, KitText, KitThemeContext, KitThemes, TextViewFont, TypographyRole, ControlSize } from "@kit";
+import { FieldSetAppearance, ButtonIntent, ChoiceLabelPosition, ControlWidth, KitSwitch, Ownership, KitFieldSet, KitText, KitThemeContext, KitThemes, TextViewFont, TypographyRole } from "@kit";
 import { Theme } from "../../theme.slint";
 import { InstallBlockReason, UpdateRowStatus } from "../../types.slint";
 import { UpdateCopy } from "../update_copy.slint";
+import { CompactButton, SettingsFieldRow } from "../app_controls.slint";
 
 // Port of AboutSettingsSection.svelte, including `UpdateAction`: the
 // "Mises à jour" row walks check -> download (with progress) -> install and
@@ -84,10 +85,7 @@ export component AboutSection inherits KitFieldSet {
     legend: @tr("À PROPOS");
     appearance: FieldSetAppearance.card;
 
-    KitFieldRow {
-        orientation: Theme.settings-field-orientation(self.width);
-        appearance: FieldRowAppearance.inset;
-        show-divider: true;
+    SettingsFieldRow {
         label: @tr("Version");
 
         KitText {
@@ -102,10 +100,7 @@ export component AboutSection inherits KitFieldSet {
         }
     }
 
-    KitFieldRow {
-        orientation: Theme.settings-field-orientation(self.width);
-        appearance: FieldRowAppearance.inset;
-        show-divider: true;
+    SettingsFieldRow {
         focus-requested => { update-button.take-focus(); }
         private property <bool> control-focused: update-button.has-focus;
         changed control-focused => {
@@ -114,9 +109,8 @@ export component AboutSection inherits KitFieldSet {
         label: @tr("Mises à jour");
         description: root.update-description();
 
-        update-button := KitButton {
+        update-button := CompactButton {
             theme: KitThemeContext.current;
-            control-size: ControlSize.compact;
             text: root.update-button-label();
             intent: root.update-button-intent();
             disabled: !root.update-button-enabled();
@@ -124,10 +118,7 @@ export component AboutSection inherits KitFieldSet {
         }
     }
 
-    KitFieldRow {
-        orientation: Theme.settings-field-orientation(self.width);
-        appearance: FieldRowAppearance.inset;
-        show-divider: true;
+    SettingsFieldRow {
         focus-requested => { update-switch.take-focus(); }
         private property <bool> control-focused: update-switch.has-focus;
         changed control-focused => {

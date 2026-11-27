@@ -1,9 +1,10 @@
 import { AppText, Typography } from "@typography";
-import { AlertSeverity, ButtonIntent, ControlSize, ControlWidth, KitAlert, KitButton, KitCard, KitInline, KitPressable, KitProgress, KitText, KitThemeContext, ListView, ProgressMode, SurfaceLevel, TypographyRole } from "@kit";
+import { AlertSeverity, ButtonIntent, ControlWidth, KitCard, KitInline, KitPressable, KitProgress, KitText, KitThemeContext, ListView, ProgressMode, SurfaceLevel, TypographyRole } from "@kit";
 import { Theme } from "../theme.slint";
 import { CompressionUi } from "../compression.slint";
 import { CompactJobPhase } from "../types.slint";
 import { CompressionStatus } from "compression_status.slint";
+import { BannerAlert, CompactButton } from "./app_controls.slint";
 
 component CompactLine inherits Rectangle {
     in property <string> text;
@@ -56,21 +57,18 @@ export component CompactTranscriptSection inherits KitCard {
             vertical-alignment: center;
             horizontal-stretch: 1;
         }
-        if !CompressionUi.busy: KitButton {
+        if !CompressionUi.busy: CompactButton {
             text: CompressionUi.has-compact ? @tr("Régénérer") : @tr("Générer");
             intent: ButtonIntent.secondary;
-            control-size: ControlSize.compact;
             disabled: CompressionUi.ongoing || !CompressionUi.has-source;
             activated => { CompressionUi.generate(); }
         }
-        if CompressionUi.busy: KitButton { text: @tr("Annuler"); control-size: ControlSize.compact; activated => { CompressionUi.cancel(); } }
-        if CompressionUi.has-compact: KitButton { text: CompressionUi.copied ? @tr("Copié") : @tr("Copier"); control-size: ControlSize.compact; activated => { CompressionUi.copy(); } }
+        if CompressionUi.busy: CompactButton { text: @tr("Annuler"); activated => { CompressionUi.cancel(); } }
+        if CompressionUi.has-compact: CompactButton { text: CompressionUi.copied ? @tr("Copié") : @tr("Copier"); activated => { CompressionUi.copy(); } }
     }
 
     if CompressionUi.ongoing: KitText { text: @tr("Disponible une fois l'enregistrement terminé."); role: TypographyRole.caption; }
-    if CompressionUi.stale: KitAlert { bordered: false;
-        corner-radius: 12px;
-        inset: 12px;
+    if CompressionUi.stale: BannerAlert {
         severity: AlertSeverity.warning;
         message: @tr("Cette version compacte précède les dernières modifications de la transcription. Régénérez-la avant de l'utiliser.");
     }
@@ -82,27 +80,19 @@ export component CompactTranscriptSection inherits KitCard {
         value: CompressionUi.progress / 100.0;
         label: @tr("Compression : {}%", CompressionUi.progress);
     }
-    if CompressionUi.job-phase == CompactJobPhase.failed: KitAlert { bordered: false;
-        corner-radius: 12px;
-        inset: 12px;
+    if CompressionUi.job-phase == CompactJobPhase.failed: BannerAlert {
         severity: AlertSeverity.error;
         message: @tr("La compression a échoué : {}", CompressionUi.job-error);
     }
-    if CompressionUi.job-phase == CompactJobPhase.source-changed: KitAlert { bordered: false;
-        corner-radius: 12px;
-        inset: 12px;
+    if CompressionUi.job-phase == CompactJobPhase.source-changed: BannerAlert {
         severity: AlertSeverity.warning;
         message: @tr("La transcription a changé. Relancez la compression.");
     }
-    if CompressionUi.job-phase == CompactJobPhase.interrupted-by-recording: KitAlert { bordered: false;
-        corner-radius: 12px;
-        inset: 12px;
+    if CompressionUi.job-phase == CompactJobPhase.interrupted-by-recording: BannerAlert {
         severity: AlertSeverity.warning;
         message: @tr("Compression interrompue par un enregistrement. Réessayez après l'enregistrement.");
     }
-    if CompressionUi.job-error != "" && CompressionUi.job-phase != CompactJobPhase.failed: KitAlert { bordered: false;
-        corner-radius: 12px;
-        inset: 12px;
+    if CompressionUi.job-error != "" && CompressionUi.job-phase != CompactJobPhase.failed: BannerAlert {
         severity: AlertSeverity.error;
         message: @tr("L'opération a échoué : {}", CompressionUi.job-error);
     }
@@ -135,7 +125,7 @@ export component CompactTranscriptSection inherits KitCard {
     }
 
     if CompressionUi.has-compact: KitInline {
-        KitButton { text: CompressionUi.expanded ? @tr("Réduire l'aperçu") : @tr("Développer l'aperçu"); control-size: ControlSize.compact; activated => { CompressionUi.expand(); } }
+        CompactButton { text: CompressionUi.expanded ? @tr("Réduire l'aperçu") : @tr("Développer l'aperçu"); activated => { CompressionUi.expand(); } }
     }
     if CompressionUi.has-compact && CompressionUi.compact-rate < CompressionUi.rate-default: KitText { text: @tr("Une valeur basse omet des mots."); role: TypographyRole.caption; }
 }

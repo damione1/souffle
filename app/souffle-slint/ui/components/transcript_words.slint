@@ -1,7 +1,8 @@
 import { AppText, Typography, TypographyStyle } from "@typography";
-import { KitModalContext, ButtonIntent, ControlSize, KitButton, KitCard, KitIconButton, KitInline, KitStack, KitTextField, KitWrap, LayoutSpace, SurfaceLevel, Tone } from "@kit";
+import { KitModalContext, ButtonIntent, ControlSize, KitCard, KitIconButton, KitInline, KitStack, KitTextField, KitWrap, LayoutSpace, SurfaceLevel, Tone } from "@kit";
 import { LucideMath } from "@kit-icons/math.slint";
 import { Theme } from "../theme.slint";
+import { CompactButton } from "./app_controls.slint";
 
 // Click-a-word -> dictionary alias (SOU-223), shared by the post-meeting
 // transcript (transcript_section.slint) and the live meeting view
@@ -245,10 +246,9 @@ export component DictionaryAliasPopover inherits Rectangle {
                     }
                 }
 
-                save-btn := KitButton {
+                save-btn := CompactButton {
                     accessible-name: @tr("Enregistrer l'alias");
                     text: @tr("Enregistrer");
-                    control-size: ControlSize.compact;
                     intent: ButtonIntent.primary;
                     disabled: root.term-draft == "";
                     activated => { root.save-and-close(); }

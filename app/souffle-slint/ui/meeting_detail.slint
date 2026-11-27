@@ -1,7 +1,7 @@
 import { CompactTranscriptSection } from "components/compact_transcript_section.slint";
 import { SummarizationUi } from "summarization.slint";
 import { AppText, Typography } from "@typography";
-import { AlertActions, AlertSeverity, ButtonIntent, ContentWidth, ControlSize, ControlWidth, KitAlert, KitBadge, KitButton, KitCard, KitDropdownMenu, KitFocusBackground, KitIcon, KitInline, KitKeyResult, KitLayoutMetrics, KitPressable, KitScrollArea, KitSegmentedControl, KitStack, KitText, KitTextArea, KitTextField, KitThemeContext, KitWrap, LayoutSpace, OptionRow, Ownership, SegmentedAppearance, SurfaceLevel, TextEscapeBehavior, Tone, TypographyRole } from "@kit";
+import { AlertActions, AlertSeverity, ButtonIntent, ContentWidth, ControlSize, ControlWidth, KitBadge, KitCard, KitDropdownMenu, KitFocusBackground, KitIcon, KitInline, KitKeyResult, KitLayoutMetrics, KitPressable, KitScrollArea, KitSegmentedControl, KitStack, KitText, KitTextArea, KitTextField, KitThemeContext, KitWrap, LayoutSpace, OptionRow, Ownership, SegmentedAppearance, SurfaceLevel, TextEscapeBehavior, Tone, TypographyRole } from "@kit";
 import { LucideDesign } from "@kit-icons/design.slint";
 import { LucideAccount } from "@kit-icons/account.slint";
 import { LucideFiles } from "@kit-icons/files.slint";
@@ -14,6 +14,7 @@ import { AudioPlayerSection } from "components/audio_player_section.slint";
 import { TranscriptSection, TranscriptToolbar, TranscriptBlock, TranscriptLayout } from "components/transcript_section.slint";
 import { SummarySection, StructuredActionItem } from "components/summary_section.slint";
 import { Theme } from "theme.slint";
+import { BannerAlert, CompactButton } from "./components/app_controls.slint";
 
 export enum MeetingDetailView { reading, transcript }
 
@@ -193,10 +194,9 @@ export component MeetingDetail inherits Rectangle {
                     gap: regular;
 
                     KitInline {
-                        back-btn := KitButton {
+                        back-btn := CompactButton {
                             accessible-name: @tr("Retour \u{e0} l'historique");
                             text: @tr("Historique");
-                            control-size: ControlSize.compact;
                             intent: ButtonIntent.quiet;
                             leading-icon: LucideArrows.arrow-left();
                             activated => { root.back-requested(); }
@@ -294,10 +294,9 @@ export component MeetingDetail inherits Rectangle {
                             KitInline {
                                 alignment: end;
 
-                                if root.can-resume: resume-btn := KitButton {
+                                if root.can-resume: resume-btn := CompactButton {
                                     accessible-name: @tr("Reprendre l'enregistrement");
                                     text: @tr("Reprendre");
-                                    control-size: ControlSize.compact;
                                     intent: ButtonIntent.primary;
                                     leading-icon: LucideMultimedia.mic();
                                     activated => { root.resume-requested(); }
@@ -534,9 +533,8 @@ export component MeetingDetail inherits Rectangle {
                                         horizontal-stretch: 1;
                                     }
 
-                                    if root.transcript-segment-count > 0: KitButton {
+                                    if root.transcript-segment-count > 0: CompactButton {
                                         text: @tr("Voir la transcription complète");
-                                        control-size: ControlSize.compact;
                                         intent: ButtonIntent.secondary;
                                         activated => { root.show-view(MeetingDetailView.transcript); }
                                     }
@@ -565,10 +563,9 @@ export component MeetingDetail inherits Rectangle {
                         if root.show-reading: KitInline {
                             gap: compact;
 
-                            if !root.confirming-delete || root.delete-permission.blocked: delete-link := KitButton {
+                            if !root.confirming-delete || root.delete-permission.blocked: delete-link := CompactButton {
                                 accessible-name: @tr("Supprimer la réunion");
                                 text: @tr("Supprimer la réunion");
-                                control-size: ControlSize.compact;
                                 intent: ButtonIntent.quiet;
                                 disabled: root.delete-permission.blocked;
                                 leading-icon: LucideFiles.trash();
@@ -582,10 +579,9 @@ export component MeetingDetail inherits Rectangle {
                                 vertical-alignment: center;
                             }
 
-                            if root.confirming-delete && !root.delete-permission.blocked: confirm-btn := KitButton {
+                            if root.confirming-delete && !root.delete-permission.blocked: confirm-btn := CompactButton {
                                 accessible-name: @tr("Oui, supprimer");
                                 text: @tr("Oui, supprimer");
-                                control-size: ControlSize.compact;
                                 intent: ButtonIntent.destructive;
                                 init => { self.take-focus(); }
                                 key-event(event) => {
@@ -595,9 +591,8 @@ export component MeetingDetail inherits Rectangle {
                                 activated => { root.confirm-delete(); }
                             }
 
-                            if root.confirming-delete && !root.delete-permission.blocked: KitButton {
+                            if root.confirming-delete && !root.delete-permission.blocked: CompactButton {
                                 text: @tr("Annuler");
-                                control-size: ControlSize.compact;
                                 intent: ButtonIntent.quiet;
                                 activated => { root.confirming-delete = false; }
                             }
@@ -609,9 +604,7 @@ export component MeetingDetail inherits Rectangle {
                             color: Theme.text-muted;
                             wrap: word-wrap;
                         }
-                        if root.show-reading && root.delete-error != "": KitAlert { bordered: false;
-                            corner-radius: 12px;
-                            inset: 12px;
+                        if root.show-reading && root.delete-error != "": BannerAlert {
                             severity: AlertSeverity.error;
                             message: @tr("Impossible de supprimer la réunion : {}", root.delete-error);
                         }

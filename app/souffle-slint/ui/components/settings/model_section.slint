@@ -1,9 +1,10 @@
-import { FieldSetAppearance, FieldRowAppearance, AlertActions, AlertSeverity, KitAlert, KitBadge, KitButton, KitFieldRow, KitFieldSet, KitProgress, KitThemeContext, KitThemes, ProgressIntent, Tone, ControlSize } from "@kit";
+import { FieldSetAppearance, AlertActions, AlertSeverity, KitBadge, KitFieldSet, KitProgress, KitThemeContext, KitThemes, ProgressIntent, Tone } from "@kit";
 import { CatalogPicker } from "../catalog_picker.slint";
 import { SettingsNoticeRow } from "settings_notice_row.slint";
 import { ModelDeleteRow } from "model_delete_row.slint";
 import { Theme } from "../../theme.slint";
 import { ModelDeletionError, TranscriptionPhase, TranscriptionUnavailableReason, SystemSettingsPane } from "../../types.slint";
+import { BannerAlert, CompactButton, SettingsFieldRow } from "../app_controls.slint";
 
 // The download/switch state machine lives in Rust (`model_ui.rs`); this
 // component only displays the pushed state and forwards the chosen value.
@@ -40,10 +41,7 @@ export component ModelSection inherits KitFieldSet {
     legend: @tr("MODÈLE DE TRANSCRIPTION");
     appearance: FieldSetAppearance.card;
 
-    KitFieldRow {
-        orientation: Theme.settings-field-orientation(self.width);
-        appearance: FieldRowAppearance.inset;
-        show-divider: true;
+    SettingsFieldRow {
         focus-requested => { model-picker.take-focus(); }
         private property <bool> control-focused: model-picker.has-focus;
         changed control-focused => {
@@ -89,19 +87,18 @@ export component ModelSection inherits KitFieldSet {
     }
 
     if root.apple-speech-selected && !root.apple-speech-unavailable: SettingsNoticeRow {
-        KitAlert { bordered: false; corner-radius: 12px; inset: 12px; actions-placement: AlertActions.trailing;
+        BannerAlert { actions-placement: AlertActions.trailing;
             severity: AlertSeverity.information;
             message: @tr("La langue affichée est celle prise en charge par Apple Speech pour la langue et la région de ce Mac. Pour la modifier, ouvrez Réglages Système > Général > Langue et région, puis relancez Soufflé.") + "\n\n" + @tr("La transcription fonctionne sans activer Siri ou Apple Intelligence. macOS gère le modèle.");
-            KitButton {
+            CompactButton {
                 text: @tr("Ouvrir Langue et région");
-                control-size: ControlSize.compact;
                 activated => { root.open-system-settings-requested(SystemSettingsPane.language-and-region); }
             }
         }
     }
 
     if root.apple-speech-selected && root.apple-speech-unavailable: SettingsNoticeRow {
-        KitAlert { bordered: false; corner-radius: 12px; inset: 12px; actions-placement: AlertActions.trailing;
+        BannerAlert { actions-placement: AlertActions.trailing;
             severity: AlertSeverity.warning;
             title: @tr("Apple Speech indisponible");
             message: root.apple-speech-unavailable-reason == TranscriptionUnavailableReason.os-unsupported
@@ -118,14 +115,12 @@ export component ModelSection inherits KitFieldSet {
                 ? @tr("Impossible de vérifier la disponibilité d'Apple Speech. Relancez Soufflé pour réessayer ou choisissez un autre modèle.")
                 : "";
             if root.apple-speech-unavailable-reason == TranscriptionUnavailableReason.locale-unsupported
-                || root.apple-speech-unavailable-reason == TranscriptionUnavailableReason.assets-unsupported: KitButton {
+                || root.apple-speech-unavailable-reason == TranscriptionUnavailableReason.assets-unsupported: CompactButton {
                 text: @tr("Ouvrir Langue et région");
-                control-size: ControlSize.compact;
                 activated => { root.open-system-settings-requested(SystemSettingsPane.language-and-region); }
             }
-            if root.apple-speech-unavailable-reason == TranscriptionUnavailableReason.os-unsupported: KitButton {
+            if root.apple-speech-unavailable-reason == TranscriptionUnavailableReason.os-unsupported: CompactButton {
                 text: @tr("Ouvrir Mise à jour de logiciels");
-                control-size: ControlSize.compact;
                 activated => { root.open-system-settings-requested(SystemSettingsPane.software-update); }
             }
         }
@@ -140,16 +135,13 @@ export component ModelSection inherits KitFieldSet {
     }
 
     if root.error-message != "": SettingsNoticeRow {
-        KitAlert { bordered: false; corner-radius: 12px; inset: 12px; actions-placement: AlertActions.trailing;
+        BannerAlert { actions-placement: AlertActions.trailing;
             severity: AlertSeverity.error;
             message: root.error-message;
         }
     }
 
-    if !root.apple-speech-selected: KitFieldRow {
-        orientation: Theme.settings-field-orientation(self.width);
-        appearance: FieldRowAppearance.inset;
-        show-divider: true;
+    if !root.apple-speech-selected: SettingsFieldRow {
         focus-requested => { timeout-picker.take-focus(); }
         private property <bool> control-focused: timeout-picker.has-focus;
         changed control-focused => {

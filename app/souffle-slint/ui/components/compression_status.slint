@@ -3,7 +3,8 @@ import { Theme } from "../theme.slint";
 import { CompressionUi } from "../compression.slint";
 import { SummarizationUi } from "../summarization.slint";
 import { CompressionModelPhase } from "../types.slint";
-import { AlertSeverity, ButtonIntent, ControlSize, KitAlert, KitButton, KitProgress, ProgressMode } from "@kit";
+import { AlertSeverity, ButtonIntent, KitProgress, ProgressMode } from "@kit";
+import { BannerAlert, CompactButton } from "./app_controls.slint";
 export component CompressionStatus inherits VerticalLayout {
     in property <bool> allow-removal: false;
     property <bool> confirming: false;
@@ -24,26 +25,24 @@ export component CompressionStatus inherits VerticalLayout {
         color: Theme.text-muted;
         wrap: word-wrap;
     }
-    if CompressionUi.model-error != "": KitAlert { bordered: false; corner-radius: 12px; inset: 12px; severity: AlertSeverity.error; message: CompressionUi.model-error; vertical-stretch: 0; }
+    if CompressionUi.model-error != "": BannerAlert { severity: AlertSeverity.error; message: CompressionUi.model-error; vertical-stretch: 0; }
     HorizontalLayout {
         alignment: start;
         spacing: 8px;
-        if SummarizationUi.enabled && (CompressionUi.model-phase == CompressionModelPhase.not-downloaded || CompressionUi.model-phase == CompressionModelPhase.failed): KitButton {
+        if SummarizationUi.enabled && (CompressionUi.model-phase == CompressionModelPhase.not-downloaded || CompressionUi.model-phase == CompressionModelPhase.failed): CompactButton {
             text: CompressionUi.model-phase == CompressionModelPhase.failed ? @tr("Réessayer le téléchargement") : @tr("Télécharger le modèle");
-            control-size: ControlSize.compact;
             activated => { CompressionUi.download(); }
         }
-        if CompressionUi.model-phase == CompressionModelPhase.queued || CompressionUi.model-phase == CompressionModelPhase.downloading || CompressionUi.model-phase == CompressionModelPhase.preparing: KitButton {
-            text: @tr("Annuler le téléchargement"); intent: ButtonIntent.outline; control-size: ControlSize.compact;
+        if CompressionUi.model-phase == CompressionModelPhase.queued || CompressionUi.model-phase == CompressionModelPhase.downloading || CompressionUi.model-phase == CompressionModelPhase.preparing: CompactButton {
+            text: @tr("Annuler le téléchargement"); intent: ButtonIntent.outline;
             activated => { CompressionUi.cancel-download(); }
         }
-        if root.allow-removal && CompressionUi.cache-present && CompressionUi.model-phase != CompressionModelPhase.deleting: KitButton {
+        if root.allow-removal && CompressionUi.cache-present && CompressionUi.model-phase != CompressionModelPhase.deleting: CompactButton {
             text: root.confirming ? @tr("Confirmer la suppression") : @tr("Supprimer le modèle de compression");
             intent: root.confirming ? ButtonIntent.destructive : ButtonIntent.outline;
-            control-size: ControlSize.compact;
             activated => { if root.confirming { CompressionUi.remove-model(); root.confirming = false; } else { root.confirming = true; } }
         }
-        if root.confirming: KitButton { text: @tr("Annuler"); intent: ButtonIntent.quiet; control-size: ControlSize.compact; activated => { root.confirming = false; } }
+        if root.confirming: CompactButton { text: @tr("Annuler"); intent: ButtonIntent.quiet; activated => { root.confirming = false; } }
     }
     if root.confirming: AppText { text: @tr("Les versions compactes et les préférences seront conservées. Le modèle pourra être téléchargé à nouveau."); typography: Typography.hint; color: Theme.text-muted; wrap: word-wrap; }
 }

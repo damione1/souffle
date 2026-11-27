@@ -3,7 +3,8 @@ import { Theme } from "../theme.slint";
 import { SpeakerRole } from "../types.slint";
 import { TranscriptBlock, SpeakerLabels } from "transcript_section.slint";
 import { TranscriptWordFlow } from "transcript_words.slint";
-import { ButtonIntent, ControlSize, KitButton } from "@kit";
+import { ButtonIntent } from "@kit";
+import { CompactButton } from "./app_controls.slint";
 
 // The card tracks the pointer once; repeated rows do not add TouchAreas
 // around their clickable words. Reserving the action prevents hover reflow.
@@ -41,11 +42,10 @@ export component LiveTranscriptParagraph inherits VerticalLayout {
             color: Theme.text-faint;
             vertical-alignment: center;
         }
-        if root.block.can-edit: KitButton {
+        if root.block.can-edit: CompactButton {
             // Keep the existing catalogue context when extracting this row.
             text: @tr("RecordingView" => "Corriger");
             intent: ButtonIntent.quiet;
-            control-size: ControlSize.compact;
             disabled: !root.editing-enabled;
             opacity: root.hovered || self.has-focus
                 ? (root.editing-enabled ? 1.0 : 0.5) : 0.0;

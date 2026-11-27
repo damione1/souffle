@@ -1,11 +1,12 @@
 import { AppText, Typography } from "@typography";
 import { SettingsOptions, ClosedSettingsPicker } from "settings_options.slint";
-import { FieldSetAppearance, FieldRowAppearance, KitButton, KitTextArea, FieldAccess, KitFieldSet, KitThemeContext, KitThemes, KitFieldRow, ControlSize, KitFieldSeparator, FieldDecoration, AlertActions, AlertSeverity, KitAlert } from "@kit";
+import { FieldSetAppearance, KitTextArea, FieldAccess, KitFieldSet, KitThemeContext, KitThemes, KitFieldSeparator, FieldDecoration, AlertActions, AlertSeverity } from "@kit";
 import { LucideFiles } from "@kit-icons/files.slint";
 import { LucideText } from "@kit-icons/text.slint";
 import { SettingsNoticeRow } from "settings_notice_row.slint";
 import { Theme } from "../../theme.slint";
 import { AudioRetention } from "../../types.slint";
+import { BannerAlert, CompactButton, SettingsFieldRow } from "../app_controls.slint";
 
 component CodeBlock inherits Rectangle {
     in property <string> body;
@@ -32,9 +33,8 @@ component CodeBlock inherits Rectangle {
     }
 }
 
-component CopyButton inherits KitButton {
+component CopyButton inherits CompactButton {
     theme: KitThemeContext.current;
-    control-size: ControlSize.compact;
     leading-icon: LucideText.copy();
     text: @tr("Copier");
 }
@@ -96,11 +96,8 @@ export component DataSection inherits VerticalLayout {
         }
     }
 
-    KitFieldRow {
+    SettingsFieldRow {
         theme: KitThemeContext.current;
-        orientation: Theme.settings-field-orientation(self.width);
-        appearance: FieldRowAppearance.inset;
-        show-divider: true;
         focus-requested => { retention-picker.take-focus(); }
         private property <bool> control-focused: retention-picker.has-focus;
         changed control-focused => {
@@ -117,11 +114,8 @@ export component DataSection inherits VerticalLayout {
         }
     }
 
-    KitFieldRow {
+    SettingsFieldRow {
         theme: KitThemeContext.current;
-        orientation: Theme.settings-field-orientation(self.width);
-        appearance: FieldRowAppearance.inset;
-        show-divider: true;
         focus-requested => { export-button.take-focus(); }
         private property <bool> control-focused: export-button.has-focus;
         changed control-focused => {
@@ -130,20 +124,16 @@ export component DataSection inherits VerticalLayout {
         label: @tr("Exporter les données");
         description: @tr("Exporter réunions, dictées et journal dans un dossier.");
 
-        export-button := KitButton {
+        export-button := CompactButton {
             theme: KitThemeContext.current;
-            control-size: ControlSize.compact;
             text: root.exporting ? @tr("Export en cours…") : @tr("Exporter…");
             disabled: root.exporting;
             activated => { root.export-requested(); }
         }
     }
 
-    KitFieldRow {
+    SettingsFieldRow {
         theme: KitThemeContext.current;
-        orientation: Theme.settings-field-orientation(self.width);
-        appearance: FieldRowAppearance.inset;
-        show-divider: true;
         focus-requested => { reveal-button.take-focus(); }
         private property <bool> control-focused: reveal-button.has-focus;
         changed control-focused => {
@@ -151,9 +141,8 @@ export component DataSection inherits VerticalLayout {
         }
         label: @tr("Afficher le dossier de données");
 
-        reveal-button := KitButton {
+        reveal-button := CompactButton {
             theme: KitThemeContext.current;
-            control-size: ControlSize.compact;
             leading-icon: LucideFiles.folder();
             text: @tr("Afficher dans le Finder");
             activated => { root.reveal-requested(); }
@@ -196,7 +185,7 @@ export component DataSection inherits VerticalLayout {
         }
 
         if !root.mcp-exists: SettingsNoticeRow {
-            KitAlert { bordered: false; corner-radius: 12px; inset: 12px; actions-placement: AlertActions.trailing;
+            BannerAlert { actions-placement: AlertActions.trailing;
                 theme: KitThemeContext.current;
                 severity: AlertSeverity.warning;
                 message: @tr("Le serveur MCP est absent de l'application. Réinstallez Soufflé.");

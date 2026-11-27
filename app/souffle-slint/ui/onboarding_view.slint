@@ -1,5 +1,5 @@
 import { AppText, AppTextInput, Typography, TypographyStyle } from "@typography";
-import { ChoiceLabelPosition, ControlWidth, ElevationLevel, FieldAccess, KitFieldRow, KitSwitch, KitThemes, Ownership, AlertSeverity, AvatarShape, ButtonIntent, ControlSize, KitAlert, KitAvatar, KitBadge, KitButton, KitCard, KitIcon, KitImage, KitInline, KitLayoutMetrics, KitThemeContext, KitProgress, KitScrollArea, KitStack, KitSurface, KitText, LayoutSpace, ProgressMode, SurfaceBorder, SurfaceLevel, Tone } from "@kit";
+import { ChoiceLabelPosition, ControlWidth, ElevationLevel, FieldAccess, KitFieldRow, KitSwitch, KitThemes, Ownership, AlertSeverity, AvatarShape, ButtonIntent, KitAvatar, KitBadge, KitButton, KitCard, KitIcon, KitImage, KitInline, KitLayoutMetrics, KitThemeContext, KitProgress, KitScrollArea, KitStack, KitSurface, KitText, LayoutSpace, ProgressMode, SurfaceBorder, SurfaceLevel, Tone } from "@kit";
 import { LucideArrows } from "@kit-icons/arrows.slint";
 import { ProLevelMeter, ProPager } from "@kit-pro";
 import { LucideDevelopment } from "@kit-icons/development.slint";
@@ -10,6 +10,7 @@ import { PermissionsStep, PermissionRow } from "components/onboarding/permission
 import { ShortcutRecorderButton, ShortcutNoticeText, ShortcutPresentation } from "components/settings/interface_section.slint";
 import { AppLocale, ModelPhase, OnboardingStep, PermissionKind, ShortcutNotice } from "types.slint";
 import { Theme } from "theme.slint";
+import { BannerAlert, CompactButton } from "./components/app_controls.slint";
 
 // First-run wizard. Model download and shortcut capture reuse the same Rust
 // modules the Settings tab uses, through their own `onboarding-*` window
@@ -217,15 +218,13 @@ export component OnboardingView inherits Rectangle {
                             KitInline {
                                 alignment: center;
                                 gap: compact;
-                                KitButton {
+                                CompactButton {
                                     text: "English";
-                                    control-size: ControlSize.compact;
                                     intent: root.locale == AppLocale.en ? ButtonIntent.primary : ButtonIntent.secondary;
                                     activated => { root.locale-changed(AppLocale.en); }
                                 }
-                                KitButton {
+                                CompactButton {
                                     text: "Français";
-                                    control-size: ControlSize.compact;
                                     intent: root.locale == AppLocale.fr ? ButtonIntent.primary : ButtonIntent.secondary;
                                     activated => { root.locale-changed(AppLocale.fr); }
                                 }
@@ -275,9 +274,7 @@ export component OnboardingView inherits Rectangle {
                             // Rust clears this on every step change and only ever puts a
                             // real error message here (a failed save/download/load), so
                             // the banner has no dismiss action of its own.
-                            if root.status-message != "": KitAlert { bordered: false;
-                                inset: 12px;
-                                corner-radius: 12px;
+                            if root.status-message != "": BannerAlert {
                                 severity: AlertSeverity.error;
                                 message: root.status-text(root.status-message);
                             }
@@ -322,9 +319,8 @@ export component OnboardingView inherits Rectangle {
                                     VerticalLayout {
                                         alignment: center;
                                         horizontal-stretch: 0;
-                                        refresh-btn := KitButton {
+                                        refresh-btn := CompactButton {
                                             text: @tr("Actualiser");
-                                            control-size: ControlSize.compact;
                                             activated => { root.refresh-devices-requested(); }
                                         }
                                     }
@@ -474,14 +470,11 @@ export component OnboardingView inherits Rectangle {
                                     tone: ShortcutNoticeText.is-warning(root.shortcut-notice) ? Tone.warning : Tone.danger;
                                 }
 
-                                if !root.accessibility-granted: KitAlert { bordered: false;
-                                    inset: 12px;
-                                    corner-radius: 12px;
+                                if !root.accessibility-granted: BannerAlert {
                                     severity: AlertSeverity.warning;
                                     message: @tr("Le collage automatique a besoin de l'Accessibilité, qui n'est pas encore accordée. Le texte ira dans votre historique à la place.");
-                                    KitButton {
+                                    CompactButton {
                                         text: @tr("Vérifier les permissions");
-                                        control-size: ControlSize.compact;
                                         activated => { root.review-accessibility-requested(); }
                                     }
                                 }
@@ -509,9 +502,7 @@ export component OnboardingView inherits Rectangle {
                                     }
                                 }
 
-                                if root.autostart-failed: KitAlert { bordered: false;
-                                    inset: 12px;
-                                    corner-radius: 12px;
+                                if root.autostart-failed: BannerAlert {
                                     severity: AlertSeverity.error;
                                     message: @tr("macOS n'a pas appliqué ce choix. L'interrupteur montre l'état actuel.");
                                 }
